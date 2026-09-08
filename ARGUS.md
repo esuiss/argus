@@ -26,7 +26,7 @@ Rakam, tarih veya URL uydurulmamıştır. Araştırma sırasında çürütülen 
 
 - [1. Mimari kararlar](#1-mimari-kararlar)
   - [0. Ürünün tek cümlelik tanımı](#0-ürünün-tek-cümlelik-tanımı)
-  - [1. Geri alınamaz kararlar — ilk satırdan önce verilmesi gerekenler](#1-geri-alınamaz-kararlar--ilk-satırdan-önce-verilmesi-gerekenler)
+  - [1. Gün-1 kararları ve statüleri](#1-gün-1-kararları-ve-statüleri)
   - [2. Teknoloji yığını](#2-teknoloji-yığını)
   - [3. Protokol kapsamı ve öncelik](#3-protokol-kapsamı-ve-öncelik)
   - [4. Güvenlik mimarisi](#4-güvenlik-mimarisi)
@@ -35,7 +35,8 @@ Rakam, tarih veya URL uydurulmamıştır. Araştırma sırasında çürütülen 
   - [7. Farklılaşma — Argus'un neyi ilk yapacağı](#7-farklılaşma--argusun-neyi-ilk-yapacağı)
   - [8. Bilinen boşluklar — dürüst liste](#8-bilinen-boşluklar--dürüst-liste)
   - [9. Faz planı](#9-faz-planı)
-  - [10. Doküman haritası](#10-doküman-haritası)
+  - [10. Açık kararlar — kapatılmadan ilgili bileşenin implementasyonuna başlanmaz](#10-açık-kararlar--kapatılmadan-ilgili-bileşenin-implementasyonuna-başlanmaz)
+  - [11. Doküman haritası](#11-doküman-haritası)
 - [2. Çelişkiler ve çözümleri](#2-çelişkiler-ve-çözümleri)
   - [Çelişki 1 — İmza algoritması tanımlayıcısı: `ES256` mi `ESP256` mi?](#çelişki-1--imza-algoritması-tanımlayıcısı-es256-mi-esp256-mi)
   - [Çelişki 2 — `#![forbid(unsafe_code)]` ile aws-lc-rs bir arada durabilir mi?](#çelişki-2--forbidunsafecode-ile-aws-lc-rs-bir-arada-durabilir-mi)
@@ -328,42 +329,42 @@ Rakam, tarih veya URL uydurulmamıştır. Araştırma sırasında çürütülen 
 
 ---
 
-### 1. Geri alınamaz kararlar — ilk satırdan önce verilmesi gerekenler
+### 1. Gün-1 kararları ve statüleri
 
-Bu tablodaki her karar, sonradan değiştirilmesi ya imkânsız ya da "dünyayı durduran" bir göç gerektiren karardır. **Kod yazmadan önce hepsi kesinleşmiş olmalıdır.**
+Bu tablodaki kararlar **gün-1'de verilmek zorunda olanlardır** — sonradan değiştirmenin maliyeti ya imkânsız ya da "dünyayı durduran" bir göçtür.
 
-| # | Karar | Sonradan değiştirmenin maliyeti | Kaynak |
-|---|---|---|---|
-| 1 | **`tenant_id` her tabloda VE her birincil anahtarda** | Tüm PK'ları düşürüp yeniden kurmak = çevrimdışı migration. SuperTokens: 33 tablo, tüm PK'lar CASCADE | cok-kiracilik.md (§18) |
-| 2 | **Her yabancı anahtar composite (`tenant_id` dahil)** | Tek kolonlu FK'lar çapraz-kiracı referansa izin verir; RLS sonradan okumayı bozar | Logto PR #7596 |
-| 3 | **RLS + `FORCE` + non-owner rol, İSTİSNASIZ tüm tablolarda** | Sonradan eklemek "ya hep ya hiç"tir; atlanan tek tablo = sessiz sızıntı | Logto #7685 |
-| 4 | **Kiracı başına imzalama anahtarı** (ES256 varsayılan) | Paylaşımlıdan kiracı-başınaya geçiş = tüm RP'lerin JWKS cache invalidasyonu + koordineli kesinti | Storm-0558, CVE-2026-23552 |
-| 5 | **`client_id` global benzersiz** (Keycloak'ın aksine) | Sonradan globalleştirmek = müşteri `client_id`'lerini yeniden adlandırmak = her RP config'i kırılır | RFC 6749 §2.2 |
-| 6 | **Kullanıcı benzersizliği kiracı-yerel** (`UNIQUE(tenant_id, …)`), asla global | Global→kiracı-yerel geçiş veri göçü + güvenlik incelemesi; tersi imkânsız | Zitadel: *"not possible to move users between organizations"* |
-| 7 | **Değişmez kiracı slug'ı** | Slug issuer URL'indedir → değişirse her RP'nin discovery'si kırılır | Keycloak: *"alias cannot be changed afterwards"* |
-| 8 | **Issuer stratejisi: subdomain birincil** + RFC 9207 `iss` gün-1'de | Issuer değişimi = tüm RP yeniden yapılandırması | RFC 8414 / OIDC Discovery çelişkisi |
-| 9 | **`placement_id` silo-kaçış kolonu gün-1'de** (kullanılmasa bile) | Yoksa bir kiracıyı ayrı kümeye taşımak mimari yeniden yazımdır | AWS silo/pool/bridge |
-| 10 | **Denetim logu kiracı + zaman partition'lı** | Milyarlarca satırlı tabloyu sonradan partition'lamak pratikte imkânsızdır | GDPR Md. 17 |
-| 11 | **İsim değil, opak-ID/tam-yol tabanlı yetkilendirme** | Token'da isim taşıyan her şey yeniden yazılır | CVE-2026-19608 |
-| 12 | **WebAuthn RP ID = apex alan adı** (login alt alan adı DEĞİL, satıcı alan adı KESİNLİKLE değil). **Çok kiracılıkta: her kiracı KENDİ RP ID'sini alır** | **Geri alınamayan tek WebAuthn kararı.** RP ID değişirse Okta'nın ifadesiyle *"the browser doesn't present them at sign-in"* — kayıtlar silinmez ama kullanılamaz. ROR (`/.well-known/webauthn`) pratikte **5 label** ile sınırlı → paylaşımlı RP ID çok kiracılıkta ölçeklenmiyor | hesap-yasam-dongusu.md (§22) §39.1, giris-akislari.md (§23) §5.3 |
-| 13 | **WebAuthn `user.id` = 64 rastgele bayt**, asla e-posta veya hash'i | Spec `MUST NOT`; değiştirmek tüm credential'ları geçersiz kılar | WebAuthn L3 §14.6.1 |
-| 14 | **Kullanıcı ID'si asla yeniden kullanılmaz; e-posta varsayılan olarak asla** | Tombstone tekillik kısıtını sonradan eklemek çakışan kayıtları çözemez | RFC 9967, Gmail, GitHub |
-| 15 | **`argus-core` I/O yapmaz** — `async fn`, `tokio::`, `sqlx::`, `reqwest::` yasak, CI'da zorlanır | Formel doğrulamanın tek girebileceği yer burasıdır; sonradan I/O'yu sökemezsin | celiskiler-ve-kararlar.md (§2) §5 |
-| 16 | **Kimlik doğrulama akışı bir "flow" konfigürasyonu değil, tipli bir durum makinesi** | Keycloak #40744: akıştan adım silmek auth bypass üretiyor. Genel amaçlı flow motoru bunu yapısal olarak engelleyemez | hesap-yasam-dongusu.md (§22) §10.3 |
-| 17 | **Her PII alanı kullanıcı başına DEK ile şifreli** (envelope encryption) | Crypto-shredding'i sonradan eklemek tüm veriyi yeniden yazmaktır | ICO "put beyond use", EDPB CEF 2026 |
-| 18 | **Üç ayrı epoch:** `session_epoch` (kullanıcı) · `authz_epoch` (kiracı) · `key_epoch` (kiracı) | Tek sayaca sıkıştırılırsa her izin değişimi tüm oturumları düşürür | celiskiler-ve-kararlar.md (§2) §4 |
+⚠️ **Statü sütunu (3. inceleme turu).** Önceden bu tablonun başlığı "Geri alınamaz kararlar" idi ve 27 maddenin hepsine aynı kesinlik veriliyordu. Bu yanlıştı: issuer'daki kiracı slug'ı ile minimum PostgreSQL sürümü aynı sınıfta değil, ve hepsine aynı kesinliği vermek yanlış olduğu sonradan görülen bir tercihi değiştirmeyi zorlaştırır. Statüler §10.4'te tanımlıdır:
+**KŞS** = kalıcı şema sözleşmesi · **KKS** = kalıcı kimlik sözleşmesi (dış dünyaya yerleşir) · **MT** = kabul edilmiş mimari tercih · **DH** = doğrulanacak hipotez.
 
-| 19 | **Kiracıya server-side template execution VERİLMEZ** — Keycloak'ın FreeMarker modeli kopyalanmaz | Keycloak kendi dokümanında: *"a malicious template can run code as the Keycloak process."* Çok kiracılı bir üründe bu, **kiracının RCE alması** demektir. Sonradan script-siz templating'e geçmek her kiracı temasını yeniden yazdırmaktır | giris-akislari.md (§23) §5.2 |
-| 20 | **Argus'un kendi admin konsolu ve hosted login'i OAuth kullanmaz — doğrudan session cookie** | RFC 10017 §7.1: *"Simple applications are made needlessly complex by using OAuth to replace the concept of session management."* Sonradan sökmek tüm UI auth katmanını yeniden yazmaktır | giris-akislari.md (§23) §4.2 |
-
-| 21 | **Platform-admin API'si ile kiracı-admin API'si AYRI yüzeyler** — ayrı audience, ayrı scope namespace'i, ayrı rate limit bütçesi | Auth0 bunu **21 Nisan 2026'da yapmak zorunda kaldı**: Management API *"is not designed for frequent, granular calls… can quickly become a bottleneck"* ve müşteriler *"hit a wall with rate limits."* Sonradan ikinci bir API yüzeyi eklemek her entegrasyonu kırar | admin-api.md (§24) §5.1 |
-| 22 | **Yetkilendirme filtresi veri erişim katmanında, handler'da değil** — tipte kodlanır: filtrelenmemiş koleksiyon serileştirilemez | CVE-2026-17059 tam olarak bunun yokluğu: `/users` doğru filtreliyordu ama `role-members` aynı token'a tam PII veriyordu. Handler-başına yetkilendirme, N endpoint × M kaynak kombinasyonunda **kaçınılmaz olarak** atlanır | admin-api.md (§24) §3.2 |
-| 23 | **Denetim logu request transaction'ının DIŞINDA** — bounded, backpressure'lı kuyruk; kuyruk dolarsa isteği reddet | Keycloak'ın 1 numaralı arızası: *"Event writes ride the request transaction"* — login isteği DB insert'ini bekliyor. Sonradan ayırmak her handler'ı yeniden yazmaktır | gozlemlenebilirlik.md (§25) §5.4 |
-
-| 24 | **`redirect_uri` eşleştirmesi YALNIZCA exact string** — regex ve wildcard hiç implemente edilmez, "opt-in tehlikeli özellik" olarak bile | authentik **CVE-2024-52289**: escape edilmemiş regex noktası yüzünden `app.example.com` konfigürasyonu `app0example.com` ile eşleşti → *"the victim… are directly redirected to the attacker without further user interaction."* Düzeltme "strict string matching as the default" oldu. RFC 9700 zaten exact match zorunlu kılıyor | dagitim-operasyon.md (§26) §3.3 |
-| 25 | **İmzalama anahtarları veritabanının DIŞINDA**, pluggable backend (dosya/KMS/PKCS#11), DB yedeğinden bağımsız yedekleme | **Anahtar kaybı DB kaybından yıkıcıdır**: tüm token'lar, refresh token'lar, oturumlar ölür ve hiçbir RP eski JWT'leri doğrulayamaz. Keycloak `rsa-generated` anahtarları DB'ye koyuyor ve **yedekleme prosedürü dokümante etmiyor**; Zitadel'in masterkey'i `docker compose up`'ta sessizce üretiliyor ve *"cannot be changed"* | dagitim-operasyon.md (§26) §5.2 |
-| 26 | **Şema göçü ayrı bir job; uygulama başlangıçta yalnızca `validate` yapar ve uyumsuzsa ölür** | Keycloak #43252: *"Incompatible migrations and index creation locks can prevent old instances from joining clusters during rolling updates."* Uygulama başlangıcına DDL bırakmak N-1 uyumluluğunu yapısal olarak imkânsız kılar | dagitim-operasyon.md (§26) §4.4 |
-| 27 | **Minimum PostgreSQL 18** | PG18, `ALTER TABLE ... SET NOT NULL **NOT VALID**` getirdi → sonra `VALIDATE CONSTRAINT` yalnızca `SHARE UPDATE EXCLUSIVE` alır. Öncesinde `SET NOT NULL` tüm tabloyu **ACCESS EXCLUSIVE** altında tarıyordu. Expand-contract'ı NOT NULL için mümkün kılan tek sürüm | dagitim-operasyon.md (§26) §4.1 |
+| # | Karar | Statü | Sonradan değiştirmenin maliyeti | Kaynak |
+|---|---|---|---|---|
+| 1 | **`tenant_id` her tabloda VE her birincil anahtarda** | KŞS | Tüm PK'ları düşürüp yeniden kurmak = çevrimdışı migration. SuperTokens: 33 tablo, tüm PK'lar CASCADE | cok-kiracilik.md (§18) |
+| 2 | **Her yabancı anahtar composite (`tenant_id` dahil)** | KŞS | Tek kolonlu FK'lar çapraz-kiracı referansa izin verir; RLS sonradan okumayı bozar | Logto PR #7596 |
+| 3 | **RLS + `FORCE` + non-owner rol, İSTİSNASIZ tüm tablolarda** | KŞS | Sonradan eklemek "ya hep ya hiç"tir; atlanan tek tablo = sessiz sızıntı | Logto #7685 |
+| 4 | **Kiracı başına imzalama anahtarı** (ES256 varsayılan) | KKS | Paylaşımlıdan kiracı-başınaya geçiş = tüm RP'lerin JWKS cache invalidasyonu + koordineli kesinti | Storm-0558, CVE-2026-23552 |
+| 5 | **`client_id` global benzersiz** (Keycloak'ın aksine) | KKS | Sonradan globalleştirmek = müşteri `client_id`'lerini yeniden adlandırmak = her RP config'i kırılır | RFC 6749 §2.2 |
+| 6 | **Kullanıcı benzersizliği kiracı-yerel** (`UNIQUE(tenant_id, …)`), asla global | KŞS | Global→kiracı-yerel geçiş veri göçü + güvenlik incelemesi; tersi imkânsız | Zitadel: *"not possible to move users between organizations"* |
+| 7 | **Değişmez kiracı slug'ı** | KKS | Slug issuer URL'indedir → değişirse her RP'nin discovery'si kırılır | Keycloak: *"alias cannot be changed afterwards"* |
+| 8 | **Issuer stratejisi: subdomain birincil** + RFC 9207 `iss` gün-1'de | KKS | Issuer değişimi = tüm RP yeniden yapılandırması | RFC 8414 / OIDC Discovery çelişkisi |
+| 9 | **`placement_id` silo-kaçış kolonu gün-1'de** (kullanılmasa bile) | KŞS | Yoksa bir kiracıyı ayrı kümeye taşımak mimari yeniden yazımdır | AWS silo/pool/bridge |
+| 10 | **Denetim logu kiracı + zaman partition'lı** | KŞS | Milyarlarca satırlı tabloyu sonradan partition'lamak pratikte imkânsızdır | GDPR Md. 17 |
+| 11 | **İsim değil, opak-ID/tam-yol tabanlı yetkilendirme** | MT | Token'da isim taşıyan her şey yeniden yazılır | CVE-2026-19608 |
+| 12 | **WebAuthn RP ID = apex alan adı** (login alt alan adı DEĞİL, satıcı alan adı KESİNLİKLE değil). **Çok kiracılıkta: her kiracı KENDİ RP ID'sini alır.** ⚠️ *Bu bir **ürün tercihidir**, standart zorunluluğu değil — spec, origin'in effective domain'ini de geçerli RP ID sayar (§23 §5.3).* | KKS | **Geri alınamayan tek WebAuthn kararı.** RP ID değişirse Okta'nın ifadesiyle *"the browser doesn't present them at sign-in"* — kayıtlar silinmez ama kullanılamaz. ROR (`/.well-known/webauthn`) pratikte **5 label** ile sınırlı → paylaşımlı RP ID çok kiracılıkta ölçeklenmiyor | hesap-yasam-dongusu.md (§22) §39.1, giris-akislari.md (§23) §5.3 |
+| 13 | **WebAuthn `user.id` = 64 rastgele bayt**, asla e-posta veya hash'i | KKS | **İki ayrı derece — önceden tek `MUST NOT` etiketiyle birleştirilmişti:** user handle'a PII (e-posta, kullanıcı adı, salt'sız hash'i) koymak **`MUST NOT`**; **64 bayt ise `RECOMMENDED`** — spec 1–64 bayt aralığına izin verir, 64 bayt **Argus'un tercihidir**. Değiştirmek tüm credential'ları geçersiz kılar | WebAuthn L3 §5.4.3 (1–64 bayt), §14.6.1 (PII yasağı + 64 bayt önerisi) |
+| 14 | **Kullanıcı ID'si asla yeniden kullanılmaz; e-posta varsayılan olarak asla** | KŞS | Tombstone tekillik kısıtını sonradan eklemek çakışan kayıtları çözemez | RFC 9967, Gmail, GitHub |
+| 15 | **`argus-core` I/O yapmaz** — `async fn`, `tokio::`, `sqlx::`, `reqwest::` yasak, CI'da zorlanır | MT | Formel doğrulamanın tek girebileceği yer burasıdır; sonradan I/O'yu sökemezsin | celiskiler-ve-kararlar.md (§2) §5 |
+| 16 | **Kimlik doğrulama akışı bir "flow" konfigürasyonu değil, tipli bir durum makinesi** | MT | Keycloak #40744: akıştan adım silmek auth bypass üretiyor. Genel amaçlı flow motoru bunu yapısal olarak engelleyemez | hesap-yasam-dongusu.md (§22) §10.3 |
+| 17 | **Her PII alanı kullanıcı başına DEK ile şifreli** (envelope encryption) | KŞS | Crypto-shredding'i sonradan eklemek tüm veriyi yeniden yazmaktır | ICO "put beyond use", EDPB CEF 2026 |
+| 18 | **Üç ayrı epoch:** `session_epoch` (kullanıcı) · `authz_epoch` (kiracı) · `key_epoch` (kiracı) | MT ⚠️ *doldurma sözleşmesi §10.3 A6* | Tek sayaca sıkıştırılırsa her izin değişimi tüm oturumları düşürür | celiskiler-ve-kararlar.md (§2) §4 |
+| 19 | **Kiracıya server-side template execution VERİLMEZ** — Keycloak'ın FreeMarker modeli kopyalanmaz | MT | Keycloak kendi dokümanında: *"a malicious template can run code as the Keycloak process."* Çok kiracılı bir üründe bu, **kiracının RCE alması** demektir. Sonradan script-siz templating'e geçmek her kiracı temasını yeniden yazdırmaktır | giris-akislari.md (§23) §5.2 |
+| 20 | **Argus'un kendi admin konsolu ve hosted login'i OAuth kullanmaz — doğrudan session cookie** | MT | RFC 10017 §7.1: *"Simple applications are made needlessly complex by using OAuth to replace the concept of session management."* Sonradan sökmek tüm UI auth katmanını yeniden yazmaktır | giris-akislari.md (§23) §4.2 |
+| 21 | **Platform-admin API'si ile kiracı-admin API'si AYRI yüzeyler** — ayrı audience, ayrı scope namespace'i, ayrı rate limit bütçesi | KKS | Auth0 bunu **21 Nisan 2026'da yapmak zorunda kaldı**: Management API *"is not designed for frequent, granular calls… can quickly become a bottleneck"* ve müşteriler *"hit a wall with rate limits."* Sonradan ikinci bir API yüzeyi eklemek her entegrasyonu kırar | admin-api.md (§24) §5.1 |
+| 22 | **Yetkilendirme filtresi veri erişim katmanında, handler'da değil** — tipte kodlanır: filtrelenmemiş koleksiyon serileştirilemez | MT | CVE-2026-17059 tam olarak bunun yokluğu: `/users` doğru filtreliyordu ama `role-members` aynı token'a tam PII veriyordu. Handler-başına yetkilendirme, N endpoint × M kaynak kombinasyonunda **kaçınılmaz olarak** atlanır | admin-api.md (§24) §3.2 |
+| 23 | **Denetim olayı, iş değişikliğiyle AYNI transaction'da minimal bir audit outbox satırı olarak kalıcılaşır**; Merkle birleştirme, imzalama ve dışa yayın arka planda yürür | MT ✅ *kabul edilmiş yön §10.3 A1* | Keycloak'ın 1 numaralı arızası: *"Event writes ride the request transaction"* — login isteği DB insert'ini bekliyor; ayrıştırma doğru. ⚠️ **Ama çözüm bellek kuyruğu değil (düzeltme, 2. inceleme turu):** bounded in-memory kuyruk, iş değişikliği commit olduktan sonra süreç ölürse kaydı kaybeder — rol değişikliği kalıcı, denetim kaydı yok. Bu satır, §25 §7 K4'ün (Tessera: *durable* sequencing + arka planda integration) doğru okunuşudur; K8'in bellek kuyruğu K4 ile çelişiyordu | gozlemlenebilirlik.md (§25) §5.4, §7 K4/K8 |
+| 24 | **`redirect_uri` eşleştirmesi YALNIZCA exact string** — regex ve wildcard hiç implemente edilmez, "opt-in tehlikeli özellik" olarak bile | MT | authentik **CVE-2024-52289**: escape edilmemiş regex noktası yüzünden `app.example.com` konfigürasyonu `app0example.com` ile eşleşti → *"the victim… are directly redirected to the attacker without further user interaction."* Düzeltme "strict string matching as the default" oldu. RFC 9700 zaten exact match zorunlu kılıyor. **Tek istisna — loopback:** RFC 8252 §7.3 gereği native uygulamaların `127.0.0.1`/`localhost` redirect'lerinde **port bileşeni yok sayılarak** eşleştirilir (§14 §9.4'te ayrıntılı). Bu bir wildcard değil, standardın kendi kuralıdır; karar satırında taşınması gerekiyordu | dagitim-operasyon.md (§26) §3.3, mcp-yetkilendirme.md (§14) §9.4 |
+| 25 | **İmzalama anahtarları veritabanının DIŞINDA**, pluggable backend (dosya/KMS/PKCS#11), DB yedeğinden bağımsız yedekleme | MT | **Anahtar kaybı DB kaybından yıkıcıdır**: tüm token'lar, refresh token'lar, oturumlar ölür ve hiçbir RP eski JWT'leri doğrulayamaz. Keycloak `rsa-generated` anahtarları DB'ye koyuyor ve **yedekleme prosedürü dokümante etmiyor**; Zitadel'in masterkey'i `docker compose up`'ta sessizce üretiliyor ve *"cannot be changed"* | dagitim-operasyon.md (§26) §5.2 |
+| 26 | **Şema göçü ayrı bir job; uygulama başlangıçta yalnızca `validate` yapar ve uyumsuzsa ölür** | MT | Keycloak #43252: *"Incompatible migrations and index creation locks can prevent old instances from joining clusters during rolling updates."* Uygulama başlangıcına DDL bırakmak N-1 uyumluluğunu yapısal olarak imkânsız kılar | dagitim-operasyon.md (§26) §4.4 |
+| 27 | **Minimum PostgreSQL 18** | **DH** ⚠️ *gerekçesi bir kez düzeltildi* | ⚠️ **Gerekçe düzeltildi (2. inceleme turu).** Eski gerekçe ("expand-contract'ı NOT NULL için mümkün kılan tek sürüm") **olgu olarak yanlıştı:** PG12'den beri `ADD CONSTRAINT ... CHECK (col IS NOT NULL) NOT VALID` → `VALIDATE CONSTRAINT` (SHARE UPDATE EXCLUSIVE) → `SET NOT NULL` dizisi tam tablo taraması olmadan çalışır. **Geçerli gerekçeler:** (a) yerleşik `uuidv7()` — [ÖLÇÜM] insert 1,67x hızlı, indeks %26 küçük (§6 §4.2); (b) fast-path kilit düzeltmesi (commit `c4d5cb71d`) çok-partition'lı iş yükündeki kilit uçurumunu kaldırıyor (§18 §2.2); (c) PG18'in `SET NOT NULL NOT VALID`'i aynı deseni sadeleştirir. Karar ayakta, gerekçe değişti | dagitim-operasyon.md (§26) §4.1, §6 §4.2, §18 §2.2 |
 
 > **Bu yirmi yedi maddenin hepsi şemayı, crate sınırlarını, UI mimarisini, API yüzeyini veya dağıtım modelini etkiliyor. Hiçbiri "sonra bakarız" değil.**
 
@@ -379,7 +380,7 @@ Bu tablodaki her karar, sonradan değiştirilmesi ya imkânsız ya da "dünyayı
 
 **Doğru üç gerekçe:**
 1. **Kripto/TLS katmanı üstünlüğü** — rustls'te post-quantum varsayılan açık; aws-lc-rs FIPS modu + ML-DSA; s2n-bignum'un HOL Light ile makine-kontrollü ispatları.
-2. **Güvenlik değişmezlerinin tip sistemine kodlanması** — branded lifetime ile çapraz-kiracı erişimin **derleme hatası** olması; bunun yayımlanmış bir emsali yok, Argus ilk olur.
+2. **Güvenlik değişmezlerinin tip sistemine kodlanması** — branded lifetime ile **A kiracısından okunan bir varlığı B kiracısının yazma yoluna sokmanın** derleme hatası olması; bunun yayımlanmış bir emsali yok, Argus ilk olur. ⚠️ **Sınırları (§18 §6.3'teki "Kazanmaz" tablosu buraya taşınmalıydı):** yanlış kiracıyı `begin()`'e vermeyi *engellemez* (istek sınırındaki extractor invariantının işi); ham SQL'de `AND tenant_id = ?` unutmayı *engellemez* (RLS'in işi); `Scoped::get()` ham `&T` döndürdüğü için `T: Clone` olan veri brand'in dışına kopyalanabilir. **Söylenebilecek cümle:** "belirli yanlış kullanımlar derleme aşamasında engellenir." **Söylenemeyecek cümle:** "tenant izolasyonunu bütünüyle derleyici garanti eder."
 3. **`webauthn-rs`'in kalitesi** — ekosistemdeki en iyi konumlanmış parça.
 
 **Kazanç nerede:** Argon2'yi hızlandırmakta değil, **hash dışındaki %85'i silmekte.** Aynı Argon2 parametresiyle çekirdek başına 15 yerine **40-60 login/sn** gerçekçidir — 3-4× kazanç, tamamen overhead silme işi.
@@ -411,7 +412,7 @@ generativity = "1"           # branded lifetimes — kiracı izolasyonu
 | `jsonwebtoken` + `rust_crypto` özelliği | `rsa` crate'i Marvin saldırısına açık — yan-kanal.md (§8) |
 | Dağıtık cache doğruluk kaynağı olarak (Redis/Infinispan) | Endüstri PostgreSQL'e yakınsadı: Keycloak Tem 2026, Zitadel Şub 2026, authentik 2025.8 — ha-dagitik-mimari.md (§19) |
 | Postgres `LISTEN/NOTIFY` | PgBouncer transaction modunda çalışmıyor; kuyruk dolunca **yazmalar commit'te başarısız** |
-| Olay başına hash-chained audit log | Ölçüldü: 8 bağlantı = 1 bağlantı throughput'u (~5.900/s tavan, donanımdan bağımsız) |
+| Olay başına hash-chained audit log | Ölçüldü: 8 bağlantı = 1 bağlantı throughput'u — tek doğrusal zincirde ardışık zincir hash'leri arasında seri bağımlılık. ⚠️ Sayı ölçüme özgüdür, evrensel tavan değildir |
 | `gamlastan` (SAML domain modeli) | SAML iş mantığı dışarıdan gelmemeli; XSW savunması tam olarak orada yaşar |
 | Verus | `serde::Serialize` ve `Mutex` desteklemiyor — gerçek kod tabanına uymuyor |
 
@@ -487,7 +488,7 @@ Sonuç: DB tamamen düşse bile kaynak sunucular etkilenmez.
 
 **Epoch yayılımı:** transactional outbox + **100-250 ms polling** (Keycloak'ın deseni). `LISTEN/NOTIFY` değil.
 
-**Uzun ömürlü access token + sinyal güdümlü iptal**, kısa TTL değil. Microsoft'un kendi bulgusu (birebir): *"Microsoft experimented with the 'blunt object' approach of reduced token lifetimes but found they **degrade user experiences and reliability without eliminating risks**."* Entra CAE 28 saatlik token + ~15 dk yayılım kullanıyor.
+**⚠️ AÇIK KARAR — access token ömrü ve iptal sözleşmesi (bkz. §1 §10.1).** Bu satır önceden "uzun ömürlü access token + sinyal güdümlü iptal, kısa TTL değil" diye kesin bir karar bildiriyordu. Ancak §19 §7.2 degraded mode'u anlatırken şunu diyor: *"degraded mode'un gerçek güvenlik sınırı access token ömrüdür… **bu, kısa token ömrünün en güçlü tek gerekçesidir** ve degraded mode tasarımının önkoşuludur."* Yani özetin "en değerli farklılaştırıcı" diye sattığı özellik, mimari bölümünün ifadesiyle özetin reddettiği token politikasını önkoşul kabul ediyor. İkisi aynı anda savunulamaz → karar §10.1'de açık bırakıldı. Uzun ömür lehine kanıt — Microsoft'un kendi bulgusu (birebir): *"Microsoft experimented with the 'blunt object' approach of reduced token lifetimes but found they **degrade user experiences and reliability without eliminating risks**."* Entra CAE 28 saatlik token + ~15 dk yayılım kullanıyor.
 
 **Bearer varsayılan değildir.** DPoP + mTLS-bound + JWT-SVID kabulü birinci sınıftır. WIMSE'nin yönü net: WIT spec'i *"MUST NOT be used as a bearer token"* diyor.
 
@@ -511,7 +512,7 @@ Sonuç: DB tamamen düşse bile kaynak sunucular etkilenmez.
 
 #### 4.4 Kimlik doğrulama ve kurtarma
 
-- **`CHECK (achieved_aal >= required_aal)`** — "kurtarma korunan şeyden zayıf olamaz" ilkesinin şema kısıtına çevrilmiş hâli. **Bu dokümandaki en önemli tek satır.**
+- **Kurtarma güvencesi kısıtı** — "kurtarma korunan şeyden zayıf olamaz" ilkesinin şema kısıtına çevrilmiş hâli; **duruma koşullu** yazılır (koşulsuz hâli NULL'da sessizce geçerdi — §22 §10.2). Tek başına yetmez: yetki açan geçiş, kanıt doğrulama **ve kanıt tüketimi** ile aynı atomik işlemde olmalı.
 - **`independence_group`** — aynı sync fabric'teki iki passkey **tek authenticator** sayılır.
 - Hesabın efektif güvenliği = **`min(tüm kurtarma yollarının AAL'i)`**, admin konsolunda gösterilir.
 - **Enumeration savunması:** dummy-Argon2 **değil** — Rauthy'nin çalışan-ortalama padding'i + **sabit yanıt süresi tabanı**. Gerekçe: dummy hash 100 eşzamanlı istekte **6,4 GB** tahsis ettirir ve NIST'in hesap-kapsamlı throttling'i bunu yapısal olarak yakalamaz.
@@ -520,7 +521,7 @@ Sonuç: DB tamamen düşse bile kaynak sunucular etkilenmez.
 #### 4.5 Kripto
 
 - **aws-lc-rs birincil** — FIPS modu, ML-DSA, s2n-bignum ispatları.
-- **JWS `alg` beyaz listesinde `EdDSA` KABUL EDİLMEZ** — yalnızca `Ed25519` (RFC 9864). `ES256` doğrudur ve deprecate edilmemiştir.
+- **JWS `alg` beyaz listesinde `EdDSA` KABUL EDİLMEZ** — yalnızca `Ed25519`. ⚠️ *Bu bir **Argus uyumluluk politikasıdır**, standart zorunluluğu değil (düzeltme, 2. inceleme turu):* RFC 9864 `EdDSA`'yı **deprecate** eder, **yasaklamaz** — deprecated ≠ prohibited. **Bedeli açıkça:** yaygın JOSE kütüphanelerinin çoğu hâlâ `EdDSA` üretir, dolayısıyla bu politika `private_key_jwt` client assertion'larını, DPoP proof'larını ve request object'leri kırabilir. Güvenlik gerekçesi de zayıf: doğrulamada anahtarın `crv`'si zaten bilinir, `alg` anahtarın eğrisine bağlanırsa belirsizlik kalmaz. `ES256` doğrudur ve deprecate edilmemiştir.
 - **WebAuthn `pubKeyCredParams`'a COSE tarafında `ESP256` + `Ed25519` eklenir.**
 - Veri modelinde **`algorithm` alanı + rotasyon yolu gün-1'de** — ML-DSA geldiğinde şema değiştirmek istemezsin.
 - **Argon2: `m=7168, t=5, p=1`.** Ölçüldü: `m=19456, t=2`'den **%16 ucuz** ve daha iyi ölçekleniyor (4 iş parçacığında %87 vs %69 verim). Keycloak zaten bunu kullanıyor ve haklı.
@@ -528,7 +529,9 @@ Sonuç: DB tamamen düşse bile kaynak sunucular etkilenmez.
 
 #### 4.6 Denetim logu
 
-**Düz append-only (22.440 tps) + ~1 saniyede bir Merkle checkpoint.** Olay başına zincir 3,8× yavaş ve donanımdan bağımsız tavana çarpıyor.
+**Düz append-only + ~1 saniyede bir Merkle checkpoint.** Olay başına zincir, aynı koşullarda **3,8× yavaş** ve 8 bağlantı ile 1 bağlantı aynı throughput'u veriyor — tek doğrusal zincirde seri bağımlılık var.
+
+> ⚠️ **[YENİDEN ÜRETİM BEKLİYOR]** — bu bölümün dayandığı ölçüm: 12 sn pgbench, Apple M4 / Docker PostgreSQL 18.6, 8 bağlantı. **Mutlak tps değerleri ürün iddiası değildir** ve kapasite, maliyet veya rakip karşılaştırması için kullanılmamalıdır (§6 §4.4). Taşınabilir olan karşılaştırmalı orandır, o da aynı etiketle.
 **Bütünlük hash'i şifreli metin üzerinden hesaplanır** — böylece crypto-shred sonrası zincir doğrulanabilir kalır. Bütünlük ve gizlilik ayrışır.
 
 ---
@@ -601,14 +604,16 @@ Bu liste, araştırmanın en değerli çıktısıdır: **hiçbir mevcut ürünü
 
 | Faz | Kapsam | Tahminî süre | **Çıkış kriteri (ölçülebilir)** |
 |---|---|---|---|
-| **0 — Temel** | Şema (20 geri alınamaz karar), crate topolojisi, CI gate'leri, `argus-core` iskeleti, `nextest` + partitioning, `insta` snapshot altyapısı | 4-6 hafta | RLS testleri geçiyor · `cargo geiger --forbid-only` yeşil · `argus-core`'da async/IO grep'i temiz |
+| **0 — Temel** | Şema (27 gün-1 kararı), crate topolojisi, CI gate'leri, `argus-core` iskeleti, `nextest` + partitioning, `insta` snapshot altyapısı | 4-6 hafta | RLS testleri geçiyor · `cargo geiger --forbid-only` yeşil · `argus-core`'da async/IO grep'i temiz |
 | **1 — OAuth/OIDC çekirdeği** | AS durum makinesi, Discovery, JWKS, PKCE, token endpoint, DPoP | **12-18 ay-adam** | **OIDF conformance suite** (self-hosted Docker) `oidcc-basic/config/dynamic-certification-test-plan` → `run-test-plan.py` exit 0 · **OAuch 195 testi** baseline'lı geçiyor · `oidcc-server-rotate-keys` modülü yük altında 0 adet 401 |
 | **2 — MCP + ajan** | PRM, `resource`, `iss`, CIMD, Token Exchange, **ID-JAG üretimi**, CIBA | 3-4 ay | **MCP conformance suite** `authorization-server` senaryoları (per-check baseline) geçiyor · Claude Code ile uçtan uca çalışıyor |
 | **3 — Kimlik doğrulama** | WebAuthn, Argon2, kurtarma durum makinesi, kayıt akışı, enumeration savunması | 3-4 ay | CDP Virtual Authenticator ile RP akışı yeşil · `achieved_aal >= required_aal` şemada zorlanıyor · timeless-timing testleri geçiyor · `criterion` Argon2 regresyon eşiği |
 | **4 — Kurumsal** | SCIM → SAML → LDAP | 12-15 ay | **`scim2-tester`** RFC 7643/7644 geçiyor · Entra SCIM Validator (discover-schema) + Okta Runscope 13-adım yeşil · **"The Fragile Lock" 3 saldırı sınıfı + XSW1-8 regresyon corpus'u** geçiyor · LDAP: SSSD/JNDI/`ldap3` interop |
 | **5 — Farklılaşma** | OpenID Federation, delegation chain, Agent Card imzalama, federated vault | 6-9 ay | FAPI 2.0 Security Profile Final planı · OIDF federation planları (⚠️ OIDF: *"early stage"*) |
 
-**Toplam kaba tahmin: ~1,8 mühendis-yılı çekirdek + %30-40 sürekli interop bakımı.**
+**Toplam kaba tahmin: faz tablosunun toplamı ~37–51 geliştirici-ayı** (§2 §1'deki bağımsız tahmin: **46–73 geliştirici-ayı**) **+ %30-40 sürekli interop bakımı.**
+
+> ⚠️ **Düzeltme (2. inceleme turu).** Burada önceden "~1,8 mühendis-yılı çekirdek" (≈21,6 ay) yazıyordu. O rakam §3.2'de **yalnızca kurumsal protokol paketi** için hesaplanmıştı (95 hafta / 1 mühendis) ve sehven projenin tamamına genellenmişti; üç ayrı toplam (21,6 / 37–51 / 46–73) birbirini tutmuyordu. **Birim uyarısı:** yukarıdaki tabloda Faz 1 *geliştirici-ayı*, diğer fazlar *takvim ayı* cinsinden yazılmıştı; toplam geliştirici-ayına çevrildi. **Ad çakışması uyarısı:** "Faz 1/Faz 2" §16 ve §22'de **protokol içi zorunlu/opsiyonel katman** anlamında kullanılıyor, buradaki global faz numaralarıyla aynı şey değil — SCIM'in iki yerde birden görünmesinin sebebi budur.
 
 #### 9.1 CI zaman bütçesi
 
@@ -654,7 +659,7 @@ Daha önce kendi ölçümümüzle verdiğimiz "olay başına hash zinciri değil
 
 1. **OCSF 1.9.0'ın `record_integrity` profili tam olarak bu modelin wire formatı.** `attestation` nesnesi `chain_uid` (*"Identifier of the append-only chain, such as a forensic or audit log"*), `fingerprint` (*"fingerprint of this event's canonical serialization"*), `prev_event` ve `signatures` taşıyor; çoklu attestation destekleniyor. **Checkpoint'i ayrı bir attestation olarak yayınlayabiliriz** — her olaya `prev_event` gömmek zorunda değiliz. Bu, denetim çıktısını doğrudan SIEM'lerin anlayacağı hâle getirir.
 2. **Postgres append-only'de `BEFORE TRUNCATE` trigger'ı zorunlu.** Row-level trigger'lar TRUNCATE'te **hiç ateşlenmez** — `REVOKE` + row trigger ile korunan bir tablo tek komutla boşaltılabilir. Bu, "append-only" iddiasındaki en yaygın sessiz delik.
-3. **Checkpoint dışarı yayınlanmazsa bütünlük iddiası boştur.** Superuser her koruma katmanını aşar. Hedefler: müşteri webhook'u + S3 Object Lock + opsiyonel üçüncü taraf tanık. **Blockchain gerekmiyor** — ölçülen maliyet L2'de $2,30/100K olay; Argus'un 22.440 tps'sinde bu günlük ~45.000 $ eder.
+3. **Checkpoint dışarı yayınlanmazsa bütünlük iddiası boştur.** Superuser her koruma katmanını aşar. Hedefler: müşteri webhook'u + S3 Object Lock + opsiyonel üçüncü taraf tanık. **Blockchain gerekmiyor** — ölçülen maliyet L2'de $2,30/100K olay. ⚠️ *Buradaki günlük maliyet tahmini önceden 22.440 tps'yi Argus'un sürekli hacmi sayıyordu; o sayı 12 sn'lik bir çıplak-insert ölçümüdür (§6 §4.4) ve 7/24 tepe yük varsayımıyla çarpılamaz. Sonuç yönü (blockchain gereksiz) hacim varsayımına duyarlı değil; rakam kaldırıldı.*
 
 ⚠️ **Ve bir uyarı: crypto-shredding'i "GDPR erasure" diye pazarlama.** EDPB Guidelines 01/2025 (16 Ocak 2025): *"the pseudonymised data can be considered anonymous only if the conditions for anonymity are met."* Anahtar silmek otomatik anonimleştirme değildir. Doğru konumlandırma: *"irreversible de-identification of log content, subject to the controller's own DPIA."*
 
@@ -709,13 +714,243 @@ Keycloak 26.7 stateless preview'u tam olarak bunu yaptı — auth session'ları,
 
 ---
 
-### 10. Doküman haritası
+### 10. Açık kararlar — kapatılmadan ilgili bileşenin implementasyonuna başlanmaz
+
+İki bağımsız inceleme turu sonunda aşağıdaki kararlar **kasıtlı olarak açık** bırakıldı.
+"Açık" burada "sonra bakarız" değil, **"kanıtı henüz yok, uygulanabilir algoritması henüz
+yazılmadı"** demektir. Bu bölümdeki hiçbir madde kapatılmadan **ilgili bileşenin implementasyonuna
+başlanmaz** — crate iskeleti ve I/O içermeyen çekirdek bundan bağımsız ilerleyebilir.
+
+**Karar kaydı alanları — her karar satırı bunları taşır:**
+
+`kimlik · statü · gerekçe · geçerlilik koşulu · kabul testi · **hangi karşı örnek veya test
+sonucu bu kararı geçersiz kılar** · kaynak satır`
+
+Son alan bu turun ürünüdür: iki tarafın da yanıldığı yerler tam olarak bu alanın boş
+olduğu yerlerdi.
+
+**Statüler:** `kalıcı kimlik sözleşmesi` · `kabul edilmiş yön` · `doğrulanacak hipotez` ·
+`ertelenmiş karar`
+
+#### 10.1 AÇIK — iptal / bayatlık sözleşmesi
+
+**Neden açık:** §1 §4.1 uzun ömürlü access token + sinyal güdümlü iptal seçiyordu; §19 §7.2
+ise degraded mode'un *"gerçek güvenlik sınırı access token ömrüdür"* diyerek kısa ömrü
+önkoşul yapıyor. İkisi aynı anda savunulamaz.
+
+**Terminoloji:** aşağıdakiler *profil* değil **doğrulama yollarıdır**; izin verilen bayatlık
+her yol için tanımlanan bir **koşuldur**.
+
+**Bu tablo boş bir alan değil, bir birleştirme işidir.** Hücrelerin çoğunun karşılığı belgede
+zaten var — §19 §4.5 (negatif cache kuralı), §19 §7.1 (kesinti matrisi), §19 §7.2 (degraded
+mode pencereleri), §26 (operatör davranışı). Sorun bunların **eksik veya çelişkili** olması ve
+**tek, tutarlı bir sözleşmede birleştirilmemiş** olmasıdır. Mevcut bilgi yok sayılmadan
+birleştirilecek; `—` işareti "bu yol için **uygulanamaz**" demektir, "bilinmiyor" değil.
+
+| Doğrulama yolu | İptal bilgisi cache miss | Partition | Restart | Azami bayatlık |
+|---|---|---|---|---|
+| **Argus içi — login** | *birleştirilecek* (§19 §7.1: DB düştüğünde 503) | *birleştirilecek* | *birleştirilecek* | *birleştirilecek* |
+| **Argus içi — refresh** | *birleştirilecek* (§19 §7.1: 503 + `Retry-After`, asla `invalid_grant`) | *birleştirilecek* | *birleştirilecek* | *birleştirilecek* |
+| **Argus içi — introspection** | *birleştirilecek* (§19 §4.5 "mutlaka DB'ye sor" ↔ §19 §7.2 cache-only çatışıyor) | *birleştirilecek* | *birleştirilecek* | *birleştirilecek* |
+| **Salt-JWT doğrulayan RS** (sinyal tüketmez) | **—** iptal bilgisi cache'i **yok**; RS'in tuttuğu şey **JWKS anahtar cache'idir**, iptal durumu değil | *birleştirilecek* | *birleştirilecek* | ≈ access token ömrü (§19 §7.2) |
+| **Sinyal tüketen RS** (SSF/CAEP) | *birleştirilecek* | *birleştirilecek* | *birleştirilecek* | *birleştirilecek* |
+
+⚠️ **Ayrım notu (3. tur):** login / refresh / introspection aynı Argus yüzeyinde bulunmaları
+nedeniyle tek satır sayılmıştı; **aynı kesinti davranışına sahip değiller** ve §19 §7.1 zaten
+üçünü farklı sütunlarda gösteriyor. Ayrıca salt-JWT doğrulayan RS'de "epoch cache miss"
+uygulanabilir bir kavram değil — **anahtar cache'i ile iptal bilgisi ayrı tutulmalı**, aksi
+hâlde JWKS tazeliği iptal tazeliğiyle karıştırılır.
+
+**Kapatılması gereken bilinen boşluk:** §19 §4.5'in *"cache miss → **mutlaka** DB'ye sor"*
+kuralı ile §19 §7.2'nin degraded mode'u doğrudan çatışıyor — DB erişilemezken cache'te
+**hiç bulunmayan** bir kullanıcı için 60/300 sn'lik zaman penceresi anlamsızdır; o kullanıcı
+için derhal fail-closed olmak gerekir. Zaman tabanlı pencere "cache bayat" ile "cache bu
+kullanıcıyı hiç görmedi" durumlarını ayırmıyor.
+
+**Geçersiz kılma koşulu:** *"DB düşse bile doğrulama sürer"* ile *"iptal en geç 250 ms'de
+uygulanır"* aynı yolda birlikte vaat edilirse bu karar geçersizdir.
+
+#### 10.2 AÇIK — outbox teslimat algoritması
+
+**Neden açık:** §19 §4.3'ün seçtiği "son 5 saniyeyi yeniden tara" çözümü doğruluk
+sağlamıyor, ve önerilen iki alternatif de henüz tamamlanmış algoritma değil.
+
+**Kaldırılan:** 5 saniyelik pencere **doğruluk mekanizması olmaktan çıkarıldı.** PostgreSQL'de
+`now()` transaction *başlangıç* zamanını döndürdüğü için pencerenin azami transaction
+süresinden büyük olması gerekir — o süre sınırsızdır. Pencere en fazla bir *hızlandırıcı*
+olabilir, doğruluk kaynağı olamaz.
+
+**Aday A — xid watermark üzerinden ilerleme (polling). `[ADAY — DOĞRULUK İDDİASI YOK]`**
+Taslak: her turda `pg_snapshot_xmin(pg_current_snapshot())` alınır; transaction kimliği
+`[önceki_watermark, yeni_xmin)` aralığında olan satırlar işlenir; watermark yeni xmin'e taşınır.
+
+⚠️ **Neden `seq` cursor'u değil (bu kısım kesindir):** MVCC altında commit etmemiş bir
+transaction'ın outbox satırı görünmez, dolayısıyla *"uçuştaki xid'e ait en düşük seq"* tablodan
+**hesaplanamaz**. Sequence tabanlı cursor kuralları — 5 sn penceresi dahil — bu yüzden
+uygulanabilir değil. Bu, adayın kendisini doğrulamaz; yalnızca terk edilen yolu kapatır.
+
+⚠️ **Doğruluk iddiası kurulmadan önce değerlendirilecekler.** Bu liste kapanmadan A, B ile
+karşılaştırılamaz:
+- **Kimlik alanı: açık `xid8` kolonu öne çıkıyor.** İki seçenek var — satırın sistem sütunu
+  `xmin`, ya da şemaya eklenen **açık bir transaction kimliği kolonu** (`pg_current_xact_id()`
+  ile yazılan `xid8`). ⚠️ *Değerlendirme (3. tur, bu belgenin kendi çıkarımı — dış incelemede
+  yer almadı): kanıt tek yönü gösteriyor.* Sistem sütunları **indekslenemez**; `xmin` üzerinden
+  aralık taraması planlayıcı için seq scan demektir ve bu, 20 node'dan 100–250 ms'de koşan bir
+  sorguda kabul edilemez (§19 §4.3 maliyet notu). Açık `xid8` kolonu indekslenebilir ve
+  aşağıdaki sarma/subtransaction maddelerini de düşürür — **ama yalnızca üst-seviye (top-level)
+  transaction kimliği tutulursa**, yani:
+  ```sql
+  producer_xid xid8 NOT NULL DEFAULT pg_current_xact_id()
+  ```
+  **`xid8` önde gelen adaydır; seçilmiş algoritma değildir.** Karar öncesinde şu dördü kalıyor:
+  (a) aynı transaction'daki birden fazla olayın aynı `xid8`'i taşıması — sıralama ve idempotency
+  buna göre tanımlanmalı; (b) watermark aralığının **yarı açık sınır semantiği**
+  (`[önceki, yeni)`) — sınırda çift işleme veya atlama olmadığı ispatlanmalı; (c) uzun
+  transaction'ın ilerlemeyi durdurması — §10.1'in azami bayatlık hücresine yazılır;
+  (d) watermark ve retention durumunun **her tüketici için kalıcılaştırılması** — bellekte
+  tutulursa restart'ta tüketici ilerlemesi ile yeniden üretilebilir durum arasında boşluk doğar.
+- **Subtransaction'lar.** Savepoint/`EXCEPTION` bloğu içinde yazılan satır bir **subxid** taşır;
+  subxid ile üst transaction'ın xid'i arasındaki ilişki ve `xmin` sınırına göre görünürlüğü
+  ayrıca tanımlanmalı.
+- **Satır güncellemesi — bu bir şema kısıtına çevrilir, açık soru değildir.** Sistem sütunu
+  `xmin` satırı **en son yazan** transaction'ı gösterir; outbox satırı `UPDATE` edilirse ekleme
+  sırası kaybolur. Çözüm zaten belgede: §25 §7 K7'nin append-only deseni (`REVOKE UPDATE, DELETE`
+  + `BEFORE UPDATE OR DELETE` + `BEFORE TRUNCATE` trigger'ları) outbox tablosuna da uygulanır.
+  Bu maddeyi "değerlendirilecek" değil, **"şemada zorlanacak"** olarak işaretliyoruz.
+- **Snapshot tutarlılığı.** Watermark ilerletme ile satır okuma aynı snapshot'ta yapılmazsa
+  aralık kayabilir; `REPEATABLE READ` veya tek sorgu gerekir.
+- **Sorgulama maliyeti.** Sistem sütunları indekslenemez; `xmin` üzerinden aralık taraması
+  planlayıcı için seq scan demektir. 100–250 ms'de bir, 20 node'dan koşan bir sorgu için bunun
+  maliyeti ölçülmeden kabul edilemez.
+- **Sarma.** 4 baytlık `xmin` ile 8 baytlık `xid8` arasında epoch dönüşümü gerekir.
+- **Bilinen ve kaçınılmaz bedel:** tek bir uzun transaction watermark'ı dondurur ve bu
+  **doğrudan iptal gecikmesine yazılır** — §10.1'deki azami bayatlık hücresini etkiler.
+
+**Aday B — logical decoding (replication slot).** Akış tanım gereği **commit sırasındadır**,
+dolayısıyla sequence/commit uyumsuzluğu yapısal olarak ortadan kalkar; cursor dayanıklıdır
+(`confirmed_flush_lsn`), node belleğinde değil. ⚠️ **Dayanıklı slot, dayanıklı cache demek
+değildir:** tüketici olayı alıp yalnızca bellekteki cache'e uygular, ilerlemeyi bildirir ve
+çökerse, slot ilerlemiş ama cache boştur.
+
+⚠️ **Restart prosedürü `[KISMEN AÇIK]`.** İlk kurulumda çözüm bilinir: slot oluşturulurken
+**dışa aktarılan tutarlı snapshot**'tan başlangıç durumu kurulur ve akış tam oradan devralınır.
+**Mevcut bir slot üzerinden yeniden başlamak ise aynı operasyon değildir** — var olan bir slota
+yeniden bağlanmak yeni bir snapshot vermez, yalnızca bildirilen konumdan akışı sürdürür.
+
+> ⚠️ *Daraltma (3. tur, bu belgenin kendi çıkarımı — dış incelemede yer almadı): bu boşluk
+> göründüğünden dar.* Argus'un iptal cache'i **saf türetilmiş bir cache**'tir ve §19 §4.5 soğuk
+> başlangıcı zaten tanımlar: cache boşaltılır, "cache miss → mutlaka DB'ye sor" moduyla ısınır.
+> Yani durum kaybolduğunda onu **yeniden kurmanın yolu vardır ve slot'tan bağımsızdır** —
+> snapshot/slot dansı doğruluk için değil, yalnızca *ısınma maliyetinden kaçınmak* için gerekir.
+> ⚠️ **Ama bu daraltma koşulsuz değil.** Cache ancak aşağıdaki **dört koşul birlikte**
+> sağlandığında saf türetilmiş veri olur; sağlanmazsa eski slot konumunun öncesindeki olaylara
+> gerçekten ihtiyaç doğar ve boşluk yeniden açılır:
+> 1. **Cache miss primary DB'ye gider** — replica'ya değil (§19 §4.5 negatif cache kuralı).
+> 2. **DB erişilemiyorsa fail-closed olunur** — bilinmeyen için "iptal edilmemiş" varsayılmaz.
+> 3. **Cache hazırmış gibi trafik alınmaz** — node, readiness'ini ilan etmeden isteğe cevap vermez.
+> 4. **Epoch uygulaması monotondur** — yeniden teslimat veya sıra dışı olay değeri geri almaz.
+>
+> Bu dört koşul sağlandığında eksik değer her zaman DB'den çekilebilir ve restart prosedürünün
+> açık kısmı gerçekten §10.1'e taşınır. **Geriye kalan tek açık:** restart, DB erişilemezliğiyle
+> **çakışırsa** ne olur — o durumda 1. koşulun dayandığı fallback de yoktur. Bu, §10.1'in
+> cache-miss × partition hücresidir, §10.2'nin konusu değil.
+
+Yine de yeni bir snapshot/slot kurulacaksa şunlar tarif edilmeli ve hiçbiri henüz yazılmadı:
+- eski slotun **devreden çıkarılma** noktası ve sırası (önce yeni slot mu, önce eski mi),
+- iki slot arasındaki **aradaki değişikliklerin kapsanması** — hangi tarafın örttüğü,
+- tüketicinin **hazır (readiness) koşulu**: hangi anda "durumum güncel" sayılır ve o ana kadar
+  iptal kontrolü nasıl davranır (fail-closed mu, DB'ye mi sorar),
+- eski slotun WAL biriktirmesinin sınırı (`idle_replication_slot_timeout`, §19 kaynak 19).
+
+**Diğer bedelleri:** tek slot tek tüketiciye hizmet eder (N node = N slot veya ayrı dağıtıcı);
+failover'da slot senkronizasyonu gerekir; `streaming` açıksa commit etmemiş parçalar gelir ve
+tüketici `stream_abort` semantiğini doğru işlemelidir.
+
+**Her iki aday da aynı arıza matrisinde sınanacak — karşılaştırma bundan önce yapılmaz:**
+
+| # | Senaryo |
+|---|---|
+| 1 | Ters commit sırası (geç açılan transaction erken commit eder) |
+| 2 | Uzun süren tek transaction — ilerleme durur, iptal gecikmesine etkisi ölçülür |
+| 3 | Tüketici retention penceresinden (24 sa) uzun süre düşer → yeniden senkronizasyon |
+| 4 | Tüketici restart — ilerleme ile yeniden üretilebilir durum arasında boşluk var mı |
+| 5 | Failover — slot/cursor durumu hayatta kalıyor mu |
+| 6 | Çoklu tüketici / çok node yayılımı |
+
+**Sınanacak değişmez:** *Tüketici ilerlemesi ile tüketicinin yeniden oluşturabildiği durum
+arasında boşluk bulunmamalı.*
+
+**Geçersiz kılma koşulu:** yukarıdaki altı senaryodan herhangi birinde kaçırılmış iptal
+üretilebiliyorsa aday elenir.
+
+> **Bu bölümün statüsü.** §10, **mimari yönleri** kayda geçirir; outbox'ın doğruluğunu veya
+> iptal sürelerini **kanıtlamaz**. İki aday da bugün *aday*dır ve aralarında seçim yapılmamıştır.
+> Sıradaki teknik iş ikidir ve sırayla yapılır: (1) §10.1'deki doğrulama yollarının arıza
+> sözleşmesini mevcut bölümlerden **birleştirerek** doldurmak, (2) iki outbox adayını yukarıdaki
+> ortak matriste sınamak. Bu ikisi bitmeden §10.2'de karar satırı yazılmaz.
+
+#### 10.3 Kabul edilmiş yönler
+
+| # | Karar | Statü | Kabul testi |
+|---|---|---|---|
+| A1 | Denetim olayı iş değişikliğiyle **atomik** minimal kayıt; Merkle/imza/egress arkada (§1 karar 23) | kabul edilmiş yön | Commit sonrası `SIGKILL` → kayıt yeniden işlenebiliyor |
+| A2 | **Kurtarma iptali ile oturum iptali ayrı eylemler** (§22 §10.1) | kabul edilmiş yön | `DENIED` geçişi tek başına oturum düşürmüyor |
+| A3 | Yetki açan geçiş: durum + kanıt doğrulama + **kanıt tüketimi** aynı atomik işlemde (§22 §10.2) | kabul edilmiş yön | Aynı kanıtla paralel iki `REBIND_OPEN` denemesi başarısız |
+| A4 | **Origin / issuer / RP ID yaşam döngüleri ayrı modellenir** (§23 §5.3) | kabul edilmiş yön | Custom domain eklendi, eski RP ID + ROR ile giriş sürüyor |
+| A5 | Benchmark sayılarına **[YENİDEN ÜRETİM BEKLİYOR]** etiketi; mutlak sayılar ürün iddiası değil (§6 §4.4) | kabul | Kod + ham çıktı + komut repoda |
+| A6 | Yetkilendirme v1: primary'de **tek tutarlı snapshot** (`REPEATABLE READ` veya tek sorgu) + aynı transaction'da epoch artışı + sonucun snapshot epoch'uyla etiketlenmesi | kabul edilmiş başlangıç modeli | Yeni epoch altında eski veriyle karar cache'lenemiyor |
+
+⚠️ **A6'nın açık kalan parçası:** `READ COMMITTED` altında ardışık sorgular farklı snapshot
+görür — "aynı transaction" demek tek başına yetmez. Ayrıca **uçuşta olan kararın hangi anda
+geçerli sayıldığı** tanımlı değil: cache'e hiç yazılmadan doğrudan çağırana dönen bir karar,
+epoch anahtar karşılaştırmasının kapsamı dışında kalır. *"İptal commit olduktan sonra hiçbir
+eski karar kullanılamaz"* garantisi yalnızca cache karşılaştırmasından çıkmaz. Replica'ya
+çıkıldığında sürüm/LSN bariyeri gerekecek; v1'de gerekmiyor.
+
+#### 10.4 "Geri alınamaz" listesinin statü ayrımı
+
+§1 §1'deki 27 maddenin hepsi aynı sınıfta değil ve hepsine aynı kesinliği vermek, yanlış
+olduğu sonradan görülen bir tercihi değiştirmeyi zorlaştırıyor:
+
+**Dağılım (§1 §1 tablosuyla birebir sayılmıştır):** KŞS 8 · KKS 7 · MT 11 · DH 1 = 27.
+
+- **KŞS — kalıcı şema sözleşmesi (8)** — veritabanının içinde; değiştirmek çevrimdışı göç:
+  `tenant_id` her PK'da (1), composite FK (2), RLS `FORCE` (3), kiracı-yerel kullanıcı
+  benzersizliği (6), `placement_id` (9), denetim partition'ları (10), ID yeniden kullanılmaması
+  (14), kullanıcı başına DEK (17).
+- **KKS — kalıcı kimlik sözleşmesi (7)** — dış dünyaya yerleşir, göç maliyeti gerçekten yıkıcı:
+  kiracı başına imzalama anahtarı (4), global `client_id` (5), değişmez kiracı slug'ı (7),
+  issuer stratejisi (8), WebAuthn RP ID (12), `user.id` (13), platform/kiracı admin API
+  ayrımı (21 — audience ve scope namespace'i token'larda görünür).
+- **MT — kabul edilmiş mimari tercih (11)** — değiştirmesi pahalı ama mümkün: opak-ID
+  yetkilendirme (11), `argus-core` I/O yasağı (15), tipli durum makinesi (16), üç epoch (18),
+  server-side template yasağı (19), admin konsolu session cookie (20), veri katmanı filtresi
+  (22), audit outbox (23), `redirect_uri` exact match (24), **imzalama anahtarlarının DB
+  dışında olması (25)**, migration job modeli (26).
+- **DH — doğrulanacak hipotez (1)**: minimum PostgreSQL 18 (27) — gerekçesi bu turda bir kez
+  zaten düzeltildi.
+
+⚠️ *Düzeltme (4. inceleme turu): bu liste önceden 25'i (imzalama anahtarlarının konumu) KKS
+sayıyordu ve ana tabloyla çelişiyordu. **Doğrusu MT'dir:** geri alınamaz olan şey anahtarın
+**kaybı**dır, **konumu** değil — depolama arkası (dosya/KMS/PKCS#11) pluggable tasarlandığı için
+zaten değiştirilebilir. Ayrıca bu bölümün önceki hâli 27 maddenin yalnızca 8'ini sınıflandırıp
+gerisini boşta bırakıyordu; şimdi hepsi sayılı.*
+
+- **Bu tablonun dışında kalan, ertelenmiş/açık kararlar:** iptal sözleşmesi → §10.1;
+  outbox teslimatı → §10.2. Denetim kuyruğu (23) §10.3 A1 ile kapandı ve tabloya MT olarak girdi.
+
+> **Kural:** *"Henüz yayımlanmış bir örnek bulamadık"* ifadesi **"Argus dünyada ilk olacak"**
+> sonucuna dönüştürülmez. İkincisi ayrı bir iddiadır ve ayrı kanıt ister.
+
+---
+
+### 11. Doküman haritası
 
 | Dosya | Satır | İçerik |
 |---|---|---|
 | 00-mimari-kararlar.md (§1) | bu dosya | **Karar** |
 | celiskiler-ve-kararlar.md (§2) | 225 | Raporlar arası beş çelişkinin çözümü |
-| [P0-kritik-bulgular.md](P0-kritik-bulgular.md) | 376 | Acil ve öncelikli bulgular |
+| P0-kritik-bulgular.md (§3) | 376 | Acil ve öncelikli bulgular |
 | rust-ekosistemi.md (§5) | 391 | Rust fizibilitesi, crate envanteri, efor tahmini |
 | mcp-yetkilendirme.md (§14) | 1.145 | MCP authorization tam referansı |
 | ajan-kimligi.md (§15) | 1.016 | AI ajan kimliği — IETF, MCP, endüstri, düzenleme |
@@ -817,7 +1052,7 @@ Yani `forbid(unsafe_code)` bir güvenlik hedefi değil, **bir sınırlama beyan�
 > 2. **`cargo geiger --forbid-only` CI'da bir gate'tir**, metrik değil. Bağımlılık ağacındaki toplam unsafe sayısını KPI yapma — yanıltıcıdır (tokio, hyper, h2 hepsi unsafe içerir ve içermek zorundadır).
 > 3. **Kripto sağlayıcı aws-lc-rs kalır.** Gerekçe (a) FIPS modu, (b) ML-DSA, (c) s2n-bignum'un makine-kontrollü ispatları — RustCrypto'nun saf Rust'ının **sağlamadığı** üç şey.
 > 4. **`rust_crypto` özelliği `jsonwebtoken`'da ASLA açılmaz** — bkz. yan-kanal.md (§8), `rsa` crate'i Marvin saldırısına açık.
-> 5. **Asıl DoS savunması `forbid(unsafe_code)` değil, parser derinlik sınırlarıdır.** Bkz. [P0-kritik-bulgular.md](P0-kritik-bulgular.md).
+> 5. **Asıl DoS savunması `forbid(unsafe_code)` değil, parser derinlik sınırlarıdır.** Bkz. [§3 — P0 kritik bulgular](#3-p0-kritik-bulgular).
 
 ---
 
@@ -875,7 +1110,12 @@ Yani `forbid(unsafe_code)` bir güvenlik hedefi değil, **bir sınırlama beyan�
 
 **Kritik ayrım:**
 - `session_epoch` **token'ın içinde taşınır** (claim olarak) ve doğrulamada node cache'indeki değerle karşılaştırılır. Eşleşmiyorsa token ölü. **Bu, ağ turu gerektirmez.**
-- `authz_epoch` **token'ın içinde taşınmaz.** Karar cache'inin anahtarının bir parçasıdır: `cache_key = (authz_epoch, subject, action, resource)`. Epoch artınca eski anahtarlar erişilemez hâle gelir — **cache silinmez, sadece adreslenemez olur** ve doğal olarak tahliye edilir. Bu, "cache invalidation" problemini bir sayaç artışına indirger.
+- `authz_epoch` **token'ın içinde taşınmaz.** Karar cache'inin anahtarının bir parçasıdır. **Tek geçerli anahtar tanımı** — §20 §7.1 ile aynı, uzunluk-önekli hash, string concat değil:
+  ```
+  cache_key = blake3_len_prefixed(tenant_id ‖ authz_epoch ‖ subject ‖ action ‖ resource ‖ model_id)
+  ```
+  ⚠️ *Düzeltme (2. inceleme turu): burada önceden `(authz_epoch, subject, action, resource)` yazıyordu — **tenant taşımıyordu**, ki bu §18'in kendi composite-key ilkesine aykırıydı; ayrıca §20 §7.1'deki tanımla uyuşmuyordu. İki tanım tek tanıma indirildi.* Epoch artınca eski anahtarlar erişilemez hâle gelir — **cache silinmez, sadece adreslenemez olur** ve doğal olarak tahliye edilir.
+- ⚠️ **Ama bu, tazeliği TEK BAŞINA çözmez.** Epoch, cache'i *adreslenemez* kılar; cache'i *dolduran* okumanın tazeliği hakkında hiçbir şey söylemez. `E+1` epoch'u altında, eski bir replica snapshot'ından hesaplanmış bir karar yazılabilir ve orada kalır. Doldurma sözleşmesi §1 §10.3'te **kabul edilmiş başlangıç modeli** olarak, uçuşta karar semantiği ise **açık** olarak kayıtlıdır.
 
 **Bu neden doğru:** Bir kullanıcının rolü değiştiğinde oturumunu düşürmek istemezsin — sadece bir sonraki yetkilendirme kararının taze olmasını istersin. `authz_epoch` tam olarak bunu yapar ve **oturuma hiç dokunmaz.**
 
@@ -3756,7 +3996,7 @@ Filter: EXISTS(SubPlan 2)
 
 #### 4.4 [ÖLÇÜM] Hash-zincirli denetim logu — en sert yapısal sınır
 
-pgbench, 12 sn:
+pgbench, 12 sn — ⚠️ **[YENİDEN ÜRETİM BEKLİYOR]**, donanım: Apple M4 / Docker PostgreSQL 18.6, 8 bağlantı (§5 ölçüm konvansiyonu). Aşağıdaki **mutlak** değerler Argus'un throughput'u değildir: çıplak insert ölçümüdür — Merkle yok, imza yok, uygulama mantığı yok, ağ yok. Bu bölümün başka yerlerinde bu sayının ürün throughput'u gibi kullanıldığı yerler düzeltilmiştir:
 
 | Senaryo | tps | Ortalama gecikme |
 |---|---|---|
@@ -3768,18 +4008,20 @@ pgbench, 12 sn:
 
 > **Hash zinciri paralelliği tamamen yok ediyor.** Her kayıt bir öncekinin hash'ine bağlı olduğu için işlem seri olmak zorunda. Eşzamanlılık eklemek throughput'a **hiçbir şey katmıyor**, yalnızca gecikmeyi 0,170 ms'den 1,356 ms'ye (**8x**) çıkarıyor — çünkü bağlantılar kilit için sıraya giriyor.
 
-Zincir maliyeti: düz log'a göre **3,8x throughput kaybı** ve donanımdan bağımsız ~5.900 olay/sn tavanı.
+Zincir maliyeti: **bu ölçüm koşullarında** düz log'a göre **3,8x throughput kaybı**.
+
+> ⚠️ **Düzeltme (2. inceleme turu).** Burada önceden "donanımdan bağımsız ~5.900 olay/sn tavanı" yazıyordu. Bu iddia hem fazla geniş, hem de aşağıdaki çözüm tablosunun kendi *"Uygulama içi tek yazar — zinciri bellekte tutup batch commit"* satırıyla çelişiyor. **Savunulabilir ifade:** *tek bir doğrusal zincirde ardışık zincir hash'lerinin hesaplanması arasında seri bağımlılık vardır.* Payload hazırlama, bağımsız hash hesapları, batch yazma ve **farklı** zincirler paralel yürüyebilir; seri bağımlılık, olay başına ayrı bir veritabanı transaction'ını zorunlu kılmaz. Ölçülen şey belirli bir uygulamadır (olay başına transaction + her seferinde önceki hash'in okunması), yapısal bir tavan değil.
 
 **Çözüm kalıpları:**
 
 | Yaklaşım | Mekanizma | Değerlendirme |
 |---|---|---|
-| **Parçalı zincir (önerilen)** | Her shard/tenant kendi zincirini tutar; N shard = N × 5.900 olay/sn | Doğrusal ölçeklenir. Global sıralama kaybolur, ama denetim için genelde gerekmez |
-| **Checkpoint / Merkle ağacı** | Olaylar zincirsiz yazılır; periyodik olarak (örn. saniyede bir) bir batch'in Merkle kökü zincire eklenir | Düz log hızında (22.440 tps) yazma + kanıtlanabilirlik. **En iyi takas** |
+| **Parçalı zincir (önerilen)** | Her shard/tenant kendi zincirini tutar; zincirler arası seri bağımlılık yoktur | Shard sayısıyla ölçeklenir, ⚠️ **ama doğrusal olmak zorunda değil** — ortak disk, WAL, checkpoint ve imza darboğazları paylaşılır; "N shard = N × ölçülen tps" **geçersiz bir ekstrapolasyondur**. Global sıralama kaybolur, ama denetim için genelde gerekmez |
+| **Checkpoint / Merkle ağacı** | Olaylar zincirsiz yazılır; periyodik olarak (örn. saniyede bir) bir batch'in Merkle kökü zincire eklenir | Düz log hızıyla yazma + kanıtlanabilirlik (⚠️ *ölçüm etiketi: §6 §4.4, [YENİDEN ÜRETİM BEKLİYOR] — çıplak insert, ürün throughput'u değil*). **En iyi takas** |
 | Certificate Transparency modeli | Merkle ağacı + imzalı ağaç başlığı (STH) | Aynı fikrin olgunlaşmış hali; Trillian/Rekor referans alınabilir |
 | Uygulama içi tek yazar | Zinciri bellekte tutup batch commit | Yazar tek nokta hatası olur |
 
-> **Aksiyon:** Olay başına zincir kurmayın. Olayları düz append-only yazın (22.440 tps), her ~1 saniyede bir batch'in Merkle kökünü ayrı bir küçük "checkpoint" tablosuna zincirleyin. Kanıt gücü neredeyse aynı, throughput **3,8x** yüksek ve ölçeklenebilir.
+> **Aksiyon:** Olay başına zincir kurmayın. Olayları düz append-only yazın, her ~1 saniyede bir batch'in Merkle kökünü ayrı bir küçük "checkpoint" tablosuna zincirleyin. Kanıt gücü neredeyse aynı, throughput **3,8x** yüksek ve ölçeklenebilir.
 
 #### 4.5 LISTEN/NOTIFY'ın belgelenmiş sınırları
 
@@ -3997,7 +4239,7 @@ Bellek (eşzamanlı hash):
 10. **`last_seen`'i indekslemeyin** (HOT'u %97'den %0'a düşürüyor, WAL'ı 1,8x artırıyor). Oturum tablosuna **`fillfactor=70`** verin (%100 HOT).
 11. **`last_seen`'i her istekte yazmayın** — 10–30 sn pencerede birleştirip toplu `UPDATE` yapın (8x throughput, ~10x WAL azalması).
 12. **RLS kullanın**, ama her policy tek indeksli kolonda eşitlik olsun (%4,4 maliyet). Alt sorgulu policy yazmayın (%18,6 ve satır sayısıyla büyür).
-13. **Denetim logunu olay başına zincirlemeyin** — 3,8x throughput kaybı ve paralellikten tamamen yoksun (~5.900 olay/sn tavanı, donanımdan bağımsız). Düz append-only yazıp saniyede bir Merkle checkpoint zincirleyin.
+13. **Denetim logunu olay başına zincirlemeyin** — ölçülen koşullarda 3,8x throughput kaybı; tek doğrusal zincirde ardışık zincir hash'leri arasında seri bağımlılık var (⚠️ sayı ölçüme özgü, evrensel tavan değil — §6 §4.4). Düz append-only yazıp saniyede bir Merkle checkpoint zincirleyin.
 14. **LISTEN/NOTIFY'ı iptal yayını için kullanmayın** — PgBouncer transaction mode'da çalışmaz ve dolu kuyruk yazmalarınızı commit'te düşürür.
 15. **Erken karar verin:** PgBouncer transaction mode (prepared statement yok) **veya** uygulama içi sabit havuz (prepared statement var). İkisi birden olmaz.
 16. Oturum/denetim/token tablolarını zamana göre partition edin — asıl kazanç `DROP PARTITION`.
@@ -16170,7 +16412,7 @@ Bu dokümandaki her sürüm numarası, tarih, oy sayısı ve indirme rakamı bir
 
 **Soru:** 5-10 yıl yaşayacak bir IdP mimarisinde, bugün ucuz olan ama sonradan çok pahalıya patlayacak kararlar hangileri?
 
-Bu dosya dört ayrı araştırma hattının ham raporlarını birleştirir. Sentez ve karar tablosu için bkz. [P0-kritik-bulgular.md](P0-kritik-bulgular.md).
+Bu dosya dört ayrı araştırma hattının ham raporlarını birleştirir. Sentez ve karar tablosu için bkz. [§3 — P0 kritik bulgular](#3-p0-kritik-bulgular).
 
 
 ---
@@ -19679,9 +19921,12 @@ Ory'nin bakımcısı bunu doğrudan söylüyor: `GLOBAL` tablolar kişisel veri 
 | **NATS JetStream** | **At-least-once**, ack + redelivery, sequence number | ~1–5 ms | Stream diskte, replay edilir | NATS + storage | ✅ Ama fazladan sistem |
 | **Kafka** | At-least-once, kalıcı log | 5–50 ms | Kalıcı | Kafka + ZK/KRaft | ❌ **IdP için aşırı** |
 | **Gossip** | Eventual, olasılıksal | 100 ms–saniyeler | Yakınsar | Yok | ⚠️ Yakınsama süresi belirsiz |
-| **DB polling** | **Exactly-once (kaynak DB)** | Polling aralığı | Kaybolmaz | **Yok** | ✅ |
-| **DB transactional outbox + polling** | **Exactly-once, atomik** | Polling aralığı (100 ms) | Kaybolmaz | **Yok** | ✅✅ **Keycloak'ın seçimi** |
-| **PostgreSQL `LISTEN/NOTIFY`** | At-most-once (bağlantı kopunca kaybolur) | <1 ms | **Kaybolur** | Yok | ⚠️ Yalnız hızlandırıcı |
+| **DB polling** | Olay DB'de kalıcı; **teslimat at-least-once** | Polling aralığı | Kaybolmaz | **Yok** | ✅ |
+| **DB transactional outbox + polling** | **Atomik üretim** (iş değişikliğiyle aynı transaction) + **at-least-once teslimat** | Polling aralığı (100 ms) | Kaybolmaz | **Yok** | ✅✅ **Keycloak'ın seçimi** |
+| **PostgreSQL `LISTEN/NOTIFY`** | At-most-once (bağlantı kopunca kaybolur) | <1 ms | **Kaybolur** | Yok | ❌ **İptal yayınında kullanılmaz** (§6 §4.5) |
+
+> ⚠️ **Düzeltme (3. inceleme turu): son iki satırda önceden "exactly-once" yazıyordu.** Bu, teslimat semantiği olarak fazla güçlü ve genel olarak yanlış. **Olayın DB'de kalıcı olması** ile **tüketicinin etkisinin tam bir kez uygulanması** ayrı şeylerdir: tüketici satırı okuyup cache'e uygulamadan ölürse, yeniden başladığında aynı olayı yeniden alır. Doğru hedef üç parçalıdır ve üçü de ayrı ayrı tasarlanır:
+> **atomik üretim** (olay ile iş değişikliği aynı transaction) + **at-least-once teslimat** (yeniden teslimat normaldir) + **idempotent/monoton uygulama** (epoch yalnızca artar; aynı olayın iki kez uygulanması sonucu değiştirmez).
 
 #### 4.2 Redis pub/sub'ın güvenlik problemi — bu bir görüş değil, dokümante edilmiş davranış
 
@@ -19745,11 +19990,29 @@ her 100–250 ms'de bir. Sonuçlar node-yerel epoch cache'ine uygulanır. `last_
 2. **`pg_snapshot_xmin(pg_current_snapshot())` takibi:** Sadece xmin'in altındaki, kesin commit olmuş satırları işle.
 3. **`txid` kolonu + snapshot karşılaştırma** (Debezium'un yaptığı).
 
-Argus için (1) en basiti ve yeterlidir.
+⚠️ **Düzeltme (2. ve 3. inceleme turu): (1) seçimi GERİ ALINDI — yeterli değil.**
 
-**Maliyet:** Node başına saniyede 4–10 küçük indeksli sorgu. 20 node'da 80–200 qps — Postgres için önemsiz. **Outbox tablosu 24 saatlik pencereyle budanmalı** (partitioned table + `DROP PARTITION`), yoksa şişer.
+Seçenek (1) bir doğruluk mekanizması değildir. PostgreSQL'de `now()` transaction'ın
+**başlangıç** zamanını döndürür, commit zamanını değil; dolayısıyla `created_at`, satır
+transaction açıldığı anla damgalanır. Pencereden uzun süren tek bir transaction — ki yukarıdaki
+`UPDATE` + `INSERT` deseninin normal şeklidir — satırı zaten pencerenin dışına düşmüş
+`created_at` ile görünür kılar. Tüketici duraksarsa da pencere kayar ve satır kalıcı olarak
+atlanır. Pencere en fazla bir **hızlandırıcı** olabilir.
 
-**İsteğe bağlı hızlandırma:** Aynı transaction'ın sonunda `NOTIFY revocation` da yapılabilir; node'lar NOTIFY alınca polling'i beklemeden hemen sorgular. NOTIFY kaybolursa polling zaten 100 ms'de yakalar. Bu, **ortalama gecikmeyi ~1 ms'e indirirken en kötü durumu 100 ms'de tutar** — hem hızlı hem doğru.
+Seçenek (2) de yazıldığı hâliyle eksiktir: şemada transaction kimliği tutulmuyor ve cursor'un
+nasıl ilerleyeceği tanımlı değil. Ayrıca sequence tabanlı bir cursor bu problemi **prensipte**
+çözemez — commit etmemiş bir transaction'ın satırı MVCC altında görünmez, dolayısıyla
+"uçuştaki transaction'a ait en düşük `seq`" değeri tablodan hesaplanamaz.
+
+**Teslimat algoritması bu belgede AÇIK KARARDIR.** İki aday (xid watermark üzerinden polling ·
+logical decoding) ve ikisinin de ortak sınanacağı arıza matrisi için bkz. **§1 §10.2**.
+Karşılaştırma yapılmadan ve matris koşulmadan buraya bir seçim yazılmayacak.
+
+**Maliyet `[SEÇİME BAĞLI HİPOTEZ]`:** *sequence indeksi üzerinden* polling varsayımıyla node başına saniyede 4–10 küçük indeksli sorgu; 20 node'da 80–200 qps — Postgres için önemsiz. ⚠️ **Bu rakam artık teslimat algoritmasının seçimine bağlıdır (§1 §10.2).** Seçilen aday sequence indeksini kullanmayabilir: `xmin` adayı sistem sütunu üzerinden çalışırsa indeks kullanamaz ve **seq scan** riski taşır — o durumda bu maliyet tahmini geçersizdir ve yeniden ölçülmelidir.
+
+**Retention `[AÇIK]`:** outbox tablosu bir pencereyle budanmalı (partitioned table + `DROP PARTITION`), yoksa şişer. ⚠️ **Ama 24 saat henüz güvenli bir karar değil:** tüketici penceresinden uzun süre düşerse partition düşürmek olayları kalıcı olarak yok eder. **Yeniden senkronizasyon tasarımı tamamlanmadan hiçbir partition düşürülemez** — pencere süresi, o tasarımın çıktısı olarak belirlenecek (§1 §10.2, arıza matrisi senaryo 3).
+
+**⚠️ `NOTIFY` hızlandırması KULLANILMAZ — düzeltme (2. inceleme turu).** Bu paragraf önceden "isteğe bağlı hızlandırma" başlığıyla, aynı transaction'ın sonunda `NOTIFY revocation` yapılmasını öneriyordu. Bu, §6 §4.5'teki mutlak yasakla ve §1 §4.1 / §2 Çelişki 4'ün karar satırlarıyla çelişiyordu. Daha önemlisi, **"opsiyonel" çerçevesi hata modundan kaçmıyor:** `NOTIFY` iptal yazımıyla *aynı transaction'ın* içinde olduğu için, bildirim kuyruğu dolduğunda kaybolan bir hızlandırma değil — **iptalin kendisi commit olamaz**. Yani iptal mekanizması DB'nin yazma yolunu düşürebilir hâle gelir; §6 §4.5 bunu zaten "kabul edilemez bir hata modu" ilan etmişti. **Tek konum: `LISTEN/NOTIFY` iptal yayınında hiç kullanılmaz.**
 
 #### 4.4 Bloom / cuckoo filter ile iptal listesi
 
@@ -19838,7 +20101,7 @@ Katman 3: PostgreSQL primary (doğruluk kaynağı)
 | Katman | Hedef | Nasıl |
 |---|---|---|
 | **Aynı node** | **0 ms** (senkron) | İptal işlemi kendi node'unda cache'i hemen günceller |
-| **Diğer node'lar, aynı küme** | **p99 < 250 ms** | Outbox polling 100 ms + NOTIFY hızlandırma |
+| **Diğer node'lar, aynı küme** | **p99 < 250 ms** ⚠️ *hedef; teslimat algoritması açık karar (§1 §10.2)* | Outbox polling 100 ms (⚠️ `NOTIFY` hızlandırması **kullanılmaz** — §4.3) |
 | **Diğer küme / site** | **p99 < 500 ms** | Senkron DB + outbox polling |
 | **Kaynak sunucular (RS)** | **≤ access token ömrü** | Kısa access token (5 dk) + introspection ile 250 ms |
 | **Federe RP'ler** | **saniyeler** | SSF/CAEP push |
@@ -20174,7 +20437,7 @@ Bu, Argus'un Redis'i doğruluk kaynağı yapmama kararının tek gerekçesi.
 | Birincil anahtarlar | **`uuidv7()`** (PG18) | Index bloat ve WAL hacmi |
 | Uçucu durum | **Tamamı PostgreSQL'de** | Keycloak v2 / authentik / Ory yakınsaması |
 | Redis/Valkey | **Yok** (v1'de hiç) | Bağımlılık azaltma; sonradan opsiyonel hızlandırıcı |
-| İptal yayını | **Outbox tablosu + 100 ms polling + `NOTIFY` hızlandırma** | Bölüm 4.3 |
+| İptal yayını | **Outbox tablosu + 100 ms polling** (⚠️ `NOTIFY` hızlandırması kullanılmaz); **cursor algoritması AÇIK KARAR** | Bölüm 4.3, §1 §10.2 |
 | İptal modeli | **`revocation_epoch` (per-user monoton sayaç) + node cache** | Bölüm 4.5 |
 | Rate limiting | **Yerel `governor`** (kaba) + **PostgreSQL atomik UPDATE** (hesap başına) | Bölüm 5.4 |
 | Havuz | Node başına 8–16; ayrı havuzlar: kritik / admin / replica | Bölüm 6.2 |
@@ -23865,10 +24128,10 @@ Kritik kısıtlar:
 
 | Geçiş | Koşul | Yan etki |
 |---|---|---|
-| `→ REQUESTED` | Kurtarma başlatıldı | **Bildirim** tüm bildirim adreslerine (kurtarma kanalı hariç); rate-limit sayacı artar |
+| `→ REQUESTED` | Kurtarma başlatıldı | **Bildirim** tüm bildirim adreslerine (kurtarma kanalı hariç); rate-limit sayacı artar. ⚠️ **İncelenecek kötüye kullanım:** yalnızca e-posta adresini bilen biri bu geçişi tekrarlayarak bildirim ürettirebilir ve rate-limit bütçesini tüketip durum makinesini `throttled`/`locked`'a itebilir. Bu bir **oturum** DoS'u değil (oturum iptali yalnızca `DENIED`'da ve kanıt kapısının arkasında), **kurtarmanın engellenmesi**dir — meşru kullanıcının gerçekten ihtiyacı olduğunda yolu kapatabilir. Ayrı sınır gerekir |
 | `REQUESTED → EVIDENCE_MET` | AAL'e göre gereken kanıt kombinasyonu sağlandı (§2.4) | Kullanılan kanıt sınıfları kaydedilir |
 | `EVIDENCE_MET → COOLING_DOWN` | `cooldown = f(kanıt gücü, hesap değeri, risk skoru)` > 0 | İkinci bildirim: "X tarihinde tamamlanacak, değilseniz iptal et" |
-| `COOLING_DOWN → DENIED` | Kullanıcı iptal linkine tıkladı **veya** mevcut bir authenticator ile giriş yaptı | **Tüm oturumlar iptal**, kurtarma yolları dondurulur, güvenlik olayı üretilir |
+| `COOLING_DOWN → DENIED` | Kullanıcı iptal linkine tıkladı **veya** mevcut bir authenticator ile giriş yaptı | **Kurtarma girişimi iptal edilir**, kurtarma yolları dondurulur, güvenlik olayı üretilir. ⚠️ **Oturum iptali bu geçişin otomatik yan etkisi DEĞİLDİR** (düzeltme, 2. inceleme turu): kurtarma girişimini iptal etmek ile mevcut oturumları topluca iptal etmek **ayrı güvenlik eylemleridir**. İkincisi ayrı gerekçe ve yetki koşuluyla, kanıt gücüne bağlı olarak tetiklenir; birincinin sessiz yan etkisi olarak bağlanmaz |
 | `→ REBIND_OPEN` | Cooldown doldu | Oturum açılır ama **yalnızca authenticator bağlama** yetkisiyle |
 | `REBIND_OPEN → GRACE_PERIOD` | En az bir authenticator bağlandı | Tam oturum verilir ama `recovery_grace_until` dolu |
 | `GRACE_PERIOD → CLOSED` | Grace süresi doldu | Kısıtlar kalkar |
@@ -23901,13 +24164,25 @@ notification_address
 recovery_attempt
   id, user_id
   state            enum(requested, evidence_met, cooling_down, rebind_open,
-                        grace_period, closed, denied, throttled, locked)
+                        grace_period, closed, denied, throttled, locked) NOT NULL
   requested_at, state_changed_at
   cooldown_until, grace_until
   evidence         jsonb   -- [{method_id, class, verified_at}, ...]
   achieved_aal     enum    -- sağlanan kanıtın AAL'i
   required_aal     enum    -- hesabın azami AAL'i
-  CHECK (achieved_aal >= required_aal)   -- ★ ana invariant
+  -- ★ ana invariant — DURUMA KOŞULLU (⚠️ düzeltme, 2. inceleme turu)
+  -- Koşulsuz `CHECK (achieved_aal >= required_aal)` iki halden birindeydi ve ikisi de kusurlu:
+  --   (a) alanlar NOT NULL ise `requested`/`throttled`/`locked` durumlarında satır HİÇ yazılamaz;
+  --   (b) nullable ise SQL üç değerli mantığı gereği NULL karşılaştırması UNKNOWN döner
+  --       ve kısıt SESSİZCE GEÇER — yani yetki açan yolda hiçbir şey korumaz.
+  --   (`state` yukarıda NOT NULL olarak işaretlendi; kısıt ona dayanır.)
+  CHECK (
+    state IN ('requested','throttled','locked','denied')
+    OR (achieved_aal IS NOT NULL AND required_aal IS NOT NULL
+        AND achieved_aal >= required_aal)
+  )
+  -- Enum karşılaştırması PostgreSQL'de bildirim sırasına bağlıdır:
+  -- aal1 < aal2 < aal3 sırası BİLİNÇLİ bir şema sözleşmesidir, değiştirilemez.
   request_ip, request_asn, device_fp, risk_score
   denied_by        enum(user_link, user_login, admin, timeout)
   notifications_sent  jsonb  -- hangi adrese ne zaman; denetim için
@@ -23919,7 +24194,9 @@ account_recovery_policy   (realm veya kullanıcı seviyesinde)
   permanent_loss_acknowledged_at  timestamptz  -- kullanıcı riski kabul etti mi
 ```
 
-**`CHECK (achieved_aal >= required_aal)` satırı bu dokümanın en önemli tek satırıdır.** "Kurtarma korunan şeyden zayıf olamaz" ilkesini bir yorum satırından bir veritabanı kısıtına çevirir.
+**Bu kısıt, "kurtarma korunan şeyden zayıf olamaz" ilkesini bir yorum satırından bir veritabanı kısıtına çevirir.**
+
+> ⚠️ **Ama tek başına yetmez — önceki hâli ("bu dokümanın en önemli tek satırı") fazla iddialıydı (düzeltme, 2. inceleme turu).** Satırın **son hâlini** kontrol etmek, o hâle **doğrulanmış kanıttan** gelindiğini ispatlamaz. Yetki açan işlem tek bir atomik birimde şunları yapmalı: **mevcut durumu doğrula → kanıtın geçerliliğini doğrula → kanıtı TÜKET → yeni yetkiyi oluştur.** Kanıt tüketilmeden yetki üretilirse iki eşzamanlı istek aynı kanıtı kullanabilir; kabul testi de tam olarak budur (aynı kanıtla paralel iki `REBIND_OPEN` denemesi). Geçişlerin append-only kaydı **denetlenebilirlik** sağlar, geçiş **doğruluğu** sağlamaz — **geçiş kaydı, geçiş denetiminin yerine geçmemeli.**
 
 ##### 10.3 Argus'un ayrışma noktaları — kurtarma
 
@@ -26560,7 +26837,7 @@ Authorization Challenge Endpoint tanımlıyor: first-party client kullanıcıdan
 Bu, çok kiracılıkta en sert kısıt.
 
 **Okta'nın belgelediği kurallar** ([Okta — Passkeys and custom domains](https://developer.okta.com/docs/guides/custom-passkeys/main/)):
-- RP ID **registrable domain (eTLD+1)** veya onun bir suffix'i olmalı
+- RP ID, çağıran origin'in **effective domain'i** ya da onun **kaydedilebilir bir alan adı soneki (registrable domain suffix)** olmalı. `login.example.com` origin'i için `login.example.com` **ve** `example.com` geçerlidir; `com` geçerli **değildir** — eTLD+1 alt sınırdır. ⚠️ *Düzeltme (2. inceleme turu): bu satır önceden ilişkiyi ters kuruyordu ("eTLD+1 veya onun suffix'i"), ki bu okuma `com`'u geçerli RP ID gösterirdi.*
 - Okta custom domain (`login.globex.com`): standart custom domain kurulumuyla zaten doğrulanmış
 - Root domain (`globex.com`): altında doğrulanmış bir custom domain **ve** ayrı TXT record doğrulaması gerekir
 - **RP ID değişirse:** "Existing passkey enrollments aren't deleted when you set a new RP ID. Those enrollments remain in the system, but **the browser doesn't present them at sign-in**." → kullanıcı yeniden kaydolmak zorunda
@@ -27509,7 +27786,7 @@ Tarih: 8 Eylül 2026. Toplam ~55 arama/fetch (22 WebSearch + ~33 WebFetch/doğru
 
 ### 0. En kritik bulgu: Ön ölçümünüz literatürle birebir örtüşüyor
 
-Sizin per-event hash-chained audit log ölçümünüz (8 bağlantı = 1 bağlantı, ~5.900/s tavan) tesadüf değil — **yapısal**. İki bağımsız kaynak bunu doğruluyor:
+Per-event hash-chained audit log ölçümündeki **8 bağlantı = 1 bağlantı** eşitliği tesadüf değil. ⚠️ *Yapısal olan yalnızca şudur: **tek bir doğrusal zincirde ardışık zincir hash'lerinin hesaplanması arasında seri bağımlılık vardır.** Ölçülen ~5.900/s değeri bu uygulamaya ve donanıma özgüdür, evrensel bir tavan değildir (§6 §4.4).* İki bağımsız kaynak seri bağımlılığı doğruluyor:
 
 **Crosby & Wallach, "Efficient Data Structures for Tamper-Evident Logging", USENIX Security 2009** (PDF: https://static.usenix.org/event/sec09/tech/full_papers/crosby.pdf — indirildi ve metin çıkarıldı). Tablo 2, tek çekirdek Intel Core2 Duo 2.4GHz, SHA-1 + 1024-bit DSA:
 
@@ -27526,7 +27803,7 @@ Uçtan uca: **1.750 olay/s** (her olayda imza), imzalar başka çekirdeğe/HSM'e
 
 Ve tam olarak sizin kararınızı öneriyorlar: *"The logger may amortize the costs of generating a signed commitment over many inserted events... Under light load, the logger could sign every commitment and insert 1,750 events per second. With increasing load, the logger might sign one in every 16 commitments to obtain an estimated insert rate of 17,000 events per second. Clients will still receive signed commitments within a fraction of a second, but several clients can now receive the same commitment."*
 
-→ **~10x throughput artışı, karşılığında yalnızca "birden fazla istemci aynı commitment'ı alır" takası.** Sizin 22.440 tps düz append-only ölçümünüz bu tabloya oturuyor (adım A+B ≈ 66.000/s teorik tavan, gerçek DB fsync maliyetiyle 22k makul).
+→ **~10x throughput artışı, karşılığında yalnızca "birden fazla istemci aynı commitment'ı alır" takası.** Ölçülen düz append-only değeri (⚠️ *ölçüm etiketi: §6 §4.4, [YENİDEN ÜRETİM BEKLİYOR] — çıplak insert, ürün throughput'u değil*) bu tabloya oturuyor (adım A+B ≈ 66.000/s teorik tavan, gerçek DB fsync maliyetiyle 22k makul).
 
 **Agent Flight Recorder** (arXiv:2609.01931, 1 Eylül 2026, https://arxiv.org/html/2609.01931) — 5 kademeli ablation, N=10.000 olay:
 
@@ -27729,7 +28006,7 @@ CT ekosistemi RFC 6962 tarzı "canlı DB + API" modelinden **statik dosya tile'l
 
 Mimari: **sequencing** (durable index atama, sıra garantisi yok) ile **integration** (arka planda Merkle ağacına birleştirme) ayrılmış. `WithBatching`, `WithCheckpointInterval`, `WithCheckpointRepublishInterval` konfigürasyonları var. Batch size = 1 mümkün ama *"this will make sequencing expensive"* (https://github.com/transparency-dev/tessera/blob/main/README.md).
 
-→ **Argus'un 22.440 tps düz append-only'si, dünyanın en olgun tlog implementasyonunun (Tessera NVMe, 10.000 QPS, 7 çekirdek) 2 katı.** Merkle checkpoint eklemek bu avantajı korur; per-event hash chain onu Tessera'nın *altına* düşürür. Karar doğru.
+→ ⚠️ **Bu karşılaştırma kaldırıldı (düzeltme, 2. inceleme turu).** Önceden burada "Argus'un 22.440 tps'si Tessera'nın 2 katı" yazıyordu. Bu elmayla armut karşılaştırmasıdır: Tessera'nın 10.000 QPS'i sequencing + integration yapan **tam bir transparency log**'un değeridir; 22.440 ise Merkle'sız, imzasız, uygulama mantığı olmayan **çıplak insert** ölçümüdür (§6 §4.4, 12 sn pgbench). Ayakta kalan sonuç, sayılardan değil yapıdan geliyor: **per-event hash chain seri bağımlılık yaratır, Merkle checkpoint yaratmaz.** Karar bu gerekçeyle doğru.
 
 #### 2.3 AWS QLDB — ⚠️ EMEKLİ
 
@@ -27827,7 +28104,7 @@ Okta log streaming: yalnızca **Amazon EventBridge** ve **Splunk Cloud (HEC)**; 
 
 **⚠️ Event/saniye ve GB/gün rakamları:** Okta, Auth0 veya Keycloak için kamuya açık, birincil kaynaklı event/s veya GB/gün rakamı **bulunamadı**. Sektör dolaylı olarak yalnızca saklama süreleri ve rate limit'lerle konuşuyor. (Doğrulanamayanlar listesinde.)
 
-Kıyaslanabilir tek somut hacim ölçüsü: Crosby & Wallach 2009 — 10.500 ev/s = 1,9 MB/s ham syslog = **1,1 TB/hafta**. Argus'un 22.440 tps'si, benzer olay boyutunda kabaca **~2,3 TB/hafta ham** demektir. Bu, sıkıştırmasız Postgres'te tutulamaz.
+Kıyaslanabilir tek somut hacim ölçüsü: Crosby & Wallach 2009 — 10.500 ev/s = 1,9 MB/s ham syslog = **1,1 TB/hafta**. ⚠️ *Buradaki ~2,3 TB/hafta tahmini 22.440 tps'yi sürekli hacim saymaktan çıkıyordu; o sayı 12 sn'lik çıplak-insert ölçümüdür (§6 §4.4) ve 7/24 tepe yük varsayımıyla çarpılamaz. Hacim planı, gerçek olay hızı ölçüldükten sonra yeniden yapılmalı.* Yapısal sonuç değişmiyor: bu büyüklük sınıfında ham olaylar sıkıştırmasız Postgres'te tutulamaz.
 
 #### 3.2 Sampling: audit'te KABUL EDİLEBİLİR Mİ?
 
@@ -28124,7 +28401,7 @@ Aynı belge veri kategorilerini üçe ayırıyor: (1) *"data provided directly b
 
 **K3 — Hash chain yerine history tree / tlog yapısı: proof boyutu için.** Hash chain'de incremental ve membership proof O(n−k); history tree'de O(log²n). 80M olaylı log'da rastgele bir olayın kanıtı: hash chain **800 MB**, history tree **3 KB**. Argus'un doğrulama API'si (`GET /audit/{id}/proof`) ancak logaritmik yapıyla kullanılabilir. *(Crosby & Wallach §3.4)*
 
-**K4 — Sequencing ile integration'ı ayırın (Tessera modeli).** Sequencing durable index atar (batch içinde sıra garantisi yok), integration arka planda Merkle'a birleştirir. `WithBatching` + `WithCheckpointInterval` eşdeğeri konfigürasyonlar. Tessera POSIX/NVMe **10.000 write QPS @ 7 çekirdek**; Argus'un 22.440 tps'si bunun üstünde, yani bu tasarımla checkpoint eklemek throughput'u öldürmez. *(https://github.com/transparency-dev/tessera/blob/main/docs/performance.md)*
+**K4 — Sequencing ile integration'ı ayırın (Tessera modeli).** Sequencing durable index atar (batch içinde sıra garantisi yok), integration arka planda Merkle'a birleştirir. `WithBatching` + `WithCheckpointInterval` eşdeğeri konfigürasyonlar. Tessera POSIX/NVMe **10.000 write QPS @ 7 çekirdek** — bu, sequencing + integration yapan tam bir tlog'un değeri ve Argus için gerçekçi bir hedef büyüklüğü. ⚠️ *Önceden burada 22.440 ile karşılaştırma yapılıyordu; o çıplak-insert ölçümü bu rakamla kıyaslanabilir değil (§6 §4.4).* Taşınan sonuç: sequencing/integration ayrımı checkpoint eklemenin throughput'u öldürmediğini gösteriyor. *(https://github.com/transparency-dev/tessera/blob/main/docs/performance.md)*
 
 **K5 — İmzalamayı ayrı çekirdeğe/HSM'e offload edin, insert path'inden çıkarın.** Crosby: imza offload edilince 1.750 → 10.500 ev/s. Argus: checkpoint imzalama ayrı bir task/thread'de; insert path'i asla imza beklemez. *(aynı)*
 
@@ -28132,7 +28409,17 @@ Aynı belge veri kategorilerini üçe ayırıyor: (1) *"data provided directly b
 
 **K7 — Postgres append-only'yi 3 katmanda zorlayın; `BEFORE TRUNCATE` trigger'ı UNUTMAYIN.** (a) `REVOKE UPDATE, DELETE` her rolden, (b) `BEFORE UPDATE OR DELETE` row-level trigger, (c) **`BEFORE TRUNCATE` statement-level trigger** — row-level trigger'lar TRUNCATE'te ateşlenmez, bu "append-only" iddiasındaki en yaygın sessiz delik. *(https://heypinchy.com/blog/day-143-the-hole-in-append-only, 10 Tem 2026)*
 
-**K8 — Audit'i request transaction'ından ÇIKARIN.** Keycloak'ın 1 numaralı arızası: *"Event writes ride the request transaction"* — login isteği DB insert'ini bekliyor. Argus: audit olayı bounded, backpressure'lı bir in-memory kuyruğa yazılır; kuyruk dolarsa **isteği reddet** (audit kaybı yerine servis reddi — AU-12/PCI 10.2 gereği "all" loglanmalı, kayıp kabul edilemez). *(https://phasetwo.io/blog/scaling-keycloak-event-storage/)*
+**K8 — Audit'in PAHALI İŞİNİ request transaction'ından çıkarın; KABULÜNÜ çıkarmayın.** Keycloak'ın 1 numaralı arızası doğru teşhis: *"Event writes ride the request transaction"* — login isteği DB insert'ini bekliyor.
+
+> ⚠️ **Düzeltme (2. inceleme turu) — bu maddenin önceki hâli yanlıştı.** Önceden şöyle diyordu: *"audit olayı bounded, backpressure'lı bir in-memory kuyruğa yazılır; kuyruk dolarsa isteği reddet."* Kuyruğu sınırlamak taşmayı önler ama **süreç çökmesini karşılamaz:** iş değişikliği commit olur, kullanıcı başarılı yanıt alır, olay bellekte beklerken süreç ölürse **değişiklik kalıcıdır ama denetim kaydı yoktur.** AU-12/PCI 10.2'nin "all" gereği tam olarak bunu yasaklar. Ayrıca bu, hemen üstteki **K4** ile çelişiyordu: K4 Tessera modelini benimserken *"sequencing **durable** index atar"* diyor.
+>
+> **Doğrusu — iki aşamayı ayır:**
+> 1. **Kalıcı kabul (aynı transaction).** İş değişikliğiyle **atomik** olarak minimal bir `audit_outbox` satırı yazılır. Ya ikisi de olur ya hiçbiri. Maliyeti tek bir küçük insert'tir, Merkle veya imza değil.
+> 2. **Pahalı işleme (arka plan).** Merkle birleştirme, checkpoint imzalama ve dışa yayın kuyruk üzerinden, request path'in dışında yürür. Bu kuyruk bellekte olabilir — çünkü kaybı yalnızca *gecikme* yaratır, kayıt kaybı yaratmaz.
+>
+> **Ayrıca tanımlanması gereken:** başarısız giriş gibi **commit edilmiş bir iş değişikliği bulunmayan** olayların kalıcılığı ayrı bir kuraldır — atomik bağlanacağı bir transaction yoktur. Bu olaylar için kabul noktası açıkça seçilmeli.
+
+*(https://phasetwo.io/blog/scaling-keycloak-event-storage/; karar satırı: §1 §1 madde 23; statü: §1 §10.3 A1)*
 
 **K9 — Retention'ı partition DROP/DETACH ile yapın, asla bulk DELETE ile değil.** Keycloak'ın purge'ü *"effectively locks up the database and can lead to massive latency issues."* Argus: günlük/haftalık range partition; `DETACH PARTITION ... CONCURRENTLY` (yalnızca `SHARE UPDATE EXCLUSIVE`) → S3'e arşivle → `DROP`. *(https://phasetwo.io/blog/user-events-in-keycloak/; https://www.postgresql.org/docs/current/ddl-partitioning.html)*
 
@@ -28192,7 +28479,7 @@ Aynı belge veri kategorilerini üçe ayırıyor: (1) *"data provided directly b
 
 **K37 — Proof üretiminde locality'yi mimarinin merkezine koyun.** Crosby Tablo 2: membership proof **8.600/s (locality ile) vs 32/s (locality yok)** — **269x fark**. Bu, Merkle düğümlerinin disk yerleşiminin (post-order traversal, sabit boyutlu düğüm, direct access) proof API'sinin kullanılabilirliğini tek başına belirlediği anlamına gelir. Değişken boyutlu olay içeriği ayrı bir write-once append-only value store'da, ağaç yaprakları offset tutar. *(Crosby & Wallach §3.3, §5)*
 
-**K38 — Bütünlük anchor'ı için blockchain'e GEREK YOK; witness yeterli.** Agent Flight Recorder ölçümü: L2 anchoring **$2,30/100K olay**, L1 **$6.885/100K olay**, anchor başına 91.800 gas. Argus'un 22.440 tps'sinde (≈1,94 milyar olay/gün) L2 bile günlük ~$45K eder — kabul edilemez. **Alternatif: checkpoint'i müşteri webhook'una + S3 Object Lock'a + opsiyonel üçüncü taraf witness'a yayınlayın.** Compromise window aynı, maliyet ~sıfır. *(https://arxiv.org/html/2609.01931)*
+**K38 — Bütünlük anchor'ı için blockchain'e GEREK YOK; witness yeterli.** Agent Flight Recorder ölçümü: L2 anchoring **$2,30/100K olay**, L1 **$6.885/100K olay**, anchor başına 91.800 gas. ⚠️ *Önceki hesap 22.440 tps'yi sürekli hacim sayıp ≈1,94 milyar olay/gün türetiyordu; o sayı 12 sn'lik çıplak-insert ölçümüdür (§6 §4.4) ve böyle çarpılamaz.* Yön yine de sağlam: olay başına on-chain anchoring maliyeti, herhangi bir ciddi IdP hacminde witness/S3 Object Lock alternatifinin yanında kabul edilemez kalır. **Alternatif: checkpoint'i müşteri webhook'una + S3 Object Lock'a + opsiyonel üçüncü taraf witness'a yayınlayın.** Compromise window aynı, maliyet ~sıfır. *(https://arxiv.org/html/2609.01931)*
 
 ---
 
@@ -28954,7 +29241,7 @@ Keycloak'ın uyarısı: "rogue clients can inject false values"; "especially cri
 Keycloak 26.7 stateless mode tam olarak bunu yaptı: "Full cluster restarts no longer reset volatile state during upgrades" ([Temmuz 2026](https://www.keycloak.org/2026/07/multi-cluster-v2-and-stateless-mode)). Bedeli auth başına +8-10 ms ve DB CPU/IOPS'un ~2 katı. Rust'ta bu bedel JVM'sizken daha da kabul edilebilir; Argus için **varsayılan** olmalı, opsiyon değil.
 
 **7. Cache invalidation'ı ağ protokolüyle değil, DB-backed outbox ile yap.**
-Keycloak'ın Infinispan/JGroups invalidation'ı, DB'ye yazan yan süreçlerle (realm import job'ı) senkronize olamadı — [#45966](https://github.com/keycloak/keycloak/issues/45966) (Şubat 2026): realm DB'de var, konsolda yok, restart gerekiyor. 26.7'nin çözümü DB kuyruğu + polling, varsayılan **100 ms** aralık. Argus: PostgreSQL `LISTEN/NOTIFY` veya outbox tablosu + polling; **hiçbir durumda node-to-node cluster protokolü değil.**
+Keycloak'ın Infinispan/JGroups invalidation'ı, DB'ye yazan yan süreçlerle (realm import job'ı) senkronize olamadı — [#45966](https://github.com/keycloak/keycloak/issues/45966) (Şubat 2026): realm DB'de var, konsolda yok, restart gerekiyor. 26.7'nin çözümü DB kuyruğu + polling, varsayılan **100 ms** aralık. Argus: **outbox tablosu + polling** — ya da §1 §10.2'de seçilecek diğer kalıcı mekanizma. `LISTEN/NOTIFY` iptal yayınında **kullanılmaz** (§6 §4.5: PgBouncer transaction mode + dolu kuyrukta commit hatası). **Hiçbir durumda node-to-node cluster protokolü değil.**
 
 **8. Graceful shutdown: `preStop sleep` + drain delay + request timeout üçlüsünü ayrı ayrı yapılandırılabilir yap.**
 Keycloak'ın somut değerleri referans: `shutdown-delay` = 1s (LB reconfig + keepalive drain), `shutdown-timeout` = 10s (in-flight istekler) ([all-config](https://www.keycloak.org/server/all-config)). Kubernetes'te endpoint kaldırma ile SIGTERM sıralı değildir ve propagasyon "often a second or more on a busy cluster" sürer. Argus önerisi: `preStop: sleep 5` + `shutdown_delay=2s` + `shutdown_timeout=15s` + `terminationGracePeriodSeconds=45`.
