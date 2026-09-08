@@ -1,0 +1,40 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/argus-core",
+    "crates/argus-proto",
+    "crates/argus-parse",
+    "crates/argus-crypto",
+    "crates/argus-store",
+    "crates/argus-http",
+    "crates/argus-sandbox",
+    "crates/argus-saml",
+    "crates/argus",
+]
+
+[workspace.package]
+version      = "0.0.0"
+edition      = "2024"
+rust-version = "1.98"
+license      = "AGPL-3.0-only"
+repository   = "https://github.com/esuiss/argus"
+
+[workspace.lints.rust]
+unsafe_code                = "forbid"
+unreachable_pub            = "warn"
+rust_2018_idioms           = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+all                        = { level = "warn", priority = -1 }
+pedantic                   = { level = "warn", priority = -1 }
+unwrap_used                = "deny"
+expect_used                = "deny"
+panic                      = "deny"
+indexing_slicing           = "deny"
+integer_division           = "deny"
+cast_possible_truncation   = "deny"
+cast_sign_loss             = "deny"
+module_name_repetitions    = "allow"
+
+[workspace.dependencies]
+thiserror = "2"
