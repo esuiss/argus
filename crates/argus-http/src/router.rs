@@ -1,10 +1,3 @@
-//! Axum router.
-//!
-//! # Buradaki her şey ince
-//!
-//! Handler'lar ayrıştırır, saf karar fonksiyonunu çağırır ve sonucu `HTTP`'ye
-//! çevirir. Karar mantığı yoktur; olsaydı `argus-core`'un yanlış yerinde olurdu.
-
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -28,10 +21,6 @@ use crate::endpoints::userinfo::{self, UserInfoRequest};
 use crate::state::AppState;
 use crate::store::{AuditSink, ClientStore, CodeIssuer, CodeStore, RefreshStore};
 
-/// Duvar saatini okur.
-///
-/// **Tek okuma noktası budur.** `argus-core` saate bakmaz (bkz. `argus_core::time`);
-/// zaman buradan girer ve karar fonksiyonlarına parametre olarak geçer.
 fn now() -> Timestamp {
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -39,19 +28,16 @@ fn now() -> Timestamp {
     Timestamp::from_unix_seconds(secs)
 }
 
-/// [`OAuthError`]'ı `HTTP` yanıtına çevirir.
 fn oauth_response(err: &OAuthError) -> Response {
     let status = StatusCode::from_u16(err.http_status()).unwrap_or(StatusCode::BAD_REQUEST);
     let mut response = (status, Json(err)).into_response();
 
-    // RFC 6749 §5.2: `invalid_client` 401 ile birlikte `WWW-Authenticate` taşır.
     if err.error == OAuthErrorCode::InvalidClient
         && let Ok(value) = "Basic realm=\"argus\"".parse()
     {
         response.headers_mut().insert("WWW-Authenticate", value);
     }
 
-    // §14 §12994: yanıtın cache'lenmemesi gerekiyor; token yanıtı sırdır.
     if let Ok(value) = "no-store".parse() {
         response.headers_mut().insert("Cache-Control", value);
     }
@@ -87,14 +73,6 @@ where
     )
 }
 
-/// ⚠️ Tekrar kaydı **henüz yok**.
-///
-/// Hem `DPoP` kanıtlarının hem `private_key_jwt` assertion'larının `jti`'si buna
-/// sorulur. `RFC` 9449 §11.1 ve `RFC` 7523 §3 tekrar korumasını istiyor ve bu
-/// tip şu an her `jti`'yi yeni sayıyor. Tek node'da bile eksik; çok node'lu dağıtımda paylaşımlı bir
-/// kayıt (Redis/Postgres) şart. §6 §4.4 bunu Bloom/cuckoo filtrenin **tek meşru
-/// kullanım alanı** olarak işaretliyor: yanlış pozitifin bedeli tek bir isteğin
-/// reddi, kullanıcı çıkışı değil.
 struct NoReplayRecord;
 
 impl argus_core::dpop::ReplayGuard for NoReplayRecord {
@@ -103,12 +81,6 @@ impl argus_core::dpop::ReplayGuard for NoReplayRecord {
     }
 }
 
-/// `DPoP` başlığını doğrular ve bağlamayı çıkarır.
-///
-/// Kanıt varsa **doğrulanmadan** kullanılmaz: imza, `typ`, `alg`, metot ve URI
-/// eşleşmesi ve tekrar kontrolü geçmeden bağlama kurulmaz. Geçersiz bir kanıt
-/// sessizce yok sayılmaz — `invalid_dpop_proof` ile reddedilir, aksi hâlde
-/// saldırgan bozuk kanıt göndererek token'ı bearer'a düşürebilirdi.
 fn dpop_binding(headers: &HeaderMap, htu: &str, now: Timestamp) -> Result<Binding, OAuthError> {
     let Some(raw) = headers.get("DPoP") else {
         return Ok(None);
@@ -166,10 +138,6 @@ where
     }
 }
 
-/// Form-encoded gövdeden bir alanı çıkarır.
-///
-/// Tam bir form ayrıştırıcısı değil ve olmamalı: burada tek bir alan aranıyor
-/// ve gövde kimliği doğrulanmamış veridir. Küçük yüzey, küçük risk.
 fn form_field(body: &str, name: &str) -> Option<String> {
     body.split('&')
         .filter_map(|pair| pair.split_once('='))
@@ -177,7 +145,6 @@ fn form_field(body: &str, name: &str) -> Option<String> {
         .map(|(_, v)| percent_decode(v))
 }
 
-/// Form değeri için minimal yüzde çözümlemesi.
 fn percent_decode(value: &str) -> String {
     let bytes = value.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -208,18 +175,6 @@ fn percent_decode(value: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// `GET`/`POST /userinfo` — OIDC Core §5.3.
-///
-/// # Neden iki metot birden
-///
-/// §5.3.1 `GET` **ve** `POST`'u zorunlu tutuyor. Yalnızca birini sunmak,
-/// uyumluluk paketinin `UserInfo` adımını düşürür.
-///
-/// # `WWW-Authenticate` neden her ret yolunda var
-///
-/// `RFC` 6750 §3: 401 dönen bir kaynak sunucu istemciye **nasıl** kimlik
-/// doğrulayacağını söylemek zorundadır. Başlıksız 401, istemciyi kör bir yeniden
-/// denemeye iter.
 async fn userinfo_handler<C, R, A, S, U>(
     State(state): State<SharedState<C, R, A, S, U>>,
     headers: HeaderMap,
@@ -234,8 +189,7 @@ where
 {
     let authorization = headers.get("Authorization").and_then(|v| v.to_str().ok());
     let dpop = headers.get("DPoP").and_then(|v| v.to_str().ok());
-    // `RFC` 6750 §2.2: yalnızca form-encoded gövde. `GET`'te gövde boştur ve
-    // ayrıştırma hiçbir şey bulmaz.
+
     let form_access_token = form_field(&body, "access_token");
     let uri = state
         .tenant
@@ -248,10 +202,7 @@ where
         authorization,
         form_access_token: form_access_token.as_deref(),
         dpop,
-        // `htm` daima `GET`: her iki metot da aynı `htu`ya bağlanır ve
-        // `POST` yolunda gövde yok. İstemcinin hangi metodu kullandığını
-        // kanıta yansıtmak, `GET` için üretilmiş kanıtın `POST`'ta
-        // reddedilmesine yol açardı.
+
         method: "GET",
         uri: &uri,
     };
@@ -259,7 +210,7 @@ where
     match userinfo::handle(&state.tenant, &request, now(), &NoReplayRecord) {
         Ok(info) => {
             let mut r = Json(info).into_response();
-            // Kimlik yanıtı cache'lenmemeli: §5.3.4 ve token yanıtıyla aynı gerekçe.
+
             if let Ok(value) = "no-store".parse() {
                 r.headers_mut().insert("Cache-Control", value);
             }
@@ -280,10 +231,6 @@ where
     }
 }
 
-/// `GET /authorize`.
-///
-/// `redirect_uri` doğrulanamadığında **yönlendirme yapılmaz**: açık yönlendirici
-/// olmamak için tek güvenli davranış hata göstermektir.
 async fn authorize_handler<C, R, A, S, U>(
     State(state): State<SharedState<C, R, A, S, U>>,
     Query(query): Query<AuthorizeQuery>,
@@ -322,13 +269,6 @@ where
     }
 }
 
-/// Router'ı kurar.
-///
-/// # Discovery iki yoldan da yayınlanır
-///
-/// §18: iki spec aynı issuer için farklı well-known URL üretiyor ve istemcilerin
-/// hangisini deneyeceği belirsiz. İkisini birden sunmak maliyetsiz ve interop
-/// kırılmasını önlüyor.
 pub fn build<C, R, A, S, U>(state: SharedState<C, R, A, S, U>) -> Router
 where
     C: CodeStore + CodeIssuer + Send + Sync + 'static,
@@ -347,10 +287,8 @@ where
             get(metadata_handler::<C, R, A, S, U>),
         )
         .route("/.well-known/jwks.json", get(jwks_handler::<C, R, A, S, U>))
-        // RFC 6749 §3.2: token endpoint'i **yalnızca** POST kabul eder.
         .route("/authorize", get(authorize_handler::<C, R, A, S, U>))
         .route("/token", post(token_handler::<C, R, A, S, U>))
-        // OIDC Core §5.3.1: `GET` ve `POST` ikisi de zorunlu.
         .route(
             "/userinfo",
             get(userinfo_handler::<C, R, A, S, U>).post(userinfo_handler::<C, R, A, S, U>),

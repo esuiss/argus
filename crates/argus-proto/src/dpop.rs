@@ -1,16 +1,3 @@
-//! `DPoP` kanıtının ayrıştırılması ve imza doğrulaması — RFC 9449.
-//!
-//! `argus-core::dpop` claim kurallarını uygular ama imzaya bakmaz (orada kripto
-//! yok). Bu modül eksik yarıyı tamamlar: kanıtı ayrıştırır, gömülü `JWK` ile
-//! imzasını doğrular ve ancak ondan sonra `VerifiedProof` kurar.
-//!
-//! # `jkt` — bağlamayı kuran değer
-//!
-//! `RFC` 7638 `JWK` thumbprint'i: anahtarın kanonik `JSON` gösteriminin
-//! SHA-256'sı. Access token'a `cnf.jkt` olarak yazılır. Kaynak sunucu, sunulan
-//! kanıtın anahtarının thumbprint'ini hesaplayıp token'daki değerle karşılaştırır;
-//! tutmuyorsa token o istemciye ait değildir.
-
 use argus_core::dpop::VerifiedProof;
 use argus_core::pkce::Sha256 as _;
 use argus_core::time::Timestamp;
@@ -18,25 +5,20 @@ use argus_crypto::{AwsLcSha256, VerifyingKey};
 use base64ct::{Base64UrlUnpadded, Encoding as _};
 use serde::Deserialize;
 
-/// `DPoP` ayrıştırma hataları.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DpopParseError {
-    /// Kanıt üç parçalı bir `JWS` değil.
     #[error("malformed DPoP proof")]
     Malformed,
-    /// `typ` başlığı `dpop+jwt` değil.
-    ///
-    /// RFC 9449 §4.2 bunu zorunlu kılar; kontrol etmemek, başka amaçla üretilmiş
-    /// bir `JWT`'nin kanıt olarak kabul edilmesine yol açardı.
+
     #[error("DPoP proof has the wrong typ header")]
     WrongType,
-    /// `alg` izinli değil.
+
     #[error("DPoP proof algorithm is not allowed")]
     DisallowedAlgorithm,
-    /// Gömülü `JWK` eksik veya desteklenmeyen bir eğri.
+
     #[error("DPoP proof has a missing or unsupported jwk")]
     BadKey,
-    /// İmza doğrulanamadı.
+
     #[error("DPoP proof signature is invalid")]
     BadSignature,
 }
@@ -66,11 +48,6 @@ struct ProofClaims {
     ath: Option<String>,
 }
 
-/// `RFC` 7638 `JWK` thumbprint'i.
-///
-/// Kanonik gösterim: alanlar **sözlük sırasında**, boşluksuz, yalnızca zorunlu
-/// alanlar. Sıra veya boşluk değişirse thumbprint değişir ve bağlama kopar —
-/// bu yüzden dizge elle kuruluyor, `serde_json` nesne sırasına güvenilmiyor.
 #[must_use]
 pub fn jwk_thumbprint(crv: &str, x: &str, y: &str) -> String {
     let canonical = format!(r#"{{"crv":"{crv}","kty":"EC","x":"{x}","y":"{y}"}}"#);
@@ -78,14 +55,6 @@ pub fn jwk_thumbprint(crv: &str, x: &str, y: &str) -> String {
     Base64UrlUnpadded::encode_string(&digest)
 }
 
-/// Bir `DPoP` kanıtını ayrıştırır ve imzasını doğrular.
-///
-/// İmza doğrulanmadan [`VerifiedProof`] kurulmaz; claim kurallarını
-/// `argus_core::dpop::validate` uygular.
-///
-/// # Errors
-///
-/// Biçim bozuksa, `typ`/`alg` yanlışsa veya imza tutmuyorsa.
 pub fn parse_and_verify(proof: &str) -> Result<VerifiedProof, DpopParseError> {
     let mut parts = proof.split('.');
     let (Some(header_b64), Some(claims_b64), Some(sig_b64), None) =
@@ -99,8 +68,6 @@ pub fn parse_and_verify(proof: &str) -> Result<VerifiedProof, DpopParseError> {
     let header: ProofHeader =
         serde_json::from_slice(&header_bytes).map_err(|_| DpopParseError::Malformed)?;
 
-    // RFC 9449 §4.2: `typ` DAİMA `dpop+jwt`. Bu kontrol, başka amaçla üretilmiş
-    // bir `JWT`'nin kanıt yerine geçmesini engeller.
     if header.typ != "dpop+jwt" {
         return Err(DpopParseError::WrongType);
     }
@@ -150,7 +117,6 @@ mod tests {
     use argus_crypto::SigningKey;
     use base64ct::{Base64UrlUnpadded, Encoding as _};
 
-    /// Test için gerçek bir `DPoP` kanıtı üretir.
     fn make_proof(key: &SigningKey, htm: &str, htu: &str, iat: i64) -> String {
         let c = key.public_components().expect("components");
         let x = Base64UrlUnpadded::encode_string(&c.x);
@@ -180,7 +146,6 @@ mod tests {
         assert!(!verified.jkt.is_empty());
     }
 
-    /// Thumbprint anahtarın kimliğidir: farklı anahtar, farklı thumbprint.
     #[test]
     fn thumbprints_differ_per_key() {
         let (a, _) = SigningKey::generate("a").expect("key");
@@ -190,7 +155,6 @@ mod tests {
         assert_ne!(pa.jkt, pb.jkt);
     }
 
-    /// Aynı anahtar daima aynı thumbprint'i verir — kanonik gösterim sabit.
     #[test]
     fn thumbprint_is_stable() {
         let a = jwk_thumbprint("P-256", "eG9v", "d2h5");
@@ -199,7 +163,6 @@ mod tests {
         assert_ne!(a, jwk_thumbprint("P-256", "eG9v", "ZGlmZg"));
     }
 
-    /// İmzayı bozan bir değişiklik yakalanmalı.
     #[test]
     fn tampered_claims_fail_verification() {
         let (key, _) = SigningKey::generate("k").expect("key");
@@ -215,8 +178,6 @@ mod tests {
         );
     }
 
-    /// RFC 9449 §4.2: `typ` kontrol edilmezse başka amaçla üretilmiş bir `JWT`
-    /// kanıt yerine geçebilir.
     #[test]
     fn a_jwt_with_the_wrong_typ_is_rejected() {
         let (key, _) = SigningKey::generate("k").expect("key");

@@ -1,22 +1,3 @@
-//! PostgreSQL uygulaması.
-//!
-//! # Kiracı kapsamı her sorguda kurulur
-//!
-//! §18: RLS politikaları `argus_current_tenant()`'ı okur ve o değer
-//! transaction-yerel bir `GUC`'tan gelir. Bu yüzden **her** işlem bir
-//! transaction açar ve ilk iş olarak `SET LOCAL` yapar. Havuzdan alınan bir
-//! bağlantı asla önceki isteğin kapsamını taşımaz; `SET LOCAL` `COMMIT`'te
-//! kendiliğinden temizlenir.
-//!
-//! Kapsamı kurmayı unutmak **fail-closed**'dur: `argus_current_tenant()` `NULL`
-//! döner, politikalar hiçbir satır göstermez.
-//!
-//! # Derleme zamanı sorgu doğrulaması kullanılmıyor
-//!
-//! `sqlx::query!` makrosu derleme sırasında canlı bir veritabanı ister ve
-//! derlemeyi ortama bağımlı kılar. Sorgular çalışma zamanında bağlanıyor;
-//! doğruluğu gerçek `PostgreSQL`'e karşı koşan testler kanıtlıyor.
-
 use argus_core::authorize::RegisteredClient;
 use argus_core::authz_code::{CodeState, StoredCode};
 use argus_core::client_auth::{ClientAuthMethod, ClientKey};
@@ -30,18 +11,11 @@ use sqlx::{PgPool, Postgres, Row as _, Transaction};
 
 use crate::traits::{AuditSink, ClientStore, CodeIssuer, CodeStore, RefreshStore, StoreError};
 
-/// `PostgreSQL` destekli depo.
 #[derive(Debug, Clone)]
 pub struct PostgresStore {
     pool: PgPool,
 }
 
-/// `sqlx` hatasını depo hatasına çevirir.
-///
-/// ⚠️ Ayrım önemli: `RowNotFound` bir **istek** hatasıdır (`invalid_grant`),
-/// geri kalan her şey bir **altyapı** hatasıdır ve §19 §7.1 gereği `503`'e
-/// dönüşür. İkisini birleştirmek, geçici bir veritabanı arızasını kullanıcıya
-/// "yeniden yetkilendir" olarak gösterirdi.
 fn map_err(e: &sqlx::Error) -> StoreError {
     match e {
         sqlx::Error::RowNotFound => StoreError::NotFound,
@@ -50,16 +24,14 @@ fn map_err(e: &sqlx::Error) -> StoreError {
 }
 
 impl PostgresStore {
-    /// Havuzdan depo kurar.
     #[must_use]
     pub const fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 
-    /// Kiracı kapsamı kurulmuş bir transaction açar.
     async fn scoped(&self, tenant: TenantId) -> Result<Transaction<'_, Postgres>, StoreError> {
         let mut tx = self.pool.begin().await.map_err(|e| map_err(&e))?;
-        // `true` = SET LOCAL: COMMIT'te temizlenir.
+
         sqlx::query("SELECT set_config('argus.tenant_id', $1, true)")
             .bind(tenant.as_uuid().to_string())
             .execute(&mut *tx)
@@ -69,13 +41,11 @@ impl PostgresStore {
     }
 }
 
-/// Unix saniyesini `chrono` zamanına çevirir.
 fn to_dt(ts: Timestamp) -> chrono::DateTime<chrono::Utc> {
     chrono::DateTime::from_timestamp(ts.as_unix_seconds(), 0)
         .unwrap_or(chrono::DateTime::UNIX_EPOCH)
 }
 
-/// `chrono` zamanını Unix saniyesine çevirir.
 fn from_dt(dt: chrono::DateTime<chrono::Utc>) -> Timestamp {
     Timestamp::from_unix_seconds(dt.timestamp())
 }
@@ -103,10 +73,7 @@ impl ClientStore for PostgresStore {
         let raw_method: String = registration
             .try_get("auth_method")
             .map_err(|e| map_err(&e))?;
-        // Şema `auth_method`'u zaten kısıtlıyor; tanınmayan bir değer veri
-        // katmanına dışarıdan yazılmış demektir ve o satıra GÜVENİLMEZ.
-        // "Bilinmiyorsa public say" demek, bilinmeyen bir kayda kimlik
-        // doğrulamasız erişim vermek olurdu.
+
         let auth_method = match raw_method.as_str() {
             "none" => ClientAuthMethod::None,
             "private_key_jwt" => ClientAuthMethod::PrivateKeyJwt,
@@ -140,8 +107,7 @@ impl ClientStore for PostgresStore {
             let kid: String = row.try_get("kid").map_err(|e| map_err(&e))?;
             let x: Vec<u8> = row.try_get("x").map_err(|e| map_err(&e))?;
             let y: Vec<u8> = row.try_get("y").map_err(|e| map_err(&e))?;
-            // Şema uzunluğu zaten 32'ye sabitliyor; yine de tipe dönüştürülüyor
-            // çünkü veri katmanına uygulama dışından da yazılabilir.
+
             let (Ok(x), Ok(y)) = (<[u8; 32]>::try_from(x), <[u8; 32]>::try_from(y)) else {
                 return Err(StoreError::Unavailable);
             };
@@ -151,9 +117,7 @@ impl ClientStore for PostgresStore {
         let mut redirect_uris = Vec::with_capacity(rows.len());
         for row in rows {
             let raw: String = row.try_get("redirect_uri").map_err(|e| map_err(&e))?;
-            // Şema `client_redirect_uris` üzerinde wildcard/fragment/mutlaklık
-            // kısıtlarını zaten zorluyor; yine de burada tekrar doğrulanıyor.
-            // Veri katmanına uygulama dışından da yazılabilir.
+
             if let Ok(uri) = RedirectUri::register(raw) {
                 redirect_uris.push(uri);
             }
@@ -268,9 +232,6 @@ impl CodeStore for PostgresStore {
     ) -> Result<(), StoreError> {
         let mut tx = self.scoped(tenant).await?;
 
-        // `WHERE state = 'issued'`: iki eşzamanlı istek aynı kodu tüketemez.
-        // Yarışı kaybeden 0 satır günceller ve çağıran bunu tekrar kullanım
-        // olarak görür — tam olarak istenen davranış.
         sqlx::query(
             "UPDATE authorization_codes SET state = 'redeemed', redeemed_at = $3 \
              WHERE tenant_id = $1 AND code_hash = $2 AND state = 'issued'",
@@ -293,9 +254,6 @@ impl CodeStore for PostgresStore {
     ) -> Result<(), StoreError> {
         let mut tx = self.scoped(tenant).await?;
 
-        // RFC 9700 §4.1.1: koddan türeyen her şey düşer. Kodun sahibi olan
-        // kullanıcı+istemci çiftinin, kod verildikten SONRA başlayan refresh
-        // zincirleri iptal edilir.
         sqlx::query(
             "UPDATE refresh_tokens r SET state = 'revoked', revoked_at = $3 \
              WHERE r.tenant_id = $1 AND r.state <> 'revoked' AND EXISTS ( \
@@ -378,9 +336,6 @@ impl RefreshStore for PostgresStore {
     ) -> Result<(), StoreError> {
         let mut tx = self.scoped(tenant).await?;
 
-        // İkisi AYNI transaction'da: eskisinin kapanması ile yenisinin
-        // yazılması arasında bir pencere kalırsa, o pencerede çöken bir süreç
-        // ya iki geçerli token ya da hiç token bırakır.
         sqlx::query(
             "UPDATE refresh_tokens SET state = 'rotated', rotated_at = $3 \
              WHERE tenant_id = $1 AND token_hash = $2 AND state = 'active'",
@@ -421,8 +376,6 @@ impl RefreshStore for PostgresStore {
     ) -> Result<(), StoreError> {
         let mut tx = self.scoped(tenant).await?;
 
-        // Tek sorgu: yeniden kullanım tespit edildiğinde gecikme, saldırganın
-        // penceresidir. `refresh_tokens_family` indeksi bunu destekliyor.
         sqlx::query(
             "UPDATE refresh_tokens SET state = 'revoked', revoked_at = $3 \
              WHERE tenant_id = $1 AND family_id = $2 AND state <> 'revoked'",
@@ -447,9 +400,6 @@ impl AuditSink for PostgresStore {
     ) -> Result<(), StoreError> {
         let mut tx = self.scoped(tenant).await?;
 
-        // §1 #23: olay ve outbox satırı AYNI transaction'da. Ayrı bir kuyruğa
-        // yazmak, süreç çöktüğünde iş değişikliğini kalıcı ama denetim kaydını
-        // kayıp bırakırdı.
         let row = sqlx::query(
             "INSERT INTO audit_events \
              (tenant_id, occurred_at, event_type, outcome, actor_kind) \

@@ -1,87 +1,62 @@
-//! JWS ile imzalanmış JWT üretimi ve doğrulaması — RFC 7515, RFC 7519.
-
 use argus_crypto::{CryptoError, SigningKey, VerifyingKey};
 use base64ct::{Base64UrlUnpadded, Encoding as _};
 use serde::{Deserialize, Serialize};
 
-/// JWS başlığı.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JwsHeader {
-    /// İmza algoritması.
-    ///
-    /// ⚠️ `none` **hiç desteklenmiyor** ve `alg` doğrulamada beyaz listeye karşı
-    /// kontrol edilir. Alg karışıklığı (`alg` confusion) JWT'nin en klasik
-    /// atlatma sınıfıdır.
     pub alg: String,
-    /// İmzalayan anahtarın kimliği.
+
     pub kid: String,
-    /// Token tipi.
+
     pub typ: String,
 }
 
-/// Access token claim'leri.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccessTokenClaims {
-    /// Issuer — kiracının metadata'sındakiyle **birebir** aynı olmalı.
     pub iss: String,
-    /// Özne.
+
     pub sub: String,
-    /// Hedef kaynak(lar). RFC 8707 `resource` buraya yansır.
+
     pub aud: String,
-    /// Sona erme (saniye).
+
     pub exp: i64,
-    /// Veriliş (saniye).
+
     pub iat: i64,
-    /// Token kimliği — tekrar tespiti için.
+
     pub jti: String,
-    /// Verilen kapsam.
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
-    /// §1 #18: oturum geçersizleme sayacı token'ın İÇİNDE taşınır; doğrulamada
-    /// node cache'indeki değerle karşılaştırılır ve ağ turu gerekmez.
+
     pub sess: u64,
 
-    /// `RFC` 9449 §6: token'ı istemcinin anahtarına bağlayan doğrulama.
-    ///
-    /// Yoksa token bearer'dır ve **sahip olan herkes** kullanabilir. Varsa,
-    /// kaynak sunucu sunulan `DPoP` kanıtının thumbprint'ini buradakiyle
-    /// karşılaştırır; token'ı çalmak yetmez, anahtarı da çalmak gerekir.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cnf: Option<Confirmation>,
 }
 
-/// `RFC` 7800 doğrulama claim'i.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Confirmation {
-    /// `JWK` thumbprint (`RFC` 7638).
     pub jkt: String,
 }
 
-/// JWT hataları.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum JwtError {
-    /// Serileştirme başarısız.
     #[error("failed to serialise the token")]
     Serialisation,
-    /// İmzalama başarısız.
+
     #[error("failed to sign the token")]
     Signing,
-    /// Token üç parçalı değil.
+
     #[error("malformed token")]
     Malformed,
-    /// İmza doğrulanamadı.
+
     #[error("signature verification failed")]
     BadSignature,
-    /// `alg` beyaz listede değil.
+
     #[error("algorithm not allowed")]
     DisallowedAlgorithm,
 }
 
-/// Claim'leri imzalayıp kompakt JWS üretir.
-///
-/// # Errors
-///
-/// Serileştirme veya imzalama başarısız olursa.
 pub fn sign(claims: &AccessTokenClaims, key: &SigningKey) -> Result<String, JwtError> {
     let header = JwsHeader {
         alg: "ES256".to_owned(),
@@ -108,11 +83,6 @@ pub fn sign(claims: &AccessTokenClaims, key: &SigningKey) -> Result<String, JwtE
     ))
 }
 
-/// Kompakt JWS'i doğrular ve claim'leri döner.
-///
-/// # Errors
-///
-/// Biçim bozuksa, `alg` izinli değilse veya imza tutmuyorsa.
 pub fn verify(token: &str, key: &VerifyingKey) -> Result<AccessTokenClaims, JwtError> {
     let mut parts = token.split('.');
     let (Some(h), Some(c), Some(s), None) =
@@ -125,7 +95,6 @@ pub fn verify(token: &str, key: &VerifyingKey) -> Result<AccessTokenClaims, JwtE
     let header: JwsHeader =
         serde_json::from_slice(&header_bytes).map_err(|_| JwtError::Malformed)?;
 
-    // Beyaz liste: `none` ve diğer her şey reddedilir.
     if header.alg != "ES256" {
         return Err(JwtError::DisallowedAlgorithm);
     }
@@ -208,7 +177,6 @@ mod tests {
         );
     }
 
-    /// `alg: none` klasik atlatmadır; beyaz liste onu reddetmeli.
     #[test]
     fn alg_none_is_rejected() {
         let (key, _) = SigningKey::generate("k1").expect("key");

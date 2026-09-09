@@ -17,18 +17,14 @@ STORE = os.environ["ARGUS_ROTATION_TOKENS"]
 CLIENT = "demo-client"
 REDIRECT = "http://127.0.0.1/callback"
 
-
 def b64(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
-
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *_a, **_k):
         return None
 
-
 opener = urllib.request.build_opener(NoRedirect)
-
 
 def mint(_ignored):
     verifier = b64(secrets.token_bytes(32))
@@ -62,7 +58,6 @@ def mint(_ignored):
     response = urllib.request.urlopen(urllib.request.Request(f"{BASE}/token", data=body))
     return json.load(response)["access_token"]
 
-
 def use(token):
     request = urllib.request.Request(
         f"{BASE}/userinfo", headers={"Authorization": "Bearer " + token}
@@ -73,7 +68,6 @@ def use(token):
         return err.code
     except OSError:
         return 0
-
 
 def main():
     mode, count_or_status = sys.argv[1], int(sys.argv[2])
@@ -98,6 +92,5 @@ def main():
     print(f"beklenen {count_or_status}: {dict(codes)}")
     if set(codes) != {count_or_status}:
         raise SystemExit(f"FAIL: expected every request to return {count_or_status}")
-
 
 main()

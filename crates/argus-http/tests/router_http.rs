@@ -1,16 +1,3 @@
-//! Router'ın gerçek `HTTP` üzerindeki davranışı.
-//!
-//! # Neden ham soket, neden bir istemci kütüphanesi değil
-//!
-//! Buradaki testlerin konusu tam olarak **tel üzerindeki** ayrıntı: hangi
-//! metotlar kabul ediliyor, `WWW-Authenticate` gerçekten gidiyor mu,
-//! `Cache-Control` var mı. Bir istemci kütüphanesi bunların bir kısmını
-//! normalleştirip gizler; ham soket gizlemez.
-//!
-//! Diğer test dosyaları endpoint fonksiyonlarını doğrudan çağırıyor ve bu
-//! yüzden `router.rs`'in kendisi — yönlendirme tablosu, başlık çıkarımı, yanıt
-//! dönüşümü — hiç sınanmıyordu.
-
 #![allow(
     clippy::expect_used,
     clippy::unwrap_used,
@@ -35,8 +22,6 @@ use argus_proto::AuthorizationServerMetadata;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::{TcpListener, TcpStream};
 use uuid::Uuid;
-
-// --- Depolar ---------------------------------------------------------------
 
 #[derive(Default)]
 struct Codes {
@@ -126,9 +111,6 @@ impl ClientStore for Clients {
     }
 }
 
-// --- Sunucu ----------------------------------------------------------------
-
-/// Router'ı efemer bir portta ayağa kaldırır ve adresini döner.
 async fn serve() -> String {
     let (key, _) = SigningKey::generate("k1").expect("key");
     let key = Arc::new(key);
@@ -158,12 +140,11 @@ async fn serve() -> String {
     addr
 }
 
-/// Ham bir `HTTP/1.1` isteği yollar ve tüm yanıtı dizge olarak döner.
 async fn raw(addr: &str, request: &str) -> String {
     let mut s = TcpStream::connect(addr).await.expect("connect");
     s.write_all(request.as_bytes()).await.expect("write");
     let mut out = Vec::new();
-    // Sunucu `Connection: close` ile kapatıyor; EOF'a kadar okumak yeterli.
+
     s.read_to_end(&mut out).await.expect("read");
     String::from_utf8_lossy(&out).into_owned()
 }
@@ -180,11 +161,6 @@ fn status(response: &str) -> &str {
     response.lines().next().unwrap_or("").trim()
 }
 
-// --- Testler ---------------------------------------------------------------
-
-/// §18: iki spec aynı issuer için FARKLI well-known `URL` üretiyor; ikisi de
-/// aynı gövdeyi vermeli, yoksa istemcinin hangisini denediğine göre davranış
-/// değişir.
 #[tokio::test]
 async fn both_well_known_paths_serve_the_same_metadata() {
     let addr = serve().await;
@@ -198,7 +174,6 @@ async fn both_well_known_paths_serve_the_same_metadata() {
     assert!(body(&a).contains("\"userinfo_endpoint\""));
 }
 
-/// `RFC` 6749 §3.2: token endpoint'i **yalnızca** `POST` kabul eder.
 #[tokio::test]
 async fn the_token_endpoint_refuses_get() {
     let addr = serve().await;
@@ -206,7 +181,6 @@ async fn the_token_endpoint_refuses_get() {
     assert!(status(&r).contains("405"), "{r}");
 }
 
-/// OIDC Core §5.3.1: `UserInfo` hem `GET` hem `POST` kabul etmek ZORUNDA.
 #[tokio::test]
 async fn userinfo_accepts_both_get_and_post() {
     let addr = serve().await;
@@ -218,14 +192,10 @@ async fn userinfo_accepts_both_get_and_post() {
     )
     .await;
 
-    // İkisi de 401 dönüyor (token yok) ama 405 DÖNMEMELİ — 405 metodun hiç
-    // tanınmadığını söyler ve uyumluluk paketi orada düşer.
     assert!(status(&g).contains("401"), "{g}");
     assert!(status(&p).contains("401"), "{p}");
 }
 
-/// `RFC` 6750 §3: 401 dönen kaynak sunucu istemciye NASIL kimlik doğrulayacağını
-/// söylemek zorundadır; başlıksız 401 kör yeniden denemeye iter.
 #[tokio::test]
 async fn an_unauthenticated_userinfo_request_carries_a_challenge() {
     let addr = serve().await;
@@ -236,12 +206,10 @@ async fn an_unauthenticated_userinfo_request_carries_a_challenge() {
         r.to_lowercase().contains("www-authenticate: bearer"),
         "no challenge in: {r}"
     );
-    // Kimlik yanıtı cache'lenmemeli.
+
     assert!(r.to_lowercase().contains("cache-control: no-store"), "{r}");
 }
 
-/// Bozuk bir token'da `error="invalid_token"` görünmeli — istemci bunu yeniden
-/// kimlik doğrulama sinyali olarak kullanır.
 #[tokio::test]
 async fn an_invalid_token_is_named_in_the_challenge() {
     let addr = serve().await;
@@ -256,8 +224,6 @@ async fn an_invalid_token_is_named_in_the_challenge() {
     assert!(r.contains(r#"error="invalid_token""#), "{r}");
 }
 
-/// `redirect_uri` doğrulanamadığında **yönlendirme yapılmaz**: aksi hâlde
-/// sunucu açık yönlendiriciye döner.
 #[tokio::test]
 async fn an_unregistered_redirect_uri_never_redirects() {
     let addr = serve().await;
@@ -276,8 +242,6 @@ async fn an_unregistered_redirect_uri_never_redirects() {
     );
 }
 
-/// `RFC` 9207: yetkilendirme yanıtı `iss` taşımalı (§1 #8 gün-1 kararı) ve
-/// `state` içindeki ayırıcılar kodlanmalı.
 #[tokio::test]
 async fn a_valid_authorize_request_redirects_with_iss_and_encoded_state() {
     let addr = serve().await;
@@ -300,12 +264,10 @@ async fn a_valid_authorize_request_redirects_with_iss_and_encoded_state() {
         "{location}"
     );
     assert!(location.contains("code="), "{location}");
-    // `&` kodlanmamış olsaydı saldırgan yönlendirmeye parametre enjekte ederdi.
+
     assert!(location.contains("state=a%26b"), "{location}");
 }
 
-/// Geçersiz bir `DPoP` başlığı SESSİZCE yok sayılmamalı; sayılsaydı saldırgan
-/// bozuk kanıt göndererek token'ı bearer'a düşürebilirdi.
 #[tokio::test]
 async fn a_malformed_dpop_header_fails_the_token_request() {
     let addr = serve().await;
@@ -326,7 +288,6 @@ async fn a_malformed_dpop_header_fails_the_token_request() {
     assert!(r.contains("invalid_request"), "{r}");
 }
 
-/// `JWKS` özel bileşen taşımamalı — sızdırırsa herkes token imzalayabilir.
 #[tokio::test]
 async fn the_published_jwks_contains_no_private_material() {
     let addr = serve().await;

@@ -1,14 +1,5 @@
 #!/usr/bin/env bash
-# Faz 1 çıkış kriteri: "oidcc-server-rotate-keys modülü yük altında 0 adet 401".
-#
-# Rotasyondan ÖNCE basılan token'lar rotasyondan SONRA kullanılır. Token'ı
-# bastığı sunucu neslinde kullanmak rotasyon penceresini hiç sınamaz — bu
-# betiğin ilk sürümü tam olarak bu yüzden hem doğru hem yanlış rotasyonda
-# "geçti" diyordu.
-#
-# Betik KENDİ negatif kontrolünü de koşar: eski anahtar yayından kaldırıldığında
-# aynı token'lar 401 almalı. Almazsa test bir şey ölçmüyor demektir ve betik
-# başarısız olur.
+
 set -euo pipefail
 set +m
 cd "$(git rev-parse --show-toplevel)"
@@ -34,7 +25,7 @@ start() {
   ARGUS_ISSUER="$BASE" ARGUS_BIND="$BIND" \
   ARGUS_SIGNING_KEY_DIR="$1" ARGUS_ACTIVE_KID="${2:-}" \
     "$BIN" >>"$WORK/server.log" 2>&1 &
-  # İş kontrolü mesajlarını bastır: kapatma bu betikte normal akışın parçası.
+
   disown 2>/dev/null || true
   for _ in $(seq 1 40); do
     curl -sf "$BASE/.well-known/jwks.json" >/dev/null 2>&1 && return 0
@@ -47,15 +38,12 @@ start() {
 export ARGUS_ROTATION_BASE="$BASE"
 export ARGUS_ROTATION_TOKENS="$WORK/tokens.json"
 
-# 1. Eski anahtar aktifken token bas.
 start "$WORK/both" old-key
 python3 scripts/key_rotation_probe.py mint 200
 
-# 2. Yeni anahtara geç, eskisini YAYINDA BIRAK. Beklenen: 0 adet 401.
 start "$WORK/both" new-key
 python3 scripts/key_rotation_probe.py expect 200
 
-# 3. Negatif kontrol: eski anahtarı yayından kaldır. Beklenen: hepsi 401.
 start "$WORK/new-only" new-key
 python3 scripts/key_rotation_probe.py expect 401
 

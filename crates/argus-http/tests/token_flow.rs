@@ -1,14 +1,7 @@
-//! Token endpoint'inin uçtan uca akışı.
-//!
-//! Katmanların gerçekten birleştiğini kanıtlar: `argus-core`'un kararı,
-//! `argus-http`'nin etki uygulaması, `argus-crypto`'nun imzası ve
-//! `argus-proto`'nun tel formatı tek bir istekte buluşuyor.
-
 #![allow(
     clippy::expect_used,
     clippy::unwrap_used,
     clippy::panic,
-    // Sahte depolar bellek içi ve senkron; `async` imzası trait sözleşmesi için.
     clippy::unused_async_trait_impl
 )]
 
@@ -42,8 +35,6 @@ fn tenant() -> TenantId {
 fn client() -> ClientId {
     ClientId::new("acme-web").expect("client")
 }
-
-// --- Bellek içi depolar ---------------------------------------------------
 
 #[derive(Default)]
 struct MemCodes {
@@ -132,8 +123,6 @@ impl AuditSink for MemAudit {
     }
 }
 
-/// Kayıtlı istemci deposu. Varsayılan olarak public client döner; testler
-/// `method`/`keys` alanlarını değiştirerek confidential senaryoyu kurar.
 struct Clients {
     method: ClientAuthMethod,
     keys: Vec<argus_core::client_auth::ClientKey>,
@@ -166,8 +155,6 @@ impl ClientStore for Clients {
     }
 }
 
-/// ⚠️ Tekrar kaydı yok — testlerde tekrar korumasının DIŞINDAKİ kuralları
-/// izole etmek için.
 struct NoReplay;
 
 impl ReplayGuard for NoReplay {
@@ -176,7 +163,6 @@ impl ReplayGuard for NoReplay {
     }
 }
 
-/// `handle`'ı testlerin ihtiyaç duymadığı iki argümanı sabitleyerek çağırır.
 async fn token(
     s: &AppState<MemCodes, MemRefresh, MemAudit, Clients>,
     form: &TokenForm,
@@ -184,8 +170,6 @@ async fn token(
 ) -> Result<argus_proto::TokenResponse, argus_proto::OAuthError> {
     handle(s, form, NOW, &AwsLcSha256, binding, &NoReplay).await
 }
-
-// --- Kurulum --------------------------------------------------------------
 
 fn state() -> AppState<MemCodes, MemRefresh, MemAudit, Clients> {
     let (key, _) = SigningKey::generate("k1").expect("key");
@@ -233,8 +217,6 @@ fn code_form() -> TokenForm {
     }
 }
 
-// --- Authorization code ---------------------------------------------------
-
 #[tokio::test]
 async fn authorization_code_yields_a_verifiable_access_token() {
     let s = state();
@@ -242,7 +224,6 @@ async fn authorization_code_yields_a_verifiable_access_token() {
 
     let resp = token(&s, &code_form(), None).await.expect("token issued");
 
-    // Token gerçekten bu sunucunun yayınladığı anahtarla doğrulanabilmeli.
     let claims = argus_proto::jwt::verify(&resp.access_token, &s.tenant.active_key.verifying_key())
         .expect("token verifies against the published key");
 
@@ -262,8 +243,6 @@ async fn authorization_code_yields_a_verifiable_access_token() {
     );
 }
 
-/// PKCE yanlışsa token verilmez ve kod yine de tüketilir — saldırgan aynı kodu
-/// farklı verifier'larla deneyemesin.
 #[tokio::test]
 async fn wrong_pkce_verifier_is_rejected_and_burns_the_code() {
     let s = state();
@@ -282,7 +261,6 @@ async fn wrong_pkce_verifier_is_rejected_and_burns_the_code() {
     );
 }
 
-/// RFC 9700 §4.1.1: tekrar kullanılan kod, o koddan türeyen her şeyi düşürür.
 #[tokio::test]
 async fn replayed_code_triggers_revocation_of_derived_tokens() {
     let s = state();
@@ -306,8 +284,6 @@ async fn replayed_code_triggers_revocation_of_derived_tokens() {
             .contains(&"oauth.authorization_code.replayed".to_owned())
     );
 }
-
-// --- Refresh --------------------------------------------------------------
 
 fn stored_refresh(rs: RefreshState) -> RefreshToken {
     RefreshToken {
@@ -357,7 +333,6 @@ async fn refresh_rotates_and_returns_a_new_token() {
     );
 }
 
-/// RFC 9700 §4.14.2: döndürülmüş bir token yeniden sunulduğunda zincir düşer.
 #[tokio::test]
 async fn reusing_a_rotated_refresh_token_brings_the_family_down() {
     let s = state();
@@ -375,9 +350,6 @@ async fn reusing_a_rotated_refresh_token_brings_the_family_down() {
     );
 }
 
-// --- Grant tipi ve arıza davranışı ----------------------------------------
-
-/// OAuth 2.1 `password` ve implicit'i kaldırdı; desteklenmedikleri net olmalı.
 #[tokio::test]
 async fn unsupported_grant_types_are_rejected() {
     let s = state();
@@ -395,9 +367,6 @@ async fn unsupported_grant_types_are_rejected() {
     }
 }
 
-/// §19 §7.1: depo erişilemezken `invalid_grant` DÖNÜLMEZ. `invalid_grant`
-/// istemciye "yeniden yetkilendir" dedirtir ve geçici bir arızayı kalıcı bir
-/// çıkışa çevirir. Doğru cevap 503'tür.
 #[tokio::test]
 async fn storage_outage_returns_503_not_invalid_grant() {
     struct DeadCodes;
@@ -441,8 +410,6 @@ async fn storage_outage_returns_503_not_invalid_grant() {
     assert_eq!(err.http_status(), 503);
 }
 
-/// Akışın sahte hash değil GERÇEK SHA-256 kullandığının kanıtı: RFC 7636 Ek B
-/// vektörü uçtan uca yolda da tutmalı.
 #[test]
 fn the_flow_uses_real_sha256() {
     let digest = AwsLcSha256.sha256(VERIFIER.as_bytes());
@@ -450,11 +417,6 @@ fn the_flow_uses_real_sha256() {
     assert_eq!(digest.as_slice(), expected.as_slice());
 }
 
-// --- `DPoP` bağlaması ------------------------------------------------------
-
-/// `RFC` 9449 §5-6: bağlı token'ın tipi `DPoP` olmalı ve `cnf.jkt` taşımalı.
-/// İstemci `Bearer` görürse token'ı `Authorization: Bearer` ile gönderir ve
-/// bağlama sessizce devre dışı kalır.
 #[tokio::test]
 async fn dpop_binding_changes_the_token_type_and_adds_cnf() {
     let s = state();
@@ -474,8 +436,6 @@ async fn dpop_binding_changes_the_token_type_and_adds_cnf() {
     );
 }
 
-/// Bağlama yoksa token bearer'dır ve `cnf` taşımaz — bu bir eksikliktir,
-/// tercih değil (§1 §4.1).
 #[tokio::test]
 async fn without_dpop_the_token_stays_bearer() {
     let s = state();
@@ -489,9 +449,6 @@ async fn without_dpop_the_token_stays_bearer() {
     assert!(claims.cnf.is_none());
 }
 
-// --- OIDC Core -------------------------------------------------------------
-
-/// `openid` istenen kodda `nonce` da saklanır; ikisi birlikte gelir.
 fn openid_code() -> StoredCode {
     StoredCode {
         nonce: Some("n-0S6_WzA2Mj".to_owned()),
@@ -500,8 +457,6 @@ fn openid_code() -> StoredCode {
     }
 }
 
-/// OIDC Core §3.1.3.3: `openid` istendiyse yanıt `id_token` taşır ve o
-/// `id_token` sunucunun yayınladığı anahtarla doğrulanabilir olmalıdır.
 #[tokio::test]
 async fn openid_scope_produces_a_verifiable_id_token() {
     let s = state();
@@ -514,14 +469,11 @@ async fn openid_scope_produces_a_verifiable_id_token() {
         .expect("id_token verifies against the published key");
 
     assert_eq!(claims.iss, "https://acme.argus.test");
-    // `aud` İSTEMCİDİR. Kaynak sunucu yazmak, bir istemcinin başkasına verilmiş
-    // kimlik iddiasını kabul etmesine yol açar.
+
     assert_eq!(claims.aud, "acme-web");
     assert!(claims.exp > claims.iat);
 }
 
-/// §3.1.2.1: `nonce` **aynen** geri yazılır. İstemci onu kendi ürettiği değerle
-/// karşılaştırır; en ufak dönüşüm karşılaştırmayı bozar.
 #[tokio::test]
 async fn the_nonce_is_echoed_byte_for_byte() {
     let s = state();
@@ -538,8 +490,6 @@ async fn the_nonce_is_echoed_byte_for_byte() {
     assert_eq!(claims.nonce.as_deref(), Some("n-0S6_WzA2Mj"));
 }
 
-/// §3.1.3.6: `at_hash` access token'ın SHA-256'sının SOL YARISIDIR ve
-/// `id_token` ile access token'ın aynı yanıttan geldiğini kanıtlar.
 #[tokio::test]
 async fn at_hash_binds_the_id_token_to_this_access_token() {
     let s = state();
@@ -556,13 +506,10 @@ async fn at_hash_binds_the_id_token_to_this_access_token() {
     let expected = argus_proto::oidc::at_hash(&resp.access_token, &AwsLcSha256);
     assert_eq!(claims.at_hash.as_deref(), Some(expected.as_str()));
 
-    // BAŞKA bir access token'ın hash'i tutmamalı — aksi hâlde kontrol boştur.
     let other = argus_proto::oidc::at_hash("some-other-token", &AwsLcSha256);
     assert_ne!(claims.at_hash.as_deref(), Some(other.as_str()));
 }
 
-/// `openid` istenmediyse kimlik iddiası ÜRETİLMEZ. Her yanıta `id_token`
-/// koymak, kimlik istemediğini söylemiş istemcilere kimlik dağıtmaktır.
 #[tokio::test]
 async fn a_plain_oauth_request_gets_no_id_token() {
     let s = state();
@@ -576,9 +523,6 @@ async fn a_plain_oauth_request_gets_no_id_token() {
     assert!(resp.id_token.is_none());
 }
 
-/// `nonce`'sız `openid` isteği BAŞARILI olmalı: `oidcc-ensure-request-without-
-/// nonce-succeeds` sertifikasyon testi bunu bekliyor ve code akışında `nonce`
-/// opsiyoneldir (§3.1.2.1).
 #[tokio::test]
 async fn openid_without_a_nonce_still_succeeds() {
     let s = state();
@@ -598,13 +542,9 @@ async fn openid_without_a_nonce_still_succeeds() {
     )
     .expect("verify");
 
-    // Alan hiç YAZILMAMALI. Boş dize yazmak istemcinin karşılaştırmasını bozar.
     assert!(claims.nonce.is_none());
 }
 
-/// OIDC Core §12.1 refresh yanıtının `id_token` taşımasını gerektirmiyor ve
-/// kapsam refresh zincirinde saklanmıyor: bilinmeyen bir kapsamdan kimlik
-/// iddiası üretmek uydurmak olurdu.
 #[tokio::test]
 async fn refresh_does_not_fabricate_an_id_token() {
     let s = state();
@@ -615,11 +555,8 @@ async fn refresh_does_not_fabricate_an_id_token() {
     assert!(resp.id_token.is_none());
 }
 
-// --- İstemci kimlik doğrulaması — RFC 7523 §2.2 ---------------------------
-
 use argus_core::client_auth::ClientKey;
 
-/// Bir istemci anahtar çifti üretir.
 fn client_key(kid: &str) -> (SigningKey, ClientKey) {
     let (signing, _) = SigningKey::generate(kid).expect("key");
     let c = signing.public_components().expect("components");
@@ -647,7 +584,6 @@ fn assertion_for(signing: &SigningKey, kid: &str, payload: &str) -> String {
     )
 }
 
-/// Geçerli bir assertion gövdesi: `aud` bu sunucunun issuer'ı, süresi kısa.
 fn assertion_payload(aud: &str, exp_offset: i64, jti: &str) -> String {
     format!(
         r#"{{"iss":"acme-web","sub":"acme-web","aud":"{aud}","exp":{},"jti":"{jti}"}}"#,
@@ -655,7 +591,6 @@ fn assertion_payload(aud: &str, exp_offset: i64, jti: &str) -> String {
     )
 }
 
-/// `private_key_jwt` ile kayıtlı bir istemcinin durumunu kurar.
 fn confidential_state(keys: Vec<ClientKey>) -> AppState<MemCodes, MemRefresh, MemAudit, Clients> {
     let mut s = state();
     s.clients = Clients {
@@ -673,7 +608,6 @@ fn assertion_form(assertion: String) -> TokenForm {
     }
 }
 
-/// Doğru anahtarla imzalanmış, doğru `aud`'lu assertion kabul edilir.
 #[tokio::test]
 async fn a_valid_private_key_jwt_authenticates_the_client() {
     let (signing, public) = client_key("k1");
@@ -690,9 +624,6 @@ async fn a_valid_private_key_jwt_authenticates_the_client() {
         .expect("token issued");
 }
 
-/// **Asıl kural.** `private_key_jwt` ile kayıtlı bir istemci, kimlik bilgisi
-/// sunmadan token ALAMAZ — alabilseydi kayıt bir güvenlik ifadesi olmaktan
-/// çıkardı ve `client_id` bilen herkes o istemci gibi davranabilirdi.
 #[tokio::test]
 async fn a_confidential_client_cannot_authenticate_with_nothing() {
     let (_, public) = client_key("k1");
@@ -705,15 +636,12 @@ async fn a_confidential_client_cannot_authenticate_with_nothing() {
     assert_eq!(err.error, OAuthErrorCode::InvalidClient);
     assert_eq!(err.http_status(), 401);
 
-    // Ve kod TÜKETİLMEMELİ: kimliği doğrulanmamış bir çağıran, başkasının
-    // kodunu yakamamalı.
     assert!(
         !*s.codes.consumed.lock().expect("lock"),
         "an unauthenticated request must not burn the code"
     );
 }
 
-/// BAŞKA bir anahtarla imzalanmış assertion reddedilmeli.
 #[tokio::test]
 async fn an_assertion_signed_by_an_unregistered_key_is_refused() {
     let (attacker, _) = client_key("k1");
@@ -732,8 +660,6 @@ async fn an_assertion_signed_by_an_unregistered_key_is_refused() {
     assert_eq!(err.error, OAuthErrorCode::InvalidClient);
 }
 
-/// `aud` başka bir sunucuyu gösteriyorsa reddedilmeli: `RFC` 7523'ün cross-AS
-/// replay koruması tam olarak budur.
 #[tokio::test]
 async fn an_assertion_addressed_to_another_server_is_refused() {
     let (signing, public) = client_key("k1");
@@ -751,8 +677,6 @@ async fn an_assertion_addressed_to_another_server_is_refused() {
     assert_eq!(err.error, OAuthErrorCode::InvalidClient);
 }
 
-/// OIDC Core §9 token endpoint `URL`'ini `aud` olarak örnekliyor; iki yaygın
-/// kullanım da kabul edilmeli, yoksa gerçek istemciler kırılır.
 #[tokio::test]
 async fn the_token_endpoint_url_is_also_an_accepted_audience() {
     let (signing, public) = client_key("k1");
@@ -767,7 +691,6 @@ async fn the_token_endpoint_url_is_also_an_accepted_audience() {
     assert!(token(&s, &assertion_form(a), None).await.is_ok());
 }
 
-/// Süresi dolmuş assertion kabul edilmez.
 #[tokio::test]
 async fn an_expired_assertion_is_refused() {
     let (signing, public) = client_key("k1");
@@ -785,7 +708,6 @@ async fn an_expired_assertion_is_refused() {
     assert_eq!(err.error, OAuthErrorCode::InvalidClient);
 }
 
-/// Aşırı uzun ömür, çalınmış bir assertion'ı kalıcı kimlik bilgisine çevirir.
 #[tokio::test]
 async fn an_assertion_that_lives_too_long_is_refused() {
     let (signing, public) = client_key("k1");
@@ -803,8 +725,6 @@ async fn an_assertion_that_lives_too_long_is_refused() {
     assert_eq!(err.error, OAuthErrorCode::InvalidClient);
 }
 
-/// `sub` başka bir istemciyi gösteriyorsa reddedilmeli — aksi hâlde bir istemci
-/// kendi anahtarıyla başkası adına token isteyebilirdi.
 #[tokio::test]
 async fn an_assertion_claiming_another_client_is_refused() {
     let (signing, public) = client_key("k1");
@@ -822,7 +742,6 @@ async fn an_assertion_claiming_another_client_is_refused() {
     assert_eq!(err.error, OAuthErrorCode::InvalidClient);
 }
 
-/// Form'daki `client_id` ile assertion'daki `sub` çelişiyorsa istek reddedilir.
 #[tokio::test]
 async fn a_contradictory_client_id_is_refused() {
     let (signing, public) = client_key("k1");
@@ -842,8 +761,6 @@ async fn a_contradictory_client_id_is_refused() {
     assert_eq!(err.error, OAuthErrorCode::InvalidClient);
 }
 
-/// `client_assertion_type` sabittir; yanlış değer SESSİZCE yok sayılmamalı,
-/// yoksa istek kimlik doğrulamasız bir yola düşerdi.
 #[tokio::test]
 async fn a_wrong_assertion_type_is_not_silently_ignored() {
     let (signing, public) = client_key("k1");
@@ -863,8 +780,6 @@ async fn a_wrong_assertion_type_is_not_silently_ignored() {
     assert_eq!(err.error, OAuthErrorCode::InvalidRequest);
 }
 
-/// Public client assertion SUNMAMALI: kayıtlı yöntemle sunulan yöntem
-/// tutmuyorsa ya konfigürasyon hatası ya saldırı denemesidir.
 #[tokio::test]
 async fn a_public_client_may_not_present_an_assertion() {
     let (signing, _) = client_key("k1");
@@ -882,7 +797,6 @@ async fn a_public_client_may_not_present_an_assertion() {
     assert_eq!(err.error, OAuthErrorCode::InvalidClient);
 }
 
-/// Kayıtlı olmayan bir istemci `invalid_client` almalı.
 #[tokio::test]
 async fn an_unregistered_client_is_refused() {
     let s = state();
@@ -896,7 +810,6 @@ async fn an_unregistered_client_is_refused() {
     assert_eq!(err.error, OAuthErrorCode::InvalidClient);
 }
 
-/// Tekrar edilen bir `jti` reddedilmeli — `RFC` 7523 §3.
 #[tokio::test]
 async fn a_replayed_assertion_is_refused() {
     struct Seen;

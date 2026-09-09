@@ -1,18 +1,3 @@
-//! Yetkilendirme endpoint'i — RFC 6749 §4.1.1.
-//!
-//! # ⚠️ Kullanıcı kimlik doğrulaması burada GEÇİCİDİR
-//!
-//! Gerçek kimlik doğrulama (`WebAuthn`, `Argon2`, kurtarma durum makinesi) **Faz
-//! 3**'ün işi. Ama `/authorize` bir kullanıcıyı doğrulamadan kod üretemez ve
-//! Faz 1'in çıkış kriteri (`OIDF` conformance) çalışan bir akış istiyor. Belgedeki
-//! faz planında bu boşluk var: kimlik doğrulama Faz 3'te ama Faz 1 ve 2 uçtan
-//! uca çalışmalı.
-//!
-//! Çözüm, boşluğu **görünür** kılmak: [`DevAuthenticator`] açıkça geliştirme
-//! amaçlıdır, üretim yapılandırmasında kapalıdır ve Faz 3 onu değiştirecektir.
-//! Sessizce "şimdilik herkesi kabul et" yazmak, sonradan kimsenin fark etmediği
-//! bir kimlik doğrulama atlatması bırakırdı.
-
 use argus_core::authorize::{AuthorizeOutcome, AuthorizeRequest, RegisteredClient, validate};
 use argus_core::authz_code::{AuthorizationCode, DEFAULT_CODE_LIFETIME};
 use argus_core::id::{ClientId, TenantId, UserId};
@@ -22,42 +7,31 @@ use serde::Deserialize;
 
 use crate::store::{ClientStore, CodeIssuer, StoreError};
 
-/// `GET /authorize` sorgu parametreleri.
 #[derive(Debug, Clone, Deserialize)]
 pub struct AuthorizeQuery {
-    /// `response_type`.
     pub response_type: String,
-    /// `client_id`.
+
     pub client_id: String,
-    /// `redirect_uri`.
+
     pub redirect_uri: Option<String>,
-    /// `state`.
+
     pub state: Option<String>,
-    /// `code_challenge`.
+
     pub code_challenge: Option<String>,
-    /// `code_challenge_method`.
+
     pub code_challenge_method: Option<String>,
-    /// `scope`.
+
     pub scope: Option<String>,
-    /// OIDC `nonce`.
+
     pub nonce: Option<String>,
 }
 
-/// Kullanıcı kimlik doğrulama sınırı.
-///
-/// Faz 3 bunu `WebAuthn` ve parola akışlarıyla uygulayacak.
 pub trait UserAuthenticator {
-    /// İsteğin sahibi olan kullanıcıyı döndürür; oturum yoksa `None`.
     fn current_user(&self, tenant: TenantId) -> Option<UserId>;
 }
 
-/// ⚠️ **Geliştirme amaçlı** kimlik doğrulayıcı.
-///
-/// Sabit bir kullanıcı döndürür. Üretimde kullanılmaz; Faz 3 gerçek olanı
-/// getirecek. Adı ve bu not, yanlışlıkla üretime sızmasını zorlaştırmak içindir.
 #[derive(Debug, Clone, Copy)]
 pub struct DevAuthenticator {
-    /// Her istekte döndürülecek kullanıcı.
     pub user: UserId,
 }
 
@@ -67,41 +41,30 @@ impl UserAuthenticator for DevAuthenticator {
     }
 }
 
-/// Yetkilendirme sonucunun `HTTP` karşılığı.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthorizeResponse {
-    /// İstemciye yönlendir.
     Redirect(String),
-    /// **Yönlendirme yapılmaz** — kullanıcıya hata gösterilir.
-    ///
-    /// `redirect_uri` doğrulanamadığında tek güvenli davranış budur: aksi hâlde
-    /// sunucu açık yönlendiriciye dönerdi.
+
     ShowError(&'static str),
-    /// Kullanıcı henüz giriş yapmamış.
+
     NeedsAuthentication,
 }
 
-/// [`handle`] için gereken bağlam.
-///
-/// Dokuz konumsal argüman yerine yapı: aynı tipteki iki referansın (`clients`
-/// ve `codes` gibi) sessizce yer değiştirmesi, derleyicinin yakalayamayacağı
-/// bir hata olurdu.
 pub struct AuthorizeContext<'a, S, I, U, H> {
-    /// Çözülmüş kiracı.
     pub tenant: TenantId,
-    /// Kiracının issuer'ı — `RFC` 9207 `iss` parametresine yazılır.
+
     pub issuer: &'a str,
-    /// İstemci kaydı deposu.
+
     pub clients: &'a S,
-    /// Kod yazma sınırı.
+
     pub codes: &'a I,
-    /// Kullanıcı kimlik doğrulayıcı.
+
     pub auth: &'a U,
-    /// Hash sağlayıcı.
+
     pub hasher: &'a H,
-    /// Şimdi.
+
     pub now: Timestamp,
-    /// Üretilmiş kod değeri; yalnızca hash'i saklanır.
+
     pub new_code: &'a str,
 }
 
@@ -113,11 +76,6 @@ impl<S, I, U, H> Clone for AuthorizeContext<'_, S, I, U, H> {
 
 impl<S, I, U, H> Copy for AuthorizeContext<'_, S, I, U, H> {}
 
-/// Yetkilendirme isteğini işler.
-///
-/// # Errors
-///
-/// Depo erişilemezse.
 pub async fn handle<S, I, U, H>(
     ctx: &AuthorizeContext<'_, S, I, U, H>,
     query: &AuthorizeQuery,
@@ -183,8 +141,6 @@ where
                 return Ok(AuthorizeResponse::NeedsAuthentication);
             };
 
-            // `client_id` burada kesinlikle geçerli: `validate` bilinmeyen
-            // istemcide `Fatal` döndürüyor ve o dal yukarıda ele alındı.
             let Some(client) = client_id else {
                 return Ok(AuthorizeResponse::ShowError("invalid client_id"));
             };
@@ -203,17 +159,15 @@ where
                 ));
             };
 
-            // Kodun kendisi saklanmaz; yalnızca hash'i.
             let hash = hasher.sha256(new_code.as_bytes());
-            // OIDC alanları kodla BİRLİKTE saklanır: token isteği geldiğinde
-            // yetkilendirme isteği bitmiştir ve `nonce` başka yerden öğrenilemez.
+
             codes
                 .issue(tenant, &hash, &record.with_oidc(nonce, scope).to_stored())
                 .await?;
 
             let mut url = format!("{}?code={new_code}", redirect_uri.as_str());
             append_state(&mut url, state.as_deref());
-            // RFC 9207: mix-up savunması. §1 #8 gün-1 kararı.
+
             append_iss(&mut url, issuer);
             Ok(AuthorizeResponse::Redirect(url))
         }
@@ -232,11 +186,6 @@ fn append_iss(url: &mut String, issuer: &str) {
     url.push_str(&urlencode(issuer));
 }
 
-/// Sorgu değeri için minimal yüzde kodlaması.
-///
-/// Yalnızca `unreserved` karakterler olduğu gibi geçer; geri kalanı kodlanır.
-/// Bu, `state` içindeki bir `&` veya `#` karakterinin yönlendirme adresine
-/// parametre enjekte etmesini engeller.
 fn urlencode(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for b in value.bytes() {
@@ -263,8 +212,6 @@ const fn hex_digit(nibble: u8) -> u8 {
 mod tests {
     use super::{AuthorizeResponse, urlencode};
 
-    /// `state` içindeki ayırıcılar kodlanmalı, yoksa saldırgan yönlendirme
-    /// adresine kendi parametresini enjekte edebilir.
     #[test]
     fn state_separators_are_encoded() {
         assert_eq!(urlencode("a&b=c"), "a%26b%3Dc");

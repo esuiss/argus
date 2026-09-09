@@ -1,47 +1,16 @@
-//! İstemci kimlik doğrulaması — RFC 6749 §2.3.
-//!
-//! # Neden `client_secret_post` yok
-//!
-//! RFC 6749 §2.3.1 onu "MAY" olarak tanımlar ve **önermez**: sır istek gövdesine
-//! girer, dolayısıyla proxy log'larına, hata izlerine ve tarayıcı geçmişine düşme
-//! yüzeyi büyür. Argus onu temsil etmiyor, dolayısıyla kabul eden bir kod yolu
-//! yazılamıyor.
-//!
-//! # Public client'lar
-//!
-//! [`ClientAuthMethod::None`] meşrudur (RFC 6749 §2.1) ama PKCE zorunludur ve o
-//! zorunluluk authorization code akışında zaten yapısaldır: `code_verifier`
-//! olmadan kod tüketilemez.
-
 use subtle::ConstantTimeEq as _;
 
 use crate::dpop::ReplayGuard;
 use crate::id::ClientId;
 use crate::time::{Duration, Timestamp};
 
-/// İstekle sunulan kimlik bilgisi.
-///
-/// `Debug` **elle yazıldı**: türetilmiş olsaydı `secret` alanı düz metin olarak
-/// log'a düşerdi (§25 K27).
 #[derive(Clone, PartialEq, Eq)]
 pub enum PresentedCredential {
-    /// Hiçbir kimlik bilgisi sunulmadı.
     None,
-    /// `Authorization: Basic` içinden çözülmüş sır.
-    ClientSecret {
-        /// Sunulan istemci kimliği.
-        client_id: ClientId,
-        /// Sunulan sır.
-        secret: String,
-    },
-    /// Doğrulanmış bir `private_key_jwt` assertion'ı.
-    ///
-    /// İmza doğrulaması bu katmanda **yapılmaz** — `VerifiedProof` ile aynı
-    /// desen: bu varyant yalnızca imzası doğrulanmış bir assertion için kurulur.
-    VerifiedAssertion {
-        /// Assertion'ın `sub` claim'i.
-        client_id: ClientId,
-    },
+
+    ClientSecret { client_id: ClientId, secret: String },
+
+    VerifiedAssertion { client_id: ClientId },
 }
 
 impl core::fmt::Debug for PresentedCredential {
@@ -61,19 +30,16 @@ impl core::fmt::Debug for PresentedCredential {
     }
 }
 
-/// Kayıtlı istemcinin kimlik doğrulama yöntemi.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClientAuthMethod {
-    /// Public client — sır yok, PKCE ile korunur.
     None,
-    /// `Authorization: Basic` başlığıyla client secret.
+
     ClientSecretBasic,
-    /// RFC 7523 `private_key_jwt`.
+
     PrivateKeyJwt,
 }
 
 impl ClientAuthMethod {
-    /// Metadata'da ilan edilen ad.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -84,60 +50,30 @@ impl ClientAuthMethod {
     }
 }
 
-/// Kayıtlı bir istemcinin açık imzalama anahtarı.
-///
-/// # Neden `JWK` değil, ham bileşenler
-///
-/// `argus-core` serileştirme biçimlerini tanımaz; `JWK` bir tel formatıdır ve
-/// onu buraya sokmak, saf karar katmanını bir kodlama seçimine bağlardı.
-/// Bileşenler `P-256` için sabit 32 baytlıktır — tip düzeyinde boyut hatası
-/// imkânsız.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientKey {
-    /// Anahtar kimliği; `JWS` başlığındaki `kid` ile eşleşir.
     pub kid: String,
-    /// `P-256` açık anahtarının `x` bileşeni.
+
     pub x: [u8; 32],
-    /// `P-256` açık anahtarının `y` bileşeni.
+
     pub y: [u8; 32],
 }
 
-/// `private_key_jwt` assertion'ının claim'leri — `RFC` 7523 §3.
-///
-/// İmzası **doğrulanmış** bir assertion'dan çıkarılır; bu tip yalnızca imza
-/// kontrolünden sonra kurulur (`VerifiedProof` ile aynı desen).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssertionClaims {
-    /// `iss` — `RFC` 7523 §3: istemcinin kendisi.
     pub issuer: String,
-    /// `sub` — `RFC` 7523 §3: yine istemcinin kendisi.
+
     pub subject: String,
-    /// `aud` — yetkilendirme sunucusu.
+
     pub audience: Vec<String>,
-    /// `exp`.
+
     pub expires_at: Timestamp,
-    /// `jti` — tekrar tespiti için.
+
     pub jti: String,
 }
 
-/// Assertion'ın azami kabul edilen ömrü.
-///
-/// `RFC` 7523 §3 bir üst sınır koymaz ama uzun ömürlü bir assertion, çalındığında
-/// uzun süre kullanılabilir bir istemci kimlik bilgisidir. `RFC` 9700 §2.2.1'in
-/// "kısa ömürlü tut" tavsiyesiyle uyumlu muhafazakâr bir tavan.
 pub const MAX_ASSERTION_LIFETIME: Duration = Duration::from_seconds(300);
 
-/// Assertion claim kurallarını uygular.
-///
-/// İmza bu fonksiyonun işi DEĞİLDİR: `claims` yalnızca imzası doğrulanmış bir
-/// assertion'dan kurulabilir. Buradaki kontroller imzanın söylemediği her şeyi
-/// kapatır — assertion'ın kime, hangi sunucu için ve ne zamana kadar geçerli
-/// olduğunu imza değil claim'ler söyler.
-///
-/// # Errors
-///
-/// `iss`/`sub` istemciyle uyuşmazsa, `aud` bu sunucuyu göstermiyorsa, süre
-/// dolmuş ya da makul olmayacak kadar uzunsa, veya `jti` tekrar edilmişse.
 pub fn validate_assertion(
     claims: &AssertionClaims,
     client: &ClientId,
@@ -145,21 +81,14 @@ pub fn validate_assertion(
     now: Timestamp,
     replay: &impl ReplayGuard,
 ) -> Result<(), ClientAuthError> {
-    // Tekrar en başta: geçersiz bir assertion'ın bile tekrar edildiğini bilmek
-    // isteriz.
     if replay.seen(&claims.jti) {
         return Err(ClientAuthError::Replayed);
     }
 
-    // `RFC` 7523 §3: `iss` ve `sub` İKİSİ DE istemci olmalı. Yalnızca birini
-    // kontrol etmek, bir istemcinin başkası adına assertion üretmesine kapı açar.
     if claims.issuer != client.as_str() || claims.subject != client.as_str() {
         return Err(ClientAuthError::ClientMismatch);
     }
 
-    // `aud` olmadan, bir sunucu için üretilmiş assertion başka bir sunucuya
-    // yeniden sunulabilir (cross-AS replay). Bu kontrol `RFC` 7523'ün tek
-    // gerçek koruma noktasıdır.
     if !claims
         .audience
         .iter()
@@ -172,8 +101,6 @@ pub fn validate_assertion(
         return Err(ClientAuthError::Expired);
     }
 
-    // Aşırı uzun ömür, çalınmış bir assertion'ı kalıcı bir kimlik bilgisine
-    // çevirir.
     if claims.expires_at.since(now).as_seconds() > MAX_ASSERTION_LIFETIME.as_seconds() {
         return Err(ClientAuthError::LifetimeTooLong);
     }
@@ -181,67 +108,40 @@ pub fn validate_assertion(
     Ok(())
 }
 
-/// İstemci kimlik doğrulama hataları.
-///
-/// Hepsi istemciye `invalid_client` olarak döner (RFC 6749 §5.2); ayrım denetim
-/// kaydı içindir.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ClientAuthError {
-    /// Sunulan yöntem kayıtlı yöntemle uyuşmuyor.
-    ///
-    /// İstemci `none` ile kayıtlıyken sır sunması ya konfigürasyon hatasıdır ya
-    /// da bir saldırı denemesi; ikisi de kabul edilmemeli.
     #[error("client authentication method does not match the registration")]
     MethodMismatch,
 
-    /// Sunulan `client_id` beklenenle uyuşmuyor.
     #[error("client identity mismatch")]
     ClientMismatch,
 
-    /// Sır yanlış.
     #[error("invalid client credential")]
     BadCredential,
 
-    /// Kimlik bilgisi gerekiyordu ama sunulmadı.
     #[error("client authentication required")]
     Missing,
 
-    /// Assertion'ın `jti`'si daha önce görüldü.
     #[error("the client assertion has already been used")]
     Replayed,
 
-    /// Assertion başka bir yetkilendirme sunucusu için üretilmiş.
     #[error("the client assertion is not addressed to this server")]
     AudienceMismatch,
 
-    /// Assertion'ın süresi dolmuş.
     #[error("the client assertion has expired")]
     Expired,
 
-    /// Assertion makul olmayacak kadar uzun ömürlü.
     #[error("the client assertion lifetime exceeds the accepted maximum")]
     LifetimeTooLong,
 }
 
 impl ClientAuthError {
-    /// İstemciye dönecek OAuth hata kodu.
     #[must_use]
     pub const fn oauth_error_code(&self) -> &'static str {
         "invalid_client"
     }
 }
 
-/// İstemciyi doğrular.
-///
-/// `expected_secret_hash` kayıtlı sırrın hash'idir; ham sır **hiçbir zaman**
-/// saklanmaz. Karşılaştırma sabit zamanlıdır: §8, `client_secret`
-/// karşılaştırmasını sabit zaman gerektiren maddeler arasında **"Evet"** olarak
-/// işaretliyor. Buradaki sızıntı PKCE'dekinden daha tehlikelidir çünkü client
-/// secret düşük entropili olabilir.
-///
-/// # Errors
-///
-/// Yöntem uyuşmazsa, kimlik uyuşmazsa veya sır yanlışsa.
 pub fn authenticate(
     client: &ClientId,
     registered: ClientAuthMethod,
@@ -275,13 +175,11 @@ pub fn authenticate(
             }
         }
 
-        // Kimlik bilgisi gerekiyordu ama gelmedi.
         (
             ClientAuthMethod::ClientSecretBasic | ClientAuthMethod::PrivateKeyJwt,
             PresentedCredential::None,
         ) => Err(ClientAuthError::Missing),
 
-        // Yöntem karışıklığı: kayıtlı olanla sunulan tutmuyor.
         _ => Err(ClientAuthError::MethodMismatch),
     }
 }
@@ -300,7 +198,6 @@ mod tests {
         ClientId::new("other-app").expect("client")
     }
 
-    /// Test hash'i — gerçek SHA-256 değil, yalnızca eşleşme davranışını sınar.
     fn fake_hash(s: &str) -> [u8; 32] {
         let mut out = [0u8; 32];
         for (i, b) in s.bytes().take(32).enumerate() {
@@ -362,7 +259,6 @@ mod tests {
         );
     }
 
-    /// Doğru sırrı başka bir istemcinin kimliğiyle sunmak çalışmamalı.
     #[test]
     fn credential_is_bound_to_the_client_id() {
         let expected = fake_hash("s3cret");
@@ -382,10 +278,8 @@ mod tests {
         );
     }
 
-    /// Yöntem karışıklığı iki yönde de reddedilir.
     #[test]
     fn method_downgrade_and_upgrade_are_both_rejected() {
-        // Public kayıtlı, sır sunuyor.
         assert_eq!(
             authenticate(
                 &client(),
@@ -401,7 +295,6 @@ mod tests {
             ClientAuthError::MethodMismatch
         );
 
-        // Gizli kayıtlı, hiçbir şey sunmuyor.
         assert_eq!(
             authenticate(
                 &client(),
@@ -443,7 +336,6 @@ mod tests {
         );
     }
 
-    /// §25 K27: sır `Debug`'da görünmemeli.
     #[test]
     fn debug_redacts_the_secret() {
         let c = PresentedCredential::ClientSecret {

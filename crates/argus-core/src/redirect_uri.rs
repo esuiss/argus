@@ -1,63 +1,24 @@
-//! `redirect_uri` kaydı ve eşleştirmesi.
-//!
-//! # Karar (§1 #24)
-//!
-//! Eşleştirme **yalnızca tam dizge**dir. Regex ve wildcard hiç implemente edilmez —
-//! "opt-in tehlikeli özellik" olarak bile. authentik **CVE-2024-52289**: escape
-//! edilmemiş bir regex noktası yüzünden `app.example.com` konfigürasyonu
-//! `app0example.com` ile eşleşti ve kurban doğrudan saldırgana yönlendirildi.
-//! RFC 9700 zaten tam eşleşmeyi zorunlu kılıyor.
-//!
-//! # Tek istisna: loopback
-//!
-//! Native uygulamalar geçici (ephemeral) bir porta bağlanır ve hangi portu
-//! alacaklarını önceden bilemezler. RFC 8252 §7.3, IP-literal loopback için
-//! **port bileşeninin yok sayılmasını** zorunlu kılar. Argus aynı esnekliği
-//! `localhost` için de uygular — RFC 8252 §8.3 `localhost` kullanımını önermese de
-//! gerçek istemciler (ör. Claude Code) bunu kullanıyor ve reddedersek bağlanamazlar.
-//!
-//! Bu bir wildcard **değildir**: yalnızca port serbesttir; şema, host ve yol yine
-//! tam eşleşmek zorundadır.
-
 use core::fmt;
 
 use url::{Host, Url};
 
 use crate::error::RedirectUriError;
 
-/// Kayıtlı bir `redirect_uri`.
-///
-/// Kayıt anında doğrulanır, sonra değişmez. Doğrulama kuralları RFC 6749 §3.1.2'den:
-/// mutlak URI olmalı ve fragment taşımamalıdır.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct RedirectUri {
-    /// Ayrıştırılmış hâl — loopback karşılaştırması için.
     parsed: Url,
-    /// Kayıtta verilen ham dizge. Tam eşleşme **bunun** üzerinden yapılır:
-    /// `Url` normalizasyonu (ör. sondaki `/` eklenmesi) karşılaştırmayı kaydırmasın.
+
     raw: String,
 }
 
-/// Bir `redirect_uri` eşleşmesinin nasıl kurulduğu.
-///
-/// Denetim kaydına yazılır: gevşetilmiş kuralla eşleşen her istek görünür olmalıdır.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RedirectUriMatch {
-    /// Ham dizgeler bayt bayt aynı.
     Exact,
-    /// Loopback istisnası uygulandı: port dışında her şey aynı (RFC 8252 §7.3).
+
     LoopbackPortIgnored,
 }
 
 impl RedirectUri {
-    /// Bir `redirect_uri`'yi kayıt için doğrular.
-    ///
-    /// # Errors
-    ///
-    /// - [`RedirectUriError::NotAbsolute`] — ayrıştırılamıyor veya göreli.
-    /// - [`RedirectUriError::HasFragment`] — fragment içeriyor (RFC 6749 §3.1.2).
-    /// - [`RedirectUriError::WildcardNotSupported`] — `*` içeriyor. Bu ayrı bir hata
-    ///   çünkü sessizce reddedilirse operatör wildcard'ın çalıştığını sanabilir.
     pub fn register(raw: impl Into<String>) -> Result<Self, RedirectUriError> {
         let raw = raw.into();
 
@@ -74,17 +35,11 @@ impl RedirectUri {
         Ok(Self { parsed, raw })
     }
 
-    /// Kayıtlı ham dizge.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.raw
     }
 
-    /// Bu kayıt loopback gevşetmesine uygun mu?
-    ///
-    /// Koşullar birlikte sağlanmalı: şema `http` **ve** host loopback. `https` üzerinde
-    /// gevşetme yok — loopback'te TLS gereksizdir ve `https` bir uzak host'a işaret
-    /// ediyor olabilir.
     #[must_use]
     pub fn is_loopback(&self) -> bool {
         if self.parsed.scheme() != "http" {
@@ -93,26 +48,18 @@ impl RedirectUri {
         match self.parsed.host() {
             Some(Host::Ipv4(ip)) => ip.is_loopback(),
             Some(Host::Ipv6(ip)) => ip.is_loopback(),
-            // RFC 8252 §8.3 `localhost` önermiyor; yine de kabul ediyoruz, gerekçe
-            // modül notunda.
+
             Some(Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
             None => false,
         }
     }
 
-    /// Sunulan `redirect_uri`'nin bu kayıtla eşleşip eşleşmediğine karar verir.
-    ///
-    /// Eşleşme yoksa [`None`]. Çağıran bunu **kullanıcıyı yönlendirmeden** reddetmeli:
-    /// doğrulanmamış bir `redirect_uri`'ye hata yönlendirmesi yapmak açık
-    /// yönlendiricidir (RFC 9700).
     #[must_use]
     pub fn match_presented(&self, presented: &str) -> Option<RedirectUriMatch> {
-        // 1. Tam dizge — ana yol, RFC 9700'ün istediği.
         if self.raw == presented {
             return Some(RedirectUriMatch::Exact);
         }
 
-        // 2. Loopback istisnası. Yalnızca kayıt loopback ise değerlendirilir.
         if !self.is_loopback() {
             return None;
         }
@@ -122,15 +69,11 @@ impl RedirectUri {
             return None;
         }
 
-        // Port DIŞINDA her bileşen eşleşmeli. `host_str` yerine `host()` kullanıyoruz:
-        // `Host` karşılaştırması IPv6'yı köşeli parantezden bağımsız normalize eder.
         let same_scheme = self.parsed.scheme() == other.scheme();
         let same_host = self.parsed.host() == other.host();
         let same_path = self.parsed.path() == other.path();
         let same_query = self.parsed.query() == other.query();
 
-        // Sunulan taraf da loopback olmalı; aksi hâlde kayıtlı bir loopback,
-        // uzak bir host'a eşleşebilirdi.
         let other_is_loopback = match other.host() {
             Some(Host::Ipv4(ip)) => ip.is_loopback(),
             Some(Host::Ipv6(ip)) => ip.is_loopback(),
@@ -177,8 +120,6 @@ mod tests {
         );
     }
 
-    /// authentik CVE-2024-52289'un tam senaryosu: escape edilmemiş regex noktası
-    /// `app.example.com` ile `app0example.com`'u eşleştirmişti.
     #[test]
     fn regex_dot_does_not_match_arbitrary_character() {
         let uri = reg("https://app.example.com/cb");
@@ -223,8 +164,6 @@ mod tests {
         );
     }
 
-    // --- Loopback istisnası (RFC 8252 §7.3) ---
-
     #[test]
     fn loopback_ipv4_ignores_port() {
         let uri = reg("http://127.0.0.1/callback");
@@ -256,10 +195,10 @@ mod tests {
     fn loopback_relaxation_does_not_cross_scheme_host_or_path() {
         let uri = reg("http://127.0.0.1/callback");
         for evil in [
-            "https://127.0.0.1:3118/callback", // şema farklı
-            "http://127.0.0.2:3118/callback",  // host farklı
-            "http://127.0.0.1:3118/other",     // yol farklı
-            "http://evil.test:3118/callback",  // loopback değil
+            "https://127.0.0.1:3118/callback",
+            "http://127.0.0.2:3118/callback",
+            "http://127.0.0.1:3118/other",
+            "http://evil.test:3118/callback",
             "http://127.0.0.1:3118/callback?x=1",
         ] {
             assert_eq!(uri.match_presented(evil), None, "matched: {evil}");

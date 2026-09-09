@@ -1,21 +1,9 @@
--- Faz 0 çıkış kriteri: "RLS testleri geçiyor".
---
--- Her izolasyon testi `argus_app` rolüyle koşar — tabloların SAHİBİ OLMAYAN rolle.
--- Sahip rolüyle koşmak yanıltıcı olurdu: RLS varsayılan olarak sahibe uygulanmaz.
--- `FORCE ROW LEVEL SECURITY` sahibi de kapsar ve o da ayrıca sınanır (test 6).
---
--- Başarısızlıkta `RAISE EXCEPTION` ile durur; sessiz geçiş yoktur.
-
 \set ON_ERROR_STOP on
 
 \set t_a '''00000000-0000-7000-8000-00000000000a'''
 \set t_b '''00000000-0000-7000-8000-00000000000b'''
 \set u_a1 '''00000000-0000-7000-8000-0000000000a1'''
 \set u_b1 '''00000000-0000-7000-8000-0000000000b1'''
-
--- ---------------------------------------------------------------------------
--- Hazırlık
--- ---------------------------------------------------------------------------
 
 BEGIN;
   SET LOCAL argus.tenant_id = :t_a;
@@ -25,8 +13,7 @@ BEGIN;
     VALUES (:t_a, :u_a1, '\x0102'::bytea, 'kek-1');
   INSERT INTO users (tenant_id, user_id, email_ciphertext, email_blind_index)
     VALUES (:t_a, :u_a1, '\xdead'::bytea, '\xaaaa'::bytea);
-  -- Confidential client'ın kimlik doğrulama yöntemi OLMAK ZORUNDA (0005):
-  -- 'confidential' + 'none', kimlik doğrulaması olmayan bir gizli istemcidir.
+
   INSERT INTO clients (tenant_id, client_id, client_type, auth_method)
     VALUES (:t_a, 'acme-web', 'confidential', 'private_key_jwt');
 COMMIT;
@@ -41,9 +28,6 @@ BEGIN;
     VALUES (:t_b, :u_b1, '\xbeef'::bytea, '\xbbbb'::bytea);
 COMMIT;
 
--- ---------------------------------------------------------------------------
--- 1. Kapsam ayarlanmamışsa HİÇBİR satır görünmez (fail-closed)
--- ---------------------------------------------------------------------------
 BEGIN;
   SET LOCAL ROLE argus_app;
   DO $$
@@ -58,9 +42,6 @@ BEGIN;
   END $$;
 COMMIT;
 
--- ---------------------------------------------------------------------------
--- 2. Kapsam içinde yalnızca kendi satırları görünür
--- ---------------------------------------------------------------------------
 BEGIN;
   SET LOCAL ROLE argus_app;
   SET LOCAL argus.tenant_id = :t_a;
@@ -74,9 +55,6 @@ BEGIN;
   END $$;
 COMMIT;
 
--- ---------------------------------------------------------------------------
--- 3. Başka kiracının satırı ID'si bilinse bile görünmez
--- ---------------------------------------------------------------------------
 BEGIN;
   SET LOCAL ROLE argus_app;
   SET LOCAL argus.tenant_id = :t_a;
@@ -89,9 +67,6 @@ BEGIN;
   END $$;
 COMMIT;
 
--- ---------------------------------------------------------------------------
--- 4. Başka kiracı adına satır YAZILAMAZ (WITH CHECK)
--- ---------------------------------------------------------------------------
 BEGIN;
   SET LOCAL ROLE argus_app;
   SET LOCAL argus.tenant_id = :t_a;
@@ -107,9 +82,6 @@ BEGIN;
   END $$;
 ROLLBACK;
 
--- ---------------------------------------------------------------------------
--- 5. Başka kiracının satırı GÜNCELLENEMEZ / SİLİNEMEZ
--- ---------------------------------------------------------------------------
 BEGIN;
   SET LOCAL ROLE argus_app;
   SET LOCAL argus.tenant_id = :t_a;
@@ -127,9 +99,6 @@ BEGIN;
   END $$;
 ROLLBACK;
 
--- ---------------------------------------------------------------------------
--- 6. FORCE: tablo SAHİBİ de politikaya tabidir
--- ---------------------------------------------------------------------------
 BEGIN;
   SET LOCAL ROLE argus_owner;
   DO $$
@@ -140,9 +109,6 @@ BEGIN;
   END $$;
 COMMIT;
 
--- 6b. Bilinen ve KAPATILAMAYAN sınır: superuser RLS'i tümüyle atlar.
--- Bunu test etmek kusuru kabullenmek değil, sınırı kayda geçirmektir. §25 K6'nın
--- cevabı RLS değil, checkpoint'leri dışarı yayınlamaktır.
 BEGIN;
   DO $$
   DECLARE n int;
@@ -157,9 +123,6 @@ BEGIN;
   END $$;
 COMMIT;
 
--- ---------------------------------------------------------------------------
--- 7. Composite FK çapraz-kiracı referansı engeller (§1 #2)
--- ---------------------------------------------------------------------------
 BEGIN;
   SET LOCAL argus.tenant_id = :t_b;
   DO $$
@@ -173,9 +136,6 @@ BEGIN;
   END $$;
 ROLLBACK;
 
--- ---------------------------------------------------------------------------
--- 8. client_id GLOBAL benzersizdir (§1 #5)
--- ---------------------------------------------------------------------------
 BEGIN;
   SET LOCAL argus.tenant_id = :t_b;
   DO $$
@@ -189,9 +149,6 @@ BEGIN;
   END $$;
 ROLLBACK;
 
--- ---------------------------------------------------------------------------
--- 9. Kiracı kimliği DEĞİŞMEZ: slug (§1 #7) ve issuer_host (§1 #8)
--- ---------------------------------------------------------------------------
 BEGIN;
   SET LOCAL argus.tenant_id = :t_a;
   DO $$
@@ -212,9 +169,6 @@ BEGIN;
   END $$;
 ROLLBACK;
 
--- ---------------------------------------------------------------------------
--- 10. redirect_uri: wildcard, fragment, göreli reddedilir (§1 #24)
--- ---------------------------------------------------------------------------
 BEGIN;
   SET LOCAL argus.tenant_id = :t_a;
   DO $$
@@ -233,15 +187,11 @@ BEGIN;
   END $$;
 ROLLBACK;
 
--- ---------------------------------------------------------------------------
--- 11. Kiracı-yerel benzersizlik (§1 #6) — kör indeks üzerinden
--- ---------------------------------------------------------------------------
--- Aynı kör indeks İKİ FARKLI kiracıda serbest, aynı kiracıda değil.
 BEGIN;
   SET LOCAL argus.tenant_id = :t_b;
   INSERT INTO user_keys (tenant_id, user_id, dek_wrapped, kek_id)
     VALUES (:t_b, '00000000-0000-7000-8000-0000000000b3', '\x06'::bytea, 'kek-1');
-  -- Kiracı A'nın kör indeksi, kiracı B'de serbest olmalı.
+
   INSERT INTO users (tenant_id, user_id, email_ciphertext, email_blind_index)
     VALUES (:t_b, '00000000-0000-7000-8000-0000000000b3', '\xcafe'::bytea, '\xaaaa'::bytea);
 
@@ -259,11 +209,6 @@ BEGIN;
   END $$;
 ROLLBACK;
 
--- ---------------------------------------------------------------------------
--- 12. §1 #17: PII düz metin olarak SAKLANAMAZ
--- ---------------------------------------------------------------------------
--- Yapısal kontrol: kullanıcı tablosunda `text` tipinde bir e-posta kolonu KALMAMALI.
--- Bu test, ileride "geçici olarak" düz metin kolon ekleyen bir migration'ı yakalar.
 BEGIN;
   DO $$
   DECLARE offending text;
@@ -283,12 +228,9 @@ BEGIN;
   END $$;
 COMMIT;
 
--- ---------------------------------------------------------------------------
--- 13. §1 #14: emekli tanımlayıcı yeniden kullanılamaz
--- ---------------------------------------------------------------------------
 BEGIN;
   SET LOCAL argus.tenant_id = :t_a;
-  -- Kullanıcıyı 'deleted' yap: trigger tanımlayıcıları emekliye ayırmalı.
+
   UPDATE users SET status = 'deleted' WHERE user_id = :u_a1;
 
   DO $$
@@ -300,7 +242,6 @@ BEGIN;
       RAISE EXCEPTION 'FAIL retire_trigger: expected 2 retired identifiers, got %', n;
     END IF;
 
-    -- Aynı kör indeksle yeni kullanıcı açılamaz.
     BEGIN
       INSERT INTO user_keys (tenant_id, user_id, dek_wrapped, kek_id)
         VALUES ('00000000-0000-7000-8000-00000000000a',
@@ -314,9 +255,6 @@ BEGIN;
   END $$;
 ROLLBACK;
 
--- ---------------------------------------------------------------------------
--- 14. §1 #25: özel anahtar materyali DB'ye yazılamaz
--- ---------------------------------------------------------------------------
 BEGIN;
   SET LOCAL argus.tenant_id = :t_a;
   DO $$
@@ -330,16 +268,12 @@ BEGIN;
     EXCEPTION WHEN check_violation THEN NULL;
     END;
 
-    -- Açık anahtar kabul edilmeli.
     INSERT INTO signing_keys (tenant_id, kid, public_jwk, backend, backend_ref)
       VALUES ('00000000-0000-7000-8000-00000000000a', 'k1',
               '{"kty":"EC","crv":"P-256","x":"a","y":"b"}'::jsonb, 'kms', 'arn:test');
   END $$;
 ROLLBACK;
 
--- ---------------------------------------------------------------------------
--- 15. §1 #10: denetim logu partition'lı
--- ---------------------------------------------------------------------------
 BEGIN;
   DO $$
   DECLARE n int;
@@ -349,7 +283,6 @@ BEGIN;
      WHERE ns.nspname = 'public' AND c.relname = 'audit_events' AND c.relkind = 'p';
     IF n <> 1 THEN RAISE EXCEPTION 'FAIL audit_events_not_partitioned'; END IF;
 
-    -- Zaman + kiracı: aylık range partition, her biri 4 hash parçası.
     SELECT count(*) INTO n FROM pg_inherits i
       JOIN pg_class p ON p.oid = i.inhparent
      WHERE p.relname = 'audit_events';
@@ -357,9 +290,6 @@ BEGIN;
   END $$;
 COMMIT;
 
--- ---------------------------------------------------------------------------
--- 16. §25 K7: append-only ÜÇ katman — UPDATE, DELETE ve TRUNCATE
--- ---------------------------------------------------------------------------
 BEGIN;
   SET LOCAL argus.tenant_id = :t_a;
   INSERT INTO audit_events (tenant_id, occurred_at, event_type, outcome, actor_kind)
@@ -379,7 +309,6 @@ BEGIN;
     EXCEPTION WHEN restrict_violation THEN NULL;
     END;
 
-    -- En sık atlanan delik: row-level trigger'lar TRUNCATE'te ateşlenmez.
     BEGIN
       TRUNCATE audit_events;
       RAISE EXCEPTION 'FAIL audit_truncate_allowed';
@@ -388,11 +317,6 @@ BEGIN;
   END $$;
 ROLLBACK;
 
--- ---------------------------------------------------------------------------
--- 17. §1 #23: denetim olayı ve outbox satırı ATOMİK
--- ---------------------------------------------------------------------------
--- İş değişikliği geri alınırsa denetim kaydı da geri alınmalı; ikisi aynı
--- transaction'da olduğu için bu yapısal olarak garanti.
 BEGIN;
   SET LOCAL argus.tenant_id = :t_a;
   DO $$
@@ -409,7 +333,6 @@ BEGIN;
     SELECT count(*) INTO n FROM audit_outbox WHERE event_id = ev_id;
     IF n <> 1 THEN RAISE EXCEPTION 'FAIL audit_outbox_insert'; END IF;
 
-    -- §10.2 adayı için üst-seviye transaction kimliği yazılmış olmalı.
     SELECT count(*) INTO n FROM audit_outbox
      WHERE event_id = ev_id AND producer_xid IS NOT NULL;
     IF n <> 1 THEN RAISE EXCEPTION 'FAIL audit_outbox_producer_xid_missing'; END IF;
@@ -427,9 +350,6 @@ BEGIN;
   END $$;
 COMMIT;
 
--- ---------------------------------------------------------------------------
--- 18. §1 #9: placement_id gün-1'de mevcut
--- ---------------------------------------------------------------------------
 BEGIN;
   DO $$
   DECLARE n int;
@@ -445,14 +365,6 @@ BEGIN;
   END $$;
 COMMIT;
 
--- ---------------------------------------------------------------------------
--- 19. client_keys kiracılar arası sızdırmıyor
---
--- İstemcinin açık anahtarı sır değildir ama HANGİ kiracıda hangi istemcinin
--- hangi anahtarı olduğu bilgisidir; ayrıca yanlış kiracının anahtarıyla
--- doğrulama yapmak, bir kiracının istemcisinin başka bir kiracıda kimlik
--- doğrulamasına yol açardı.
--- ---------------------------------------------------------------------------
 BEGIN;
   SET LOCAL ROLE argus_app;
   SET LOCAL argus.tenant_id = :t_a;
@@ -474,12 +386,6 @@ BEGIN;
   END $$;
 COMMIT;
 
--- ---------------------------------------------------------------------------
--- 20. Confidential client kimlik doğrulama yöntemi OLMADAN yazılamaz
---
--- 'confidential' + auth_method = 'none' satırı, kimlik doğrulaması olmayan bir
--- gizli istemcidir: client_id'yi bilen herkes onun adına token isteyebilir.
--- ---------------------------------------------------------------------------
 BEGIN;
   SET LOCAL ROLE argus_app;
   SET LOCAL argus.tenant_id = :t_a;
@@ -493,7 +399,6 @@ BEGIN;
       NULL;
     END;
 
-    -- Ters yön de tutmalı: public client'ın kimlik bilgisi olmaz.
     BEGIN
       INSERT INTO clients (tenant_id, client_id, client_type, auth_method)
         VALUES ('00000000-0000-7000-8000-00000000000a', 'sneaky2', 'public', 'private_key_jwt');

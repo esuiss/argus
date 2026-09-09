@@ -1,12 +1,3 @@
-//! `UserInfo` endpoint'i — OIDC Core §5.3 ve `RFC` 9449 §7.1.
-//!
-//! # Burada test edilen şey bir kaynak sunucudur
-//!
-//! Token endpoint'i sırrı doğrulayıp iddia üretir; `UserInfo` iddiayı doğrular.
-//! Bu testlerin çoğu **ret** yollarını sınıyor, çünkü kaynak sunucuda asıl
-//! tehlike yanlış kabuldür: geçersiz bir token'ı kabul etmek, bağlamayı
-//! uygulamamak ya da süresi dolmuşu geçirmek.
-
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
 use std::sync::Arc;
@@ -25,10 +16,6 @@ const ISSUER: &str = "https://acme.argus.test";
 const USERINFO: &str = "https://acme.argus.test/userinfo";
 const SUBJECT: &str = "0000000000000000000000000000a1";
 
-/// Hiçbir `jti`'yi görülmüş saymaz.
-///
-/// ⚠️ Üretimde bu yeterli DEĞİL (`RFC` 9449 §11.1); burada tekrar korumasının
-/// **dışındaki** kuralları izole etmek için kullanılıyor.
 struct NoReplay;
 
 impl ReplayGuard for NoReplay {
@@ -37,8 +24,6 @@ impl ReplayGuard for NoReplay {
     }
 }
 
-/// Her `jti`'yi görülmüş sayar — tekrar reddinin gerçekten bağlı olduğunu
-/// kanıtlamak için.
 struct EverythingSeen;
 
 impl ReplayGuard for EverythingSeen {
@@ -76,7 +61,6 @@ fn claims(cnf: Option<Confirmation>) -> AccessTokenClaims {
     }
 }
 
-/// Gerçek bir `DPoP` kanıtı üretir.
 fn make_proof(key: &SigningKey, htm: &str, htu: &str, iat: i64, ath: Option<&str>) -> String {
     let c = key.public_components().expect("components");
     let x = Base64UrlUnpadded::encode_string(&c.x);
@@ -105,7 +89,6 @@ fn request<'a>(authorization: Option<&'a str>, dpop: Option<&'a str>) -> UserInf
     }
 }
 
-/// Token'ı gövdede sunan istek.
 fn body_request(token: &str) -> UserInfoRequest<'_> {
     UserInfoRequest {
         authorization: None,
@@ -116,10 +99,6 @@ fn body_request(token: &str) -> UserInfoRequest<'_> {
     }
 }
 
-// --- Bearer yolu -----------------------------------------------------------
-
-/// §5.3.2: `sub` `id_token`'daki ile AYNI olmalı, yoksa istemci iki kimliği
-/// eşleştiremez.
 #[test]
 fn a_valid_bearer_token_returns_the_subject() {
     let (ctx, key) = tenant();
@@ -130,8 +109,6 @@ fn a_valid_bearer_token_returns_the_subject() {
     assert_eq!(info.sub, SUBJECT);
 }
 
-/// `RFC` 7235 §2.1: şema harf büyüklüğüne duyarsızdır. `bearer` gönderen
-/// istemciler var; reddetmek uyum hatası olurdu.
 #[test]
 fn the_scheme_is_case_insensitive() {
     let (ctx, key) = tenant();
@@ -141,8 +118,6 @@ fn the_scheme_is_case_insensitive() {
     assert!(handle(&ctx, &request(Some(&header), None), NOW, &NoReplay).is_ok());
 }
 
-/// `RFC` 6750 §3.1: kimlik bilgisi HİÇ yoksa `error` yazılmaz — istemciye
-/// "kimlik doğrula" denir, "token'ın bozuk" denmez.
 #[test]
 fn a_missing_authorization_header_is_a_plain_challenge() {
     let (ctx, _) = tenant();
@@ -166,8 +141,6 @@ fn unknown_schemes_and_empty_tokens_are_refused() {
     }
 }
 
-/// BAŞKA bir anahtarla imzalanmış token kabul edilmemeli; aksi hâlde imza
-/// kontrolü hiçbir şey yapmıyor demektir.
 #[test]
 fn a_token_signed_by_another_key_is_rejected() {
     let (ctx, _) = tenant();
@@ -181,7 +154,6 @@ fn a_token_signed_by_another_key_is_rejected() {
     );
 }
 
-/// İmza geçerli olsa bile süresi dolmuş token kabul edilmez.
 #[test]
 fn an_expired_token_is_rejected() {
     let (ctx, key) = tenant();
@@ -195,7 +167,6 @@ fn an_expired_token_is_rejected() {
     );
 }
 
-/// Başka bir issuer'ın token'ı, imzası doğrulansa bile bu kiracıya ait değildir.
 #[test]
 fn a_token_from_another_issuer_is_rejected() {
     let (ctx, key) = tenant();
@@ -210,8 +181,6 @@ fn a_token_from_another_issuer_is_rejected() {
     );
 }
 
-/// §1 §9: rotasyon penceresinde eski anahtarla imzalanmış token'lar hâlâ
-/// dolaşımdadır. "0 adet 401" kriteri tam olarak burada sınanıyor.
 #[test]
 fn a_token_signed_by_a_retired_but_published_key_still_verifies() {
     let (old, _) = SigningKey::generate("old").expect("key");
@@ -234,10 +203,6 @@ fn a_token_signed_by_a_retired_but_published_key_still_verifies() {
     );
 }
 
-// --- `DPoP` bağlaması ------------------------------------------------------
-
-/// `RFC` 9449 §7.1: bağlı bir token'ı kanıtsız kabul etmek, bağlamayı tamamen
-/// anlamsız kılar — çalınmış token hâlâ kullanılabilir olurdu.
 #[test]
 fn a_bound_token_presented_as_bearer_is_refused() {
     let (ctx, key) = tenant();
@@ -266,8 +231,6 @@ fn a_bound_token_without_a_proof_header_is_refused() {
     );
 }
 
-/// Bağlamanın TAMAMI bu karşılaştırmada: başka bir anahtarla imzalanmış geçerli
-/// bir kanıt, token'ı kullanılabilir kılmamalı.
 #[test]
 fn a_proof_from_a_different_key_does_not_unlock_the_token() {
     let (ctx, key) = tenant();
@@ -297,7 +260,6 @@ fn a_proof_from_a_different_key_does_not_unlock_the_token() {
     );
 }
 
-/// Doğru anahtar, doğru `htm`/`htu` ve doğru `ath` — kabul.
 #[test]
 fn a_matching_proof_unlocks_the_bound_token() {
     let (ctx, key) = tenant();
@@ -318,8 +280,6 @@ fn a_matching_proof_unlocks_the_bound_token() {
     assert_eq!(info.sub, SUBJECT);
 }
 
-/// `RFC` 9449 §4.3: `ath` olmadan, bir kaynak için üretilmiş kanıt BAŞKA bir
-/// token'la eşleştirilebilirdi.
 #[test]
 fn a_proof_without_ath_is_refused() {
     let (ctx, key) = tenant();
@@ -341,7 +301,6 @@ fn a_proof_without_ath_is_refused() {
     );
 }
 
-/// BAŞKA bir token'ın `ath`'ini taşıyan kanıt reddedilmeli.
 #[test]
 fn a_proof_bound_to_another_token_is_refused() {
     let (ctx, key) = tenant();
@@ -370,7 +329,6 @@ fn a_proof_bound_to_another_token_is_refused() {
     );
 }
 
-/// Başka bir endpoint için üretilmiş kanıt buraya taşınamamalı.
 #[test]
 fn a_proof_for_another_uri_is_refused() {
     let (ctx, key) = tenant();
@@ -399,7 +357,6 @@ fn a_proof_for_another_uri_is_refused() {
     );
 }
 
-/// Tekrar reddi gerçekten bağlı olmalı; kanıtın geri kalanı kusursuz olsa bile.
 #[test]
 fn a_replayed_proof_is_refused() {
     let (ctx, key) = tenant();
@@ -428,8 +385,6 @@ fn a_replayed_proof_is_refused() {
     );
 }
 
-/// Bağsız bir token'ı `DPoP` şemasıyla sunmak bir çelişkidir: istemci bağlama
-/// olduğunu sanıyor ama yok.
 #[test]
 fn an_unbound_token_presented_as_dpop_is_refused() {
     let (ctx, key) = tenant();
@@ -442,8 +397,6 @@ fn an_unbound_token_presented_as_dpop_is_refused() {
     );
 }
 
-/// `RFC` 6750 §3 ve `RFC` 9449 §7.1: her ret yolu istemciye NASIL kimlik
-/// doğrulayacağını söylemeli; başlıksız 401 kör yeniden denemeye iter.
 #[test]
 fn every_refusal_carries_a_usable_challenge() {
     for err in [
@@ -459,11 +412,9 @@ fn every_refusal_carries_a_usable_challenge() {
         );
         assert_eq!(err.http_status(), 401);
     }
-    // `DPoP` yollarında istemci hangi algoritmayı kullanacağını bilmeli.
+
     assert!(UserInfoError::MissingProof.challenge().contains("algs="));
 }
-
-// --- Yardımcılar -----------------------------------------------------------
 
 fn thumbprint(key: &SigningKey) -> String {
     let c = key.public_components().expect("components");
@@ -479,26 +430,17 @@ fn access_token_hash(token: &str) -> String {
     Base64UrlUnpadded::encode_string(&AwsLcSha256.sha256(token.as_bytes()))
 }
 
-/// `at_hash` ile `ath` KARIŞTIRILMAMALI: biri digest'in sol yarısı (OIDC Core
-/// §3.1.3.6), diğeri tamamı (`RFC` 9449 §4.3). Karıştırmak sessiz bir ret
-/// üretir ve hata ayıklaması çok zordur.
 #[test]
 fn at_hash_and_ath_are_different_values() {
     let half = oidc::at_hash("a-token", &AwsLcSha256);
     let full = access_token_hash("a-token");
     assert_ne!(half, full);
-    // 16 bayt 22 BASE64 karakteri doldurur ama son karakter yalnızca 4 gerçek
-    // bit taşır; 32 baytlık kodlamada o karakter 6 bit taşıdığı için farklıdır.
-    // Ortak önek tam 21 karakterdir — "biri diğerinin önekidir" demek yanlış.
+
     assert_eq!(&full[..21], &half[..21]);
     assert_eq!(half.len(), 22);
     assert_eq!(full.len(), 43);
 }
 
-// --- Gövdedeki token — RFC 6750 §2.2 --------------------------------------
-
-/// OIDC Core §5.3.1 form-encoded gövdeyle token sunmaya izin verir;
-/// `oidcc-userinfo-post-body` bunu sınar.
 #[test]
 fn a_token_in_the_request_body_is_accepted() {
     let (ctx, key) = tenant();
@@ -508,9 +450,6 @@ fn a_token_in_the_request_body_is_accepted() {
     assert_eq!(info.sub, SUBJECT);
 }
 
-/// `RFC` 6750 §2: *"Clients MUST NOT use more than one method to transmit the
-/// token in each request."* İkisi birden geldiğinde hangisinin geçerli olduğunu
-/// seçmek, sunucular arasında farklı davranış üretir.
 #[test]
 fn presenting_the_token_twice_is_refused() {
     let (ctx, key) = tenant();
@@ -530,8 +469,6 @@ fn presenting_the_token_twice_is_refused() {
     );
 }
 
-/// Gövde yolunda şema yoktur; `DPoP` bağlı bir token bu yolla sunulamaz.
-/// Geçebilseydi, bağlama gövde kullanılarak atlatılabilirdi.
 #[test]
 fn a_bound_token_cannot_slip_through_the_body_path() {
     let (ctx, key) = tenant();
@@ -550,7 +487,6 @@ fn a_bound_token_cannot_slip_through_the_body_path() {
     );
 }
 
-/// Boş gövde bir kimlik bilgisi değildir.
 #[test]
 fn an_empty_body_token_is_not_credentials() {
     let (ctx, _) = tenant();

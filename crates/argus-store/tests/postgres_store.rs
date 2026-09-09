@@ -1,17 +1,3 @@
-//! `PostgresStore`'un gerçek `PostgreSQL`'e karşı davranışı.
-//!
-//! # Neden gerçek veritabanı
-//!
-//! Bu katmanın işi SQL yazmak. Sahte bir depoyla test etmek, tam olarak test
-//! edilmesi gereken şeyi (sorguların doğruluğu, `RLS`'in devrede olması,
-//! transaction sınırları) atlamak olurdu. Faz 0'da `FORCE ROW LEVEL SECURITY`
-//! ile ilgili iki gerçek açık ancak canlı veritabanına karşı koşunca çıkmıştı.
-//!
-//! `ARGUS_TEST_DATABASE_URL` ayarlı değilse testler **atlanır**, başarısız
-//! olmaz: veritabanı olmayan bir makinede derleme kapısını kırmak istemiyoruz.
-//! Kurulum: `./.claude/skills/dogrula/rls-test.sh` kabı ayakta bırakmaz;
-//! elle `docker run --name argus-db ... -e POSTGRES_DB=argus_db -p 55432:5432`.
-
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
 use argus_core::authz_code::{CodeState, StoredCode};
@@ -29,11 +15,6 @@ use uuid::Uuid;
 const CHALLENGE: &str = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
 const NOW: Timestamp = Timestamp::from_unix_seconds(1_700_000_000);
 
-/// Her teste KENDİ kiracısı verilir.
-///
-/// Testler paralel koşuyor; ortak bir kiracıyı silip yeniden yazmak birbirlerinin
-/// verisini yok ederdi. Ayrı kiracılar hem bunu çözüyor hem de kiracı kapsamının
-/// gerçekten işlediğini kanıtlıyor.
 fn fresh_tenant() -> TenantId {
     TenantId::from_uuid(Uuid::new_v4())
 }
@@ -42,12 +23,10 @@ fn user() -> UserId {
     UserId::from_uuid(Uuid::from_u128(0xa1))
 }
 
-/// `client_id` GLOBAL benzersizdir (§1 #5), bu yüzden kiracıya bağlanıyor.
 fn client_of(tenant: TenantId) -> ClientId {
     ClientId::new(format!("c{}", &tenant.as_uuid().simple().to_string()[..8])).expect("client")
 }
 
-/// Veritabanı yoksa `None` döner ve test atlanır.
 async fn store() -> Option<PostgresStore> {
     let url = std::env::var("ARGUS_TEST_DATABASE_URL").ok()?;
     let pool = PgPoolOptions::new()
@@ -58,7 +37,6 @@ async fn store() -> Option<PostgresStore> {
     Some(PostgresStore::new(pool))
 }
 
-/// Verilen kiracı için istemci ve kullanıcı kurar.
 async fn seed(tenant: TenantId) {
     let url = std::env::var("ARGUS_TEST_DATABASE_URL").expect("url");
     let pool = PgPoolOptions::new()
@@ -93,7 +71,6 @@ async fn seed(tenant: TenantId) {
         .await
         .expect("user");
 
-    // `client_id` GLOBAL benzersiz (§1 #5), bu yüzden kiracıya özgü olmalı.
     sqlx::query(
         "INSERT INTO clients (tenant_id, client_id, client_type) VALUES ($1, $2, 'public')",
     )
@@ -158,13 +135,11 @@ async fn authorization_code_round_trips_through_the_database() {
     assert_eq!(loaded.client, client_of(t));
     assert_eq!(loaded.subject, user());
     assert_eq!(loaded.state, CodeState::Issued);
-    // PKCE challenge kaydedilip geri okunabilmeli, yoksa doğrulama çalışmaz.
+
     assert_eq!(loaded.challenge.digest(), stored_code(t).challenge.digest());
     assert_eq!(loaded.redirect_uri.as_str(), "https://app.example.com/cb");
 }
 
-/// Tüketim tek yönlüdür ve `WHERE state = 'issued'` sayesinde iki eşzamanlı
-/// istek aynı kodu tüketemez.
 #[tokio::test]
 async fn consuming_a_code_is_idempotent_and_one_way() {
     let Some(s) = store().await else {
@@ -182,8 +157,6 @@ async fn consuming_a_code_is_idempotent_and_one_way() {
     let loaded = CodeStore::load(&s, t, &hash).await.expect("load");
     assert_eq!(loaded.state, CodeState::Redeemed { at });
 
-    // İkinci tüketim durumu DEĞİŞTİRMEZ: ilk tüketimin zamanı korunur, yoksa
-    // denetim kaydı yanlış anı gösterirdi.
     let later = Timestamp::from_unix_seconds(NOW.as_unix_seconds() + 99);
     s.consume(t, &hash, later).await.expect("consume 2");
     assert_eq!(
@@ -200,8 +173,6 @@ async fn missing_code_is_not_found_not_unavailable() {
     let t = fresh_tenant();
     seed(t).await;
 
-    // Ayrım kritik: `NotFound` istemciye `invalid_grant`, `Unavailable` ise
-    // 503 olur (§19 §7.1).
     assert_eq!(
         CodeStore::load(&s, t, &[0u8; 32]).await.unwrap_err(),
         StoreError::NotFound
@@ -220,8 +191,6 @@ async fn refresh_rotation_closes_the_old_and_opens_the_new() {
     let old = [1u8; 32];
     let new = [2u8; 32];
 
-    // İlk token'ı doğrudan yazmak için rotate kullanılıyor: eski hash yoksa
-    // UPDATE 0 satır etkiler, INSERT yine de çalışır.
     s.rotate(t, &old, &old, &refresh(t, family, 0), NOW)
         .await
         .expect("seed token");
@@ -237,13 +206,12 @@ async fn refresh_rotation_closes_the_old_and_opens_the_new() {
     let current = RefreshStore::load(&s, t, &new).await.expect("load new");
     assert_eq!(current.state, RefreshState::Active);
     assert_eq!(current.generation, 1);
-    // Zincir korunmalı: tespit ancak `family_id` aynı kalırsa mümkün.
+
     assert_eq!(current.family, family);
-    // Mutlak ömür rotasyonla YENİLENMEZ.
+
     assert_eq!(current.family_started_at, NOW);
 }
 
-/// RFC 9700 §4.14.2: yeniden kullanım tespit edildiğinde zincirin TAMAMI düşer.
 #[tokio::test]
 async fn revoking_a_family_takes_every_generation_down() {
     let Some(s) = store().await else {
@@ -284,7 +252,6 @@ async fn revoking_a_family_takes_every_generation_down() {
         );
     }
 
-    // Başka bir zincire dokunulmamalı.
     assert_eq!(
         RefreshStore::load(&s, t, &untouched)
             .await
@@ -314,15 +281,10 @@ async fn client_lookup_returns_registered_redirect_uris() {
         "https://app.example.com/cb"
     );
 
-    // Bilinmeyen istemci bir HATA değil: yetkilendirme akışında bu normal bir
-    // durumdur ve `Fatal(UnknownClient)` sonucunu doğurur.
     let unknown = ClientId::new("nope").expect("client id");
     assert!(s.find(t, &unknown).await.expect("query").is_none());
 }
 
-/// OIDC alanları kodla BİRLİKTE saklanmalı: token isteği geldiğinde
-/// yetkilendirme isteği bitmiştir ve `nonce` başka hiçbir yerden öğrenilemez.
-/// Bu test tam olarak `0004`'ün varlık sebebini sınıyor.
 #[tokio::test]
 async fn oidc_claims_survive_the_round_trip() {
     let Some(s) = store().await else {
@@ -341,13 +303,11 @@ async fn oidc_claims_survive_the_round_trip() {
     s.issue(t, &hash, &code).await.expect("issue");
 
     let loaded = CodeStore::load(&s, t, &hash).await.expect("load");
-    // `nonce` AYNEN dönmeli; en ufak dönüşüm istemcinin karşılaştırmasını bozar.
+
     assert_eq!(loaded.nonce.as_deref(), Some("n-0S6_WzA2Mj"));
     assert_eq!(loaded.scope.as_deref(), Some("openid profile"));
 }
 
-/// `openid` istenmeyen akışta iki kolon da `NULL` kalmalı — boş dize yazmak,
-/// "`nonce` gönderildi ama boştu" ile "hiç gönderilmedi"yi ayırt edilemez kılar.
 #[tokio::test]
 async fn a_plain_oauth_code_stores_no_oidc_claims() {
     let Some(s) = store().await else {
@@ -364,8 +324,6 @@ async fn a_plain_oauth_code_stores_no_oidc_claims() {
     assert!(loaded.scope.is_none());
 }
 
-/// İstemciden gelip aynen geri yazılan her alan bir şişirme yüzeyidir; sınır
-/// şemada zorlanmalı, yoksa uygulamadaki bir hata doğrudan diske yazar.
 #[tokio::test]
 async fn an_oversized_nonce_is_refused_by_the_schema() {
     let Some(s) = store().await else {
@@ -383,7 +341,6 @@ async fn an_oversized_nonce_is_refused_by_the_schema() {
         "the schema must reject a nonce longer than 255 characters"
     );
 
-    // Sınırın kendisi geçmeli, yoksa kontrol bir karakter kaymış demektir.
     let at_limit = StoredCode {
         nonce: Some("n".repeat(255)),
         ..stored_code(t)
@@ -393,9 +350,6 @@ async fn an_oversized_nonce_is_refused_by_the_schema() {
         .expect("255 characters must be accepted");
 }
 
-/// Kayıtlı istemcinin kimlik doğrulama yöntemi ve anahtarları veritabanından
-/// okunmalı: token endpoint'i hangi yöntemi bekleyeceğini yalnızca buradan
-/// öğrenir. Yanlış okunursa confidential bir istemci public gibi davranır.
 #[tokio::test]
 async fn a_confidential_client_carries_its_method_and_keys() {
     let Some(s) = store().await else {
@@ -443,7 +397,7 @@ async fn a_confidential_client_carries_its_method_and_keys() {
         .expect("client exists");
 
     assert_eq!(found.auth_method, ClientAuthMethod::PrivateKeyJwt);
-    // Rotasyon penceresinde iki anahtar birden geçerli olmalı.
+
     assert_eq!(found.keys.len(), 2);
     let kids: Vec<&str> = found.keys.iter().map(|k| k.kid.as_str()).collect();
     assert_eq!(kids, ["k1", "k2"]);
@@ -451,7 +405,6 @@ async fn a_confidential_client_carries_its_method_and_keys() {
     assert_eq!(found.keys.first().expect("key").y, [0x12u8; 32]);
 }
 
-/// Public client varsayılanı `none` olmalı ve anahtar taşımamalı.
 #[tokio::test]
 async fn a_public_client_defaults_to_no_authentication() {
     let Some(s) = store().await else {

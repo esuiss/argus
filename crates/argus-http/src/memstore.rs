@@ -1,13 +1,3 @@
-//! Bellek içi depo — **yalnızca geliştirme ve test için**.
-//!
-//! ⚠️ **Üretimde kullanılmaz.** Süreç yeniden başladığında her şey kaybolur:
-//! bekleyen authorization code'lar, refresh zincirleri ve — en kötüsü — denetim
-//! kayıtları. §1 #23 denetim olayının iş değişikliğiyle **aynı transaction'da**
-//! kalıcılaşmasını istiyor; bellek bunu sağlayamaz.
-//!
-//! Var olma sebebi, sunucunun `PostgreSQL` olmadan ayağa kalkıp uçtan uca
-//! denenebilmesi.
-
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -21,18 +11,12 @@ use argus_core::id::ClientId;
 
 use crate::store::{AuditSink, ClientStore, CodeIssuer, CodeStore, RefreshStore, StoreError};
 
-/// Bellek içi authorization code deposu.
 #[derive(Debug, Default)]
 pub struct MemoryCodeStore {
     codes: Mutex<HashMap<[u8; 32], StoredCode>>,
 }
 
 impl MemoryCodeStore {
-    /// Yeni bir kod kaydı ekler.
-    ///
-    /// # Errors
-    ///
-    /// Kilit zehirlenmişse (başka bir thread panikleyerek çıkmışsa).
     pub fn insert(&self, hash: [u8; 32], code: StoredCode) -> Result<(), StoreError> {
         self.codes
             .lock()
@@ -43,8 +27,6 @@ impl MemoryCodeStore {
 }
 
 impl CodeIssuer for MemoryCodeStore {
-    // Bellek erişimi senkron; `async` imzası trait'in `impl Future + Send`
-    // sözleşmesi için. `PostgreSQL` sürümü gerçekten bekleyecek.
     #[allow(clippy::unused_async_trait_impl)]
     async fn issue(
         &self,
@@ -60,18 +42,12 @@ impl CodeIssuer for MemoryCodeStore {
     }
 }
 
-/// Bellek içi istemci kaydı.
 #[derive(Debug, Default)]
 pub struct MemoryClientStore {
     clients: Mutex<HashMap<String, RegisteredClient>>,
 }
 
 impl MemoryClientStore {
-    /// İstemci kaydı ekler.
-    ///
-    /// # Errors
-    ///
-    /// Kilit zehirlenmişse.
     pub fn insert(&self, client: RegisteredClient) -> Result<(), StoreError> {
         self.clients
             .lock()
@@ -82,7 +58,6 @@ impl MemoryClientStore {
 }
 
 impl ClientStore for MemoryClientStore {
-    // Bellek erişimi senkron; imza trait sözleşmesi için.
     #[allow(clippy::unused_async_trait_impl)]
     async fn find(
         &self,
@@ -99,8 +74,6 @@ impl ClientStore for MemoryClientStore {
 }
 
 impl CodeStore for MemoryCodeStore {
-    // Bellek erişimi senkron; `async` imzası trait\'in `impl Future + Send`
-    // sözleşmesi için. `PostgreSQL` sürümü gerçekten bekleyecek.
     #[allow(clippy::unused_async_trait_impl)]
     async fn load(&self, _t: TenantId, hash: &[u8; 32]) -> Result<StoredCode, StoreError> {
         self.codes
@@ -111,8 +84,6 @@ impl CodeStore for MemoryCodeStore {
             .ok_or(StoreError::NotFound)
     }
 
-    // Bellek erişimi senkron; `async` imzası trait\'in `impl Future + Send`
-    // sözleşmesi için. `PostgreSQL` sürümü gerçekten bekleyecek.
     #[allow(clippy::unused_async_trait_impl)]
     async fn consume(
         &self,
@@ -127,8 +98,6 @@ impl CodeStore for MemoryCodeStore {
         Ok(())
     }
 
-    // Bellek erişimi senkron; `async` imzası trait\'in `impl Future + Send`
-    // sözleşmesi için. `PostgreSQL` sürümü gerçekten bekleyecek.
     #[allow(clippy::unused_async_trait_impl)]
     async fn revoke_tokens_issued_for_code(
         &self,
@@ -136,24 +105,16 @@ impl CodeStore for MemoryCodeStore {
         _hash: &[u8; 32],
         _at: Timestamp,
     ) -> Result<(), StoreError> {
-        // Bellek içi sürümde koddan türeyen token izi tutulmuyor; PostgreSQL
-        // sürümü bunu `audit_outbox` ve refresh zinciriyle bağlayacak.
         Ok(())
     }
 }
 
-/// Bellek içi refresh token deposu.
 #[derive(Debug, Default)]
 pub struct MemoryRefreshStore {
     tokens: Mutex<HashMap<[u8; 32], RefreshToken>>,
 }
 
 impl MemoryRefreshStore {
-    /// Yeni bir token kaydı ekler.
-    ///
-    /// # Errors
-    ///
-    /// Kilit zehirlenmişse.
     pub fn insert(&self, hash: [u8; 32], token: RefreshToken) -> Result<(), StoreError> {
         self.tokens
             .lock()
@@ -164,8 +125,6 @@ impl MemoryRefreshStore {
 }
 
 impl RefreshStore for MemoryRefreshStore {
-    // Bellek erişimi senkron; `async` imzası trait\'in `impl Future + Send`
-    // sözleşmesi için. `PostgreSQL` sürümü gerçekten bekleyecek.
     #[allow(clippy::unused_async_trait_impl)]
     async fn load(&self, _t: TenantId, hash: &[u8; 32]) -> Result<RefreshToken, StoreError> {
         self.tokens
@@ -176,8 +135,6 @@ impl RefreshStore for MemoryRefreshStore {
             .ok_or(StoreError::NotFound)
     }
 
-    // Bellek erişimi senkron; `async` imzası trait\'in `impl Future + Send`
-    // sözleşmesi için. `PostgreSQL` sürümü gerçekten bekleyecek.
     #[allow(clippy::unused_async_trait_impl)]
     async fn rotate(
         &self,
@@ -195,8 +152,6 @@ impl RefreshStore for MemoryRefreshStore {
         Ok(())
     }
 
-    // Bellek erişimi senkron; `async` imzası trait\'in `impl Future + Send`
-    // sözleşmesi için. `PostgreSQL` sürümü gerçekten bekleyecek.
     #[allow(clippy::unused_async_trait_impl)]
     async fn revoke_family(
         &self,
@@ -214,18 +169,12 @@ impl RefreshStore for MemoryRefreshStore {
     }
 }
 
-/// Bellek içi denetim kaydı.
 #[derive(Debug, Default)]
 pub struct MemoryAuditSink {
     events: Mutex<Vec<(String, i64)>>,
 }
 
 impl MemoryAuditSink {
-    /// Kaydedilmiş olayları verir.
-    ///
-    /// # Errors
-    ///
-    /// Kilit zehirlenmişse.
     pub fn events(&self) -> Result<Vec<(String, i64)>, StoreError> {
         Ok(self
             .events
@@ -236,8 +185,6 @@ impl MemoryAuditSink {
 }
 
 impl AuditSink for MemoryAuditSink {
-    // Bellek erişimi senkron; `async` imzası trait\'in `impl Future + Send`
-    // sözleşmesi için. `PostgreSQL` sürümü gerçekten bekleyecek.
     #[allow(clippy::unused_async_trait_impl)]
     async fn record(
         &self,

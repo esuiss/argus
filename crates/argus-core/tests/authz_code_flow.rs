@@ -1,11 +1,3 @@
-//! Authorization code akışının uçtan uca kuralları.
-//!
-//! Entegrasyon testi olarak yazıldı (birim testi değil): böylece akışın yalnızca
-//! **public API** üzerinden kurulabildiği de doğrulanmış oluyor. `argus-http`
-//! ileride tam olarak buradaki yüzeyi kullanacak.
-
-// Testlerde `expect` serbest: fikstür kurulumu başarısız olursa testin panikleyip
-// durması DOĞRU davranıştır. Üretim kodunda bu lint `deny` olarak kalır.
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
 use argus_core::authz_code::{
@@ -17,8 +9,6 @@ use argus_core::pkce::{CodeChallenge, CodeChallengeMethod, Sha256};
 use argus_core::time::Duration;
 use argus_core::{ClientId, PkceError, RedirectUri, TenantId, Timestamp, UserId};
 use uuid::Uuid;
-
-// --- Sabitler -------------------------------------------------------------
 
 const VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
 const CHALLENGE: &str = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
@@ -38,8 +28,6 @@ impl Sha256 for FixedSha256 {
         }
     }
 }
-
-// --- Fikstürler -----------------------------------------------------------
 
 fn tenant_a() -> TenantId {
     TenantId::from_uuid(Uuid::from_u128(0x0a))
@@ -97,7 +85,6 @@ fn request() -> TokenRequest {
     }
 }
 
-/// Testlerin çoğu "reddedildi mi ve hangi sebeple" sorar.
 fn deny_reason(d: &Decision) -> &DenialReason {
     match d {
         Decision::Deny { reason, .. } => reason,
@@ -110,8 +97,6 @@ fn effects(d: &Decision) -> &[Effect] {
         Decision::Deny { effects, .. } | Decision::Grant { effects, .. } => effects,
     }
 }
-
-// --- Mutlu yol ------------------------------------------------------------
 
 #[test]
 fn valid_request_is_granted() {
@@ -129,7 +114,6 @@ fn valid_request_is_granted() {
     assert!(effects(&d).contains(&Effect::ConsumeCode));
 }
 
-/// Süre sınırı kapsayıcıdır: tam sona erme anında kod hâlâ geçerli (RFC 7519 §4.1.4).
 #[test]
 fn code_is_valid_at_the_exact_expiry_instant() {
     let c = code();
@@ -137,11 +121,6 @@ fn code_is_valid_at_the_exact_expiry_instant() {
     assert!(matches!(d, Decision::Grant { .. }));
 }
 
-// --- Tekrar kullanım: en önemli kural -------------------------------------
-
-/// RFC 9700 §4.1.1: kod ikinci kez sunulduğunda o koddan türeyen TÜM token'lar
-/// iptal edilmelidir. Bu etkinin kararın parçası olması, çağıranın onu
-/// unutamayacağı anlamına gelir.
 #[test]
 fn replay_revokes_every_token_derived_from_the_code() {
     let used = AuthorizationCode::from_stored(StoredCode {
@@ -179,9 +158,6 @@ fn replay_revokes_every_token_derived_from_the_code() {
     );
 }
 
-/// Süresi dolmuş bir kodun tekrar sunulması da bir güvenlik olayıdır.
-/// "Zaten süresi dolmuştu" diyerek iptali atlamak, saldırganın kodu bekletmesini
-/// ödüllendirirdi.
 #[test]
 fn replay_of_an_expired_code_still_revokes() {
     let used = AuthorizationCode::from_stored(StoredCode {
@@ -199,7 +175,6 @@ fn replay_of_an_expired_code_still_revokes() {
         scope: None,
     });
 
-    // Çok sonra sunuluyor — süresi çoktan dolmuş.
     let d = redeem(
         &used,
         &request(),
@@ -210,8 +185,6 @@ fn replay_of_an_expired_code_still_revokes() {
     assert!(matches!(deny_reason(&d), DenialReason::Replayed { .. }));
     assert!(effects(&d).contains(&Effect::RevokeTokensIssuedForCode));
 }
-
-// --- Bağlama kuralları ----------------------------------------------------
 
 #[test]
 fn code_is_bound_to_its_client() {
@@ -237,8 +210,6 @@ fn redirect_uri_must_match_the_authorization_request() {
     assert_eq!(deny_reason(&d), &DenialReason::RedirectUriMismatch);
 }
 
-/// Loopback istisnası (§1 #24 / RFC 8252 §7.3) token isteğinde de geçerli olmalı:
-/// native uygulama yetkilendirme anında hangi porta bağlanacağını bilmiyordu.
 #[test]
 fn loopback_port_variance_is_accepted_at_the_token_endpoint() {
     let loopback = RedirectUri::register("http://127.0.0.1/callback").expect("valid");
@@ -276,11 +247,6 @@ fn wrong_pkce_verifier_is_rejected() {
     );
 }
 
-// --- Değişmezler ----------------------------------------------------------
-
-/// Tekrar kullanım DIŞINDAKİ her ret kodu tüketmelidir. Aksi hâlde saldırgan
-/// aynı kodu farklı parametrelerle (başka `redirect_uri`, başka verifier)
-/// tekrar tekrar deneyebilirdi.
 #[test]
 fn every_non_replay_denial_consumes_the_code() {
     let mut wrong_client = request();
@@ -304,15 +270,12 @@ fn every_non_replay_denial_consumes_the_code() {
         );
     }
 
-    // Süresi dolan da tüketilir.
     let c = code();
     let after = Timestamp::from_unix_seconds(c.expires_at().as_unix_seconds() + 1);
     let d = redeem(&c, &request(), after, &FixedSha256);
     assert!(effects(&d).contains(&Effect::ConsumeCode));
 }
 
-/// Her karar denetim kaydı ister. Sessizce geçen bir yol olmamalı (§25 K17:
-/// denetimde örnekleme yasak).
 #[test]
 fn every_decision_requests_an_audit_record() {
     let mut wrong_client = request();
@@ -333,8 +296,6 @@ fn every_decision_requests_an_audit_record() {
     }
 }
 
-/// İstemciye dönen hata kodu her zaman `invalid_grant`'tır: hangi kontrolde
-/// takıldığını söylemek saldırgana bilgi verir (RFC 6749 §5.2).
 #[test]
 fn all_denials_surface_as_invalid_grant() {
     let mut wrong_client = request();
@@ -348,8 +309,6 @@ fn all_denials_surface_as_invalid_grant() {
         assert_eq!(deny_reason(&d).oauth_error_code(), "invalid_grant");
     }
 }
-
-// --- Konfigürasyon --------------------------------------------------------
 
 #[test]
 fn code_lifetime_is_bounded_by_the_rfc_maximum() {
