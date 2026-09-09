@@ -21,8 +21,8 @@ use crate::endpoints::userinfo::{self, UserInfoRequest};
 use crate::replay::{PrecheckedReplay, consume};
 use crate::state::AppState;
 use crate::store::{
-    AuditSink, ClientStore, CodeIssuer, CodeStore, ConnectionStore, JtiPurpose, RefreshStore,
-    ReplayStore, ResourceStore,
+    AuditSink, BackchannelStore, ClientStore, CodeIssuer, CodeStore, ConnectionStore, JtiPurpose,
+    RefreshStore, ReplayStore, ResourceStore,
 };
 
 fn now() -> Timestamp {
@@ -54,7 +54,7 @@ async fn metadata_handler<C, R, A, S, U, P, X>(
     State(state): State<SharedState<C, R, A, S, U, P, X>>,
 ) -> Response
 where
-    C: CodeStore + CodeIssuer + Send + Sync + 'static,
+    C: CodeStore + CodeIssuer + BackchannelStore + Send + Sync + 'static,
     R: RefreshStore + Send + Sync + 'static,
     A: AuditSink + Send + Sync + 'static,
     S: ClientStore + Send + Sync + 'static,
@@ -69,7 +69,7 @@ async fn jwks_handler<C, R, A, S, U, P, X>(
     State(state): State<SharedState<C, R, A, S, U, P, X>>,
 ) -> Response
 where
-    C: CodeStore + CodeIssuer + Send + Sync + 'static,
+    C: CodeStore + CodeIssuer + BackchannelStore + Send + Sync + 'static,
     R: RefreshStore + Send + Sync + 'static,
     A: AuditSink + Send + Sync + 'static,
     S: ClientStore + Send + Sync + 'static,
@@ -136,7 +136,7 @@ async fn token_handler<C, R, A, S, U, P, X>(
     Form(form): Form<TokenForm>,
 ) -> Response
 where
-    C: CodeStore + CodeIssuer + Send + Sync + 'static,
+    C: CodeStore + CodeIssuer + BackchannelStore + Send + Sync + 'static,
     R: RefreshStore + Send + Sync + 'static,
     A: AuditSink + Send + Sync + 'static,
     S: ClientStore + Send + Sync + 'static,
@@ -207,13 +207,69 @@ fn percent_decode(value: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+async fn backchannel_handler<C, R, A, S, U, P, X>(
+    State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    Form(form): Form<crate::endpoints::backchannel::BackchannelForm>,
+) -> Response
+where
+    C: CodeStore + CodeIssuer + BackchannelStore + Send + Sync + 'static,
+    R: RefreshStore + Send + Sync + 'static,
+    A: AuditSink + Send + Sync + 'static,
+    S: ClientStore + Send + Sync + 'static,
+    U: UserAuthenticator + Send + Sync + 'static,
+    P: ReplayStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + Send + Sync + 'static,
+{
+    use crate::endpoints::backchannel::{
+        BackchannelContext, DevBackchannelResolver, request as backchannel_request,
+    };
+
+    let at = now();
+
+    let Some(raw_client) = form.client_id.clone() else {
+        return oauth_response(&OAuthError::new(OAuthErrorCode::InvalidClient));
+    };
+
+    let resolved = match resolve_client(&state, &raw_client, at).await {
+        Ok(Some(client)) => client,
+        Ok(None) => return oauth_response(&OAuthError::new(OAuthErrorCode::InvalidClient)),
+        Err(response) => return *response,
+    };
+
+    let auth_req_id = uuid::Uuid::new_v4().simple().to_string();
+
+    let ctx = BackchannelContext {
+        tenant: state.tenant_id(),
+        client: &resolved.client_id,
+        store: &state.codes,
+        hasher: &AwsLcSha256,
+        users: &DevBackchannelResolver {
+            user: argus_core::id::UserId::from_uuid(uuid::Uuid::from_u128(1)),
+        },
+        now: at,
+        auth_req_id: &auth_req_id,
+        resources: Vec::new(),
+    };
+
+    match backchannel_request(&ctx, &form).await {
+        Ok(response) => {
+            let mut r = Json(response).into_response();
+            if let Ok(value) = "no-store".parse() {
+                r.headers_mut().insert("Cache-Control", value);
+            }
+            r
+        }
+        Err(err) => oauth_response(&err),
+    }
+}
+
 async fn resolve_client<C, R, A, S, U, P, X>(
     state: &AppState<C, R, A, S, U, P, X>,
     client_id: &str,
     now: Timestamp,
 ) -> Result<Option<argus_core::authorize::RegisteredClient>, Box<Response>>
 where
-    C: CodeStore + CodeIssuer + Send + Sync,
+    C: CodeStore + CodeIssuer + BackchannelStore + Send + Sync,
     R: RefreshStore + Send + Sync,
     A: AuditSink + Send + Sync,
     S: ClientStore + Send + Sync,
@@ -248,7 +304,7 @@ async fn prm_handler<C, R, A, S, U, P, X>(
     axum::extract::Path(path): axum::extract::Path<String>,
 ) -> Response
 where
-    C: CodeStore + CodeIssuer + Send + Sync + 'static,
+    C: CodeStore + CodeIssuer + BackchannelStore + Send + Sync + 'static,
     R: RefreshStore + Send + Sync + 'static,
     A: AuditSink + Send + Sync + 'static,
     S: ClientStore + Send + Sync + 'static,
@@ -263,7 +319,7 @@ async fn prm_root_handler<C, R, A, S, U, P, X>(
     State(state): State<SharedState<C, R, A, S, U, P, X>>,
 ) -> Response
 where
-    C: CodeStore + CodeIssuer + Send + Sync + 'static,
+    C: CodeStore + CodeIssuer + BackchannelStore + Send + Sync + 'static,
     R: RefreshStore + Send + Sync + 'static,
     A: AuditSink + Send + Sync + 'static,
     S: ClientStore + Send + Sync + 'static,
@@ -279,7 +335,7 @@ async fn prm_response<C, R, A, S, U, P, X>(
     suffix: &str,
 ) -> Response
 where
-    C: CodeStore + CodeIssuer + Send + Sync,
+    C: CodeStore + CodeIssuer + BackchannelStore + Send + Sync,
     R: RefreshStore + Send + Sync,
     A: AuditSink + Send + Sync,
     X: ResourceStore + Send + Sync,
@@ -318,7 +374,7 @@ async fn userinfo_handler<C, R, A, S, U, P, X>(
     body: String,
 ) -> Response
 where
-    C: CodeStore + CodeIssuer + Send + Sync + 'static,
+    C: CodeStore + CodeIssuer + BackchannelStore + Send + Sync + 'static,
     R: RefreshStore + Send + Sync + 'static,
     A: AuditSink + Send + Sync + 'static,
     S: ClientStore + Send + Sync + 'static,
@@ -404,7 +460,7 @@ async fn authorize_handler<C, R, A, S, U, P, X>(
     axum::extract::RawQuery(raw_query): axum::extract::RawQuery,
 ) -> Response
 where
-    C: CodeStore + CodeIssuer + Send + Sync + 'static,
+    C: CodeStore + CodeIssuer + BackchannelStore + Send + Sync + 'static,
     R: RefreshStore + Send + Sync + 'static,
     A: AuditSink + Send + Sync + 'static,
     S: ClientStore + Send + Sync + 'static,
@@ -459,7 +515,7 @@ where
 
 pub fn build<C, R, A, S, U, P, X>(state: SharedState<C, R, A, S, U, P, X>) -> Router
 where
-    C: CodeStore + CodeIssuer + Send + Sync + 'static,
+    C: CodeStore + CodeIssuer + BackchannelStore + Send + Sync + 'static,
     R: RefreshStore + Send + Sync + 'static,
     A: AuditSink + Send + Sync + 'static,
     S: ClientStore + Send + Sync + 'static,
@@ -490,6 +546,10 @@ where
         )
         .route("/authorize", get(authorize_handler::<C, R, A, S, U, P, X>))
         .route("/token", post(token_handler::<C, R, A, S, U, P, X>))
+        .route(
+            "/bc-authorize",
+            post(backchannel_handler::<C, R, A, S, U, P, X>),
+        )
         .route(
             "/userinfo",
             get(userinfo_handler::<C, R, A, S, U, P, X>)

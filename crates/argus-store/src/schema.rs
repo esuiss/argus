@@ -12,6 +12,7 @@ pub const EXPECTED_MIGRATIONS: &[&str] = &[
     "0009_protected_resources",
     "0010_code_resources",
     "0011_cross_app_connections",
+    "0012_backchannel_requests",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

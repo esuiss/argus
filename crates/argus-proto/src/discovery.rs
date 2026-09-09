@@ -11,6 +11,14 @@ pub struct AuthorizationServerMetadata {
     pub jwks_uri: String,
 
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub backchannel_authentication_endpoint: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backchannel_token_delivery_modes_supported: Option<Vec<String>>,
+
+    pub backchannel_user_code_parameter_supported: bool,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub userinfo_endpoint: Option<String>,
 
     pub response_types_supported: Vec<String>,
@@ -57,12 +65,16 @@ impl AuthorizationServerMetadata {
             authorization_endpoint: format!("{issuer}/authorize"),
             token_endpoint: format!("{issuer}/token"),
             jwks_uri: format!("{issuer}/.well-known/jwks.json"),
+            backchannel_authentication_endpoint: Some(format!("{issuer}/bc-authorize")),
+            backchannel_token_delivery_modes_supported: Some(vec!["poll".to_owned()]),
+            backchannel_user_code_parameter_supported: false,
             userinfo_endpoint: Some(format!("{issuer}/userinfo")),
             response_types_supported: vec!["code".to_owned()],
             grant_types_supported: vec![
                 "authorization_code".to_owned(),
                 "refresh_token".to_owned(),
                 crate::idjag::GRANT_TYPE_TOKEN_EXCHANGE.to_owned(),
+                "urn:openid:params:grant-type:ciba".to_owned(),
             ],
             code_challenge_methods_supported: vec!["S256".to_owned()],
             token_endpoint_auth_methods_supported: vec![
@@ -125,6 +137,24 @@ mod tests {
     #[test]
     fn iss_parameter_is_always_advertised() {
         assert!(meta().authorization_response_iss_parameter_supported);
+    }
+
+    #[test]
+    fn only_the_poll_delivery_mode_is_advertised() {
+        let m = meta();
+        assert_eq!(
+            m.backchannel_token_delivery_modes_supported.as_deref(),
+            Some(["poll".to_owned()].as_slice())
+        );
+        assert!(!m.backchannel_user_code_parameter_supported);
+        assert_eq!(
+            m.backchannel_authentication_endpoint.as_deref(),
+            Some("https://acme.argus.test/bc-authorize")
+        );
+        assert!(
+            m.grant_types_supported
+                .contains(&"urn:openid:params:grant-type:ciba".to_owned())
+        );
     }
 
     #[test]

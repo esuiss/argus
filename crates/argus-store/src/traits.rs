@@ -1,5 +1,6 @@
 use argus_core::authorize::RegisteredClient;
 use argus_core::authz_code::StoredCode;
+use argus_core::ciba::BackchannelRequest;
 use argus_core::exchange::CrossAppConnection;
 use argus_core::id::ClientId;
 use argus_core::id::TenantId;
@@ -121,6 +122,43 @@ pub trait ResourceStore {
         &self,
         tenant: TenantId,
     ) -> impl Future<Output = Result<Vec<ProtectedResource>, StoreError>> + Send;
+}
+
+pub trait BackchannelStore {
+    fn create_backchannel(
+        &self,
+        tenant: TenantId,
+        auth_req_hash: &[u8; 32],
+        request: &BackchannelRequest,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    fn load_backchannel(
+        &self,
+        tenant: TenantId,
+        auth_req_hash: &[u8; 32],
+    ) -> impl Future<Output = Result<BackchannelRequest, StoreError>> + Send;
+
+    fn record_backchannel_poll(
+        &self,
+        tenant: TenantId,
+        auth_req_hash: &[u8; 32],
+        at: Timestamp,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    fn consume_backchannel(
+        &self,
+        tenant: TenantId,
+        auth_req_hash: &[u8; 32],
+        at: Timestamp,
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send;
+
+    fn decide_backchannel(
+        &self,
+        tenant: TenantId,
+        auth_req_hash: &[u8; 32],
+        approved: bool,
+        at: Timestamp,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
 
 pub trait ConnectionStore {

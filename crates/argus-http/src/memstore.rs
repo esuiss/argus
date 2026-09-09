@@ -10,13 +10,14 @@ use argus_core::authorize::RegisteredClient;
 use argus_core::id::ClientId;
 
 use crate::store::{
-    AuditSink, ClientStore, CodeIssuer, CodeStore, ConnectionStore, JtiOutcome, JtiPurpose,
-    ProtectedResource, RefreshStore, ReplayStore, ResourceStore, StoreError,
+    AuditSink, BackchannelStore, ClientStore, CodeIssuer, CodeStore, ConnectionStore, JtiOutcome,
+    JtiPurpose, ProtectedResource, RefreshStore, ReplayStore, ResourceStore, StoreError,
 };
 
 #[derive(Debug, Default)]
 pub struct MemoryCodeStore {
     codes: Mutex<HashMap<[u8; 32], StoredCode>>,
+    backchannel: Mutex<HashMap<[u8; 32], argus_core::ciba::BackchannelRequest>>,
 }
 
 impl MemoryCodeStore {
@@ -312,5 +313,97 @@ impl ConnectionStore for MemoryResourceStore {
             .iter()
             .find(|c| &c.requesting_client == client && c.resource_as_issuer == resource_as_issuer)
             .cloned())
+    }
+}
+
+impl BackchannelStore for MemoryCodeStore {
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn create_backchannel(
+        &self,
+        _t: TenantId,
+        hash: &[u8; 32],
+        request: &argus_core::ciba::BackchannelRequest,
+    ) -> Result<(), StoreError> {
+        self.backchannel
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .insert(*hash, request.clone());
+        Ok(())
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn load_backchannel(
+        &self,
+        _t: TenantId,
+        hash: &[u8; 32],
+    ) -> Result<argus_core::ciba::BackchannelRequest, StoreError> {
+        self.backchannel
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .get(hash)
+            .cloned()
+            .ok_or(StoreError::NotFound)
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn record_backchannel_poll(
+        &self,
+        _t: TenantId,
+        hash: &[u8; 32],
+        at: Timestamp,
+    ) -> Result<(), StoreError> {
+        if let Some(record) = self
+            .backchannel
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .get_mut(hash)
+        {
+            record.last_polled_at = Some(at);
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn consume_backchannel(
+        &self,
+        _t: TenantId,
+        hash: &[u8; 32],
+        _at: Timestamp,
+    ) -> Result<bool, StoreError> {
+        let mut guard = self
+            .backchannel
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?;
+        let Some(record) = guard.get_mut(hash) else {
+            return Ok(false);
+        };
+        if record.state != argus_core::ciba::BackchannelState::Approved {
+            return Ok(false);
+        }
+        record.state = argus_core::ciba::BackchannelState::Consumed;
+        Ok(true)
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn decide_backchannel(
+        &self,
+        _t: TenantId,
+        hash: &[u8; 32],
+        approved: bool,
+        _at: Timestamp,
+    ) -> Result<(), StoreError> {
+        if let Some(record) = self
+            .backchannel
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .get_mut(hash)
+        {
+            record.state = if approved {
+                argus_core::ciba::BackchannelState::Approved
+            } else {
+                argus_core::ciba::BackchannelState::Denied
+            };
+        }
+        Ok(())
     }
 }

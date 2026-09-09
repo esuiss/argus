@@ -2,6 +2,7 @@
 
 pub mod authorize;
 pub mod authz_code;
+pub mod ciba;
 pub mod cimd;
 pub mod client_auth;
 pub mod dpop;

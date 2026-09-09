@@ -1,4 +1,5 @@
 use argus_core::authz_code::{AuthorizationCode, Decision, TokenRequest, redeem};
+use argus_core::ciba::{PollOutcome, poll};
 use argus_core::client_auth::{
     MAX_ASSERTION_LIFETIME, PresentedCredential, authenticate, validate_assertion,
 };
@@ -21,8 +22,8 @@ use crate::effects::{EffectContext, Rotation, apply};
 use crate::replay::consume;
 use crate::state::AppState;
 use crate::store::{
-    AuditSink, ClientStore, CodeStore, ConnectionStore, JtiPurpose, RefreshStore, ReplayStore,
-    StoreError,
+    AuditSink, BackchannelStore, ClientStore, CodeStore, ConnectionStore, JtiPurpose, RefreshStore,
+    ReplayStore, StoreError,
 };
 
 pub const PLACEHOLDER_ACCESS_TOKEN_LIFETIME: Duration = Duration::from_seconds(300);
@@ -66,6 +67,8 @@ pub struct TokenForm {
     pub resource: Option<String>,
 
     pub scope: Option<String>,
+
+    pub auth_req_id: Option<String>,
 }
 
 fn hash(hasher: &impl Sha256, secret: &str) -> [u8; 32] {
@@ -87,7 +90,7 @@ pub async fn handle<C, R, A, S, U, P, X, H>(
     binding: Binding,
 ) -> Result<TokenResponse, OAuthError>
 where
-    C: CodeStore + Send + Sync,
+    C: CodeStore + BackchannelStore + Send + Sync,
     R: RefreshStore + Send + Sync,
     A: AuditSink + Send + Sync,
     S: ClientStore + Send + Sync,
@@ -104,6 +107,9 @@ where
         "refresh_token" => refresh_token(state, form, &client, now, hasher, binding).await,
         argus_proto::idjag::GRANT_TYPE_TOKEN_EXCHANGE => {
             token_exchange(state, form, &client, now).await
+        }
+        argus_core::ciba::GRANT_TYPE => {
+            backchannel(state, form, &client, now, hasher, binding).await
         }
 
         _ => Err(OAuthError::with_description(
@@ -375,6 +381,86 @@ where
                 hasher,
             )
         }
+    }
+}
+
+async fn backchannel<C, R, A, S, U, P, X, H>(
+    state: &AppState<C, R, A, S, U, P, X>,
+    form: &TokenForm,
+    client: &ClientId,
+    now: Timestamp,
+    hasher: &H,
+    binding: Binding,
+) -> Result<TokenResponse, OAuthError>
+where
+    C: CodeStore + BackchannelStore + Send + Sync,
+    R: RefreshStore + Send + Sync,
+    A: AuditSink + Send + Sync,
+    H: Sha256,
+{
+    let auth_req_id = form
+        .auth_req_id
+        .as_deref()
+        .ok_or_else(|| OAuthError::new(OAuthErrorCode::InvalidRequest))?;
+
+    let hash = hash(hasher, auth_req_id);
+
+    let record = state
+        .codes
+        .load_backchannel(state.tenant_id(), &hash)
+        .await
+        .map_err(|e| store_error_to_oauth(&e))?;
+
+    let outcome = poll(&record, client, now);
+
+    state
+        .codes
+        .record_backchannel_poll(state.tenant_id(), &hash, now)
+        .await
+        .map_err(|e| store_error_to_oauth(&e))?;
+
+    let PollOutcome::Approved {
+        subject,
+        scope,
+        resources,
+    } = outcome
+    else {
+        return Err(backchannel_error(&outcome));
+    };
+
+    let consumed = state
+        .codes
+        .consume_backchannel(state.tenant_id(), &hash, now)
+        .await
+        .map_err(|e| store_error_to_oauth(&e))?;
+
+    if !consumed {
+        return Err(OAuthError::new(OAuthErrorCode::InvalidGrant));
+    }
+
+    issue(
+        state,
+        &IssueRequest {
+            subject: &subject,
+            client,
+            refresh: None,
+            binding,
+            nonce: None,
+            scope: scope.as_deref(),
+            resources: &resources,
+        },
+        now,
+        hasher,
+    )
+}
+
+fn backchannel_error(outcome: &PollOutcome) -> OAuthError {
+    match outcome.oauth_error_code() {
+        Some("authorization_pending") => OAuthError::new(OAuthErrorCode::AuthorizationPending),
+        Some("slow_down") => OAuthError::new(OAuthErrorCode::SlowDown),
+        Some("expired_token") => OAuthError::new(OAuthErrorCode::ExpiredToken),
+        Some("access_denied") => OAuthError::new(OAuthErrorCode::AccessDenied),
+        _ => OAuthError::new(OAuthErrorCode::InvalidGrant),
     }
 }
 

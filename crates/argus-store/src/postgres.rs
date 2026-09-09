@@ -1,5 +1,6 @@
 use argus_core::authorize::RegisteredClient;
 use argus_core::authz_code::{CodeState, StoredCode};
+use argus_core::ciba::{BackchannelRequest, BackchannelState};
 use argus_core::client_auth::{ClientAuthMethod, ClientKey};
 use argus_core::exchange::CrossAppConnection;
 use argus_core::id::{ClientId, TenantId, UserId};
@@ -12,8 +13,8 @@ use base64ct::{Base64UrlUnpadded, Encoding as _};
 use sqlx::{PgPool, Postgres, Row as _, Transaction};
 
 use crate::traits::{
-    AuditSink, ClientStore, CodeIssuer, CodeStore, ConnectionStore, JtiOutcome, JtiPurpose,
-    ProtectedResource, RefreshStore, ReplayStore, ResourceStore, StoreError,
+    AuditSink, BackchannelStore, ClientStore, CodeIssuer, CodeStore, ConnectionStore, JtiOutcome,
+    JtiPurpose, ProtectedResource, RefreshStore, ReplayStore, ResourceStore, StoreError,
 };
 
 #[derive(Debug, Clone)]
@@ -471,6 +472,184 @@ fn resource_from_row(row: &sqlx::postgres::PgRow) -> Result<ProtectedResource, S
 
     let uri = ResourceUri::parse(&raw).map_err(|_| StoreError::Unavailable)?;
     Ok(ProtectedResource { uri, name, scopes })
+}
+
+impl BackchannelStore for PostgresStore {
+    async fn create_backchannel(
+        &self,
+        tenant: TenantId,
+        auth_req_hash: &[u8; 32],
+        request: &BackchannelRequest,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        sqlx::query(
+            "INSERT INTO backchannel_requests \
+             (tenant_id, auth_req_hash, client_id, user_id, scope, resources, \
+              state, issued_at, expires_at, poll_interval) \
+             VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8, $9)",
+        )
+        .bind(tenant.as_uuid())
+        .bind(auth_req_hash.as_slice())
+        .bind(request.client.as_str())
+        .bind(request.subject.as_uuid())
+        .bind(request.scope.as_deref())
+        .bind(join_resources(&request.resources))
+        .bind(to_dt(request.issued_at))
+        .bind(to_dt(request.expires_at))
+        .bind(i32::try_from(request.interval.as_seconds()).unwrap_or(5))
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?;
+
+        tx.commit().await.map_err(|e| map_err(&e))
+    }
+
+    async fn load_backchannel(
+        &self,
+        tenant: TenantId,
+        auth_req_hash: &[u8; 32],
+    ) -> Result<BackchannelRequest, StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        let row = sqlx::query(
+            "SELECT client_id, user_id, scope, resources, state, issued_at, \
+                    expires_at, poll_interval, last_polled_at \
+             FROM backchannel_requests WHERE tenant_id = $1 AND auth_req_hash = $2",
+        )
+        .bind(tenant.as_uuid())
+        .bind(auth_req_hash.as_slice())
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?
+        .ok_or(StoreError::NotFound)?;
+
+        tx.commit().await.map_err(|e| map_err(&e))?;
+
+        let client_id: String = row.try_get("client_id").map_err(|e| map_err(&e))?;
+        let user_id: uuid::Uuid = row.try_get("user_id").map_err(|e| map_err(&e))?;
+        let scope: Option<String> = row.try_get("scope").map_err(|e| map_err(&e))?;
+        let raw_resources: Option<String> = row.try_get("resources").map_err(|e| map_err(&e))?;
+        let raw_state: String = row.try_get("state").map_err(|e| map_err(&e))?;
+        let issued: chrono::DateTime<chrono::Utc> =
+            row.try_get("issued_at").map_err(|e| map_err(&e))?;
+        let expires: chrono::DateTime<chrono::Utc> =
+            row.try_get("expires_at").map_err(|e| map_err(&e))?;
+        let interval: i32 = row.try_get("poll_interval").map_err(|e| map_err(&e))?;
+        let last_polled: Option<chrono::DateTime<chrono::Utc>> =
+            row.try_get("last_polled_at").map_err(|e| map_err(&e))?;
+
+        let state = match raw_state.as_str() {
+            "pending" => BackchannelState::Pending,
+            "approved" => BackchannelState::Approved,
+            "denied" => BackchannelState::Denied,
+            "consumed" => BackchannelState::Consumed,
+            _ => return Err(StoreError::Unavailable),
+        };
+
+        let mut resources = Vec::new();
+        for value in raw_resources.as_deref().unwrap_or_default().split(' ') {
+            if value.is_empty() {
+                continue;
+            }
+            resources.push(ResourceUri::parse(value).map_err(|_| StoreError::Unavailable)?);
+        }
+
+        Ok(BackchannelRequest {
+            tenant,
+            client: ClientId::new(client_id).map_err(|_| StoreError::Unavailable)?,
+            subject: UserId::from_uuid(user_id),
+            scope,
+            resources,
+            state,
+            issued_at: from_dt(issued),
+            expires_at: from_dt(expires),
+            interval: argus_core::time::Duration::from_seconds(i64::from(interval)),
+            last_polled_at: last_polled.map(from_dt),
+        })
+    }
+
+    async fn record_backchannel_poll(
+        &self,
+        tenant: TenantId,
+        auth_req_hash: &[u8; 32],
+        at: Timestamp,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        sqlx::query(
+            "UPDATE backchannel_requests SET last_polled_at = $3 \
+             WHERE tenant_id = $1 AND auth_req_hash = $2",
+        )
+        .bind(tenant.as_uuid())
+        .bind(auth_req_hash.as_slice())
+        .bind(to_dt(at))
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?;
+
+        tx.commit().await.map_err(|e| map_err(&e))
+    }
+
+    async fn consume_backchannel(
+        &self,
+        tenant: TenantId,
+        auth_req_hash: &[u8; 32],
+        at: Timestamp,
+    ) -> Result<bool, StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        let result = sqlx::query(
+            "UPDATE backchannel_requests SET state = 'consumed', decided_at = $3 \
+             WHERE tenant_id = $1 AND auth_req_hash = $2 AND state = 'approved'",
+        )
+        .bind(tenant.as_uuid())
+        .bind(auth_req_hash.as_slice())
+        .bind(to_dt(at))
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?;
+
+        tx.commit().await.map_err(|e| map_err(&e))?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    async fn decide_backchannel(
+        &self,
+        tenant: TenantId,
+        auth_req_hash: &[u8; 32],
+        approved: bool,
+        at: Timestamp,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        sqlx::query(
+            "UPDATE backchannel_requests SET state = $3, decided_at = $4 \
+             WHERE tenant_id = $1 AND auth_req_hash = $2 AND state = 'pending'",
+        )
+        .bind(tenant.as_uuid())
+        .bind(auth_req_hash.as_slice())
+        .bind(if approved { "approved" } else { "denied" })
+        .bind(to_dt(at))
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?;
+
+        tx.commit().await.map_err(|e| map_err(&e))
+    }
+}
+
+fn join_resources(resources: &[ResourceUri]) -> Option<String> {
+    if resources.is_empty() {
+        return None;
+    }
+    Some(
+        resources
+            .iter()
+            .map(ResourceUri::as_str)
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
 }
 
 impl ConnectionStore for PostgresStore {

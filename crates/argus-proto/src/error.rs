@@ -22,6 +22,14 @@ pub enum OAuthErrorCode {
     InvalidToken,
 
     InvalidTarget,
+
+    AuthorizationPending,
+
+    SlowDown,
+
+    ExpiredToken,
+
+    AccessDenied,
 }
 
 impl OAuthErrorCode {
@@ -38,6 +46,10 @@ impl OAuthErrorCode {
             Self::TemporarilyUnavailable => "temporarily_unavailable",
             Self::InvalidToken => "invalid_token",
             Self::InvalidTarget => "invalid_target",
+            Self::AuthorizationPending => "authorization_pending",
+            Self::SlowDown => "slow_down",
+            Self::ExpiredToken => "expired_token",
+            Self::AccessDenied => "access_denied",
         }
     }
 

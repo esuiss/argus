@@ -19,7 +19,9 @@ use argus_crypto::{AwsLcSha256, SigningKey};
 use argus_http::endpoints::token::{TokenForm, handle};
 use argus_http::memstore::{MemoryReplayStore, MemoryResourceStore};
 use argus_http::state::{AppState, TenantContext};
-use argus_http::store::{AuditSink, ClientStore, CodeStore, RefreshStore, StoreError};
+use argus_http::store::{
+    AuditSink, BackchannelStore, ClientStore, CodeStore, RefreshStore, StoreError,
+};
 use argus_proto::{AuthorizationServerMetadata, OAuthErrorCode};
 use base64ct::Encoding as _;
 use uuid::Uuid;
@@ -41,6 +43,7 @@ struct MemCodes {
     record: Mutex<Option<StoredCode>>,
     consumed: Mutex<bool>,
     revoked_for_code: Mutex<bool>,
+    backchannel: Mutex<std::collections::HashMap<[u8; 32], argus_core::ciba::BackchannelRequest>>,
 }
 
 impl CodeStore for MemCodes {
@@ -219,6 +222,7 @@ fn code_form() -> TokenForm {
         audience: None,
         resource: None,
         scope: None,
+        auth_req_id: None,
     }
 }
 
@@ -319,6 +323,7 @@ fn refresh_form() -> TokenForm {
         audience: None,
         resource: None,
         scope: None,
+        auth_req_id: None,
     }
 }
 
@@ -381,6 +386,58 @@ async fn unsupported_grant_types_are_rejected() {
 #[tokio::test]
 async fn storage_outage_returns_503_not_invalid_grant() {
     struct DeadCodes;
+
+    impl BackchannelStore for DeadCodes {
+        #[allow(clippy::unused_async_trait_impl)]
+        async fn create_backchannel(
+            &self,
+            _t: TenantId,
+            _h: &[u8; 32],
+            _r: &argus_core::ciba::BackchannelRequest,
+        ) -> Result<(), StoreError> {
+            Err(StoreError::Unavailable)
+        }
+
+        #[allow(clippy::unused_async_trait_impl)]
+        async fn load_backchannel(
+            &self,
+            _t: TenantId,
+            _h: &[u8; 32],
+        ) -> Result<argus_core::ciba::BackchannelRequest, StoreError> {
+            Err(StoreError::Unavailable)
+        }
+
+        #[allow(clippy::unused_async_trait_impl)]
+        async fn record_backchannel_poll(
+            &self,
+            _t: TenantId,
+            _h: &[u8; 32],
+            _at: Timestamp,
+        ) -> Result<(), StoreError> {
+            Err(StoreError::Unavailable)
+        }
+
+        #[allow(clippy::unused_async_trait_impl)]
+        async fn consume_backchannel(
+            &self,
+            _t: TenantId,
+            _h: &[u8; 32],
+            _at: Timestamp,
+        ) -> Result<bool, StoreError> {
+            Err(StoreError::Unavailable)
+        }
+
+        #[allow(clippy::unused_async_trait_impl)]
+        async fn decide_backchannel(
+            &self,
+            _t: TenantId,
+            _h: &[u8; 32],
+            _approved: bool,
+            _at: Timestamp,
+        ) -> Result<(), StoreError> {
+            Err(StoreError::Unavailable)
+        }
+    }
     impl CodeStore for DeadCodes {
         async fn load(&self, _: TenantId, _: &[u8; 32]) -> Result<StoredCode, StoreError> {
             Err(StoreError::Unavailable)
@@ -1064,4 +1121,229 @@ async fn the_client_id_in_the_grant_is_the_authenticated_client() {
             .expect("verify");
 
     assert_eq!(claims.client_id, client().as_str());
+}
+
+impl BackchannelStore for MemCodes {
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn create_backchannel(
+        &self,
+        _t: TenantId,
+        hash: &[u8; 32],
+        request: &argus_core::ciba::BackchannelRequest,
+    ) -> Result<(), StoreError> {
+        self.backchannel
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .insert(*hash, request.clone());
+        Ok(())
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn load_backchannel(
+        &self,
+        _t: TenantId,
+        hash: &[u8; 32],
+    ) -> Result<argus_core::ciba::BackchannelRequest, StoreError> {
+        self.backchannel
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .get(hash)
+            .cloned()
+            .ok_or(StoreError::NotFound)
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn record_backchannel_poll(
+        &self,
+        _t: TenantId,
+        hash: &[u8; 32],
+        at: Timestamp,
+    ) -> Result<(), StoreError> {
+        if let Some(record) = self
+            .backchannel
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .get_mut(hash)
+        {
+            record.last_polled_at = Some(at);
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn consume_backchannel(
+        &self,
+        _t: TenantId,
+        hash: &[u8; 32],
+        _at: Timestamp,
+    ) -> Result<bool, StoreError> {
+        let mut guard = self
+            .backchannel
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?;
+        let Some(record) = guard.get_mut(hash) else {
+            return Ok(false);
+        };
+        if record.state != argus_core::ciba::BackchannelState::Approved {
+            return Ok(false);
+        }
+        record.state = argus_core::ciba::BackchannelState::Consumed;
+        Ok(true)
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn decide_backchannel(
+        &self,
+        _t: TenantId,
+        hash: &[u8; 32],
+        approved: bool,
+        _at: Timestamp,
+    ) -> Result<(), StoreError> {
+        if let Some(record) = self
+            .backchannel
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .get_mut(hash)
+        {
+            record.state = if approved {
+                argus_core::ciba::BackchannelState::Approved
+            } else {
+                argus_core::ciba::BackchannelState::Denied
+            };
+        }
+        Ok(())
+    }
+}
+
+// --- CIBA — OpenID Connect Client-Initiated Backchannel Authentication ------
+
+use argus_core::ciba::{BackchannelRequest, BackchannelState, DEFAULT_POLL_INTERVAL};
+
+const AUTH_REQ_ID: &str = "the-auth-req-id";
+
+fn auth_req_hash() -> [u8; 32] {
+    AwsLcSha256.sha256(AUTH_REQ_ID.as_bytes())
+}
+
+async fn seed_backchannel(s: &TestState, state_value: BackchannelState) {
+    s.codes
+        .create_backchannel(
+            tenant(),
+            &auth_req_hash(),
+            &BackchannelRequest {
+                tenant: tenant(),
+                client: client(),
+                subject: UserId::from_uuid(Uuid::from_u128(0xa1)),
+                scope: Some("openid".to_owned()),
+                resources: Vec::new(),
+                state: state_value,
+                issued_at: NOW,
+                expires_at: NOW.saturating_add(Duration::from_seconds(300)),
+                interval: DEFAULT_POLL_INTERVAL,
+                last_polled_at: None,
+            },
+        )
+        .await
+        .expect("seed");
+}
+
+fn ciba_form() -> TokenForm {
+    TokenForm {
+        grant_type: argus_core::ciba::GRANT_TYPE.to_owned(),
+        auth_req_id: Some(AUTH_REQ_ID.to_owned()),
+        ..code_form()
+    }
+}
+
+#[tokio::test]
+async fn a_pending_backchannel_request_answers_authorization_pending() {
+    let s = state();
+    seed_backchannel(&s, BackchannelState::Pending).await;
+
+    let err = token(&s, &ciba_form(), None)
+        .await
+        .expect_err("must still be pending");
+    assert_eq!(err.error, OAuthErrorCode::AuthorizationPending);
+}
+
+#[tokio::test]
+async fn polling_again_too_soon_is_told_to_slow_down() {
+    let s = state();
+    seed_backchannel(&s, BackchannelState::Pending).await;
+
+    let _ = token(&s, &ciba_form(), None).await;
+    let err = token(&s, &ciba_form(), None)
+        .await
+        .expect_err("must be throttled");
+    assert_eq!(err.error, OAuthErrorCode::SlowDown);
+}
+
+#[tokio::test]
+async fn an_approved_request_yields_tokens_exactly_once() {
+    let s = state();
+    seed_backchannel(&s, BackchannelState::Approved).await;
+
+    let resp = token(&s, &ciba_form(), None).await.expect("tokens");
+    assert!(!resp.access_token.is_empty());
+    assert!(resp.id_token.is_some());
+
+    let err = token(&s, &ciba_form(), None)
+        .await
+        .expect_err("the same auth_req_id must not mint twice");
+    assert_eq!(err.error, OAuthErrorCode::InvalidGrant);
+}
+
+#[tokio::test]
+async fn a_denied_request_is_access_denied() {
+    let s = state();
+    seed_backchannel(&s, BackchannelState::Denied).await;
+
+    let err = token(&s, &ciba_form(), None)
+        .await
+        .expect_err("must be denied");
+    assert_eq!(err.error, OAuthErrorCode::AccessDenied);
+}
+
+#[tokio::test]
+async fn another_client_cannot_collect_the_result() {
+    let s = state();
+    seed_backchannel(&s, BackchannelState::Approved).await;
+
+    let form = TokenForm {
+        client_id: Some("acme-web".to_owned()),
+        ..ciba_form()
+    };
+    let _ = token(&s, &form, None).await;
+
+    let unknown = TokenForm {
+        client_id: Some("ghost".to_owned()),
+        ..ciba_form()
+    };
+    let err = token(&s, &unknown, None)
+        .await
+        .expect_err("an unregistered client must not poll");
+    assert_eq!(err.error, OAuthErrorCode::InvalidClient);
+}
+
+#[tokio::test]
+async fn an_unknown_auth_req_id_is_invalid_grant() {
+    let s = state();
+
+    let form = TokenForm {
+        auth_req_id: Some("never-issued".to_owned()),
+        ..ciba_form()
+    };
+    let err = token(&s, &form, None).await.expect_err("must be refused");
+    assert_eq!(err.error, OAuthErrorCode::InvalidGrant);
+}
+
+#[tokio::test]
+async fn the_auth_req_id_is_required() {
+    let s = state();
+    let form = TokenForm {
+        auth_req_id: None,
+        ..ciba_form()
+    };
+    let err = token(&s, &form, None).await.expect_err("must be refused");
+    assert_eq!(err.error, OAuthErrorCode::InvalidRequest);
 }

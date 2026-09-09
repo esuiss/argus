@@ -18,7 +18,9 @@ use argus_crypto::SigningKey;
 use argus_http::endpoints::authorize::DevAuthenticator;
 use argus_http::memstore::{MemoryReplayStore, MemoryResourceStore};
 use argus_http::state::{AppState, TenantContext};
-use argus_http::store::{AuditSink, ClientStore, CodeIssuer, CodeStore, RefreshStore, StoreError};
+use argus_http::store::{
+    AuditSink, BackchannelStore, ClientStore, CodeIssuer, CodeStore, RefreshStore, StoreError,
+};
 use argus_proto::AuthorizationServerMetadata;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::{TcpListener, TcpStream};
@@ -300,4 +302,55 @@ async fn the_published_jwks_contains_no_private_material() {
     assert!(status(&r).contains("200"), "{r}");
     assert!(!r.contains("\"d\""), "private component leaked: {r}");
     assert!(r.contains("\"kty\":\"EC\""), "{r}");
+}
+impl BackchannelStore for Codes {
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn create_backchannel(
+        &self,
+        _t: TenantId,
+        _h: &[u8; 32],
+        _r: &argus_core::ciba::BackchannelRequest,
+    ) -> Result<(), StoreError> {
+        Err(StoreError::Unavailable)
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn load_backchannel(
+        &self,
+        _t: TenantId,
+        _h: &[u8; 32],
+    ) -> Result<argus_core::ciba::BackchannelRequest, StoreError> {
+        Err(StoreError::Unavailable)
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn record_backchannel_poll(
+        &self,
+        _t: TenantId,
+        _h: &[u8; 32],
+        _at: Timestamp,
+    ) -> Result<(), StoreError> {
+        Err(StoreError::Unavailable)
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn consume_backchannel(
+        &self,
+        _t: TenantId,
+        _h: &[u8; 32],
+        _at: Timestamp,
+    ) -> Result<bool, StoreError> {
+        Err(StoreError::Unavailable)
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn decide_backchannel(
+        &self,
+        _t: TenantId,
+        _h: &[u8; 32],
+        _approved: bool,
+        _at: Timestamp,
+    ) -> Result<(), StoreError> {
+        Err(StoreError::Unavailable)
+    }
 }
