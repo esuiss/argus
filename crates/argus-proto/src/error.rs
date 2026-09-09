@@ -33,6 +33,13 @@ pub enum OAuthErrorCode {
     ServerError,
     /// Sunucu geçici olarak isteği karşılayamıyor.
     TemporarilyUnavailable,
+
+    /// Sunulan access token geçersiz, süresi dolmuş veya bağlaması tutmuyor.
+    ///
+    /// ⚠️ Bu kod **`RFC` 6750 §3.1'e** aittir, §5.2'ye değil: token endpoint'i
+    /// bunu asla döndürmez, **kaynak sunucu** döndürür. Aynı enum'da durmasının
+    /// sebebi tel biçiminin ve serileştirme yolunun tek olması; anlamı ayrı.
+    InvalidToken,
 }
 
 impl OAuthErrorCode {
@@ -48,6 +55,7 @@ impl OAuthErrorCode {
             Self::InvalidScope => "invalid_scope",
             Self::ServerError => "server_error",
             Self::TemporarilyUnavailable => "temporarily_unavailable",
+            Self::InvalidToken => "invalid_token",
         }
     }
 
@@ -63,7 +71,9 @@ impl OAuthErrorCode {
     #[must_use]
     pub const fn http_status(self) -> u16 {
         match self {
-            Self::InvalidClient => 401,
+            // `RFC` 6750 §3.1: geçersiz token 401'dir; 403 "yetkin yok" demek
+            // olurdu ve bu farklı bir iddiadır.
+            Self::InvalidClient | Self::InvalidToken => 401,
             Self::ServerError => 500,
             Self::TemporarilyUnavailable => 503,
             _ => 400,

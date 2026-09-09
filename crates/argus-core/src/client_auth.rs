@@ -15,7 +15,9 @@
 
 use subtle::ConstantTimeEq as _;
 
+use crate::dpop::ReplayGuard;
 use crate::id::ClientId;
+use crate::time::{Duration, Timestamp};
 
 /// İstekle sunulan kimlik bilgisi.
 ///
@@ -82,6 +84,103 @@ impl ClientAuthMethod {
     }
 }
 
+/// Kayıtlı bir istemcinin açık imzalama anahtarı.
+///
+/// # Neden `JWK` değil, ham bileşenler
+///
+/// `argus-core` serileştirme biçimlerini tanımaz; `JWK` bir tel formatıdır ve
+/// onu buraya sokmak, saf karar katmanını bir kodlama seçimine bağlardı.
+/// Bileşenler `P-256` için sabit 32 baytlıktır — tip düzeyinde boyut hatası
+/// imkânsız.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientKey {
+    /// Anahtar kimliği; `JWS` başlığındaki `kid` ile eşleşir.
+    pub kid: String,
+    /// `P-256` açık anahtarının `x` bileşeni.
+    pub x: [u8; 32],
+    /// `P-256` açık anahtarının `y` bileşeni.
+    pub y: [u8; 32],
+}
+
+/// `private_key_jwt` assertion'ının claim'leri — `RFC` 7523 §3.
+///
+/// İmzası **doğrulanmış** bir assertion'dan çıkarılır; bu tip yalnızca imza
+/// kontrolünden sonra kurulur (`VerifiedProof` ile aynı desen).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssertionClaims {
+    /// `iss` — `RFC` 7523 §3: istemcinin kendisi.
+    pub issuer: String,
+    /// `sub` — `RFC` 7523 §3: yine istemcinin kendisi.
+    pub subject: String,
+    /// `aud` — yetkilendirme sunucusu.
+    pub audience: Vec<String>,
+    /// `exp`.
+    pub expires_at: Timestamp,
+    /// `jti` — tekrar tespiti için.
+    pub jti: String,
+}
+
+/// Assertion'ın azami kabul edilen ömrü.
+///
+/// `RFC` 7523 §3 bir üst sınır koymaz ama uzun ömürlü bir assertion, çalındığında
+/// uzun süre kullanılabilir bir istemci kimlik bilgisidir. `RFC` 9700 §2.2.1'in
+/// "kısa ömürlü tut" tavsiyesiyle uyumlu muhafazakâr bir tavan.
+pub const MAX_ASSERTION_LIFETIME: Duration = Duration::from_seconds(300);
+
+/// Assertion claim kurallarını uygular.
+///
+/// İmza bu fonksiyonun işi DEĞİLDİR: `claims` yalnızca imzası doğrulanmış bir
+/// assertion'dan kurulabilir. Buradaki kontroller imzanın söylemediği her şeyi
+/// kapatır — assertion'ın kime, hangi sunucu için ve ne zamana kadar geçerli
+/// olduğunu imza değil claim'ler söyler.
+///
+/// # Errors
+///
+/// `iss`/`sub` istemciyle uyuşmazsa, `aud` bu sunucuyu göstermiyorsa, süre
+/// dolmuş ya da makul olmayacak kadar uzunsa, veya `jti` tekrar edilmişse.
+pub fn validate_assertion(
+    claims: &AssertionClaims,
+    client: &ClientId,
+    accepted_audiences: &[&str],
+    now: Timestamp,
+    replay: &impl ReplayGuard,
+) -> Result<(), ClientAuthError> {
+    // Tekrar en başta: geçersiz bir assertion'ın bile tekrar edildiğini bilmek
+    // isteriz.
+    if replay.seen(&claims.jti) {
+        return Err(ClientAuthError::Replayed);
+    }
+
+    // `RFC` 7523 §3: `iss` ve `sub` İKİSİ DE istemci olmalı. Yalnızca birini
+    // kontrol etmek, bir istemcinin başkası adına assertion üretmesine kapı açar.
+    if claims.issuer != client.as_str() || claims.subject != client.as_str() {
+        return Err(ClientAuthError::ClientMismatch);
+    }
+
+    // `aud` olmadan, bir sunucu için üretilmiş assertion başka bir sunucuya
+    // yeniden sunulabilir (cross-AS replay). Bu kontrol `RFC` 7523'ün tek
+    // gerçek koruma noktasıdır.
+    if !claims
+        .audience
+        .iter()
+        .any(|a| accepted_audiences.contains(&a.as_str()))
+    {
+        return Err(ClientAuthError::AudienceMismatch);
+    }
+
+    if claims.expires_at.as_unix_seconds() <= now.as_unix_seconds() {
+        return Err(ClientAuthError::Expired);
+    }
+
+    // Aşırı uzun ömür, çalınmış bir assertion'ı kalıcı bir kimlik bilgisine
+    // çevirir.
+    if claims.expires_at.since(now).as_seconds() > MAX_ASSERTION_LIFETIME.as_seconds() {
+        return Err(ClientAuthError::LifetimeTooLong);
+    }
+
+    Ok(())
+}
+
 /// İstemci kimlik doğrulama hataları.
 ///
 /// Hepsi istemciye `invalid_client` olarak döner (RFC 6749 §5.2); ayrım denetim
@@ -106,6 +205,22 @@ pub enum ClientAuthError {
     /// Kimlik bilgisi gerekiyordu ama sunulmadı.
     #[error("client authentication required")]
     Missing,
+
+    /// Assertion'ın `jti`'si daha önce görüldü.
+    #[error("the client assertion has already been used")]
+    Replayed,
+
+    /// Assertion başka bir yetkilendirme sunucusu için üretilmiş.
+    #[error("the client assertion is not addressed to this server")]
+    AudienceMismatch,
+
+    /// Assertion'ın süresi dolmuş.
+    #[error("the client assertion has expired")]
+    Expired,
+
+    /// Assertion makul olmayacak kadar uzun ömürlü.
+    #[error("the client assertion lifetime exceeds the accepted maximum")]
+    LifetimeTooLong,
 }
 
 impl ClientAuthError {

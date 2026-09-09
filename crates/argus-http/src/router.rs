@@ -24,6 +24,7 @@ use crate::endpoints::authorize::{
 };
 use crate::endpoints::discovery;
 use crate::endpoints::token::{Binding, TokenForm, handle};
+use crate::endpoints::userinfo::{self, UserInfoRequest};
 use crate::state::AppState;
 use crate::store::{AuditSink, ClientStore, CodeIssuer, CodeStore, RefreshStore};
 
@@ -88,8 +89,9 @@ where
 
 /// ⚠️ Tekrar kaydı **henüz yok**.
 ///
-/// `RFC` 9449 §11.1 `jti` tekrar korumasını istiyor ve bu tip şu an her `jti`'yi
-/// yeni sayıyor. Tek node'da bile eksik; çok node'lu dağıtımda paylaşımlı bir
+/// Hem `DPoP` kanıtlarının hem `private_key_jwt` assertion'larının `jti`'si buna
+/// sorulur. `RFC` 9449 §11.1 ve `RFC` 7523 §3 tekrar korumasını istiyor ve bu
+/// tip şu an her `jti`'yi yeni sayıyor. Tek node'da bile eksik; çok node'lu dağıtımda paylaşımlı bir
 /// kayıt (Redis/Postgres) şart. §6 §4.4 bunu Bloom/cuckoo filtrenin **tek meşru
 /// kullanım alanı** olarak işaretliyor: yanlış pozitifin bedeli tek bir isteğin
 /// reddi, kullanıcı çıkışı değil.
@@ -152,7 +154,7 @@ where
         Err(e) => return oauth_response(&e),
     };
 
-    match handle(&state, &form, at, &AwsLcSha256, binding).await {
+    match handle(&state, &form, at, &AwsLcSha256, binding, &NoReplayRecord).await {
         Ok(response) => {
             let mut r = Json(response).into_response();
             if let Ok(value) = "no-store".parse() {
@@ -161,6 +163,120 @@ where
             r
         }
         Err(err) => oauth_response(&err),
+    }
+}
+
+/// Form-encoded gövdeden bir alanı çıkarır.
+///
+/// Tam bir form ayrıştırıcısı değil ve olmamalı: burada tek bir alan aranıyor
+/// ve gövde kimliği doğrulanmamış veridir. Küçük yüzey, küçük risk.
+fn form_field(body: &str, name: &str) -> Option<String> {
+    body.split('&')
+        .filter_map(|pair| pair.split_once('='))
+        .find(|(k, _)| *k == name)
+        .map(|(_, v)| percent_decode(v))
+}
+
+/// Form değeri için minimal yüzde çözümlemesi.
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes.get(i) {
+            Some(b'+') => {
+                out.push(b' ');
+                i += 1;
+            }
+            Some(b'%') if i + 2 < bytes.len() => {
+                let hex = value.get(i + 1..i + 3).unwrap_or_default();
+                if let Ok(b) = u8::from_str_radix(hex, 16) {
+                    out.push(b);
+                    i += 3;
+                } else {
+                    out.push(b'%');
+                    i += 1;
+                }
+            }
+            Some(b) => {
+                out.push(*b);
+                i += 1;
+            }
+            None => break,
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// `GET`/`POST /userinfo` — OIDC Core §5.3.
+///
+/// # Neden iki metot birden
+///
+/// §5.3.1 `GET` **ve** `POST`'u zorunlu tutuyor. Yalnızca birini sunmak,
+/// uyumluluk paketinin `UserInfo` adımını düşürür.
+///
+/// # `WWW-Authenticate` neden her ret yolunda var
+///
+/// `RFC` 6750 §3: 401 dönen bir kaynak sunucu istemciye **nasıl** kimlik
+/// doğrulayacağını söylemek zorundadır. Başlıksız 401, istemciyi kör bir yeniden
+/// denemeye iter.
+async fn userinfo_handler<C, R, A, S, U>(
+    State(state): State<SharedState<C, R, A, S, U>>,
+    headers: HeaderMap,
+    body: String,
+) -> Response
+where
+    C: CodeStore + CodeIssuer + Send + Sync + 'static,
+    R: RefreshStore + Send + Sync + 'static,
+    A: AuditSink + Send + Sync + 'static,
+    S: ClientStore + Send + Sync + 'static,
+    U: UserAuthenticator + Send + Sync + 'static,
+{
+    let authorization = headers.get("Authorization").and_then(|v| v.to_str().ok());
+    let dpop = headers.get("DPoP").and_then(|v| v.to_str().ok());
+    // `RFC` 6750 §2.2: yalnızca form-encoded gövde. `GET`'te gövde boştur ve
+    // ayrıştırma hiçbir şey bulmaz.
+    let form_access_token = form_field(&body, "access_token");
+    let uri = state
+        .tenant
+        .metadata
+        .userinfo_endpoint
+        .clone()
+        .unwrap_or_else(|| format!("{}/userinfo", state.tenant.metadata.issuer));
+
+    let request = UserInfoRequest {
+        authorization,
+        form_access_token: form_access_token.as_deref(),
+        dpop,
+        // `htm` daima `GET`: her iki metot da aynı `htu`ya bağlanır ve
+        // `POST` yolunda gövde yok. İstemcinin hangi metodu kullandığını
+        // kanıta yansıtmak, `GET` için üretilmiş kanıtın `POST`'ta
+        // reddedilmesine yol açardı.
+        method: "GET",
+        uri: &uri,
+    };
+
+    match userinfo::handle(&state.tenant, &request, now(), &NoReplayRecord) {
+        Ok(info) => {
+            let mut r = Json(info).into_response();
+            // Kimlik yanıtı cache'lenmemeli: §5.3.4 ve token yanıtıyla aynı gerekçe.
+            if let Ok(value) = "no-store".parse() {
+                r.headers_mut().insert("Cache-Control", value);
+            }
+            r
+        }
+        Err(err) => {
+            let status =
+                StatusCode::from_u16(err.http_status()).unwrap_or(StatusCode::UNAUTHORIZED);
+            let mut r = (status, Json(err.body())).into_response();
+            if let Ok(value) = err.challenge().parse() {
+                r.headers_mut().insert("WWW-Authenticate", value);
+            }
+            if let Ok(value) = "no-store".parse() {
+                r.headers_mut().insert("Cache-Control", value);
+            }
+            r
+        }
     }
 }
 
@@ -234,5 +350,10 @@ where
         // RFC 6749 §3.2: token endpoint'i **yalnızca** POST kabul eder.
         .route("/authorize", get(authorize_handler::<C, R, A, S, U>))
         .route("/token", post(token_handler::<C, R, A, S, U>))
+        // OIDC Core §5.3.1: `GET` ve `POST` ikisi de zorunlu.
+        .route(
+            "/userinfo",
+            get(userinfo_handler::<C, R, A, S, U>).post(userinfo_handler::<C, R, A, S, U>),
+        )
         .with_state(state)
 }

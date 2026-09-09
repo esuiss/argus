@@ -82,6 +82,10 @@ pub struct StoredCode {
     pub expires_at: Timestamp,
     /// Mevcut durum.
     pub state: CodeState,
+    /// OIDC `nonce` — `id_token`'a aynen yazılır.
+    pub nonce: Option<String>,
+    /// Verilen kapsam. `openid` içeriyorsa `id_token` üretilir.
+    pub scope: Option<String>,
 }
 
 /// Saklanan authorization code kaydı.
@@ -100,6 +104,8 @@ pub struct AuthorizationCode {
     issued_at: Timestamp,
     expires_at: Timestamp,
     state: CodeState,
+    nonce: Option<String>,
+    scope: Option<String>,
 }
 
 /// Token endpoint'ine gelen `grant_type=authorization_code` isteği.
@@ -128,6 +134,10 @@ pub struct Grant {
     pub client: ClientId,
     /// Kiracı.
     pub tenant: TenantId,
+    /// OIDC `nonce` — `id_token` üretilecekse gerekli.
+    pub nonce: Option<String>,
+    /// Verilen kapsam.
+    pub scope: Option<String>,
 }
 
 /// Token endpoint'inin istemciye döneceği hata.
@@ -223,6 +233,8 @@ impl AuthorizationCode {
             issued_at,
             expires_at: issued_at.saturating_add(lifetime),
             state: CodeState::Issued,
+            nonce: None,
+            scope: None,
         })
     }
 
@@ -242,7 +254,17 @@ impl AuthorizationCode {
             issued_at: stored.issued_at,
             expires_at: stored.expires_at,
             state: stored.state,
+            nonce: stored.nonce,
+            scope: stored.scope,
         }
+    }
+
+    /// OIDC alanlarını ekler.
+    #[must_use]
+    pub fn with_oidc(mut self, nonce: Option<String>, scope: Option<String>) -> Self {
+        self.nonce = nonce;
+        self.scope = scope;
+        self
     }
 
     /// Kodun sona erme anı.
@@ -275,6 +297,8 @@ impl AuthorizationCode {
             issued_at: self.issued_at,
             expires_at: self.expires_at,
             state: self.state,
+            nonce: self.nonce.clone(),
+            scope: self.scope.clone(),
         }
     }
 }
@@ -384,6 +408,8 @@ pub fn redeem(
             subject: code.subject,
             client: code.client.clone(),
             tenant: code.tenant,
+            nonce: code.nonce.clone(),
+            scope: code.scope.clone(),
         },
         effects: vec![
             Effect::ConsumeCode,

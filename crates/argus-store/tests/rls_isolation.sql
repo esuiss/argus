@@ -25,8 +25,10 @@ BEGIN;
     VALUES (:t_a, :u_a1, '\x0102'::bytea, 'kek-1');
   INSERT INTO users (tenant_id, user_id, email_ciphertext, email_blind_index)
     VALUES (:t_a, :u_a1, '\xdead'::bytea, '\xaaaa'::bytea);
-  INSERT INTO clients (tenant_id, client_id, client_type)
-    VALUES (:t_a, 'acme-web', 'confidential');
+  -- Confidential client'ın kimlik doğrulama yöntemi OLMAK ZORUNDA (0005):
+  -- 'confidential' + 'none', kimlik doğrulaması olmayan bir gizli istemcidir.
+  INSERT INTO clients (tenant_id, client_id, client_type, auth_method)
+    VALUES (:t_a, 'acme-web', 'confidential', 'private_key_jwt');
 COMMIT;
 
 BEGIN;
@@ -443,4 +445,63 @@ BEGIN;
   END $$;
 COMMIT;
 
-\echo 'RLS + sema: 18/18 gecti'
+-- ---------------------------------------------------------------------------
+-- 19. client_keys kiracılar arası sızdırmıyor
+--
+-- İstemcinin açık anahtarı sır değildir ama HANGİ kiracıda hangi istemcinin
+-- hangi anahtarı olduğu bilgisidir; ayrıca yanlış kiracının anahtarıyla
+-- doğrulama yapmak, bir kiracının istemcisinin başka bir kiracıda kimlik
+-- doğrulamasına yol açardı.
+-- ---------------------------------------------------------------------------
+BEGIN;
+  SET LOCAL ROLE argus_app;
+  SET LOCAL argus.tenant_id = :t_a;
+  INSERT INTO client_keys (tenant_id, client_id, kid, x, y)
+    VALUES (:t_a, 'acme-web', 'k1',
+            decode(repeat('11', 32), 'hex'), decode(repeat('22', 32), 'hex'));
+COMMIT;
+
+BEGIN;
+  SET LOCAL ROLE argus_app;
+  SET LOCAL argus.tenant_id = :t_b;
+  DO $$
+  DECLARE n int;
+  BEGIN
+    SELECT count(*) INTO n FROM client_keys;
+    IF n <> 0 THEN
+      RAISE EXCEPTION 'FAIL client_keys_cross_tenant_read: leaked % rows', n;
+    END IF;
+  END $$;
+COMMIT;
+
+-- ---------------------------------------------------------------------------
+-- 20. Confidential client kimlik doğrulama yöntemi OLMADAN yazılamaz
+--
+-- 'confidential' + auth_method = 'none' satırı, kimlik doğrulaması olmayan bir
+-- gizli istemcidir: client_id'yi bilen herkes onun adına token isteyebilir.
+-- ---------------------------------------------------------------------------
+BEGIN;
+  SET LOCAL ROLE argus_app;
+  SET LOCAL argus.tenant_id = :t_a;
+  DO $$
+  BEGIN
+    BEGIN
+      INSERT INTO clients (tenant_id, client_id, client_type, auth_method)
+        VALUES ('00000000-0000-7000-8000-00000000000a', 'sneaky', 'confidential', 'none');
+      RAISE EXCEPTION 'FAIL confidential_without_auth_method_accepted';
+    EXCEPTION WHEN check_violation THEN
+      NULL;
+    END;
+
+    -- Ters yön de tutmalı: public client'ın kimlik bilgisi olmaz.
+    BEGIN
+      INSERT INTO clients (tenant_id, client_id, client_type, auth_method)
+        VALUES ('00000000-0000-7000-8000-00000000000a', 'sneaky2', 'public', 'private_key_jwt');
+      RAISE EXCEPTION 'FAIL public_with_auth_method_accepted';
+    EXCEPTION WHEN check_violation THEN
+      NULL;
+    END;
+  END $$;
+ROLLBACK;
+
+\echo 'RLS + sema: 20/20 gecti'

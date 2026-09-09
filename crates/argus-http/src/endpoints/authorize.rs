@@ -39,6 +39,8 @@ pub struct AuthorizeQuery {
     pub code_challenge_method: Option<String>,
     /// `scope`.
     pub scope: Option<String>,
+    /// OIDC `nonce`.
+    pub nonce: Option<String>,
 }
 
 /// Kullanıcı kimlik doğrulama sınırı.
@@ -151,6 +153,7 @@ where
         code_challenge: query.code_challenge.clone(),
         code_challenge_method: query.code_challenge_method.clone(),
         scope: query.scope.clone(),
+        nonce: query.nonce.clone(),
     };
 
     match validate(&request, registered.as_ref()) {
@@ -173,7 +176,8 @@ where
             redirect_uri,
             challenge,
             state,
-            ..
+            scope,
+            nonce,
         } => {
             let Some(user) = auth.current_user(tenant) else {
                 return Ok(AuthorizeResponse::NeedsAuthentication);
@@ -201,7 +205,11 @@ where
 
             // Kodun kendisi saklanmaz; yalnızca hash'i.
             let hash = hasher.sha256(new_code.as_bytes());
-            codes.issue(tenant, &hash, &record.to_stored()).await?;
+            // OIDC alanları kodla BİRLİKTE saklanır: token isteği geldiğinde
+            // yetkilendirme isteği bitmiştir ve `nonce` başka yerden öğrenilemez.
+            codes
+                .issue(tenant, &hash, &record.with_oidc(nonce, scope).to_stored())
+                .await?;
 
             let mut url = format!("{}?code={new_code}", redirect_uri.as_str());
             append_state(&mut url, state.as_deref());

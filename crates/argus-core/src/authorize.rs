@@ -16,6 +16,7 @@
 //! | [`AuthorizeOutcome::RedirectError`] | `redirect_uri` doğrulandı; hata oraya yönlendirilir |
 //! | [`AuthorizeOutcome::Proceed`] | Kullanıcı kimlik doğrulamasına geçilir |
 
+use crate::client_auth::{ClientAuthMethod, ClientKey};
 use crate::id::ClientId;
 use crate::pkce::{CodeChallenge, CodeChallengeMethod};
 use crate::redirect_uri::RedirectUri;
@@ -37,6 +38,8 @@ pub struct AuthorizeRequest {
     pub code_challenge_method: Option<String>,
     /// `scope`.
     pub scope: Option<String>,
+    /// OIDC `nonce`.
+    pub nonce: Option<String>,
 }
 
 /// Kayıtlı istemcinin yetkilendirme için gereken bilgisi.
@@ -46,6 +49,17 @@ pub struct RegisteredClient {
     pub client_id: ClientId,
     /// Kayıtlı yönlendirme adresleri.
     pub redirect_uris: Vec<RedirectUri>,
+    /// İstemcinin **kayıtlı** kimlik doğrulama yöntemi.
+    ///
+    /// Sunulan yöntem değil, kayıtlı olan: bir istemci `private_key_jwt` ile
+    /// kayıtlıysa kimlik bilgisi sunmadan token alamamalı, aksi hâlde kayıt
+    /// bir güvenlik ifadesi olmaktan çıkar.
+    pub auth_method: ClientAuthMethod,
+    /// `private_key_jwt` için kayıtlı açık anahtarlar.
+    ///
+    /// Birden fazla: istemci de anahtar döndürür ve rotasyon penceresinde eski
+    /// ile yeni birlikte geçerli olmalıdır.
+    pub keys: Vec<ClientKey>,
 }
 
 /// Yönlendirilemeyecek hatalar.
@@ -59,9 +73,14 @@ pub enum AuthorizeFatal {
 
     /// `redirect_uri` verilmedi ve istemcinin tek bir kayıtlı adresi yok.
     ///
-    /// RFC 6749 §3.1.2.3 tek kayıtlı adres varsa atlanmasına izin verir; birden
-    /// fazlaysa istek belirsizdir ve tahmin edilemez.
-    #[error("redirect_uri is required when the client has multiple registered URIs")]
+    /// RFC 6749 §3.1.2.3 tek kayıtlı adres varsa atlanmasına izin verir, ama
+    /// **OIDC Core §3.1.2.1 `redirect_uri`'yi HER ZAMAN zorunlu tutar** ve Argus
+    /// bir OIDC sağlayıcısıdır. Sunucunun hedefi tahmin etmesi, istemcinin
+    /// nereye döneceğini söylemediği bir istekte sunucunun karar vermesi
+    /// demektir; §1 #24'ün tam eşleşme disiplini bununla çelişir.
+    ///
+    /// `oidcc-ensure-redirect-uri-in-authorization-request` bu davranışı sınar.
+    #[error("redirect_uri is required")]
     AmbiguousRedirectUri,
 
     /// Sunulan `redirect_uri` kayıtlı değil.
@@ -117,6 +136,8 @@ pub enum AuthorizeOutcome {
         state: Option<String>,
         /// İstenen kapsam.
         scope: Option<String>,
+        /// OIDC `nonce`.
+        nonce: Option<String>,
     },
 }
 
@@ -151,13 +172,11 @@ pub fn validate(request: &AuthorizeRequest, client: Option<&RegisteredClient>) -
                 }
             }
         }
-        None => {
-            // RFC 6749 §3.1.2.3: tek kayıtlı adres varsa atlanabilir.
-            match client.redirect_uris.as_slice() {
-                [only] => only.clone(),
-                _ => return AuthorizeOutcome::Fatal(AuthorizeFatal::AmbiguousRedirectUri),
-            }
-        }
+        // OIDC Core §3.1.2.1: `redirect_uri` ZORUNLU. Tek kayıtlı adres olsa
+        // bile atlanmasına izin VERİLMEZ — hedefi sunucunun seçmesi, açık
+        // yönlendirici korumasının dayandığı "istemci ne istediğini söyledi"
+        // varsayımını kaldırır.
+        None => return AuthorizeOutcome::Fatal(AuthorizeFatal::AmbiguousRedirectUri),
     };
 
     let state = request.state.clone();
@@ -194,6 +213,7 @@ pub fn validate(request: &AuthorizeRequest, client: Option<&RegisteredClient>) -
         challenge,
         state,
         scope: request.scope.clone(),
+        nonce: request.nonce.clone(),
     }
 }
 
@@ -204,6 +224,7 @@ mod tests {
         AuthorizeError, AuthorizeFatal, AuthorizeOutcome, AuthorizeRequest, RegisteredClient,
         validate,
     };
+    use crate::client_auth::ClientAuthMethod;
     use crate::id::ClientId;
     use crate::redirect_uri::RedirectUri;
 
@@ -217,6 +238,8 @@ mod tests {
         RegisteredClient {
             client_id: ClientId::new("acme-web").expect("client"),
             redirect_uris: vec![uri("https://app.example.com/cb")],
+            auth_method: ClientAuthMethod::None,
+            keys: Vec::new(),
         }
     }
 
@@ -229,6 +252,7 @@ mod tests {
             code_challenge: Some(CHALLENGE.to_owned()),
             code_challenge_method: Some("S256".to_owned()),
             scope: None,
+            nonce: Some("n-1".to_owned()),
         }
     }
 
@@ -285,15 +309,20 @@ mod tests {
         }
     }
 
-    /// RFC 6749 §3.1.2.3: tek kayıtlı adres varsa `redirect_uri` atlanabilir.
+    /// OIDC Core §3.1.2.1: `redirect_uri` ZORUNLU — tek kayıtlı adres olsa bile.
+    ///
+    /// `RFC` 6749 §3.1.2.3 atlanmasına izin verir ama Argus bir OIDC
+    /// sağlayıcısıdır ve hedefi sunucunun seçmesi, açık yönlendirici korumasının
+    /// dayandığı varsayımı kaldırır. `oidcc-ensure-redirect-uri-in-authorization-request`
+    /// bunu sınar.
     #[test]
-    fn redirect_uri_may_be_omitted_when_exactly_one_is_registered() {
+    fn redirect_uri_is_required_even_with_a_single_registration() {
         let mut r = request();
         r.redirect_uri = None;
-        assert!(matches!(
+        assert_eq!(
             validate(&r, Some(&client())),
-            AuthorizeOutcome::Proceed { .. }
-        ));
+            AuthorizeOutcome::Fatal(AuthorizeFatal::AmbiguousRedirectUri)
+        );
     }
 
     /// Birden fazla adres varsa atlamak belirsizdir; tahmin edilmez.

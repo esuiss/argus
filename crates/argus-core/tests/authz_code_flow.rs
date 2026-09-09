@@ -155,6 +155,8 @@ fn replay_revokes_every_token_derived_from_the_code() {
         state: CodeState::Redeemed {
             at: Timestamp::from_unix_seconds(1_010),
         },
+        nonce: None,
+        scope: None,
     });
 
     let d = redeem(
@@ -193,6 +195,8 @@ fn replay_of_an_expired_code_still_revokes() {
         state: CodeState::Redeemed {
             at: Timestamp::from_unix_seconds(1_010),
         },
+        nonce: None,
+        scope: None,
     });
 
     // Çok sonra sunuluyor — süresi çoktan dolmuş.

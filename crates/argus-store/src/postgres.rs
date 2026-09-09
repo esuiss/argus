@@ -19,6 +19,7 @@
 
 use argus_core::authorize::RegisteredClient;
 use argus_core::authz_code::{CodeState, StoredCode};
+use argus_core::client_auth::{ClientAuthMethod, ClientKey};
 use argus_core::id::{ClientId, TenantId, UserId};
 use argus_core::pkce::{CodeChallenge, CodeChallengeMethod};
 use argus_core::redirect_uri::RedirectUri;
@@ -87,16 +88,30 @@ impl ClientStore for PostgresStore {
     ) -> Result<Option<RegisteredClient>, StoreError> {
         let mut tx = self.scoped(tenant).await?;
 
-        let exists = sqlx::query("SELECT 1 FROM clients WHERE tenant_id = $1 AND client_id = $2")
-            .bind(tenant.as_uuid())
-            .bind(client_id.as_str())
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(|e| map_err(&e))?;
+        let registration =
+            sqlx::query("SELECT auth_method FROM clients WHERE tenant_id = $1 AND client_id = $2")
+                .bind(tenant.as_uuid())
+                .bind(client_id.as_str())
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|e| map_err(&e))?;
 
-        if exists.is_none() {
+        let Some(registration) = registration else {
             return Ok(None);
-        }
+        };
+
+        let raw_method: String = registration
+            .try_get("auth_method")
+            .map_err(|e| map_err(&e))?;
+        // Şema `auth_method`'u zaten kısıtlıyor; tanınmayan bir değer veri
+        // katmanına dışarıdan yazılmış demektir ve o satıra GÜVENİLMEZ.
+        // "Bilinmiyorsa public say" demek, bilinmeyen bir kayda kimlik
+        // doğrulamasız erişim vermek olurdu.
+        let auth_method = match raw_method.as_str() {
+            "none" => ClientAuthMethod::None,
+            "private_key_jwt" => ClientAuthMethod::PrivateKeyJwt,
+            _ => return Err(StoreError::Unavailable),
+        };
 
         let rows = sqlx::query(
             "SELECT redirect_uri FROM client_redirect_uris \
@@ -108,7 +123,30 @@ impl ClientStore for PostgresStore {
         .await
         .map_err(|e| map_err(&e))?;
 
+        let key_rows = sqlx::query(
+            "SELECT kid, x, y FROM client_keys \
+             WHERE tenant_id = $1 AND client_id = $2 ORDER BY kid",
+        )
+        .bind(tenant.as_uuid())
+        .bind(client_id.as_str())
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?;
+
         tx.commit().await.map_err(|e| map_err(&e))?;
+
+        let mut keys = Vec::with_capacity(key_rows.len());
+        for row in key_rows {
+            let kid: String = row.try_get("kid").map_err(|e| map_err(&e))?;
+            let x: Vec<u8> = row.try_get("x").map_err(|e| map_err(&e))?;
+            let y: Vec<u8> = row.try_get("y").map_err(|e| map_err(&e))?;
+            // Şema uzunluğu zaten 32'ye sabitliyor; yine de tipe dönüştürülüyor
+            // çünkü veri katmanına uygulama dışından da yazılabilir.
+            let (Ok(x), Ok(y)) = (<[u8; 32]>::try_from(x), <[u8; 32]>::try_from(y)) else {
+                return Err(StoreError::Unavailable);
+            };
+            keys.push(ClientKey { kid, x, y });
+        }
 
         let mut redirect_uris = Vec::with_capacity(rows.len());
         for row in rows {
@@ -124,6 +162,8 @@ impl ClientStore for PostgresStore {
         Ok(Some(RegisteredClient {
             client_id: client_id.clone(),
             redirect_uris,
+            auth_method,
+            keys,
         }))
     }
 }
@@ -140,8 +180,9 @@ impl CodeIssuer for PostgresStore {
         sqlx::query(
             "INSERT INTO authorization_codes \
              (tenant_id, code_hash, client_id, user_id, redirect_uri, \
-              challenge_digest, challenge_method, issued_at, expires_at, state) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'issued')",
+              challenge_digest, challenge_method, issued_at, expires_at, state, \
+              nonce, scope) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'issued', $10, $11)",
         )
         .bind(tenant.as_uuid())
         .bind(&code_hash[..])
@@ -152,6 +193,8 @@ impl CodeIssuer for PostgresStore {
         .bind(code.challenge.method().as_str())
         .bind(to_dt(code.issued_at))
         .bind(to_dt(code.expires_at))
+        .bind(code.nonce.as_deref())
+        .bind(code.scope.as_deref())
         .execute(&mut *tx)
         .await
         .map_err(|e| map_err(&e))?;
@@ -166,7 +209,7 @@ impl CodeStore for PostgresStore {
 
         let row = sqlx::query(
             "SELECT client_id, user_id, redirect_uri, challenge_digest, \
-                    issued_at, expires_at, state, redeemed_at \
+                    issued_at, expires_at, state, redeemed_at, nonce, scope \
              FROM authorization_codes WHERE tenant_id = $1 AND code_hash = $2",
         )
         .bind(tenant.as_uuid())
@@ -188,6 +231,8 @@ impl CodeStore for PostgresStore {
         let state_raw: String = row.try_get("state").map_err(|e| map_err(&e))?;
         let redeemed: Option<chrono::DateTime<chrono::Utc>> =
             row.try_get("redeemed_at").map_err(|e| map_err(&e))?;
+        let nonce: Option<String> = row.try_get("nonce").map_err(|e| map_err(&e))?;
+        let scope: Option<String> = row.try_get("scope").map_err(|e| map_err(&e))?;
 
         let challenge = CodeChallenge::parse(
             CodeChallengeMethod::S256,
@@ -210,6 +255,8 @@ impl CodeStore for PostgresStore {
             issued_at: from_dt(issued),
             expires_at: from_dt(expires),
             state,
+            nonce,
+            scope,
         })
     }
 

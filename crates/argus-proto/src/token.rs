@@ -31,6 +31,14 @@ pub struct TokenResponse {
     /// Verilen kapsam, istenenden farklıysa (RFC 6749 §5.1).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
+
+    /// OIDC Core §3.1.3.3: kapsam `openid` içeriyorsa kimlik iddiası.
+    ///
+    /// Access token'ın aksine bu alan **istemci tarafından okunur**; bu yüzden
+    /// yalnızca `openid` istendiğinde vardır. Her yanıta koymak, kimlik
+    /// iddiasını istemediğini söylemiş istemcilere kimlik dağıtmak olurdu.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id_token: Option<String>,
 }
 
 impl core::fmt::Debug for TokenResponse {
@@ -44,6 +52,9 @@ impl core::fmt::Debug for TokenResponse {
                 &self.refresh_token.as_ref().map(|_| "<redacted>"),
             )
             .field("scope", &self.scope)
+            // `id_token` sır DEĞİL — istemci onu okumak zorunda — ama içinde
+            // `sub` var; log'a özne kimliği düşürmemek için yine gizleniyor.
+            .field("id_token", &self.id_token.as_ref().map(|_| "<redacted>"))
             .finish()
     }
 }
@@ -60,6 +71,7 @@ mod tests {
             expires_in: 300,
             refresh_token: Some("SUPER-SECRET-REFRESH".to_owned()),
             scope: None,
+            id_token: None,
         }
     }
 
@@ -84,6 +96,31 @@ mod tests {
         let json = serde_json::to_string(&r).unwrap();
         assert!(!json.contains("refresh_token"));
         assert!(!json.contains("scope"));
+        // `openid` istenmediyse yanıtta kimlik iddiası HİÇ olmamalı.
+        assert!(!json.contains("id_token"));
+    }
+
+    /// `openid` istendiğinde alan tam adıyla telde görünmeli; istemciler onu
+    /// bu adla arıyor.
+    #[test]
+    fn id_token_is_serialised_when_present() {
+        let r = TokenResponse {
+            id_token: Some("header.payload.sig".to_owned()),
+            ..sample()
+        };
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(json.contains(r#""id_token":"header.payload.sig""#));
+    }
+
+    /// Kimlik iddiası `sub` taşır; `Debug` çıktısında görünmemeli.
+    #[test]
+    fn debug_hides_the_id_token() {
+        let r = TokenResponse {
+            id_token: Some("h.SUBJECT-INSIDE.s".to_owned()),
+            ..sample()
+        };
+        let shown = format!("{r:?}");
+        assert!(!shown.contains("SUBJECT-INSIDE"), "leaked: {shown}");
     }
 
     #[test]

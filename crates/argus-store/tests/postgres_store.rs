@@ -15,6 +15,7 @@
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
 use argus_core::authz_code::{CodeState, StoredCode};
+use argus_core::client_auth::ClientAuthMethod;
 use argus_core::id::{ClientId, TenantId, UserId};
 use argus_core::pkce::{CodeChallenge, CodeChallengeMethod};
 use argus_core::redirect_uri::RedirectUri;
@@ -123,6 +124,8 @@ fn stored_code(tenant: TenantId) -> StoredCode {
         issued_at: NOW,
         expires_at: NOW.saturating_add(Duration::from_seconds(60)),
         state: CodeState::Issued,
+        nonce: None,
+        scope: None,
     }
 }
 
@@ -315,4 +318,154 @@ async fn client_lookup_returns_registered_redirect_uris() {
     // durumdur ve `Fatal(UnknownClient)` sonucunu doğurur.
     let unknown = ClientId::new("nope").expect("client id");
     assert!(s.find(t, &unknown).await.expect("query").is_none());
+}
+
+/// OIDC alanları kodla BİRLİKTE saklanmalı: token isteği geldiğinde
+/// yetkilendirme isteği bitmiştir ve `nonce` başka hiçbir yerden öğrenilemez.
+/// Bu test tam olarak `0004`'ün varlık sebebini sınıyor.
+#[tokio::test]
+async fn oidc_claims_survive_the_round_trip() {
+    let Some(s) = store().await else {
+        eprintln!("skipped: ARGUS_TEST_DATABASE_URL is not set");
+        return;
+    };
+    let t = fresh_tenant();
+    seed(t).await;
+
+    let hash = [21u8; 32];
+    let code = StoredCode {
+        nonce: Some("n-0S6_WzA2Mj".to_owned()),
+        scope: Some("openid profile".to_owned()),
+        ..stored_code(t)
+    };
+    s.issue(t, &hash, &code).await.expect("issue");
+
+    let loaded = CodeStore::load(&s, t, &hash).await.expect("load");
+    // `nonce` AYNEN dönmeli; en ufak dönüşüm istemcinin karşılaştırmasını bozar.
+    assert_eq!(loaded.nonce.as_deref(), Some("n-0S6_WzA2Mj"));
+    assert_eq!(loaded.scope.as_deref(), Some("openid profile"));
+}
+
+/// `openid` istenmeyen akışta iki kolon da `NULL` kalmalı — boş dize yazmak,
+/// "`nonce` gönderildi ama boştu" ile "hiç gönderilmedi"yi ayırt edilemez kılar.
+#[tokio::test]
+async fn a_plain_oauth_code_stores_no_oidc_claims() {
+    let Some(s) = store().await else {
+        return;
+    };
+    let t = fresh_tenant();
+    seed(t).await;
+
+    let hash = [22u8; 32];
+    s.issue(t, &hash, &stored_code(t)).await.expect("issue");
+
+    let loaded = CodeStore::load(&s, t, &hash).await.expect("load");
+    assert!(loaded.nonce.is_none());
+    assert!(loaded.scope.is_none());
+}
+
+/// İstemciden gelip aynen geri yazılan her alan bir şişirme yüzeyidir; sınır
+/// şemada zorlanmalı, yoksa uygulamadaki bir hata doğrudan diske yazar.
+#[tokio::test]
+async fn an_oversized_nonce_is_refused_by_the_schema() {
+    let Some(s) = store().await else {
+        return;
+    };
+    let t = fresh_tenant();
+    seed(t).await;
+
+    let code = StoredCode {
+        nonce: Some("n".repeat(256)),
+        ..stored_code(t)
+    };
+    assert!(
+        s.issue(t, &[23u8; 32], &code).await.is_err(),
+        "the schema must reject a nonce longer than 255 characters"
+    );
+
+    // Sınırın kendisi geçmeli, yoksa kontrol bir karakter kaymış demektir.
+    let at_limit = StoredCode {
+        nonce: Some("n".repeat(255)),
+        ..stored_code(t)
+    };
+    s.issue(t, &[24u8; 32], &at_limit)
+        .await
+        .expect("255 characters must be accepted");
+}
+
+/// Kayıtlı istemcinin kimlik doğrulama yöntemi ve anahtarları veritabanından
+/// okunmalı: token endpoint'i hangi yöntemi bekleyeceğini yalnızca buradan
+/// öğrenir. Yanlış okunursa confidential bir istemci public gibi davranır.
+#[tokio::test]
+async fn a_confidential_client_carries_its_method_and_keys() {
+    let Some(s) = store().await else {
+        eprintln!("skipped: ARGUS_TEST_DATABASE_URL is not set");
+        return;
+    };
+    let t = fresh_tenant();
+    seed(t).await;
+
+    let url = std::env::var("ARGUS_TEST_DATABASE_URL").expect("url");
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+        .expect("pool");
+
+    sqlx::query(
+        "UPDATE clients SET client_type = 'confidential', auth_method = 'private_key_jwt' \
+         WHERE tenant_id = $1 AND client_id = $2",
+    )
+    .bind(t.as_uuid())
+    .bind(client_of(t).as_str())
+    .execute(&pool)
+    .await
+    .expect("promote client");
+
+    for (kid, fill) in [("k1", 0x11u8), ("k2", 0x33u8)] {
+        sqlx::query(
+            "INSERT INTO client_keys (tenant_id, client_id, kid, x, y) VALUES ($1,$2,$3,$4,$5)",
+        )
+        .bind(t.as_uuid())
+        .bind(client_of(t).as_str())
+        .bind(kid)
+        .bind(vec![fill; 32])
+        .bind(vec![fill.wrapping_add(1); 32])
+        .execute(&pool)
+        .await
+        .expect("key");
+    }
+
+    let found = s
+        .find(t, &client_of(t))
+        .await
+        .expect("query")
+        .expect("client exists");
+
+    assert_eq!(found.auth_method, ClientAuthMethod::PrivateKeyJwt);
+    // Rotasyon penceresinde iki anahtar birden geçerli olmalı.
+    assert_eq!(found.keys.len(), 2);
+    let kids: Vec<&str> = found.keys.iter().map(|k| k.kid.as_str()).collect();
+    assert_eq!(kids, ["k1", "k2"]);
+    assert_eq!(found.keys.first().expect("key").x, [0x11u8; 32]);
+    assert_eq!(found.keys.first().expect("key").y, [0x12u8; 32]);
+}
+
+/// Public client varsayılanı `none` olmalı ve anahtar taşımamalı.
+#[tokio::test]
+async fn a_public_client_defaults_to_no_authentication() {
+    let Some(s) = store().await else {
+        return;
+    };
+    let t = fresh_tenant();
+    seed(t).await;
+
+    let found = s
+        .find(t, &client_of(t))
+        .await
+        .expect("query")
+        .expect("client exists");
+
+    assert_eq!(found.auth_method, ClientAuthMethod::None);
+    assert!(found.keys.is_empty());
 }
