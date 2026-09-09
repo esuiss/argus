@@ -58,6 +58,10 @@ uuid = { version = "1", default-features = false, features = ["v4"] }
 # WHATWG URL uygulaması, ağ erişimi yok. Lisans: MIT OR Apache-2.0 (AGPL uyumlu).
 url = "2"
 
+# Yalnızca dev-dependency (§9 Faz 3 çıkış kriteri: "criterion Argon2 regresyon
+# eşiği"). Üretim binary'sine girmez. Lisans: MIT OR Apache-2.0.
+criterion = { version = "0.5", default-features = false }
+
 # Yalnızca dev-dependency (§27 test stratejisi: "insta snapshot altyapısı").
 # Üretim binary'sine girmez. Lisans: Apache-2.0.
 insta = "1"
@@ -108,6 +112,13 @@ rustls-pemfile = "2"
 # ⚠️ §6 §593: ARM'da NEON yok, x86'da libargon2 ile fark ölçülmedi.
 # Lisans: MIT OR Apache-2.0 (AGPL uyumlu).
 argon2 = { version = "0.5", features = ["std"] }
+
+# §1 §2.2 satır 399'da onaylı. WebAuthn/FIDO2 ceremonileri.
+# `danger-allow-state-serialisation`: kayıt ve doğrulama iki HTTP isteğine
+# yayılıyor; aradaki challenge durumu sunucu tarafında saklanmak zorunda.
+# ⚠️ §5 §3535: webauthn-rs, ldap3_proto ve concread aynı ekipten — korele risk.
+# Lisans: MPL-2.0 (AGPL uyumlu).
+webauthn-rs = { version = "0.5", features = ["danger-allow-state-serialisation"] }
 
 # CIMD dokümanlarını çekerken sunucu sertifikasını doğrulamak için kök depo.
 # Sistem deposu yerine sabit bir küme: kabın içinde ca-certificates olup

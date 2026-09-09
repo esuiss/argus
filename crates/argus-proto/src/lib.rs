@@ -11,6 +11,7 @@ pub mod jwt;
 pub mod oidc;
 pub mod prm;
 pub mod token;
+pub mod webauthn;
 
 pub use cimd::{ClientIdMetadataDocument, DocumentError, MAX_DOCUMENT_BYTES};
 pub use client_assertion::{ASSERTION_TYPE, AssertionError};

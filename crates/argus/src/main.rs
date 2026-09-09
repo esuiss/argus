@@ -10,11 +10,10 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use argus_core::authorize::RegisteredClient;
+use argus_core::id::ClientId;
 use argus_core::id::TenantId;
-use argus_core::id::{ClientId, UserId};
 use argus_core::redirect_uri::RedirectUri;
 use argus_crypto::SigningKey;
-use argus_http::endpoints::authorize::DevAuthenticator;
 use argus_http::memstore::{
     MemoryAuditSink, MemoryClientStore, MemoryCodeStore, MemoryRefreshStore, MemoryReplayStore,
     MemoryResourceStore,
@@ -108,9 +107,7 @@ async fn main() -> ExitCode {
         tenant_id: TenantId::from_uuid(Uuid::nil()),
         clients,
 
-        authenticator: DevAuthenticator {
-            user: UserId::from_uuid(Uuid::from_u128(1)),
-        },
+        authenticator: (),
         replay: MemoryReplayStore::default(),
         resources: MemoryResourceStore::default(),
         cimd: Some(cimd_runtime(&config)),
@@ -422,9 +419,7 @@ async fn serve_with_postgres(config: &Config, url: &str, keys: &KeySet) -> ExitC
         tenant_id: TenantId::from_uuid(Uuid::nil()),
         clients: store.clone(),
 
-        authenticator: DevAuthenticator {
-            user: UserId::from_uuid(Uuid::from_u128(1)),
-        },
+        authenticator: (),
         replay: store.clone(),
         resources: store,
         cimd: Some(cimd_runtime(config)),

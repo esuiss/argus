@@ -1,3 +1,4 @@
+pub mod authn;
 pub mod authorize;
 pub mod backchannel;
 pub mod discovery;

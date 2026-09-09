@@ -32,21 +32,6 @@ pub struct AuthorizeQuery {
     pub consented: bool,
 }
 
-pub trait UserAuthenticator {
-    fn current_user(&self, tenant: TenantId) -> Option<UserId>;
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct DevAuthenticator {
-    pub user: UserId,
-}
-
-impl UserAuthenticator for DevAuthenticator {
-    fn current_user(&self, _tenant: TenantId) -> Option<UserId> {
-        Some(self.user)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthorizeResponse {
     Redirect(String),
@@ -62,7 +47,7 @@ pub enum AuthorizeResponse {
     NeedsAuthentication,
 }
 
-pub struct AuthorizeContext<'a, I, U, H> {
+pub struct AuthorizeContext<'a, I, H> {
     pub tenant: TenantId,
 
     pub issuer: &'a str,
@@ -71,7 +56,7 @@ pub struct AuthorizeContext<'a, I, U, H> {
 
     pub codes: &'a I,
 
-    pub auth: &'a U,
+    pub subject: Option<UserId>,
 
     pub hasher: &'a H,
 
@@ -84,21 +69,20 @@ pub struct AuthorizeContext<'a, I, U, H> {
     pub requires_consent: bool,
 }
 
-impl<I, U, H> Clone for AuthorizeContext<'_, I, U, H> {
+impl<I, H> Clone for AuthorizeContext<'_, I, H> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<I, U, H> Copy for AuthorizeContext<'_, I, U, H> {}
+impl<I, H> Copy for AuthorizeContext<'_, I, H> {}
 
-pub async fn handle<I, U, H>(
-    ctx: &AuthorizeContext<'_, I, U, H>,
+pub async fn handle<I, H>(
+    ctx: &AuthorizeContext<'_, I, H>,
     query: &AuthorizeQuery,
 ) -> Result<AuthorizeResponse, StoreError>
 where
     I: CodeIssuer + Sync,
-    U: UserAuthenticator + Sync,
     H: Sha256,
 {
     let AuthorizeContext {
@@ -106,7 +90,7 @@ where
         issuer,
         client: registered,
         codes,
-        auth,
+        subject,
         hasher,
         now,
         new_code,
@@ -152,7 +136,7 @@ where
             nonce,
             resources,
         } => {
-            let Some(user) = auth.current_user(tenant) else {
+            let Some(user) = subject else {
                 return Ok(AuthorizeResponse::NeedsAuthentication);
             };
 

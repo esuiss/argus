@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use argus_core::authz_code::{CodeState, StoredCode};
-use argus_core::id::TenantId;
+use argus_core::id::{TenantId, UserId};
 use argus_core::refresh::{FamilyId, RefreshState, RefreshToken};
 use argus_core::time::Timestamp;
 
@@ -10,15 +10,16 @@ use argus_core::authorize::RegisteredClient;
 use argus_core::id::ClientId;
 
 use crate::store::{
-    AuditSink, BackchannelStore, ClientStore, CodeIssuer, CodeStore, ConnectionStore, IssuerStore,
-    JtiOutcome, JtiPurpose, ProtectedResource, RefreshStore, ReplayStore, ResourceStore,
-    StoreError,
+    AuditSink, AuthnSession, AuthnStore, BackchannelStore, ClientStore, CodeIssuer, CodeStore,
+    ConnectionStore, IssuerStore, JtiOutcome, JtiPurpose, ProtectedResource, RefreshStore,
+    ReplayStore, ResourceStore, SessionStore, StoreError,
 };
 
 #[derive(Debug, Default)]
 pub struct MemoryCodeStore {
     codes: Mutex<HashMap<[u8; 32], StoredCode>>,
     backchannel: Mutex<HashMap<[u8; 32], argus_core::ciba::BackchannelRequest>>,
+    sessions: Mutex<HashMap<[u8; 32], AuthnSession>>,
 }
 
 impl MemoryCodeStore {
@@ -431,5 +432,121 @@ impl IssuerStore for MemoryResourceStore {
             .lock()
             .map_err(|_| StoreError::Unavailable)?
             .clone())
+    }
+}
+
+impl SessionStore for MemoryCodeStore {
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn create_session(
+        &self,
+        _t: TenantId,
+        hash: &[u8; 32],
+        session: &AuthnSession,
+    ) -> Result<(), StoreError> {
+        self.sessions
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .insert(*hash, session.clone());
+        Ok(())
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn load_session(
+        &self,
+        _t: TenantId,
+        hash: &[u8; 32],
+        now: Timestamp,
+    ) -> Result<AuthnSession, StoreError> {
+        let guard = self.sessions.lock().map_err(|_| StoreError::Unavailable)?;
+        let session = guard.get(hash).ok_or(StoreError::NotFound)?;
+        if session.expires_at.as_unix_seconds() <= now.as_unix_seconds() {
+            return Err(StoreError::NotFound);
+        }
+        Ok(session.clone())
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn revoke_session(
+        &self,
+        _t: TenantId,
+        hash: &[u8; 32],
+        _at: Timestamp,
+    ) -> Result<(), StoreError> {
+        self.sessions
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .remove(hash);
+        Ok(())
+    }
+}
+
+impl AuthnStore for MemoryCodeStore {
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn find_user_by_identifier(
+        &self,
+        _t: TenantId,
+        _identifier: &str,
+    ) -> Result<Option<UserId>, StoreError> {
+        Ok(None)
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn password_of(&self, _t: TenantId, _u: UserId) -> Result<Option<String>, StoreError> {
+        Ok(None)
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn set_password(&self, _t: TenantId, _u: UserId, _p: &str) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn required_aal(
+        &self,
+        _t: TenantId,
+        _u: UserId,
+    ) -> Result<argus_core::aal::Aal, StoreError> {
+        Ok(argus_core::aal::Aal::One)
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn webauthn_credentials(
+        &self,
+        _t: TenantId,
+        _u: UserId,
+    ) -> Result<Vec<String>, StoreError> {
+        Ok(Vec::new())
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn store_webauthn_credential(
+        &self,
+        _t: TenantId,
+        _u: UserId,
+        _c: &[u8],
+        _r: &str,
+        _s: &str,
+    ) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn user_for_credential(
+        &self,
+        _t: TenantId,
+        _c: &[u8],
+    ) -> Result<Option<UserId>, StoreError> {
+        Ok(None)
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn advance_sign_count(
+        &self,
+        _t: TenantId,
+        _c: &[u8],
+        _n: i64,
+        _at: Timestamp,
+    ) -> Result<bool, StoreError> {
+        Ok(true)
     }
 }

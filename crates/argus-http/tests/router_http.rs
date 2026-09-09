@@ -15,11 +15,11 @@ use argus_core::redirect_uri::RedirectUri;
 use argus_core::refresh::{FamilyId, RefreshToken};
 use argus_core::time::Timestamp;
 use argus_crypto::SigningKey;
-use argus_http::endpoints::authorize::DevAuthenticator;
 use argus_http::memstore::{MemoryReplayStore, MemoryResourceStore};
 use argus_http::state::{AppState, TenantContext};
 use argus_http::store::{
-    AuditSink, BackchannelStore, ClientStore, CodeIssuer, CodeStore, RefreshStore, StoreError,
+    AuditSink, AuthnStore, BackchannelStore, ClientStore, CodeIssuer, CodeStore, RefreshStore,
+    SessionStore, StoreError,
 };
 use argus_proto::AuthorizationServerMetadata;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
@@ -29,6 +29,7 @@ use uuid::Uuid;
 #[derive(Default)]
 struct Codes {
     issued: Mutex<Option<StoredCode>>,
+    sessions: Mutex<std::collections::HashMap<[u8; 32], argus_http::store::AuthnSession>>,
 }
 
 impl CodeIssuer for Codes {
@@ -114,6 +115,12 @@ impl ClientStore for Clients {
     }
 }
 
+const SESSION_SECRET: &str = "test-session-secret";
+
+fn session_cookie_header() -> String {
+    format!("Cookie: argus_session={SESSION_SECRET}\r\n")
+}
+
 async fn serve() -> String {
     let (key, _) = SigningKey::generate("k1").expect("key");
     let key = Arc::new(key);
@@ -129,13 +136,30 @@ async fn serve() -> String {
         audit: Audit,
         tenant_id: TenantId::from_uuid(Uuid::nil()),
         clients: Clients,
-        authenticator: DevAuthenticator {
-            user: UserId::from_uuid(Uuid::from_u128(1)),
-        },
+        authenticator: (),
         replay: MemoryReplayStore::default(),
         resources: MemoryResourceStore::default(),
         cimd: None,
     });
+
+    {
+        use argus_core::pkce::Sha256 as _;
+        let hash = argus_crypto::AwsLcSha256.sha256(SESSION_SECRET.as_bytes());
+        state
+            .codes
+            .create_session(
+                TenantId::from_uuid(Uuid::nil()),
+                &hash,
+                &argus_http::store::AuthnSession {
+                    subject: UserId::from_uuid(Uuid::from_u128(1)),
+                    achieved: argus_core::aal::Aal::One,
+                    authenticated_at: Timestamp::from_unix_seconds(0),
+                    expires_at: Timestamp::from_unix_seconds(4_000_000_000),
+                },
+            )
+            .await
+            .expect("session");
+    }
 
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let addr = listener.local_addr().expect("addr").to_string();
@@ -256,7 +280,7 @@ async fn a_valid_authorize_request_redirects_with_iss_and_encoded_state() {
         "/authorize?response_type=code&client_id=demo-client&redirect_uri=https%3A%2F%2Fapp.example.com%2Fcb\
          &state=a%26b&scope=openid&nonce=n1\
          &code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256",
-        "",
+        &session_cookie_header(),
     )
     .await;
 
@@ -386,4 +410,154 @@ async fn the_consent_page_escapes_what_it_shows() {
         !r.contains("<script>"),
         "unescaped markup reached the page: {r}"
     );
+}
+
+impl SessionStore for Codes {
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn create_session(
+        &self,
+        _t: TenantId,
+        hash: &[u8; 32],
+        session: &argus_http::store::AuthnSession,
+    ) -> Result<(), StoreError> {
+        self.sessions
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .insert(*hash, session.clone());
+        Ok(())
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn load_session(
+        &self,
+        _t: TenantId,
+        hash: &[u8; 32],
+        now: Timestamp,
+    ) -> Result<argus_http::store::AuthnSession, StoreError> {
+        let guard = self.sessions.lock().map_err(|_| StoreError::Unavailable)?;
+        let session = guard.get(hash).ok_or(StoreError::NotFound)?;
+        if session.expires_at.as_unix_seconds() <= now.as_unix_seconds() {
+            return Err(StoreError::NotFound);
+        }
+        Ok(session.clone())
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn revoke_session(
+        &self,
+        _t: TenantId,
+        hash: &[u8; 32],
+        _at: Timestamp,
+    ) -> Result<(), StoreError> {
+        self.sessions
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .remove(hash);
+        Ok(())
+    }
+}
+
+impl AuthnStore for Codes {
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn find_user_by_identifier(
+        &self,
+        _t: TenantId,
+        _identifier: &str,
+    ) -> Result<Option<UserId>, StoreError> {
+        Ok(None)
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn password_of(&self, _t: TenantId, _u: UserId) -> Result<Option<String>, StoreError> {
+        Ok(None)
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn set_password(&self, _t: TenantId, _u: UserId, _p: &str) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn required_aal(
+        &self,
+        _t: TenantId,
+        _u: UserId,
+    ) -> Result<argus_core::aal::Aal, StoreError> {
+        Ok(argus_core::aal::Aal::One)
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn webauthn_credentials(
+        &self,
+        _t: TenantId,
+        _u: UserId,
+    ) -> Result<Vec<String>, StoreError> {
+        Ok(Vec::new())
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn store_webauthn_credential(
+        &self,
+        _t: TenantId,
+        _u: UserId,
+        _c: &[u8],
+        _r: &str,
+        _s: &str,
+    ) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn user_for_credential(
+        &self,
+        _t: TenantId,
+        _c: &[u8],
+    ) -> Result<Option<UserId>, StoreError> {
+        Ok(None)
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn advance_sign_count(
+        &self,
+        _t: TenantId,
+        _c: &[u8],
+        _n: i64,
+        _at: Timestamp,
+    ) -> Result<bool, StoreError> {
+        Ok(true)
+    }
+}
+
+#[tokio::test]
+async fn an_authorize_request_without_a_session_is_not_authenticated() {
+    let addr = serve().await;
+    let r = get(
+        &addr,
+        "/authorize?response_type=code&client_id=demo-client\
+         &redirect_uri=https%3A%2F%2Fapp.example.com%2Fcb&scope=openid\
+         &code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256",
+        "",
+    )
+    .await;
+
+    assert!(
+        status(&r).contains("401"),
+        "an unauthenticated authorize request must not mint a code: {r}"
+    );
+    assert!(!r.to_lowercase().contains("location:"), "{r}");
+}
+
+#[tokio::test]
+async fn a_forged_session_cookie_does_not_authenticate() {
+    let addr = serve().await;
+    let r = get(
+        &addr,
+        "/authorize?response_type=code&client_id=demo-client\
+         &redirect_uri=https%3A%2F%2Fapp.example.com%2Fcb&scope=openid\
+         &code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256",
+        "Cookie: argus_session=not-the-real-one\r\n",
+    )
+    .await;
+
+    assert!(status(&r).contains("401"), "{r}");
 }

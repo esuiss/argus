@@ -1,3 +1,4 @@
+use argus_core::aal::Aal;
 use argus_core::authorize::RegisteredClient;
 use argus_core::authz_code::{CodeState, StoredCode};
 use argus_core::ciba::{BackchannelRequest, BackchannelState};
@@ -14,8 +15,9 @@ use base64ct::{Base64UrlUnpadded, Encoding as _};
 use sqlx::{PgPool, Postgres, Row as _, Transaction};
 
 use crate::traits::{
-    AuditSink, BackchannelStore, ClientStore, CodeIssuer, CodeStore, ConnectionStore, IssuerStore,
-    JtiOutcome, JtiPurpose, ProtectedResource, RefreshStore, ReplayStore, ResourceStore,
+    AuditSink, AuthnSession, AuthnStore, BackchannelStore, CeremonyPurpose, CeremonyStore,
+    ClientStore, CodeIssuer, CodeStore, ConnectionStore, IssuerStore, JtiOutcome, JtiPurpose,
+    PendingCeremony, ProtectedResource, RefreshStore, ReplayStore, ResourceStore, SessionStore,
     StoreError,
 };
 
@@ -652,6 +654,353 @@ fn join_resources(resources: &[ResourceUri]) -> Option<String> {
             .collect::<Vec<_>>()
             .join(" "),
     )
+}
+
+impl AuthnStore for PostgresStore {
+    async fn find_user_by_identifier(
+        &self,
+        tenant: TenantId,
+        identifier: &str,
+    ) -> Result<Option<UserId>, StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        let row = sqlx::query(
+            "SELECT user_id FROM users \
+             WHERE tenant_id = $1 AND email_blind_index = digest($2, 'sha256')",
+        )
+        .bind(tenant.as_uuid())
+        .bind(identifier)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?;
+
+        tx.commit().await.map_err(|e| map_err(&e))?;
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let id: uuid::Uuid = row.try_get("user_id").map_err(|e| map_err(&e))?;
+        Ok(Some(UserId::from_uuid(id)))
+    }
+
+    async fn password_of(
+        &self,
+        tenant: TenantId,
+        user: UserId,
+    ) -> Result<Option<String>, StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        let row = sqlx::query(
+            "SELECT phc FROM password_credentials WHERE tenant_id = $1 AND user_id = $2",
+        )
+        .bind(tenant.as_uuid())
+        .bind(user.as_uuid())
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?;
+
+        tx.commit().await.map_err(|e| map_err(&e))?;
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        Ok(Some(row.try_get("phc").map_err(|e| map_err(&e))?))
+    }
+
+    async fn set_password(
+        &self,
+        tenant: TenantId,
+        user: UserId,
+        phc: &str,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        sqlx::query(
+            "INSERT INTO password_credentials (tenant_id, user_id, phc) VALUES ($1, $2, $3) \
+             ON CONFLICT (tenant_id, user_id) DO UPDATE SET phc = $3, updated_at = now()",
+        )
+        .bind(tenant.as_uuid())
+        .bind(user.as_uuid())
+        .bind(phc)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?;
+
+        tx.commit().await.map_err(|e| map_err(&e))
+    }
+
+    async fn required_aal(&self, tenant: TenantId, user: UserId) -> Result<Aal, StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        let row = sqlx::query(
+            "SELECT required_aal::text FROM users WHERE tenant_id = $1 AND user_id = $2",
+        )
+        .bind(tenant.as_uuid())
+        .bind(user.as_uuid())
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?
+        .ok_or(StoreError::NotFound)?;
+
+        tx.commit().await.map_err(|e| map_err(&e))?;
+
+        let raw: String = row.try_get("required_aal").map_err(|e| map_err(&e))?;
+        Aal::parse(&raw).ok_or(StoreError::Unavailable)
+    }
+
+    async fn webauthn_credentials(
+        &self,
+        tenant: TenantId,
+        user: UserId,
+    ) -> Result<Vec<String>, StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        let rows = sqlx::query(
+            "SELECT public_key FROM webauthn_credentials \
+             WHERE tenant_id = $1 AND user_id = $2 ORDER BY created_at",
+        )
+        .bind(tenant.as_uuid())
+        .bind(user.as_uuid())
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?;
+
+        tx.commit().await.map_err(|e| map_err(&e))?;
+
+        let mut out = Vec::with_capacity(rows.len());
+        for row in &rows {
+            let raw: Vec<u8> = row.try_get("public_key").map_err(|e| map_err(&e))?;
+            out.push(String::from_utf8(raw).map_err(|_| StoreError::Unavailable)?);
+        }
+        Ok(out)
+    }
+
+    async fn store_webauthn_credential(
+        &self,
+        tenant: TenantId,
+        user: UserId,
+        credential_id: &[u8],
+        rp_id: &str,
+        serialised: &str,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        sqlx::query(
+            "INSERT INTO webauthn_credentials \
+             (tenant_id, credential_id, user_id, rp_id, public_key) \
+             VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(tenant.as_uuid())
+        .bind(credential_id)
+        .bind(user.as_uuid())
+        .bind(rp_id)
+        .bind(serialised.as_bytes())
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?;
+
+        tx.commit().await.map_err(|e| map_err(&e))
+    }
+
+    async fn user_for_credential(
+        &self,
+        tenant: TenantId,
+        credential_id: &[u8],
+    ) -> Result<Option<UserId>, StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        let row = sqlx::query(
+            "SELECT user_id FROM webauthn_credentials \
+             WHERE tenant_id = $1 AND credential_id = $2",
+        )
+        .bind(tenant.as_uuid())
+        .bind(credential_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?;
+
+        tx.commit().await.map_err(|e| map_err(&e))?;
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let id: uuid::Uuid = row.try_get("user_id").map_err(|e| map_err(&e))?;
+        Ok(Some(UserId::from_uuid(id)))
+    }
+
+    async fn advance_sign_count(
+        &self,
+        tenant: TenantId,
+        credential_id: &[u8],
+        counter: i64,
+        at: Timestamp,
+    ) -> Result<bool, StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        let result = sqlx::query(
+            "UPDATE webauthn_credentials SET sign_count = $3, last_used_at = $4 \
+             WHERE tenant_id = $1 AND credential_id = $2 \
+               AND ($3 = 0 OR $3 > sign_count)",
+        )
+        .bind(tenant.as_uuid())
+        .bind(credential_id)
+        .bind(counter)
+        .bind(to_dt(at))
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?;
+
+        tx.commit().await.map_err(|e| map_err(&e))?;
+        Ok(result.rows_affected() == 1)
+    }
+}
+
+impl CeremonyStore for PostgresStore {
+    async fn store_ceremony(
+        &self,
+        tenant: TenantId,
+        ceremony_hash: &[u8; 32],
+        ceremony: &PendingCeremony<'_>,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        sqlx::query(
+            "INSERT INTO webauthn_ceremonies \
+             (tenant_id, ceremony_hash, user_id, purpose, state, issued_at, expires_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        )
+        .bind(tenant.as_uuid())
+        .bind(ceremony_hash.as_slice())
+        .bind(ceremony.user.map(UserId::as_uuid))
+        .bind(ceremony.purpose.as_str())
+        .bind(ceremony.state)
+        .bind(to_dt(ceremony.issued_at))
+        .bind(to_dt(ceremony.expires_at))
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?;
+
+        tx.commit().await.map_err(|e| map_err(&e))
+    }
+
+    async fn take_ceremony(
+        &self,
+        tenant: TenantId,
+        ceremony_hash: &[u8; 32],
+        purpose: CeremonyPurpose,
+        now: Timestamp,
+    ) -> Result<(Option<UserId>, String), StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        let row = sqlx::query(
+            "DELETE FROM webauthn_ceremonies \
+             WHERE tenant_id = $1 AND ceremony_hash = $2 AND purpose = $3 AND expires_at > $4 \
+             RETURNING user_id, state",
+        )
+        .bind(tenant.as_uuid())
+        .bind(ceremony_hash.as_slice())
+        .bind(purpose.as_str())
+        .bind(to_dt(now))
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?
+        .ok_or(StoreError::NotFound)?;
+
+        tx.commit().await.map_err(|e| map_err(&e))?;
+
+        let user: Option<uuid::Uuid> = row.try_get("user_id").map_err(|e| map_err(&e))?;
+        let state: String = row.try_get("state").map_err(|e| map_err(&e))?;
+        Ok((user.map(UserId::from_uuid), state))
+    }
+}
+
+impl SessionStore for PostgresStore {
+    async fn create_session(
+        &self,
+        tenant: TenantId,
+        session_hash: &[u8; 32],
+        session: &AuthnSession,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        sqlx::query(
+            "INSERT INTO authn_sessions \
+             (tenant_id, session_hash, user_id, achieved_aal, authenticated_at, expires_at) \
+             VALUES ($1, $2, $3, $4::aal, $5, $6)",
+        )
+        .bind(tenant.as_uuid())
+        .bind(session_hash.as_slice())
+        .bind(session.subject.as_uuid())
+        .bind(session.achieved.as_str())
+        .bind(to_dt(session.authenticated_at))
+        .bind(to_dt(session.expires_at))
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?;
+
+        tx.commit().await.map_err(|e| map_err(&e))
+    }
+
+    async fn load_session(
+        &self,
+        tenant: TenantId,
+        session_hash: &[u8; 32],
+        now: Timestamp,
+    ) -> Result<AuthnSession, StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        let row = sqlx::query(
+            "SELECT user_id, achieved_aal::text, authenticated_at, expires_at \
+             FROM authn_sessions \
+             WHERE tenant_id = $1 AND session_hash = $2 \
+               AND revoked_at IS NULL AND expires_at > $3",
+        )
+        .bind(tenant.as_uuid())
+        .bind(session_hash.as_slice())
+        .bind(to_dt(now))
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?
+        .ok_or(StoreError::NotFound)?;
+
+        tx.commit().await.map_err(|e| map_err(&e))?;
+
+        let user: uuid::Uuid = row.try_get("user_id").map_err(|e| map_err(&e))?;
+        let raw_aal: String = row.try_get("achieved_aal").map_err(|e| map_err(&e))?;
+        let authenticated: chrono::DateTime<chrono::Utc> =
+            row.try_get("authenticated_at").map_err(|e| map_err(&e))?;
+        let expires: chrono::DateTime<chrono::Utc> =
+            row.try_get("expires_at").map_err(|e| map_err(&e))?;
+
+        Ok(AuthnSession {
+            subject: UserId::from_uuid(user),
+            achieved: Aal::parse(&raw_aal).ok_or(StoreError::Unavailable)?,
+            authenticated_at: from_dt(authenticated),
+            expires_at: from_dt(expires),
+        })
+    }
+
+    async fn revoke_session(
+        &self,
+        tenant: TenantId,
+        session_hash: &[u8; 32],
+        at: Timestamp,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        sqlx::query(
+            "UPDATE authn_sessions SET revoked_at = $3 \
+             WHERE tenant_id = $1 AND session_hash = $2 AND revoked_at IS NULL",
+        )
+        .bind(tenant.as_uuid())
+        .bind(session_hash.as_slice())
+        .bind(to_dt(at))
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?;
+
+        tx.commit().await.map_err(|e| map_err(&e))
+    }
 }
 
 impl IssuerStore for PostgresStore {

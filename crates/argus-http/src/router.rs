@@ -12,8 +12,7 @@ use axum::routing::{get, post};
 use axum::{Form, Json, Router};
 
 use crate::endpoints::authorize::{
-    AuthorizeContext, AuthorizeQuery, AuthorizeResponse, UserAuthenticator,
-    handle as authorize_handle,
+    AuthorizeContext, AuthorizeQuery, AuthorizeResponse, handle as authorize_handle,
 };
 use crate::endpoints::discovery;
 use crate::endpoints::token::{Binding, TokenForm, handle};
@@ -21,8 +20,8 @@ use crate::endpoints::userinfo::{self, UserInfoRequest};
 use crate::replay::{PrecheckedReplay, consume};
 use crate::state::AppState;
 use crate::store::{
-    AuditSink, BackchannelStore, ClientStore, CodeIssuer, CodeStore, ConnectionStore, IssuerStore,
-    JtiPurpose, RefreshStore, ReplayStore, ResourceStore,
+    AuditSink, AuthnStore, BackchannelStore, ClientStore, CodeIssuer, CodeStore, ConnectionStore,
+    IssuerStore, JtiPurpose, RefreshStore, ReplayStore, ResourceStore, SessionStore,
 };
 
 fn now() -> Timestamp {
@@ -54,11 +53,18 @@ async fn metadata_handler<C, R, A, S, U, P, X>(
     State(state): State<SharedState<C, R, A, S, U, P, X>>,
 ) -> Response
 where
-    C: CodeStore + CodeIssuer + BackchannelStore + Send + Sync + 'static,
+    C: CodeStore
+        + CodeIssuer
+        + BackchannelStore
+        + SessionStore
+        + AuthnStore
+        + Send
+        + Sync
+        + 'static,
     R: RefreshStore + Send + Sync + 'static,
     A: AuditSink + Send + Sync + 'static,
     S: ClientStore + Send + Sync + 'static,
-    U: UserAuthenticator + Send + Sync + 'static,
+    U: Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
     X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
@@ -69,11 +75,18 @@ async fn jwks_handler<C, R, A, S, U, P, X>(
     State(state): State<SharedState<C, R, A, S, U, P, X>>,
 ) -> Response
 where
-    C: CodeStore + CodeIssuer + BackchannelStore + Send + Sync + 'static,
+    C: CodeStore
+        + CodeIssuer
+        + BackchannelStore
+        + SessionStore
+        + AuthnStore
+        + Send
+        + Sync
+        + 'static,
     R: RefreshStore + Send + Sync + 'static,
     A: AuditSink + Send + Sync + 'static,
     S: ClientStore + Send + Sync + 'static,
-    U: UserAuthenticator + Send + Sync + 'static,
+    U: Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
     X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
@@ -136,11 +149,18 @@ async fn token_handler<C, R, A, S, U, P, X>(
     Form(form): Form<TokenForm>,
 ) -> Response
 where
-    C: CodeStore + CodeIssuer + BackchannelStore + Send + Sync + 'static,
+    C: CodeStore
+        + CodeIssuer
+        + BackchannelStore
+        + SessionStore
+        + AuthnStore
+        + Send
+        + Sync
+        + 'static,
     R: RefreshStore + Send + Sync + 'static,
     A: AuditSink + Send + Sync + 'static,
     S: ClientStore + Send + Sync + 'static,
-    U: UserAuthenticator + Send + Sync + 'static,
+    U: Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
     X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
@@ -212,11 +232,18 @@ async fn backchannel_handler<C, R, A, S, U, P, X>(
     Form(form): Form<crate::endpoints::backchannel::BackchannelForm>,
 ) -> Response
 where
-    C: CodeStore + CodeIssuer + BackchannelStore + Send + Sync + 'static,
+    C: CodeStore
+        + CodeIssuer
+        + BackchannelStore
+        + SessionStore
+        + AuthnStore
+        + Send
+        + Sync
+        + 'static,
     R: RefreshStore + Send + Sync + 'static,
     A: AuditSink + Send + Sync + 'static,
     S: ClientStore + Send + Sync + 'static,
-    U: UserAuthenticator + Send + Sync + 'static,
+    U: Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
     X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
@@ -325,13 +352,96 @@ fn escape(value: &str) -> String {
         .replace('\'', "&#39;")
 }
 
+async fn login_handler<C, R, A, S, U, P, X>(
+    State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    Form(form): Form<crate::endpoints::authn::PasswordLoginForm>,
+) -> Response
+where
+    C: CodeStore
+        + CodeIssuer
+        + BackchannelStore
+        + SessionStore
+        + AuthnStore
+        + Send
+        + Sync
+        + 'static,
+    R: RefreshStore + Send + Sync + 'static,
+    A: AuditSink + Send + Sync + 'static,
+    S: ClientStore + Send + Sync + 'static,
+    U: Send + Sync + 'static,
+    P: ReplayStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
+{
+    use crate::endpoints::authn::{LoginOutcome, LoginResponse, password_login, session_cookie};
+
+    let at = now();
+    let (outcome, secret) =
+        password_login(&state.codes, state.tenant_id(), &form, &AwsLcSha256, at).await;
+
+    let mut response = match outcome {
+        LoginOutcome::Established { .. } => {
+            let Some(secret) = secret else {
+                return oauth_response(&OAuthError::new(OAuthErrorCode::ServerError));
+            };
+            let secure = state.tenant.metadata.issuer.starts_with("https://");
+            let mut r = Json(LoginResponse {
+                authenticated: true,
+            })
+            .into_response();
+            if let Ok(value) = session_cookie(&secret, secure).parse() {
+                r.headers_mut().insert("Set-Cookie", value);
+            }
+            r
+        }
+        LoginOutcome::Refused => (
+            StatusCode::UNAUTHORIZED,
+            Json(LoginResponse {
+                authenticated: false,
+            }),
+        )
+            .into_response(),
+        LoginOutcome::Unavailable => {
+            return oauth_response(&OAuthError::new(OAuthErrorCode::TemporarilyUnavailable));
+        }
+    };
+
+    if let Ok(value) = "no-store".parse() {
+        response.headers_mut().insert("Cache-Control", value);
+    }
+    response
+}
+
+async fn resolve_subject<C, R, A, S, U, P, X>(
+    state: &AppState<C, R, A, S, U, P, X>,
+    headers: &HeaderMap,
+    now: Timestamp,
+) -> Option<argus_core::id::UserId>
+where
+    C: CodeStore + SessionStore + Send + Sync,
+    R: RefreshStore + Send + Sync,
+    A: AuditSink + Send + Sync,
+{
+    use argus_core::pkce::Sha256 as _;
+
+    let cookies = headers.get("Cookie").and_then(|v| v.to_str().ok());
+    let secret = crate::endpoints::authn::session_from_cookies(cookies)?;
+    let hash = AwsLcSha256.sha256(secret.as_bytes());
+
+    state
+        .codes
+        .load_session(state.tenant_id(), &hash, now)
+        .await
+        .ok()
+        .map(|session| session.subject)
+}
+
 async fn resolve_client<C, R, A, S, U, P, X>(
     state: &AppState<C, R, A, S, U, P, X>,
     client_id: &str,
     now: Timestamp,
 ) -> Result<Option<argus_core::authorize::RegisteredClient>, Box<Response>>
 where
-    C: CodeStore + CodeIssuer + BackchannelStore + Send + Sync,
+    C: CodeStore + CodeIssuer + BackchannelStore + SessionStore + AuthnStore + Send + Sync,
     R: RefreshStore + Send + Sync,
     A: AuditSink + Send + Sync,
     S: ClientStore + Send + Sync,
@@ -366,11 +476,18 @@ async fn prm_handler<C, R, A, S, U, P, X>(
     axum::extract::Path(path): axum::extract::Path<String>,
 ) -> Response
 where
-    C: CodeStore + CodeIssuer + BackchannelStore + Send + Sync + 'static,
+    C: CodeStore
+        + CodeIssuer
+        + BackchannelStore
+        + SessionStore
+        + AuthnStore
+        + Send
+        + Sync
+        + 'static,
     R: RefreshStore + Send + Sync + 'static,
     A: AuditSink + Send + Sync + 'static,
     S: ClientStore + Send + Sync + 'static,
-    U: UserAuthenticator + Send + Sync + 'static,
+    U: Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
     X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
@@ -381,11 +498,18 @@ async fn prm_root_handler<C, R, A, S, U, P, X>(
     State(state): State<SharedState<C, R, A, S, U, P, X>>,
 ) -> Response
 where
-    C: CodeStore + CodeIssuer + BackchannelStore + Send + Sync + 'static,
+    C: CodeStore
+        + CodeIssuer
+        + BackchannelStore
+        + SessionStore
+        + AuthnStore
+        + Send
+        + Sync
+        + 'static,
     R: RefreshStore + Send + Sync + 'static,
     A: AuditSink + Send + Sync + 'static,
     S: ClientStore + Send + Sync + 'static,
-    U: UserAuthenticator + Send + Sync + 'static,
+    U: Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
     X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
@@ -397,7 +521,7 @@ async fn prm_response<C, R, A, S, U, P, X>(
     suffix: &str,
 ) -> Response
 where
-    C: CodeStore + CodeIssuer + BackchannelStore + Send + Sync,
+    C: CodeStore + CodeIssuer + BackchannelStore + SessionStore + AuthnStore + Send + Sync,
     R: RefreshStore + Send + Sync,
     A: AuditSink + Send + Sync,
     X: ResourceStore + Send + Sync,
@@ -448,11 +572,18 @@ async fn userinfo_handler<C, R, A, S, U, P, X>(
     body: String,
 ) -> Response
 where
-    C: CodeStore + CodeIssuer + BackchannelStore + Send + Sync + 'static,
+    C: CodeStore
+        + CodeIssuer
+        + BackchannelStore
+        + SessionStore
+        + AuthnStore
+        + Send
+        + Sync
+        + 'static,
     R: RefreshStore + Send + Sync + 'static,
     A: AuditSink + Send + Sync + 'static,
     S: ClientStore + Send + Sync + 'static,
-    U: UserAuthenticator + Send + Sync + 'static,
+    U: Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
     X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
@@ -539,15 +670,23 @@ fn userinfo_refusal(err: userinfo::UserInfoError, issuer: &str) -> Response {
 
 async fn authorize_handler<C, R, A, S, U, P, X>(
     State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    headers: HeaderMap,
     Query(query): Query<AuthorizeQuery>,
     axum::extract::RawQuery(raw_query): axum::extract::RawQuery,
 ) -> Response
 where
-    C: CodeStore + CodeIssuer + BackchannelStore + Send + Sync + 'static,
+    C: CodeStore
+        + CodeIssuer
+        + BackchannelStore
+        + SessionStore
+        + AuthnStore
+        + Send
+        + Sync
+        + 'static,
     R: RefreshStore + Send + Sync + 'static,
     A: AuditSink + Send + Sync + 'static,
     S: ClientStore + Send + Sync + 'static,
-    U: UserAuthenticator + Send + Sync + 'static,
+    U: Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
     X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
@@ -564,6 +703,8 @@ where
         }
     };
 
+    let subject = resolve_subject(&state, &headers, at).await;
+
     let resolved = match resolve_client(&state, &query.client_id, at).await {
         Ok(client) => client,
         Err(response) => return *response,
@@ -574,7 +715,7 @@ where
         issuer: &state.tenant.metadata.issuer,
         client: resolved.as_ref(),
         codes: &state.codes,
-        auth: &state.authenticator,
+        subject,
         hasher: &AwsLcSha256,
         now: at,
         new_code: &code,
@@ -609,11 +750,18 @@ where
 
 pub fn build<C, R, A, S, U, P, X>(state: SharedState<C, R, A, S, U, P, X>) -> Router
 where
-    C: CodeStore + CodeIssuer + BackchannelStore + Send + Sync + 'static,
+    C: CodeStore
+        + CodeIssuer
+        + BackchannelStore
+        + SessionStore
+        + AuthnStore
+        + Send
+        + Sync
+        + 'static,
     R: RefreshStore + Send + Sync + 'static,
     A: AuditSink + Send + Sync + 'static,
     S: ClientStore + Send + Sync + 'static,
-    U: UserAuthenticator + Send + Sync + 'static,
+    U: Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
     X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
@@ -640,6 +788,7 @@ where
         )
         .route("/authorize", get(authorize_handler::<C, R, A, S, U, P, X>))
         .route("/token", post(token_handler::<C, R, A, S, U, P, X>))
+        .route("/login", post(login_handler::<C, R, A, S, U, P, X>))
         .route(
             "/bc-authorize",
             post(backchannel_handler::<C, R, A, S, U, P, X>),

@@ -1,9 +1,11 @@
+use argus_core::aal::Aal;
 use argus_core::authorize::RegisteredClient;
 use argus_core::authz_code::StoredCode;
 use argus_core::ciba::BackchannelRequest;
 use argus_core::exchange::CrossAppConnection;
 use argus_core::id::ClientId;
 use argus_core::id::TenantId;
+use argus_core::id::UserId;
 use argus_core::jag_consume::TrustedIssuer;
 use argus_core::refresh::{FamilyId, RefreshToken};
 use argus_core::resource::ResourceUri;
@@ -158,6 +160,135 @@ pub trait BackchannelStore {
         tenant: TenantId,
         auth_req_hash: &[u8; 32],
         approved: bool,
+        at: Timestamp,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthnSession {
+    pub subject: UserId,
+    pub achieved: Aal,
+    pub authenticated_at: Timestamp,
+    pub expires_at: Timestamp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CeremonyPurpose {
+    Registration,
+    Authentication,
+}
+
+impl CeremonyPurpose {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Registration => "registration",
+            Self::Authentication => "authentication",
+        }
+    }
+}
+
+pub trait AuthnStore {
+    fn find_user_by_identifier(
+        &self,
+        tenant: TenantId,
+        identifier: &str,
+    ) -> impl Future<Output = Result<Option<UserId>, StoreError>> + Send;
+
+    fn password_of(
+        &self,
+        tenant: TenantId,
+        user: UserId,
+    ) -> impl Future<Output = Result<Option<String>, StoreError>> + Send;
+
+    fn set_password(
+        &self,
+        tenant: TenantId,
+        user: UserId,
+        phc: &str,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    fn required_aal(
+        &self,
+        tenant: TenantId,
+        user: UserId,
+    ) -> impl Future<Output = Result<Aal, StoreError>> + Send;
+
+    fn webauthn_credentials(
+        &self,
+        tenant: TenantId,
+        user: UserId,
+    ) -> impl Future<Output = Result<Vec<String>, StoreError>> + Send;
+
+    fn store_webauthn_credential(
+        &self,
+        tenant: TenantId,
+        user: UserId,
+        credential_id: &[u8],
+        rp_id: &str,
+        serialised: &str,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    fn user_for_credential(
+        &self,
+        tenant: TenantId,
+        credential_id: &[u8],
+    ) -> impl Future<Output = Result<Option<UserId>, StoreError>> + Send;
+
+    fn advance_sign_count(
+        &self,
+        tenant: TenantId,
+        credential_id: &[u8],
+        counter: i64,
+        at: Timestamp,
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send;
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PendingCeremony<'a> {
+    pub user: Option<UserId>,
+    pub purpose: CeremonyPurpose,
+    pub state: &'a str,
+    pub issued_at: Timestamp,
+    pub expires_at: Timestamp,
+}
+
+pub trait CeremonyStore {
+    fn store_ceremony(
+        &self,
+        tenant: TenantId,
+        ceremony_hash: &[u8; 32],
+        ceremony: &PendingCeremony<'_>,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    fn take_ceremony(
+        &self,
+        tenant: TenantId,
+        ceremony_hash: &[u8; 32],
+        purpose: CeremonyPurpose,
+        now: Timestamp,
+    ) -> impl Future<Output = Result<(Option<UserId>, String), StoreError>> + Send;
+}
+
+pub trait SessionStore {
+    fn create_session(
+        &self,
+        tenant: TenantId,
+        session_hash: &[u8; 32],
+        session: &AuthnSession,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    fn load_session(
+        &self,
+        tenant: TenantId,
+        session_hash: &[u8; 32],
+        now: Timestamp,
+    ) -> impl Future<Output = Result<AuthnSession, StoreError>> + Send;
+
+    fn revoke_session(
+        &self,
+        tenant: TenantId,
+        session_hash: &[u8; 32],
         at: Timestamp,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }

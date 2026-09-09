@@ -13,6 +13,13 @@ thiserror.workspace = true
 argon2.workspace    = true
 subtle.workspace    = true
 
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name    = "argon2"
+harness = false
+
 [lints.rust]
 unreachable_pub = "warn"
 
