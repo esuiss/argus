@@ -8,7 +8,6 @@ macro_rules! define_epoch {
         pub struct $name(u64);
 
         impl $name {
-
             pub const ZERO: Self = Self(0);
 
             #[must_use]
@@ -42,17 +41,14 @@ macro_rules! define_epoch {
 }
 
 define_epoch! {
-
     SessionEpoch
 }
 
 define_epoch! {
-
     AuthzEpoch
 }
 
 define_epoch! {
-
     KeyEpoch
 }
 
