@@ -21,8 +21,8 @@ use crate::endpoints::userinfo::{self, UserInfoRequest};
 use crate::replay::{PrecheckedReplay, consume};
 use crate::state::AppState;
 use crate::store::{
-    AuditSink, ClientStore, CodeIssuer, CodeStore, JtiPurpose, RefreshStore, ReplayStore,
-    ResourceStore,
+    AuditSink, ClientStore, CodeIssuer, CodeStore, ConnectionStore, JtiPurpose, RefreshStore,
+    ReplayStore, ResourceStore,
 };
 
 fn now() -> Timestamp {
@@ -60,7 +60,7 @@ where
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
-    X: ResourceStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + Send + Sync + 'static,
 {
     Json(discovery::metadata(&state.tenant)).into_response()
 }
@@ -75,7 +75,7 @@ where
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
-    X: ResourceStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + Send + Sync + 'static,
 {
     discovery::jwks(&state.tenant).map_or_else(
         |_| oauth_response(&OAuthError::new(OAuthErrorCode::ServerError)),
@@ -142,7 +142,7 @@ where
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
-    X: ResourceStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + Send + Sync + 'static,
 {
     let at = now();
     let binding = match dpop_binding(
@@ -254,7 +254,7 @@ where
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
-    X: ResourceStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + Send + Sync + 'static,
 {
     prm_response(&state, &format!("/{path}")).await
 }
@@ -269,7 +269,7 @@ where
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
-    X: ResourceStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + Send + Sync + 'static,
 {
     prm_response(&state, "").await
 }
@@ -324,7 +324,7 @@ where
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
-    X: ResourceStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + Send + Sync + 'static,
 {
     let authorization = headers.get("Authorization").and_then(|v| v.to_str().ok());
     let dpop_header = headers.get("DPoP").and_then(|v| v.to_str().ok());
@@ -410,7 +410,7 @@ where
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
-    X: ResourceStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + Send + Sync + 'static,
 {
     let at = now();
     let mut query = query;
@@ -465,7 +465,7 @@ where
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
-    X: ResourceStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + Send + Sync + 'static,
 {
     Router::new()
         .route(

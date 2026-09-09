@@ -1,6 +1,7 @@
 use argus_core::authorize::RegisteredClient;
 use argus_core::authz_code::{CodeState, StoredCode};
 use argus_core::client_auth::{ClientAuthMethod, ClientKey};
+use argus_core::exchange::CrossAppConnection;
 use argus_core::id::{ClientId, TenantId, UserId};
 use argus_core::pkce::{CodeChallenge, CodeChallengeMethod};
 use argus_core::redirect_uri::RedirectUri;
@@ -11,8 +12,8 @@ use base64ct::{Base64UrlUnpadded, Encoding as _};
 use sqlx::{PgPool, Postgres, Row as _, Transaction};
 
 use crate::traits::{
-    AuditSink, ClientStore, CodeIssuer, CodeStore, JtiOutcome, JtiPurpose, ProtectedResource,
-    RefreshStore, ReplayStore, ResourceStore, StoreError,
+    AuditSink, ClientStore, CodeIssuer, CodeStore, ConnectionStore, JtiOutcome, JtiPurpose,
+    ProtectedResource, RefreshStore, ReplayStore, ResourceStore, StoreError,
 };
 
 #[derive(Debug, Clone)]
@@ -470,6 +471,53 @@ fn resource_from_row(row: &sqlx::postgres::PgRow) -> Result<ProtectedResource, S
 
     let uri = ResourceUri::parse(&raw).map_err(|_| StoreError::Unavailable)?;
     Ok(ProtectedResource { uri, name, scopes })
+}
+
+impl ConnectionStore for PostgresStore {
+    async fn find_connection(
+        &self,
+        tenant: TenantId,
+        client: &ClientId,
+        resource_as_issuer: &str,
+    ) -> Result<Option<CrossAppConnection>, StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        let row = sqlx::query(
+            "SELECT resource_uri, allowed_scopes FROM cross_app_connections \
+             WHERE tenant_id = $1 AND requesting_client_id = $2 AND resource_as_issuer = $3",
+        )
+        .bind(tenant.as_uuid())
+        .bind(client.as_str())
+        .bind(resource_as_issuer)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?;
+
+        tx.commit().await.map_err(|e| map_err(&e))?;
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+
+        let raw_resource: Option<String> = row.try_get("resource_uri").map_err(|e| map_err(&e))?;
+        let allowed: String = row.try_get("allowed_scopes").map_err(|e| map_err(&e))?;
+
+        let resource = match raw_resource {
+            Some(raw) => Some(ResourceUri::parse(&raw).map_err(|_| StoreError::Unavailable)?),
+            None => None,
+        };
+
+        Ok(Some(CrossAppConnection {
+            requesting_client: client.clone(),
+            resource_as_issuer: resource_as_issuer.to_owned(),
+            resource,
+            allowed_scopes: allowed
+                .split(' ')
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .collect(),
+        }))
+    }
 }
 
 impl ReplayStore for PostgresStore {

@@ -3,6 +3,7 @@ use argus_core::client_auth::{
     MAX_ASSERTION_LIFETIME, PresentedCredential, authenticate, validate_assertion,
 };
 use argus_core::effect::Effect;
+use argus_core::exchange::{ExchangeRequest, authorise};
 use argus_core::id::ClientId;
 use argus_core::pkce::Sha256;
 use argus_core::refresh::{
@@ -10,6 +11,7 @@ use argus_core::refresh::{
     RefreshToken, rotate,
 };
 use argus_core::time::{Duration, Timestamp};
+use argus_proto::idjag::IdJagClaims;
 use argus_proto::jwt::{AccessTokenClaims, Audience, Confirmation, sign};
 use argus_proto::oidc::{IdTokenClaims, at_hash, sign_id_token};
 use argus_proto::{OAuthError, OAuthErrorCode, TokenResponse};
@@ -19,12 +21,15 @@ use crate::effects::{EffectContext, Rotation, apply};
 use crate::replay::consume;
 use crate::state::AppState;
 use crate::store::{
-    AuditSink, ClientStore, CodeStore, JtiPurpose, RefreshStore, ReplayStore, StoreError,
+    AuditSink, ClientStore, CodeStore, ConnectionStore, JtiPurpose, RefreshStore, ReplayStore,
+    StoreError,
 };
 
 pub const PLACEHOLDER_ACCESS_TOKEN_LIFETIME: Duration = Duration::from_seconds(300);
 
 pub const ID_TOKEN_LIFETIME: Duration = Duration::from_seconds(300);
+
+pub const ID_JAG_LIFETIME: Duration = Duration::from_seconds(300);
 
 fn wants_openid(scope: Option<&str>) -> bool {
     scope.is_some_and(|s| s.split(' ').any(|v| v == "openid"))
@@ -49,6 +54,18 @@ pub struct TokenForm {
     pub client_assertion_type: Option<String>,
 
     pub client_assertion: Option<String>,
+
+    pub requested_token_type: Option<String>,
+
+    pub subject_token: Option<String>,
+
+    pub subject_token_type: Option<String>,
+
+    pub audience: Option<String>,
+
+    pub resource: Option<String>,
+
+    pub scope: Option<String>,
 }
 
 fn hash(hasher: &impl Sha256, secret: &str) -> [u8; 32] {
@@ -75,6 +92,7 @@ where
     A: AuditSink + Send + Sync,
     S: ClientStore + Send + Sync,
     P: ReplayStore + Send + Sync,
+    X: ConnectionStore + Send + Sync,
     H: Sha256,
 {
     let client = authenticate_client(state, form, now, hasher).await?;
@@ -84,10 +102,13 @@ where
             authorization_code(state, form, &client, now, hasher, binding).await
         }
         "refresh_token" => refresh_token(state, form, &client, now, hasher, binding).await,
+        argus_proto::idjag::GRANT_TYPE_TOKEN_EXCHANGE => {
+            token_exchange(state, form, &client, now).await
+        }
 
         _ => Err(OAuthError::with_description(
             OAuthErrorCode::UnsupportedGrantType,
-            "only authorization_code and refresh_token are supported",
+            "only authorization_code, refresh_token and token-exchange are supported",
         )),
     }
 }
@@ -357,6 +378,125 @@ where
     }
 }
 
+async fn token_exchange<C, R, A, S, U, P, X>(
+    state: &AppState<C, R, A, S, U, P, X>,
+    form: &TokenForm,
+    client: &ClientId,
+    now: Timestamp,
+) -> Result<TokenResponse, OAuthError>
+where
+    C: CodeStore + Send + Sync,
+    R: RefreshStore + Send + Sync,
+    A: AuditSink + Send + Sync,
+    X: ConnectionStore + Send + Sync,
+{
+    if form.requested_token_type.as_deref() != Some(argus_proto::idjag::TOKEN_TYPE) {
+        return Err(OAuthError::with_description(
+            OAuthErrorCode::InvalidRequest,
+            "only the id-jag requested_token_type is supported",
+        ));
+    }
+
+    let subject_token = form
+        .subject_token
+        .as_deref()
+        .ok_or_else(|| OAuthError::new(OAuthErrorCode::InvalidRequest))?;
+
+    let audience = form
+        .audience
+        .clone()
+        .ok_or_else(|| OAuthError::new(OAuthErrorCode::InvalidRequest))?;
+
+    let subject = subject_of(state, subject_token, now)?;
+
+    let connection = state
+        .resources
+        .find_connection(state.tenant_id(), client, &audience)
+        .await
+        .map_err(|e| store_error_to_oauth(&e))?;
+
+    let grant = authorise(
+        &ExchangeRequest {
+            requesting_client: client.clone(),
+            audience,
+            resource: form.resource.clone(),
+            scope: form.scope.clone(),
+        },
+        connection.as_ref(),
+    )
+    .map_err(|e| {
+        OAuthError::new(match e.oauth_error_code() {
+            "invalid_target" => OAuthErrorCode::InvalidTarget,
+            "invalid_scope" => OAuthErrorCode::InvalidScope,
+            _ => OAuthErrorCode::InvalidGrant,
+        })
+    })?;
+
+    let claims = IdJagClaims {
+        iss: state.tenant.metadata.issuer.clone(),
+        sub: subject,
+        aud: grant.resource_as_issuer,
+        client_id: client.as_str().to_owned(),
+        jti: uuid::Uuid::new_v4().simple().to_string(),
+        exp: now.saturating_add(ID_JAG_LIFETIME).as_unix_seconds(),
+        iat: now.as_unix_seconds(),
+        resource: grant.resource,
+        scope: if grant.scopes.is_empty() {
+            None
+        } else {
+            Some(grant.scopes.join(" "))
+        },
+        email: None,
+    };
+
+    let assertion = argus_proto::idjag::sign_id_jag(&claims, &state.tenant.active_key)
+        .map_err(|_| OAuthError::new(OAuthErrorCode::ServerError))?;
+
+    Ok(TokenResponse {
+        access_token: assertion,
+        token_type: "N_A".to_owned(),
+        expires_in: ID_JAG_LIFETIME.as_seconds(),
+        refresh_token: None,
+        scope: None,
+        id_token: None,
+        issued_token_type: Some(argus_proto::idjag::TOKEN_TYPE.to_owned()),
+    })
+}
+
+fn subject_of<C, R, A, S, U, P, X>(
+    state: &AppState<C, R, A, S, U, P, X>,
+    subject_token: &str,
+    now: Timestamp,
+) -> Result<String, OAuthError>
+where
+    C: CodeStore + Send + Sync,
+    R: RefreshStore + Send + Sync,
+    A: AuditSink + Send + Sync,
+{
+    for key in &state.tenant.published_keys {
+        let verifying = key.verifying_key();
+
+        if let Ok(claims) = argus_proto::oidc::verify_id_token(subject_token, &verifying)
+            && claims.iss == state.tenant.metadata.issuer
+            && claims.exp > now.as_unix_seconds()
+        {
+            return Ok(claims.sub);
+        }
+
+        if let Ok(claims) = argus_proto::jwt::verify(subject_token, &verifying)
+            && claims.iss == state.tenant.metadata.issuer
+            && claims.exp > now.as_unix_seconds()
+        {
+            return Ok(claims.sub);
+        }
+    }
+
+    Err(OAuthError::with_description(
+        OAuthErrorCode::InvalidGrant,
+        "the subject_token was not issued by this server or has expired",
+    ))
+}
+
 async fn apply_effects<C, R, A, S, U, P, X>(
     state: &AppState<C, R, A, S, U, P, X>,
     effects: &[Effect],
@@ -479,6 +619,7 @@ where
         refresh_token: request.refresh.clone(),
         scope: request.scope.map(str::to_owned),
         id_token,
+        issued_token_type: None,
     })
 }
 

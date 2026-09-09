@@ -20,6 +20,8 @@ pub enum OAuthErrorCode {
     TemporarilyUnavailable,
 
     InvalidToken,
+
+    InvalidTarget,
 }
 
 impl OAuthErrorCode {
@@ -35,6 +37,7 @@ impl OAuthErrorCode {
             Self::ServerError => "server_error",
             Self::TemporarilyUnavailable => "temporarily_unavailable",
             Self::InvalidToken => "invalid_token",
+            Self::InvalidTarget => "invalid_target",
         }
     }
 

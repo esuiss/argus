@@ -80,11 +80,8 @@ pub fn verify_id_jag(token: &str, key: &VerifyingKey) -> Result<IdJagClaims, Jwt
     }
 
     let signature = Base64UrlUnpadded::decode_vec(sig_b64).map_err(|_| JwtError::Malformed)?;
-    key.verify(
-        format!("{header_b64}.{claims_b64}").as_bytes(),
-        &signature,
-    )
-    .map_err(|_| JwtError::BadSignature)?;
+    key.verify(format!("{header_b64}.{claims_b64}").as_bytes(), &signature)
+        .map_err(|_| JwtError::BadSignature)?;
 
     let claim_bytes = Base64UrlUnpadded::decode_vec(claims_b64).map_err(|_| JwtError::Malformed)?;
     serde_json::from_slice(&claim_bytes).map_err(|_| JwtError::Malformed)
@@ -130,8 +127,14 @@ mod tests {
         let head = token.split('.').next().expect("header");
         let decoded = Base64UrlUnpadded::decode_vec(head).expect("decode");
         let header: serde_json::Value = serde_json::from_slice(&decoded).expect("json");
-        assert_eq!(header["typ"], HEADER_TYP);
-        assert_eq!(header["kid"], "k1");
+        assert_eq!(
+            header.get("typ").and_then(serde_json::Value::as_str),
+            Some(HEADER_TYP)
+        );
+        assert_eq!(
+            header.get("kid").and_then(serde_json::Value::as_str),
+            Some("k1")
+        );
     }
 
     #[test]
@@ -179,7 +182,16 @@ mod tests {
         let value: serde_json::Value = serde_json::from_slice(&decoded).expect("json");
 
         for member in [
-            "jti", "iss", "sub", "email", "aud", "resource", "client_id", "exp", "iat", "scope",
+            "jti",
+            "iss",
+            "sub",
+            "email",
+            "aud",
+            "resource",
+            "client_id",
+            "exp",
+            "iat",
+            "scope",
         ] {
             assert!(value.get(member).is_some(), "{member} missing");
         }

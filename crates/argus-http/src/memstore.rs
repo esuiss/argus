@@ -10,8 +10,8 @@ use argus_core::authorize::RegisteredClient;
 use argus_core::id::ClientId;
 
 use crate::store::{
-    AuditSink, ClientStore, CodeIssuer, CodeStore, JtiOutcome, JtiPurpose, ProtectedResource,
-    RefreshStore, ReplayStore, ResourceStore, StoreError,
+    AuditSink, ClientStore, CodeIssuer, CodeStore, ConnectionStore, JtiOutcome, JtiPurpose,
+    ProtectedResource, RefreshStore, ReplayStore, ResourceStore, StoreError,
 };
 
 #[derive(Debug, Default)]
@@ -242,6 +242,7 @@ impl ReplayStore for MemoryReplayStore {
 #[derive(Debug, Default)]
 pub struct MemoryResourceStore {
     resources: Mutex<Vec<ProtectedResource>>,
+    connections: Mutex<Vec<argus_core::exchange::CrossAppConnection>>,
 }
 
 impl MemoryResourceStore {
@@ -280,5 +281,36 @@ impl ResourceStore for MemoryResourceStore {
             .lock()
             .map_err(|_| StoreError::Unavailable)?
             .clone())
+    }
+}
+
+impl MemoryResourceStore {
+    pub fn connect(
+        &self,
+        connection: argus_core::exchange::CrossAppConnection,
+    ) -> Result<(), StoreError> {
+        self.connections
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .push(connection);
+        Ok(())
+    }
+}
+
+impl ConnectionStore for MemoryResourceStore {
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn find_connection(
+        &self,
+        _tenant: TenantId,
+        client: &ClientId,
+        resource_as_issuer: &str,
+    ) -> Result<Option<argus_core::exchange::CrossAppConnection>, StoreError> {
+        Ok(self
+            .connections
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .iter()
+            .find(|c| &c.requesting_client == client && c.resource_as_issuer == resource_as_issuer)
+            .cloned())
     }
 }

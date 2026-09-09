@@ -43,6 +43,9 @@ pub struct AuthorizationServerMetadata {
     pub authorization_response_iss_parameter_supported: bool,
 
     pub client_id_metadata_document_supported: bool,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity_chaining_requested_token_types_supported: Option<Vec<String>>,
 }
 
 impl AuthorizationServerMetadata {
@@ -59,6 +62,7 @@ impl AuthorizationServerMetadata {
             grant_types_supported: vec![
                 "authorization_code".to_owned(),
                 "refresh_token".to_owned(),
+                crate::idjag::GRANT_TYPE_TOKEN_EXCHANGE.to_owned(),
             ],
             code_challenge_methods_supported: vec!["S256".to_owned()],
             token_endpoint_auth_methods_supported: vec![
@@ -83,6 +87,9 @@ impl AuthorizationServerMetadata {
             scopes_supported: Some(vec!["openid".to_owned()]),
             authorization_response_iss_parameter_supported: true,
             client_id_metadata_document_supported: true,
+            identity_chaining_requested_token_types_supported: Some(vec![
+                crate::idjag::TOKEN_TYPE.to_owned(),
+            ]),
         }
     }
 }
@@ -118,6 +125,20 @@ mod tests {
     #[test]
     fn iss_parameter_is_always_advertised() {
         assert!(meta().authorization_response_iss_parameter_supported);
+    }
+
+    #[test]
+    fn id_jag_issuance_is_advertised() {
+        let m = meta();
+        assert_eq!(
+            m.identity_chaining_requested_token_types_supported
+                .as_deref(),
+            Some(["urn:ietf:params:oauth:token-type:id-jag".to_owned()].as_slice())
+        );
+        assert!(
+            m.grant_types_supported
+                .contains(&"urn:ietf:params:oauth:grant-type:token-exchange".to_owned())
+        );
     }
 
     #[test]

@@ -16,6 +16,9 @@ pub struct TokenResponse {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id_token: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub issued_token_type: Option<String>,
 }
 
 impl core::fmt::Debug for TokenResponse {
@@ -30,6 +33,7 @@ impl core::fmt::Debug for TokenResponse {
             )
             .field("scope", &self.scope)
             .field("id_token", &self.id_token.as_ref().map(|_| "<redacted>"))
+            .field("issued_token_type", &self.issued_token_type)
             .finish()
     }
 }
@@ -47,6 +51,7 @@ mod tests {
             refresh_token: Some("SUPER-SECRET-REFRESH".to_owned()),
             scope: None,
             id_token: None,
+            issued_token_type: None,
         }
     }
 

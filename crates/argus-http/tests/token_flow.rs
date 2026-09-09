@@ -213,6 +213,12 @@ fn code_form() -> TokenForm {
         refresh_token: None,
         client_assertion_type: None,
         client_assertion: None,
+        requested_token_type: None,
+        subject_token: None,
+        subject_token_type: None,
+        audience: None,
+        resource: None,
+        scope: None,
     }
 }
 
@@ -307,6 +313,12 @@ fn refresh_form() -> TokenForm {
         refresh_token: Some("the-refresh".to_owned()),
         client_assertion_type: None,
         client_assertion: None,
+        requested_token_type: None,
+        subject_token: None,
+        subject_token_type: None,
+        audience: None,
+        resource: None,
+        scope: None,
     }
 }
 
@@ -851,4 +863,205 @@ async fn a_different_jti_from_the_same_client_is_accepted() {
             .await
             .unwrap_or_else(|e| panic!("jti {jti} must be accepted: {e:?}"));
     }
+}
+
+// --- Token Exchange / ID-JAG — draft-ietf-oauth-identity-assertion-authz-grant
+
+use argus_core::exchange::CrossAppConnection;
+use argus_core::resource::ResourceUri;
+
+const RESOURCE_AS: &str = "https://auth.chat.example";
+const MCP_SERVER: &str = "https://mcp.chat.example";
+
+fn connected_state() -> TestState {
+    let s = state();
+    s.resources
+        .connect(CrossAppConnection {
+            requesting_client: client(),
+            resource_as_issuer: RESOURCE_AS.to_owned(),
+            resource: Some(ResourceUri::parse(MCP_SERVER).expect("uri")),
+            allowed_scopes: vec!["chat.read".to_owned(), "chat.history".to_owned()],
+        })
+        .expect("connect");
+    s
+}
+
+async fn subject_token(s: &TestState) -> String {
+    *s.codes.record.lock().expect("lock") = Some(StoredCode {
+        scope: Some("openid".to_owned()),
+        ..stored_code(CodeState::Issued)
+    });
+    token(s, &code_form(), None)
+        .await
+        .expect("token")
+        .id_token
+        .expect("id_token")
+}
+
+fn exchange_form(
+    subject: &str,
+    audience: &str,
+    resource: Option<&str>,
+    scope: Option<&str>,
+) -> TokenForm {
+    TokenForm {
+        grant_type: argus_proto::idjag::GRANT_TYPE_TOKEN_EXCHANGE.to_owned(),
+        requested_token_type: Some(argus_proto::idjag::TOKEN_TYPE.to_owned()),
+        subject_token: Some(subject.to_owned()),
+        subject_token_type: Some("urn:ietf:params:oauth:token-type:id_token".to_owned()),
+        audience: Some(audience.to_owned()),
+        resource: resource.map(str::to_owned),
+        scope: scope.map(str::to_owned),
+        ..code_form()
+    }
+}
+
+#[tokio::test]
+async fn an_authorised_exchange_mints_an_id_jag() {
+    let s = connected_state();
+    let subject = subject_token(&s).await;
+
+    let resp = token(
+        &s,
+        &exchange_form(&subject, RESOURCE_AS, Some(MCP_SERVER), Some("chat.read")),
+        None,
+    )
+    .await
+    .expect("exchange");
+
+    assert_eq!(resp.token_type, "N_A");
+    assert_eq!(
+        resp.issued_token_type.as_deref(),
+        Some(argus_proto::idjag::TOKEN_TYPE)
+    );
+    assert!(resp.refresh_token.is_none());
+
+    let claims =
+        argus_proto::idjag::verify_id_jag(&resp.access_token, &s.tenant.active_key.verifying_key())
+            .expect("verify");
+
+    assert_eq!(claims.iss, "https://acme.argus.test");
+    assert_eq!(claims.aud, RESOURCE_AS);
+    assert_eq!(claims.client_id, "acme-web");
+    assert_eq!(claims.resource.as_deref(), Some(MCP_SERVER));
+    assert_eq!(claims.scope.as_deref(), Some("chat.read"));
+    assert!(claims.exp > claims.iat);
+}
+
+#[tokio::test]
+async fn without_a_connection_nothing_is_exchanged() {
+    let s = state();
+    let subject = subject_token(&s).await;
+
+    let err = token(
+        &s,
+        &exchange_form(&subject, RESOURCE_AS, Some(MCP_SERVER), None),
+        None,
+    )
+    .await
+    .expect_err("must be refused");
+    assert_eq!(err.error, OAuthErrorCode::InvalidGrant);
+}
+
+#[tokio::test]
+async fn an_audience_outside_the_connection_is_refused() {
+    let s = connected_state();
+    let subject = subject_token(&s).await;
+
+    let err = token(
+        &s,
+        &exchange_form(&subject, "https://auth.evil.example", None, None),
+        None,
+    )
+    .await
+    .expect_err("must be refused");
+    assert_eq!(err.error, OAuthErrorCode::InvalidGrant);
+}
+
+#[tokio::test]
+async fn a_resource_outside_the_connection_is_invalid_target() {
+    let s = connected_state();
+    let subject = subject_token(&s).await;
+
+    let err = token(
+        &s,
+        &exchange_form(
+            &subject,
+            RESOURCE_AS,
+            Some("https://mcp.evil.example"),
+            None,
+        ),
+        None,
+    )
+    .await
+    .expect_err("must be refused");
+    assert_eq!(err.error, OAuthErrorCode::InvalidTarget);
+}
+
+#[tokio::test]
+async fn a_scope_beyond_the_connection_is_refused() {
+    let s = connected_state();
+    let subject = subject_token(&s).await;
+
+    let err = token(
+        &s,
+        &exchange_form(&subject, RESOURCE_AS, None, Some("chat.read chat.admin")),
+        None,
+    )
+    .await
+    .expect_err("must be refused");
+    assert_eq!(err.error, OAuthErrorCode::InvalidScope);
+}
+
+#[tokio::test]
+async fn a_subject_token_this_server_did_not_issue_is_refused() {
+    let s = connected_state();
+    let (foreign, _) = SigningKey::generate("evil").expect("key");
+    let forged = argus_proto::oidc::sign_id_token(
+        &argus_proto::IdTokenClaims {
+            iss: "https://acme.argus.test".to_owned(),
+            sub: "someone".to_owned(),
+            aud: "acme-web".to_owned(),
+            exp: NOW.as_unix_seconds() + 300,
+            iat: NOW.as_unix_seconds(),
+            nonce: None,
+            auth_time: None,
+            at_hash: None,
+        },
+        &foreign,
+    )
+    .expect("sign");
+
+    let err = token(&s, &exchange_form(&forged, RESOURCE_AS, None, None), None)
+        .await
+        .expect_err("must be refused");
+    assert_eq!(err.error, OAuthErrorCode::InvalidGrant);
+}
+
+#[tokio::test]
+async fn only_the_id_jag_requested_token_type_is_supported() {
+    let s = connected_state();
+    let subject = subject_token(&s).await;
+
+    let form = TokenForm {
+        requested_token_type: Some("urn:ietf:params:oauth:token-type:access_token".to_owned()),
+        ..exchange_form(&subject, RESOURCE_AS, None, None)
+    };
+    let err = token(&s, &form, None).await.expect_err("must be refused");
+    assert_eq!(err.error, OAuthErrorCode::InvalidRequest);
+}
+
+#[tokio::test]
+async fn the_client_id_in_the_grant_is_the_authenticated_client() {
+    let s = connected_state();
+    let subject = subject_token(&s).await;
+
+    let resp = token(&s, &exchange_form(&subject, RESOURCE_AS, None, None), None)
+        .await
+        .expect("exchange");
+    let claims =
+        argus_proto::idjag::verify_id_jag(&resp.access_token, &s.tenant.active_key.verifying_key())
+            .expect("verify");
+
+    assert_eq!(claims.client_id, client().as_str());
 }

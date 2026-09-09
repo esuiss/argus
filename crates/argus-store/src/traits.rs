@@ -1,5 +1,6 @@
 use argus_core::authorize::RegisteredClient;
 use argus_core::authz_code::StoredCode;
+use argus_core::exchange::CrossAppConnection;
 use argus_core::id::ClientId;
 use argus_core::id::TenantId;
 use argus_core::refresh::{FamilyId, RefreshToken};
@@ -120,6 +121,15 @@ pub trait ResourceStore {
         &self,
         tenant: TenantId,
     ) -> impl Future<Output = Result<Vec<ProtectedResource>, StoreError>> + Send;
+}
+
+pub trait ConnectionStore {
+    fn find_connection(
+        &self,
+        tenant: TenantId,
+        client: &ClientId,
+        resource_as_issuer: &str,
+    ) -> impl Future<Output = Result<Option<CrossAppConnection>, StoreError>> + Send;
 }
 
 pub trait ReplayStore {
