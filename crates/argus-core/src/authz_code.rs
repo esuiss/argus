@@ -27,6 +27,7 @@
 //! | PKCE zorunlu | OAuth 2.1, RFC 9700 |
 //! | Kod kısa ömürlüdür | RFC 6749 §4.1.2 ("maximum of 10 minutes") |
 
+use crate::effect::Effect;
 use crate::error::PkceError;
 use crate::id::{ClientId, TenantId, UserId};
 use crate::pkce::{CodeChallenge, Sha256};
@@ -112,22 +113,6 @@ pub struct TokenRequest {
     pub code_verifier: String,
     /// İsteğin geldiği kiracı (host'tan çözülmüş, gövdeden DEĞİL).
     pub tenant: TenantId,
-}
-
-/// Kararın çağırandan istediği yan etki.
-///
-/// Çağıran bunları **sırayla ve hepsini** uygulamak zorundadır. Liste boş
-/// dönmez: her karar en az bir denetim kaydı ister.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Effect {
-    /// Kodu tüketilmiş olarak işaretle.
-    ConsumeCode,
-    /// **Bu koddan türeyen tüm token'ları iptal et.** RFC 9700 §4.1.1: kod tekrar
-    /// kullanıldığında, saldırganın ya da meşru istemcinin daha önce aldığı
-    /// token'lar artık güvenilmezdir çünkü kodun iki tarafça bilindiği kesindir.
-    RevokeTokensIssuedForCode,
-    /// Denetim olayı üret. Olay tipi §25 K29 taksonomisine göredir.
-    RecordAudit(&'static str),
 }
 
 /// Başarılı tüketimin sonucu.

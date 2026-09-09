@@ -10,8 +10,9 @@
 
 use argus_core::authz_code::{
     AuthorizationCode, CodeLifetimeError, CodeState, DEFAULT_CODE_LIFETIME, Decision, DenialReason,
-    Effect, MAX_CODE_LIFETIME, StoredCode, TokenRequest, redeem,
+    MAX_CODE_LIFETIME, StoredCode, TokenRequest, redeem,
 };
+use argus_core::effect::Effect;
 use argus_core::pkce::{CodeChallenge, CodeChallengeMethod, Sha256};
 use argus_core::time::Duration;
 use argus_core::{ClientId, PkceError, RedirectUri, TenantId, Timestamp, UserId};
