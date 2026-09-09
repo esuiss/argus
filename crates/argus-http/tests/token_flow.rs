@@ -1347,3 +1347,23 @@ async fn the_auth_req_id_is_required() {
     let err = token(&s, &form, None).await.expect_err("must be refused");
     assert_eq!(err.error, OAuthErrorCode::InvalidRequest);
 }
+
+/// CIMD istemcisi `/authorize`'da çözülüyorsa `/token`'da da çözülmeli; aksi
+/// hâlde akış ortada kırılır ve istemci kodunu asla token'a çeviremez.
+#[tokio::test]
+async fn a_cimd_client_is_refused_when_cimd_is_disabled_rather_than_looked_up_in_the_store() {
+    let s = state();
+    *s.codes.record.lock().expect("lock") = Some(stored_code(CodeState::Issued));
+
+    let form = TokenForm {
+        client_id: Some("https://example.com/client.json".to_owned()),
+        ..code_form()
+    };
+    let err = token(&s, &form, None).await.expect_err("must be refused");
+    assert_eq!(err.error, OAuthErrorCode::InvalidClient);
+
+    assert!(
+        !*s.codes.consumed.lock().expect("lock"),
+        "an unresolvable client must not burn the code"
+    );
+}

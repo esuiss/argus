@@ -162,12 +162,24 @@ where
     let client =
         ClientId::new(claimed).map_err(|_| OAuthError::new(OAuthErrorCode::InvalidClient))?;
 
-    let registered = state
-        .clients
-        .find(tenant, &client)
-        .await
-        .map_err(|e| store_error_to_oauth(&e))?
-        .ok_or_else(|| OAuthError::new(OAuthErrorCode::InvalidClient))?;
+    let registered = if argus_core::cimd::looks_like_a_url(client.as_str()) {
+        let cimd = state
+            .cimd
+            .as_ref()
+            .ok_or_else(|| OAuthError::new(OAuthErrorCode::InvalidClient))?;
+        let url = argus_core::cimd::ClientIdUrl::parse(client.as_str())
+            .map_err(|_| OAuthError::new(OAuthErrorCode::InvalidClient))?;
+        cimd.resolve(&url, &crate::cimd_fetch::SystemResolver, now)
+            .await
+            .map_err(|_| OAuthError::new(OAuthErrorCode::InvalidClient))?
+    } else {
+        state
+            .clients
+            .find(tenant, &client)
+            .await
+            .map_err(|e| store_error_to_oauth(&e))?
+            .ok_or_else(|| OAuthError::new(OAuthErrorCode::InvalidClient))?
+    };
 
     let presented = match form.client_assertion.as_deref() {
         Some(raw) => {
