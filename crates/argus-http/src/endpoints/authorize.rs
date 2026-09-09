@@ -24,6 +24,9 @@ pub struct AuthorizeQuery {
     pub scope: Option<String>,
 
     pub nonce: Option<String>,
+
+    #[serde(skip)]
+    pub resource: Vec<String>,
 }
 
 pub trait UserAuthenticator {
@@ -66,6 +69,8 @@ pub struct AuthorizeContext<'a, S, I, U, H> {
     pub now: Timestamp,
 
     pub new_code: &'a str,
+
+    pub registered_resources: &'a [argus_core::resource::ResourceUri],
 }
 
 impl<S, I, U, H> Clone for AuthorizeContext<'_, S, I, U, H> {
@@ -95,6 +100,7 @@ where
         hasher,
         now,
         new_code,
+        registered_resources,
     } = *ctx;
 
     let client_id = ClientId::new(query.client_id.clone()).ok();
@@ -112,9 +118,10 @@ where
         code_challenge_method: query.code_challenge_method.clone(),
         scope: query.scope.clone(),
         nonce: query.nonce.clone(),
+        resources: query.resource.clone(),
     };
 
-    match validate(&request, registered.as_ref()) {
+    match validate(&request, registered.as_ref(), registered_resources) {
         AuthorizeOutcome::Fatal(_) => Ok(AuthorizeResponse::ShowError(
             "the redirect_uri is not registered for this client",
         )),
@@ -136,6 +143,7 @@ where
             state,
             scope,
             nonce,
+            resources,
         } => {
             let Some(user) = auth.current_user(tenant) else {
                 return Ok(AuthorizeResponse::NeedsAuthentication);
@@ -162,7 +170,14 @@ where
             let hash = hasher.sha256(new_code.as_bytes());
 
             codes
-                .issue(tenant, &hash, &record.with_oidc(nonce, scope).to_stored())
+                .issue(
+                    tenant,
+                    &hash,
+                    &record
+                        .with_oidc(nonce, scope)
+                        .with_resources(resources)
+                        .to_stored(),
+                )
                 .await?;
 
             let mut url = format!("{}?code={new_code}", redirect_uri.as_str());
@@ -223,5 +238,81 @@ mod tests {
     fn show_error_is_not_a_redirect() {
         let r = AuthorizeResponse::ShowError("nope");
         assert!(!matches!(r, AuthorizeResponse::Redirect(_)));
+    }
+}
+
+#[must_use]
+pub fn repeated_query_values(raw: Option<&str>, key: &str) -> Vec<String> {
+    let Some(raw) = raw else {
+        return Vec::new();
+    };
+    raw.split('&')
+        .filter_map(|pair| pair.split_once('='))
+        .filter(|(k, _)| *k == key)
+        .map(|(_, v)| percent_decode_value(v))
+        .collect()
+}
+
+fn percent_decode_value(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes.get(i) {
+            Some(b'+') => {
+                out.push(b' ');
+                i += 1;
+            }
+            Some(b'%') if i + 2 < bytes.len() => {
+                let hex = value.get(i + 1..i + 3).unwrap_or_default();
+                if let Ok(b) = u8::from_str_radix(hex, 16) {
+                    out.push(b);
+                    i += 3;
+                } else {
+                    out.push(b'%');
+                    i += 1;
+                }
+            }
+            Some(b) => {
+                out.push(*b);
+                i += 1;
+            }
+            None => break,
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod repeated_tests {
+    use super::repeated_query_values;
+
+    #[test]
+    fn several_occurrences_are_all_collected() {
+        let raw = "client_id=a&resource=https%3A%2F%2Fa.test&resource=https%3A%2F%2Fb.test";
+        assert_eq!(
+            repeated_query_values(Some(raw), "resource"),
+            ["https://a.test", "https://b.test"]
+        );
+    }
+
+    #[test]
+    fn a_single_occurrence_still_yields_one_value() {
+        assert_eq!(
+            repeated_query_values(Some("resource=https%3A%2F%2Fa.test"), "resource"),
+            ["https://a.test"]
+        );
+    }
+
+    #[test]
+    fn an_absent_key_yields_nothing() {
+        assert!(repeated_query_values(Some("client_id=a"), "resource").is_empty());
+        assert!(repeated_query_values(None, "resource").is_empty());
+    }
+
+    #[test]
+    fn a_key_that_merely_starts_the_same_is_not_matched() {
+        assert!(repeated_query_values(Some("resources=a&resource_x=b"), "resource").is_empty());
     }
 }

@@ -34,16 +34,16 @@ fn the_expected_list_matches_the_migrations_on_disk() {
 
 #[test]
 fn every_migration_is_registered_in_the_ledger() {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/migrations/0008_schema_migrations.sql"
-    );
-    let sql = std::fs::read_to_string(path).expect("ledger migration");
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/migrations");
+    let ledger = std::fs::read_to_string(format!("{dir}/0008_schema_migrations.sql"))
+        .expect("ledger migration");
 
     for name in EXPECTED_MIGRATIONS {
+        let own = std::fs::read_to_string(format!("{dir}/{name}.sql")).unwrap_or_default();
+        let marker = format!("('{name}')");
         assert!(
-            sql.contains(&format!("('{name}')")),
-            "{name} is not inserted into argus_meta.schema_migrations"
+            ledger.contains(&marker) || own.contains(&marker),
+            "{name} never inserts itself into argus_meta.schema_migrations"
         );
     }
 }

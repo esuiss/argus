@@ -136,6 +136,7 @@ fn replay_revokes_every_token_derived_from_the_code() {
         },
         nonce: None,
         scope: None,
+        resources: Vec::new(),
     });
 
     let d = redeem(
@@ -173,6 +174,7 @@ fn replay_of_an_expired_code_still_revokes() {
         },
         nonce: None,
         scope: None,
+        resources: Vec::new(),
     });
 
     let d = redeem(

@@ -10,7 +10,7 @@ use argus_core::refresh::{
     RefreshToken, rotate,
 };
 use argus_core::time::{Duration, Timestamp};
-use argus_proto::jwt::{AccessTokenClaims, Confirmation, sign};
+use argus_proto::jwt::{AccessTokenClaims, Audience, Confirmation, sign};
 use argus_proto::oidc::{IdTokenClaims, at_hash, sign_id_token};
 use argus_proto::{OAuthError, OAuthErrorCode, TokenResponse};
 use serde::Deserialize;
@@ -62,8 +62,8 @@ const fn store_error_to_oauth(e: &StoreError) -> OAuthError {
     }
 }
 
-pub async fn handle<C, R, A, S, U, P, H>(
-    state: &AppState<C, R, A, S, U, P>,
+pub async fn handle<C, R, A, S, U, P, X, H>(
+    state: &AppState<C, R, A, S, U, P, X>,
     form: &TokenForm,
     now: Timestamp,
     hasher: &H,
@@ -92,8 +92,8 @@ where
     }
 }
 
-async fn authenticate_client<C, R, A, S, U, P, H>(
-    state: &AppState<C, R, A, S, U, P>,
+async fn authenticate_client<C, R, A, S, U, P, X, H>(
+    state: &AppState<C, R, A, S, U, P, X>,
     form: &TokenForm,
     now: Timestamp,
     hasher: &H,
@@ -189,8 +189,8 @@ where
     Ok(client)
 }
 
-async fn authorization_code<C, R, A, S, U, P, H>(
-    state: &AppState<C, R, A, S, U, P>,
+async fn authorization_code<C, R, A, S, U, P, X, H>(
+    state: &AppState<C, R, A, S, U, P, X>,
     form: &TokenForm,
     client: &ClientId,
     now: Timestamp,
@@ -260,14 +260,15 @@ where
 
             nonce: grant.nonce.as_deref(),
             scope: grant.scope.as_deref(),
+            resources: &grant.resources,
         },
         now,
         hasher,
     )
 }
 
-async fn refresh_token<C, R, A, S, U, P, H>(
-    state: &AppState<C, R, A, S, U, P>,
+async fn refresh_token<C, R, A, S, U, P, X, H>(
+    state: &AppState<C, R, A, S, U, P, X>,
     form: &TokenForm,
     client: &ClientId,
     now: Timestamp,
@@ -347,6 +348,7 @@ where
                     binding,
                     nonce: None,
                     scope: None,
+                    resources: &[],
                 },
                 now,
                 hasher,
@@ -355,8 +357,8 @@ where
     }
 }
 
-async fn apply_effects<C, R, A, S, U, P>(
-    state: &AppState<C, R, A, S, U, P>,
+async fn apply_effects<C, R, A, S, U, P, X>(
+    state: &AppState<C, R, A, S, U, P, X>,
     effects: &[Effect],
     code_hash: &[u8; 32],
     rotation: Option<Rotation<'_>>,
@@ -394,10 +396,12 @@ struct IssueRequest<'a> {
     nonce: Option<&'a str>,
 
     scope: Option<&'a str>,
+
+    resources: &'a [argus_core::resource::ResourceUri],
 }
 
-fn issue<C, R, A, S, U, P, H>(
-    state: &AppState<C, R, A, S, U, P>,
+fn issue<C, R, A, S, U, P, X, H>(
+    state: &AppState<C, R, A, S, U, P, X>,
     request: &IssueRequest<'_>,
     now: Timestamp,
     hasher: &H,
@@ -410,10 +414,23 @@ where
 {
     let subject = request.subject.as_uuid().simple().to_string();
     let exp = now.saturating_add(PLACEHOLDER_ACCESS_TOKEN_LIFETIME);
+
+    let audience = if request.resources.is_empty() {
+        Audience::One(request.client.as_str().to_owned())
+    } else {
+        Audience::of(
+            &request
+                .resources
+                .iter()
+                .map(|r| r.as_str().to_owned())
+                .collect::<Vec<_>>(),
+        )
+    };
+
     let claims = AccessTokenClaims {
         iss: state.tenant.metadata.issuer.clone(),
         sub: subject.clone(),
-        aud: request.client.as_str().to_owned(),
+        aud: audience,
         exp: exp.as_unix_seconds(),
         iat: now.as_unix_seconds(),
         jti: uuid::Uuid::new_v4().simple().to_string(),

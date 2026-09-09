@@ -12,12 +12,45 @@ pub struct JwsHeader {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Audience {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl Audience {
+    #[must_use]
+    pub fn of(values: &[String]) -> Self {
+        match values {
+            [only] => Self::One(only.clone()),
+            many => Self::Many(many.to_vec()),
+        }
+    }
+
+    #[must_use]
+    pub fn contains(&self, value: &str) -> bool {
+        match self {
+            Self::One(one) => one == value,
+            Self::Many(many) => many.iter().any(|a| a == value),
+        }
+    }
+
+    #[must_use]
+    pub fn values(&self) -> Vec<&str> {
+        match self {
+            Self::One(one) => vec![one.as_str()],
+            Self::Many(many) => many.iter().map(String::as_str).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccessTokenClaims {
     pub iss: String,
 
     pub sub: String,
 
-    pub aud: String,
+    pub aud: Audience,
 
     pub exp: i64,
 
@@ -111,7 +144,7 @@ pub fn verify(token: &str, key: &VerifyingKey) -> Result<AccessTokenClaims, JwtE
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
-    use super::{AccessTokenClaims, JwtError, sign, verify};
+    use super::{AccessTokenClaims, Audience, JwtError, sign, verify};
     use argus_crypto::SigningKey;
     use base64ct::Encoding as _;
 
@@ -119,7 +152,7 @@ mod tests {
         AccessTokenClaims {
             iss: "https://acme.argus.test".to_owned(),
             sub: "user-1".to_owned(),
-            aud: "https://api.acme.test".to_owned(),
+            aud: Audience::One("https://api.acme.test".to_owned()),
             exp: 1_000_300,
             iat: 1_000_000,
             jti: "jti-1".to_owned(),
@@ -199,5 +232,53 @@ mod tests {
         for bad in ["", "a.b", "a.b.c.d", "not-a-token"] {
             assert!(verify(bad, &vk).is_err(), "accepted: {bad}");
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod audience_tests {
+    use super::Audience;
+
+    #[test]
+    fn a_single_audience_stays_a_bare_string_on_the_wire() {
+        let json = serde_json::to_string(&Audience::of(&["https://a.test".to_owned()])).unwrap();
+        assert_eq!(json, r#""https://a.test""#);
+    }
+
+    #[test]
+    fn several_audiences_become_an_array() {
+        let json = serde_json::to_string(&Audience::of(&[
+            "https://a.test".to_owned(),
+            "https://b.test".to_owned(),
+        ]))
+        .unwrap();
+        assert_eq!(json, r#"["https://a.test","https://b.test"]"#);
+    }
+
+    #[test]
+    fn both_wire_forms_round_trip() {
+        for json in [
+            r#""https://a.test""#,
+            r#"["https://a.test","https://b.test"]"#,
+        ] {
+            let parsed: Audience = serde_json::from_str(json).unwrap();
+            assert_eq!(serde_json::to_string(&parsed).unwrap(), json);
+        }
+    }
+
+    #[test]
+    fn membership_is_exact() {
+        let aud = Audience::of(&["https://a.test".to_owned(), "https://b.test".to_owned()]);
+        assert!(aud.contains("https://a.test"));
+        assert!(aud.contains("https://b.test"));
+        assert!(!aud.contains("https://a.test.evil"));
+        assert!(!aud.contains("a.test"));
+    }
+
+    #[test]
+    fn an_empty_list_is_an_empty_array_not_a_string() {
+        let json = serde_json::to_string(&Audience::of(&[])).unwrap();
+        assert_eq!(json, "[]");
     }
 }

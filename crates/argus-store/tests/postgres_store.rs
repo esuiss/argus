@@ -106,6 +106,7 @@ fn stored_code(tenant: TenantId) -> StoredCode {
         state: CodeState::Issued,
         nonce: None,
         scope: None,
+        resources: Vec::new(),
     }
 }
 

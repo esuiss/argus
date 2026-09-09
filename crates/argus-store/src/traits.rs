@@ -3,6 +3,7 @@ use argus_core::authz_code::StoredCode;
 use argus_core::id::ClientId;
 use argus_core::id::TenantId;
 use argus_core::refresh::{FamilyId, RefreshToken};
+use argus_core::resource::ResourceUri;
 use core::future::Future;
 
 use argus_core::time::Timestamp;
@@ -99,6 +100,26 @@ impl JtiPurpose {
 pub enum JtiOutcome {
     Fresh,
     Replayed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProtectedResource {
+    pub uri: ResourceUri,
+    pub name: Option<String>,
+    pub scopes: Option<String>,
+}
+
+pub trait ResourceStore {
+    fn find_resource(
+        &self,
+        tenant: TenantId,
+        uri: &ResourceUri,
+    ) -> impl Future<Output = Result<Option<ProtectedResource>, StoreError>> + Send;
+
+    fn list_resources(
+        &self,
+        tenant: TenantId,
+    ) -> impl Future<Output = Result<Vec<ProtectedResource>, StoreError>> + Send;
 }
 
 pub trait ReplayStore {

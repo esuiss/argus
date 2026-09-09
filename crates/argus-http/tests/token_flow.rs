@@ -17,7 +17,7 @@ use argus_core::refresh::{FamilyId, RefreshState, RefreshToken};
 use argus_core::time::{Duration, Timestamp};
 use argus_crypto::{AwsLcSha256, SigningKey};
 use argus_http::endpoints::token::{TokenForm, handle};
-use argus_http::memstore::MemoryReplayStore;
+use argus_http::memstore::{MemoryReplayStore, MemoryResourceStore};
 use argus_http::state::{AppState, TenantContext};
 use argus_http::store::{AuditSink, ClientStore, CodeStore, RefreshStore, StoreError};
 use argus_proto::{AuthorizationServerMetadata, OAuthErrorCode};
@@ -155,7 +155,8 @@ impl ClientStore for Clients {
     }
 }
 
-type TestState = AppState<MemCodes, MemRefresh, MemAudit, Clients, (), MemoryReplayStore>;
+type TestState =
+    AppState<MemCodes, MemRefresh, MemAudit, Clients, (), MemoryReplayStore, MemoryResourceStore>;
 
 async fn token(
     s: &TestState,
@@ -181,6 +182,7 @@ fn state() -> TestState {
         clients: Clients::default(),
         authenticator: (),
         replay: MemoryReplayStore::default(),
+        resources: MemoryResourceStore::default(),
     }
 }
 
@@ -196,6 +198,7 @@ fn stored_code(code_state: CodeState) -> StoredCode {
         state: code_state,
         nonce: None,
         scope: None,
+        resources: Vec::new(),
     }
 }
 
@@ -223,7 +226,7 @@ async fn authorization_code_yields_a_verifiable_access_token() {
         .expect("token verifies against the published key");
 
     assert_eq!(claims.iss, "https://acme.argus.test");
-    assert_eq!(claims.aud, "acme-web");
+    assert!(claims.aud.contains("acme-web"));
     assert_eq!(claims.exp, NOW.as_unix_seconds() + resp.expires_in);
     assert!(
         *s.codes.consumed.lock().expect("lock"),
@@ -397,6 +400,7 @@ async fn storage_outage_returns_503_not_invalid_grant() {
         clients: Clients::default(),
         authenticator: (),
         replay: MemoryReplayStore::default(),
+        resources: MemoryResourceStore::default(),
     };
 
     let err = handle(&s, &code_form(), NOW, &AwsLcSha256, None)
@@ -466,7 +470,7 @@ async fn openid_scope_produces_a_verifiable_id_token() {
 
     assert_eq!(claims.iss, "https://acme.argus.test");
 
-    assert_eq!(claims.aud, "acme-web");
+    assert!(claims.aud.contains("acme-web"));
     assert!(claims.exp > claims.iat);
 }
 

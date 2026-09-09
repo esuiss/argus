@@ -9,6 +9,8 @@ pub const EXPECTED_MIGRATIONS: &[&str] = &[
     "0006_redirect_uri_scheme",
     "0007_consumed_jtis",
     "0008_schema_migrations",
+    "0009_protected_resources",
+    "0010_code_resources",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

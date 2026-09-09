@@ -11,6 +11,7 @@ pub mod id;
 pub mod pkce;
 pub mod redirect_uri;
 pub mod refresh;
+pub mod resource;
 pub mod time;
 
 pub use authorize::{AuthorizeOutcome, AuthorizeRequest, RegisteredClient};

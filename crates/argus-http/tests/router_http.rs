@@ -16,7 +16,7 @@ use argus_core::refresh::{FamilyId, RefreshToken};
 use argus_core::time::Timestamp;
 use argus_crypto::SigningKey;
 use argus_http::endpoints::authorize::DevAuthenticator;
-use argus_http::memstore::MemoryReplayStore;
+use argus_http::memstore::{MemoryReplayStore, MemoryResourceStore};
 use argus_http::state::{AppState, TenantContext};
 use argus_http::store::{AuditSink, ClientStore, CodeIssuer, CodeStore, RefreshStore, StoreError};
 use argus_proto::AuthorizationServerMetadata;
@@ -131,6 +131,7 @@ async fn serve() -> String {
             user: UserId::from_uuid(Uuid::from_u128(1)),
         },
         replay: MemoryReplayStore::default(),
+        resources: MemoryResourceStore::default(),
     });
 
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");

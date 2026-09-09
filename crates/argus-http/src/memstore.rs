@@ -10,8 +10,8 @@ use argus_core::authorize::RegisteredClient;
 use argus_core::id::ClientId;
 
 use crate::store::{
-    AuditSink, ClientStore, CodeIssuer, CodeStore, JtiOutcome, JtiPurpose, RefreshStore,
-    ReplayStore, StoreError,
+    AuditSink, ClientStore, CodeIssuer, CodeStore, JtiOutcome, JtiPurpose, ProtectedResource,
+    RefreshStore, ReplayStore, ResourceStore, StoreError,
 };
 
 #[derive(Debug, Default)]
@@ -236,5 +236,49 @@ impl ReplayStore for MemoryReplayStore {
         let before = seen.len();
         seen.retain(|_, expires| *expires > now.as_unix_seconds());
         Ok((before - seen.len()) as u64)
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct MemoryResourceStore {
+    resources: Mutex<Vec<ProtectedResource>>,
+}
+
+impl MemoryResourceStore {
+    pub fn insert(&self, resource: ProtectedResource) -> Result<(), StoreError> {
+        self.resources
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .push(resource);
+        Ok(())
+    }
+}
+
+impl ResourceStore for MemoryResourceStore {
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn find_resource(
+        &self,
+        _tenant: TenantId,
+        uri: &argus_core::resource::ResourceUri,
+    ) -> Result<Option<ProtectedResource>, StoreError> {
+        Ok(self
+            .resources
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .iter()
+            .find(|r| &r.uri == uri)
+            .cloned())
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn list_resources(
+        &self,
+        _tenant: TenantId,
+    ) -> Result<Vec<ProtectedResource>, StoreError> {
+        Ok(self
+            .resources
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .clone())
     }
 }

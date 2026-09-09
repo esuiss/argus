@@ -3,6 +3,7 @@ use crate::error::PkceError;
 use crate::id::{ClientId, TenantId, UserId};
 use crate::pkce::{CodeChallenge, Sha256};
 use crate::redirect_uri::RedirectUri;
+use crate::resource::ResourceUri;
 use crate::time::{Duration, Timestamp};
 
 pub const MAX_CODE_LIFETIME: Duration = Duration::from_seconds(600);
@@ -37,6 +38,8 @@ pub struct StoredCode {
     pub nonce: Option<String>,
 
     pub scope: Option<String>,
+
+    pub resources: Vec<ResourceUri>,
 }
 
 #[derive(Debug, Clone)]
@@ -51,6 +54,7 @@ pub struct AuthorizationCode {
     state: CodeState,
     nonce: Option<String>,
     scope: Option<String>,
+    resources: Vec<ResourceUri>,
 }
 
 #[derive(Debug, Clone)]
@@ -75,6 +79,8 @@ pub struct Grant {
     pub nonce: Option<String>,
 
     pub scope: Option<String>,
+
+    pub resources: Vec<ResourceUri>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -147,6 +153,7 @@ impl AuthorizationCode {
             state: CodeState::Issued,
             nonce: None,
             scope: None,
+            resources: Vec::new(),
         })
     }
 
@@ -163,6 +170,7 @@ impl AuthorizationCode {
             state: stored.state,
             nonce: stored.nonce,
             scope: stored.scope,
+            resources: stored.resources,
         }
     }
 
@@ -170,6 +178,12 @@ impl AuthorizationCode {
     pub fn with_oidc(mut self, nonce: Option<String>, scope: Option<String>) -> Self {
         self.nonce = nonce;
         self.scope = scope;
+        self
+    }
+
+    #[must_use]
+    pub fn with_resources(mut self, resources: Vec<ResourceUri>) -> Self {
+        self.resources = resources;
         self
     }
 
@@ -201,6 +215,7 @@ impl AuthorizationCode {
             state: self.state,
             nonce: self.nonce.clone(),
             scope: self.scope.clone(),
+            resources: self.resources.clone(),
         }
     }
 }
@@ -283,6 +298,7 @@ pub fn redeem(
             tenant: code.tenant,
             nonce: code.nonce.clone(),
             scope: code.scope.clone(),
+            resources: code.resources.clone(),
         },
         effects: vec![
             Effect::ConsumeCode,

@@ -13,7 +13,7 @@ pub struct TenantContext {
     pub published_keys: Vec<Arc<SigningKey>>,
 }
 
-pub struct AppState<C, R, A, S = (), U = (), P = ()>
+pub struct AppState<C, R, A, S = (), U = (), P = (), X = ()>
 where
     C: CodeStore + Send + Sync,
     R: RefreshStore + Send + Sync,
@@ -33,9 +33,10 @@ where
 
     pub authenticator: U,
     pub replay: P,
+    pub resources: X,
 }
 
-impl<C, R, A, S, U, P> AppState<C, R, A, S, U, P>
+impl<C, R, A, S, U, P, X> AppState<C, R, A, S, U, P, X>
 where
     C: CodeStore + Send + Sync,
     R: RefreshStore + Send + Sync,

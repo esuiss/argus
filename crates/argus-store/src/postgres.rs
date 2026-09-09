@@ -5,13 +5,14 @@ use argus_core::id::{ClientId, TenantId, UserId};
 use argus_core::pkce::{CodeChallenge, CodeChallengeMethod};
 use argus_core::redirect_uri::RedirectUri;
 use argus_core::refresh::{FamilyId, RefreshState, RefreshToken};
+use argus_core::resource::ResourceUri;
 use argus_core::time::Timestamp;
 use base64ct::{Base64UrlUnpadded, Encoding as _};
 use sqlx::{PgPool, Postgres, Row as _, Transaction};
 
 use crate::traits::{
-    AuditSink, ClientStore, CodeIssuer, CodeStore, JtiOutcome, JtiPurpose, RefreshStore,
-    ReplayStore, StoreError,
+    AuditSink, ClientStore, CodeIssuer, CodeStore, JtiOutcome, JtiPurpose, ProtectedResource,
+    RefreshStore, ReplayStore, ResourceStore, StoreError,
 };
 
 #[derive(Debug, Clone)]
@@ -148,8 +149,8 @@ impl CodeIssuer for PostgresStore {
             "INSERT INTO authorization_codes \
              (tenant_id, code_hash, client_id, user_id, redirect_uri, \
               challenge_digest, challenge_method, issued_at, expires_at, state, \
-              nonce, scope) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'issued', $10, $11)",
+              nonce, scope, resources) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'issued', $10, $11, $12)",
         )
         .bind(tenant.as_uuid())
         .bind(&code_hash[..])
@@ -162,6 +163,17 @@ impl CodeIssuer for PostgresStore {
         .bind(to_dt(code.expires_at))
         .bind(code.nonce.as_deref())
         .bind(code.scope.as_deref())
+        .bind(if code.resources.is_empty() {
+            None
+        } else {
+            Some(
+                code.resources
+                    .iter()
+                    .map(argus_core::resource::ResourceUri::as_str)
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            )
+        })
         .execute(&mut *tx)
         .await
         .map_err(|e| map_err(&e))?;
@@ -176,7 +188,7 @@ impl CodeStore for PostgresStore {
 
         let row = sqlx::query(
             "SELECT client_id, user_id, redirect_uri, challenge_digest, \
-                    issued_at, expires_at, state, redeemed_at, nonce, scope \
+                    issued_at, expires_at, state, redeemed_at, nonce, scope, resources \
              FROM authorization_codes WHERE tenant_id = $1 AND code_hash = $2",
         )
         .bind(tenant.as_uuid())
@@ -200,6 +212,14 @@ impl CodeStore for PostgresStore {
             row.try_get("redeemed_at").map_err(|e| map_err(&e))?;
         let nonce: Option<String> = row.try_get("nonce").map_err(|e| map_err(&e))?;
         let scope: Option<String> = row.try_get("scope").map_err(|e| map_err(&e))?;
+        let raw_resources: Option<String> = row.try_get("resources").map_err(|e| map_err(&e))?;
+        let mut resources = Vec::new();
+        for value in raw_resources.as_deref().unwrap_or_default().split(' ') {
+            if value.is_empty() {
+                continue;
+            }
+            resources.push(ResourceUri::parse(value).map_err(|_| StoreError::Unavailable)?);
+        }
 
         let challenge = CodeChallenge::parse(
             CodeChallengeMethod::S256,
@@ -224,6 +244,7 @@ impl CodeStore for PostgresStore {
             state,
             nonce,
             scope,
+            resources,
         })
     }
 
@@ -392,6 +413,63 @@ impl RefreshStore for PostgresStore {
 
         tx.commit().await.map_err(|e| map_err(&e))
     }
+}
+
+impl ResourceStore for PostgresStore {
+    async fn find_resource(
+        &self,
+        tenant: TenantId,
+        uri: &ResourceUri,
+    ) -> Result<Option<ProtectedResource>, StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        let row = sqlx::query(
+            "SELECT resource_uri, resource_name, scopes FROM protected_resources \
+             WHERE tenant_id = $1 AND resource_uri = $2",
+        )
+        .bind(tenant.as_uuid())
+        .bind(uri.as_str())
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?;
+
+        tx.commit().await.map_err(|e| map_err(&e))?;
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        Ok(Some(resource_from_row(&row)?))
+    }
+
+    async fn list_resources(&self, tenant: TenantId) -> Result<Vec<ProtectedResource>, StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        let rows = sqlx::query(
+            "SELECT resource_uri, resource_name, scopes FROM protected_resources \
+             WHERE tenant_id = $1 ORDER BY resource_uri",
+        )
+        .bind(tenant.as_uuid())
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?;
+
+        tx.commit().await.map_err(|e| map_err(&e))?;
+
+        let mut out = Vec::with_capacity(rows.len());
+        for row in &rows {
+            out.push(resource_from_row(row)?);
+        }
+        Ok(out)
+    }
+}
+
+fn resource_from_row(row: &sqlx::postgres::PgRow) -> Result<ProtectedResource, StoreError> {
+    let raw: String = row.try_get("resource_uri").map_err(|e| map_err(&e))?;
+    let name: Option<String> = row.try_get("resource_name").map_err(|e| map_err(&e))?;
+    let scopes: Option<String> = row.try_get("scopes").map_err(|e| map_err(&e))?;
+
+    let uri = ResourceUri::parse(&raw).map_err(|_| StoreError::Unavailable)?;
+    Ok(ProtectedResource { uri, name, scopes })
 }
 
 impl ReplayStore for PostgresStore {

@@ -87,6 +87,27 @@ aws-lc-rs = { version = "1", default-features = false, features = ["aws-lc-sys"]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# §1 §2.2 satır 396'da onaylı: rustls. Sunucu tarafı TLS sonlandırma için.
+# `aws-lc-rs` sağlayıcısı seçildi (§1 §2.2 kripto kararıyla aynı) — `ring` ile iki
+# ayrı kripto yığını taşımamak için sqlx de aws-lc-rs'e alındı.
+# rustls kendi ifadesiyle güven sınırındaki tüm crate'inde `forbid(unsafe_code)`.
+# Lisans: Apache-2.0 OR ISC OR MIT (AGPL uyumlu).
+rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "tls12", "logging"] }
+
+# rustls ekibinin tokio adaptörü ve PEM ayrıştırıcısı. Üçüncü taraf sarmalayıcı
+# (axum-server gibi) yerine bunlar seçildi: kabul döngüsünü kendimiz yazınca
+# graceful shutdown yolu açıkta kalıyor ve §9.5 #3'ün "in-flight akışı graceful
+# shutdown'a emanet etme" uyarısı görünür oluyor.
+# Lisans: Apache-2.0 OR ISC OR MIT.
+tokio-rustls = { version = "0.26", default-features = false, features = ["aws-lc-rs", "tls12"] }
+rustls-pemfile = "2"
+
+# hyper'ın kendi yardımcıları: TLS akışını hyper'a bağlamak ve tower servisini
+# hyper servisine çevirmek için. axum zaten hyper üstünde.
+# Lisans: MIT.
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["server", "server-auto", "tokio", "service"] }
+
 # §1 §2.2 yığını. `argus-http` dışındaki hiçbir crate bunları görmez;
 # `argus-core` özellikle görmez (karar #15).
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "form", "query"] }
@@ -96,5 +117,5 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal
 # canlı bir `DATABASE_URL` olmadan derlenemez ve derlemeyi ortama bağımlı kılar.
 # Sorgular çalışma zamanında bağlanıyor; doğrulamayı gerçek veritabanına karşı
 # koşan testler yapıyor.
-sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls-ring", "uuid", "chrono", "macros"] }
+sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls-aws-lc-rs", "uuid", "chrono", "macros"] }
 chrono = { version = "0.4", default-features = false, features = ["std"] }

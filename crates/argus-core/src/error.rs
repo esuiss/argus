@@ -33,6 +33,18 @@ pub enum RedirectUriError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum ResourceUriError {
+    #[error("resource must be an absolute URI with a host (RFC 8707 §2)")]
+    NotAbsolute,
+
+    #[error("resource must not contain a fragment (RFC 8707 §2)")]
+    HasFragment,
+
+    #[error("resource scheme {scheme} is not allowed; MCP canonical URIs are http or https")]
+    DisallowedScheme { scheme: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum PkceError {
     #[error("unsupported code_challenge_method: {method}")]
     UnsupportedMethod { method: String },

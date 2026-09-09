@@ -49,7 +49,7 @@ fn claims(cnf: Option<Confirmation>) -> AccessTokenClaims {
     AccessTokenClaims {
         iss: ISSUER.to_owned(),
         sub: SUBJECT.to_owned(),
-        aud: "acme-web".to_owned(),
+        aud: argus_proto::Audience::One("acme-web".to_owned()),
         exp: NOW
             .saturating_add(Duration::from_seconds(300))
             .as_unix_seconds(),

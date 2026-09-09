@@ -7,6 +7,6 @@ pub mod traits;
 pub use postgres::PostgresStore;
 pub use schema::{EXPECTED_MIGRATIONS, SchemaError};
 pub use traits::{
-    AuditSink, ClientStore, CodeIssuer, CodeStore, JtiOutcome, JtiPurpose, RefreshStore,
-    ReplayStore, StoreError,
+    AuditSink, ClientStore, CodeIssuer, CodeStore, JtiOutcome, JtiPurpose, ProtectedResource,
+    RefreshStore, ReplayStore, ResourceStore, StoreError,
 };

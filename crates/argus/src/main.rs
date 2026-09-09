@@ -17,6 +17,7 @@ use argus_crypto::SigningKey;
 use argus_http::endpoints::authorize::DevAuthenticator;
 use argus_http::memstore::{
     MemoryAuditSink, MemoryClientStore, MemoryCodeStore, MemoryRefreshStore, MemoryReplayStore,
+    MemoryResourceStore,
 };
 use argus_http::state::{AppState, TenantContext};
 use argus_proto::AuthorizationServerMetadata;
@@ -29,6 +30,9 @@ struct Config {
     database_url: Option<String>,
 
     key_dir: Option<String>,
+    tls_cert: Option<String>,
+    tls_key: Option<String>,
+    production: bool,
 
     active_kid: Option<String>,
 }
@@ -41,6 +45,9 @@ impl Config {
             database_url: env::var("ARGUS_DATABASE_URL").ok(),
             key_dir: env::var("ARGUS_SIGNING_KEY_DIR").ok(),
             active_kid: env::var("ARGUS_ACTIVE_KID").ok(),
+            tls_cert: env::var("ARGUS_TLS_CERT").ok(),
+            tls_key: env::var("ARGUS_TLS_KEY").ok(),
+            production: env::var("ARGUS_ENV").is_ok_and(|v| v == "production"),
         }
     }
 }
@@ -105,32 +112,16 @@ async fn main() -> ExitCode {
             user: UserId::from_uuid(Uuid::from_u128(1)),
         },
         replay: MemoryReplayStore::default(),
+        resources: MemoryResourceStore::default(),
     });
 
     let app = argus_http::build(state);
 
-    let Ok(listener) = tokio::net::TcpListener::bind(&config.bind).await else {
-        eprintln!("argus: cannot bind {}", config.bind);
-        return ExitCode::FAILURE;
-    };
-
-    eprintln!(
-        "argus: listening on {} (issuer {})",
-        config.bind, config.issuer
-    );
     eprintln!("argus: WARNING - in-memory store, DevAuthenticator active");
     warn_if_keys_are_ephemeral(&config);
     eprintln!("argus: WARNING - development configuration, not for production");
 
-    if let Err(e) = axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown())
-        .await
-    {
-        eprintln!("argus: server error: {e}");
-        return ExitCode::FAILURE;
-    }
-
-    ExitCode::SUCCESS
+    serve(app, &config, "in-memory").await
 }
 
 fn keygen(args: &[String]) -> ExitCode {
@@ -247,6 +238,129 @@ fn warn_if_keys_are_ephemeral(config: &Config) {
     }
 }
 
+async fn serve(app: axum::Router, config: &Config, store_kind: &str) -> ExitCode {
+    let tls = match tls_config(config) {
+        Ok(tls) => tls,
+        Err(message) => {
+            eprintln!("argus: {message}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let Ok(listener) = tokio::net::TcpListener::bind(&config.bind).await else {
+        eprintln!("argus: cannot bind {}", config.bind);
+        return ExitCode::FAILURE;
+    };
+
+    let scheme = if tls.is_some() { "https" } else { "http" };
+    eprintln!(
+        "argus: listening on {} over {scheme} (issuer {}, {store_kind})",
+        config.bind, config.issuer
+    );
+
+    if let Some(tls) = tls {
+        return serve_tls(listener, app, tls).await;
+    }
+
+    if let Err(e) = axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown())
+        .await
+    {
+        eprintln!("argus: server error: {e}");
+        return ExitCode::FAILURE;
+    }
+
+    ExitCode::SUCCESS
+}
+
+fn tls_config(config: &Config) -> Result<Option<Arc<rustls::ServerConfig>>, String> {
+    let (cert_path, key_path) = match (config.tls_cert.as_deref(), config.tls_key.as_deref()) {
+        (Some(c), Some(k)) => (c, k),
+        (None, None) => {
+            if config.production {
+                return Err(
+                    "ARGUS_ENV=production requires ARGUS_TLS_CERT and ARGUS_TLS_KEY; \
+                     refusing to serve an identity provider over plaintext"
+                        .to_owned(),
+                );
+            }
+            eprintln!(
+                "argus: WARNING - no TLS; every token and authorization code crosses \
+                 the network in plaintext (MCP AS-M4 requires HTTPS)"
+            );
+            return Ok(None);
+        }
+        _ => {
+            return Err("ARGUS_TLS_CERT and ARGUS_TLS_KEY must be set together".to_owned());
+        }
+    };
+
+    let certs = load_certs(cert_path)?;
+    let key = load_key(key_path)?;
+
+    let mut server_config = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .map_err(|e| format!("the certificate and key do not match: {e}"))?;
+
+    server_config.alpn_protocols = vec![b"http/1.1".to_vec()];
+
+    Ok(Some(Arc::new(server_config)))
+}
+
+fn load_certs(path: &str) -> Result<Vec<rustls::pki_types::CertificateDer<'static>>, String> {
+    let data = std::fs::read(path).map_err(|_| format!("cannot read {path}"))?;
+    let certs: Result<Vec<_>, _> = rustls_pemfile::certs(&mut data.as_slice()).collect();
+    let certs = certs.map_err(|_| format!("{path} is not a valid PEM certificate chain"))?;
+    if certs.is_empty() {
+        return Err(format!("{path} contains no certificates"));
+    }
+    Ok(certs)
+}
+
+fn load_key(path: &str) -> Result<rustls::pki_types::PrivateKeyDer<'static>, String> {
+    let data = std::fs::read(path).map_err(|_| format!("cannot read {path}"))?;
+    rustls_pemfile::private_key(&mut data.as_slice())
+        .map_err(|_| format!("{path} is not a valid PEM private key"))?
+        .ok_or_else(|| format!("{path} contains no private key"))
+}
+
+async fn serve_tls(
+    listener: tokio::net::TcpListener,
+    app: axum::Router,
+    tls: Arc<rustls::ServerConfig>,
+) -> ExitCode {
+    let acceptor = tokio_rustls::TlsAcceptor::from(tls);
+    let mut stop = Box::pin(shutdown());
+
+    loop {
+        let accepted = tokio::select! {
+            result = listener.accept() => result,
+            () = &mut stop => break,
+        };
+
+        let Ok((stream, _peer)) = accepted else {
+            continue;
+        };
+
+        let acceptor = acceptor.clone();
+        let service = hyper_util::service::TowerToHyperService::new(app.clone());
+
+        tokio::spawn(async move {
+            let Ok(tls_stream) = acceptor.accept(stream).await else {
+                return;
+            };
+            let io = hyper_util::rt::TokioIo::new(tls_stream);
+            let _ =
+                hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+                    .serve_connection(io, service)
+                    .await;
+        });
+    }
+
+    ExitCode::SUCCESS
+}
+
 async fn shutdown() {
     let _ = tokio::signal::ctrl_c().await;
     eprintln!("argus: shutting down");
@@ -285,30 +399,14 @@ async fn serve_with_postgres(config: &Config, url: &str, keys: &KeySet) -> ExitC
         authenticator: DevAuthenticator {
             user: UserId::from_uuid(Uuid::from_u128(1)),
         },
-        replay: store,
+        replay: store.clone(),
+        resources: store,
     });
 
     let app = argus_http::build(state);
 
-    let Ok(listener) = tokio::net::TcpListener::bind(&config.bind).await else {
-        eprintln!("argus: cannot bind {}", config.bind);
-        return ExitCode::FAILURE;
-    };
-
-    eprintln!(
-        "argus: listening on {} (issuer {}, PostgreSQL)",
-        config.bind, config.issuer
-    );
     eprintln!("argus: WARNING - DevAuthenticator active, development only");
     warn_if_keys_are_ephemeral(config);
 
-    if let Err(e) = axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown())
-        .await
-    {
-        eprintln!("argus: server error: {e}");
-        return ExitCode::FAILURE;
-    }
-
-    ExitCode::SUCCESS
+    serve(app, config, "PostgreSQL").await
 }

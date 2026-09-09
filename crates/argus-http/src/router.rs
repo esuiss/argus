@@ -22,6 +22,7 @@ use crate::replay::{PrecheckedReplay, consume};
 use crate::state::AppState;
 use crate::store::{
     AuditSink, ClientStore, CodeIssuer, CodeStore, JtiPurpose, RefreshStore, ReplayStore,
+    ResourceStore,
 };
 
 fn now() -> Timestamp {
@@ -47,10 +48,10 @@ fn oauth_response(err: &OAuthError) -> Response {
     response
 }
 
-type SharedState<C, R, A, S, U, P> = Arc<AppState<C, R, A, S, U, P>>;
+type SharedState<C, R, A, S, U, P, X> = Arc<AppState<C, R, A, S, U, P, X>>;
 
-async fn metadata_handler<C, R, A, S, U, P>(
-    State(state): State<SharedState<C, R, A, S, U, P>>,
+async fn metadata_handler<C, R, A, S, U, P, X>(
+    State(state): State<SharedState<C, R, A, S, U, P, X>>,
 ) -> Response
 where
     C: CodeStore + CodeIssuer + Send + Sync + 'static,
@@ -59,12 +60,13 @@ where
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
+    X: ResourceStore + Send + Sync + 'static,
 {
     Json(discovery::metadata(&state.tenant)).into_response()
 }
 
-async fn jwks_handler<C, R, A, S, U, P>(
-    State(state): State<SharedState<C, R, A, S, U, P>>,
+async fn jwks_handler<C, R, A, S, U, P, X>(
+    State(state): State<SharedState<C, R, A, S, U, P, X>>,
 ) -> Response
 where
     C: CodeStore + CodeIssuer + Send + Sync + 'static,
@@ -73,6 +75,7 @@ where
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
+    X: ResourceStore + Send + Sync + 'static,
 {
     discovery::jwks(&state.tenant).map_or_else(
         |_| oauth_response(&OAuthError::new(OAuthErrorCode::ServerError)),
@@ -127,8 +130,8 @@ where
     Ok(Some(proof.jkt))
 }
 
-async fn token_handler<C, R, A, S, U, P>(
-    State(state): State<SharedState<C, R, A, S, U, P>>,
+async fn token_handler<C, R, A, S, U, P, X>(
+    State(state): State<SharedState<C, R, A, S, U, P, X>>,
     headers: HeaderMap,
     Form(form): Form<TokenForm>,
 ) -> Response
@@ -139,6 +142,7 @@ where
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
+    X: ResourceStore + Send + Sync + 'static,
 {
     let at = now();
     let binding = match dpop_binding(
@@ -203,8 +207,77 @@ fn percent_decode(value: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-async fn userinfo_handler<C, R, A, S, U, P>(
-    State(state): State<SharedState<C, R, A, S, U, P>>,
+async fn prm_handler<C, R, A, S, U, P, X>(
+    State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    axum::extract::Path(path): axum::extract::Path<String>,
+) -> Response
+where
+    C: CodeStore + CodeIssuer + Send + Sync + 'static,
+    R: RefreshStore + Send + Sync + 'static,
+    A: AuditSink + Send + Sync + 'static,
+    S: ClientStore + Send + Sync + 'static,
+    U: UserAuthenticator + Send + Sync + 'static,
+    P: ReplayStore + Send + Sync + 'static,
+    X: ResourceStore + Send + Sync + 'static,
+{
+    prm_response(&state, &format!("/{path}")).await
+}
+
+async fn prm_root_handler<C, R, A, S, U, P, X>(
+    State(state): State<SharedState<C, R, A, S, U, P, X>>,
+) -> Response
+where
+    C: CodeStore + CodeIssuer + Send + Sync + 'static,
+    R: RefreshStore + Send + Sync + 'static,
+    A: AuditSink + Send + Sync + 'static,
+    S: ClientStore + Send + Sync + 'static,
+    U: UserAuthenticator + Send + Sync + 'static,
+    P: ReplayStore + Send + Sync + 'static,
+    X: ResourceStore + Send + Sync + 'static,
+{
+    prm_response(&state, "").await
+}
+
+async fn prm_response<C, R, A, S, U, P, X>(
+    state: &AppState<C, R, A, S, U, P, X>,
+    suffix: &str,
+) -> Response
+where
+    C: CodeStore + CodeIssuer + Send + Sync,
+    R: RefreshStore + Send + Sync,
+    A: AuditSink + Send + Sync,
+    X: ResourceStore + Send + Sync,
+{
+    let Ok(resources) = state.resources.list_resources(state.tenant_id()).await else {
+        return oauth_response(&OAuthError::new(OAuthErrorCode::TemporarilyUnavailable));
+    };
+
+    let wanted = format!("/.well-known/oauth-protected-resource{suffix}");
+
+    let found = resources
+        .into_iter()
+        .find(|r| argus_proto::well_known_path(r.uri.as_str()).is_some_and(|p| p == wanted));
+
+    let Some(resource) = found else {
+        return (StatusCode::NOT_FOUND, "no such protected resource").into_response();
+    };
+
+    let metadata = argus_proto::ProtectedResourceMetadata::new(
+        resource.uri.as_str(),
+        &state.tenant.metadata.issuer,
+    )
+    .with_name(resource.name)
+    .with_scopes(resource.scopes.as_deref());
+
+    let mut r = Json(metadata).into_response();
+    if let Ok(value) = "public, max-age=3600".parse() {
+        r.headers_mut().insert("Cache-Control", value);
+    }
+    r
+}
+
+async fn userinfo_handler<C, R, A, S, U, P, X>(
+    State(state): State<SharedState<C, R, A, S, U, P, X>>,
     headers: HeaderMap,
     body: String,
 ) -> Response
@@ -215,6 +288,7 @@ where
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
+    X: ResourceStore + Send + Sync + 'static,
 {
     let authorization = headers.get("Authorization").and_then(|v| v.to_str().ok());
     let dpop_header = headers.get("DPoP").and_then(|v| v.to_str().ok());
@@ -288,9 +362,10 @@ fn userinfo_refusal(err: userinfo::UserInfoError) -> Response {
     r
 }
 
-async fn authorize_handler<C, R, A, S, U, P>(
-    State(state): State<SharedState<C, R, A, S, U, P>>,
+async fn authorize_handler<C, R, A, S, U, P, X>(
+    State(state): State<SharedState<C, R, A, S, U, P, X>>,
     Query(query): Query<AuthorizeQuery>,
+    axum::extract::RawQuery(raw_query): axum::extract::RawQuery,
 ) -> Response
 where
     C: CodeStore + CodeIssuer + Send + Sync + 'static,
@@ -299,8 +374,20 @@ where
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
+    X: ResourceStore + Send + Sync + 'static,
 {
+    let mut query = query;
+    query.resource =
+        crate::endpoints::authorize::repeated_query_values(raw_query.as_deref(), "resource");
+
     let code = uuid::Uuid::new_v4().simple().to_string();
+    let registered_resources = match state.resources.list_resources(state.tenant_id()).await {
+        Ok(list) => list.into_iter().map(|r| r.uri).collect::<Vec<_>>(),
+        Err(_) => {
+            return oauth_response(&OAuthError::new(OAuthErrorCode::TemporarilyUnavailable));
+        }
+    };
+
     let ctx = AuthorizeContext {
         tenant: state.tenant_id(),
         issuer: &state.tenant.metadata.issuer,
@@ -310,6 +397,7 @@ where
         hasher: &AwsLcSha256,
         now: now(),
         new_code: &code,
+        registered_resources: &registered_resources,
     };
     let outcome = authorize_handle(&ctx, &query).await;
 
@@ -327,7 +415,7 @@ where
     }
 }
 
-pub fn build<C, R, A, S, U, P>(state: SharedState<C, R, A, S, U, P>) -> Router
+pub fn build<C, R, A, S, U, P, X>(state: SharedState<C, R, A, S, U, P, X>) -> Router
 where
     C: CodeStore + CodeIssuer + Send + Sync + 'static,
     R: RefreshStore + Send + Sync + 'static,
@@ -335,25 +423,35 @@ where
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
+    X: ResourceStore + Send + Sync + 'static,
 {
     Router::new()
         .route(
             "/.well-known/oauth-authorization-server",
-            get(metadata_handler::<C, R, A, S, U, P>),
+            get(metadata_handler::<C, R, A, S, U, P, X>),
         )
         .route(
             "/.well-known/openid-configuration",
-            get(metadata_handler::<C, R, A, S, U, P>),
+            get(metadata_handler::<C, R, A, S, U, P, X>),
         )
         .route(
             "/.well-known/jwks.json",
-            get(jwks_handler::<C, R, A, S, U, P>),
+            get(jwks_handler::<C, R, A, S, U, P, X>),
         )
-        .route("/authorize", get(authorize_handler::<C, R, A, S, U, P>))
-        .route("/token", post(token_handler::<C, R, A, S, U, P>))
+        .route(
+            "/.well-known/oauth-protected-resource",
+            get(prm_root_handler::<C, R, A, S, U, P, X>),
+        )
+        .route(
+            "/.well-known/oauth-protected-resource/{*path}",
+            get(prm_handler::<C, R, A, S, U, P, X>),
+        )
+        .route("/authorize", get(authorize_handler::<C, R, A, S, U, P, X>))
+        .route("/token", post(token_handler::<C, R, A, S, U, P, X>))
         .route(
             "/userinfo",
-            get(userinfo_handler::<C, R, A, S, U, P>).post(userinfo_handler::<C, R, A, S, U, P>),
+            get(userinfo_handler::<C, R, A, S, U, P, X>)
+                .post(userinfo_handler::<C, R, A, S, U, P, X>),
         )
         .with_state(state)
 }
