@@ -38,3 +38,21 @@ module_name_repetitions    = "allow"
 
 [workspace.dependencies]
 thiserror = "2"
+
+# §1 §2.2'deki listede yoktu — gerekçe (CLAUDE.md §6 kuralı):
+# Kimlik tipleri için zorunlu. Birincil anahtarlar UUIDv7 (§1 §2, PG18 yerleşik
+# `uuidv7()`), dolayısıyla Rust tarafında yalnızca TAŞIMA ve AYRIŞTIRMA gerekiyor —
+# üretim veritabanında. Bu yüzden `v4`/`v7` özellikleri KAPALI: argus-core'un
+# rastgelelik kaynağına erişmesi gerekmiyor. Lisans: MIT OR Apache-2.0 (AGPL uyumlu).
+uuid = { version = "1", default-features = false }
+
+# §1 §2.2'deki listede yoktu — gerekçe (CLAUDE.md §6 kuralı):
+# `redirect_uri` eşleştirmesi (§1 #24) exact string'dir, TEK istisnası loopback'te
+# port'un yok sayılmasıdır (RFC 8252 §7.3). Port'u yok saymak için URL'yi ayrıştırmak
+# zorunlu; elle ayrıştırma tam olarak authentik CVE-2024-52289'un sınıfıdır.
+# WHATWG URL uygulaması, ağ erişimi yok. Lisans: MIT OR Apache-2.0 (AGPL uyumlu).
+url = "2"
+
+# Yalnızca dev-dependency (§27 test stratejisi: "insta snapshot altyapısı").
+# Üretim binary'sine girmez. Lisans: Apache-2.0.
+insta = "1"

@@ -1,0 +1,10 @@
+---
+source: crates/argus-core/tests/redirect_uri_corpus.rs
+expression: out
+---
+https://*.example.com/cb     -> redirect_uri wildcards are not supported; register each URI exactly
+https://example.com/*        -> redirect_uri wildcards are not supported; register each URI exactly
+https://example.com/cb#frag  -> redirect_uri must not contain a fragment (RFC 6749 §3.1.2)
+/relative/cb                 -> redirect_uri must be an absolute URI (RFC 6749 §3.1.2)
+not a uri                    -> redirect_uri must be an absolute URI (RFC 6749 §3.1.2)
+                             -> redirect_uri must be an absolute URI (RFC 6749 §3.1.2)

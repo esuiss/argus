@@ -1,0 +1,23 @@
+---
+source: crates/argus-core/tests/redirect_uri_corpus.rs
+expression: out
+---
+https://app.example.com/cb   [loopback=false]
+  EXACT     https://app.example.com/cb
+
+https://app.example.com/cb/   [loopback=false]
+  EXACT     https://app.example.com/cb/
+
+http://127.0.0.1/callback   [loopback=true]
+  LOOPBACK  http://127.0.0.1:3118/callback
+
+http://[::1]/callback   [loopback=true]
+  LOOPBACK  http://[::1]:51234/callback
+
+http://localhost/callback   [loopback=true]
+  LOOPBACK  http://localhost:8080/callback
+
+https://127.0.0.1/callback   [loopback=false]
+
+com.example.app:/oauth   [loopback=false]
+  EXACT     com.example.app:/oauth
