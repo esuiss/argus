@@ -21,8 +21,8 @@ use crate::replay::{PrecheckedReplay, consume};
 use crate::state::AppState;
 use crate::store::{
     AuditSink, AuthnStore, BackchannelStore, CeremonyStore, ClientStore, CodeIssuer, CodeStore,
-    ConnectionStore, IssuerStore, JtiPurpose, RefreshStore, ReplayStore, ResourceStore,
-    SessionStore,
+    ConnectionStore, IssuerStore, JtiPurpose, RecoveryStore, RefreshStore, ReplayStore,
+    ResourceStore, SessionStore,
 };
 
 fn now() -> Timestamp {
@@ -60,6 +60,7 @@ where
         + SessionStore
         + AuthnStore
         + CeremonyStore
+        + RecoveryStore
         + Send
         + Sync
         + 'static,
@@ -83,6 +84,7 @@ where
         + SessionStore
         + AuthnStore
         + CeremonyStore
+        + RecoveryStore
         + Send
         + Sync
         + 'static,
@@ -158,6 +160,7 @@ where
         + SessionStore
         + AuthnStore
         + CeremonyStore
+        + RecoveryStore
         + Send
         + Sync
         + 'static,
@@ -242,6 +245,7 @@ where
         + SessionStore
         + AuthnStore
         + CeremonyStore
+        + RecoveryStore
         + Send
         + Sync
         + 'static,
@@ -368,6 +372,7 @@ where
         + SessionStore
         + AuthnStore
         + CeremonyStore
+        + RecoveryStore
         + Send
         + Sync
         + 'static,
@@ -424,6 +429,156 @@ where
     response
 }
 
+fn recovery_response(
+    result: Result<impl serde::Serialize, crate::endpoints::recovery::RecoveryHttpError>,
+) -> Response {
+    use crate::endpoints::recovery::RecoveryHttpError;
+
+    match result {
+        Ok(body) => no_store(Json(body).into_response()),
+        Err(err) => {
+            let status = match err {
+                RecoveryHttpError::Unknown => StatusCode::NOT_FOUND,
+                RecoveryHttpError::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
+                RecoveryHttpError::Conflict => StatusCode::CONFLICT,
+                _ => StatusCode::BAD_REQUEST,
+            };
+            no_store(
+                (
+                    status,
+                    Json(serde_json::json!({ "error": err.to_string() })),
+                )
+                    .into_response(),
+            )
+        }
+    }
+}
+
+async fn recovery_start<C, R, A, S, U, P, X>(
+    State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    Json(request): Json<crate::endpoints::recovery::StartRecovery>,
+) -> Response
+where
+    C: CodeStore
+        + CodeIssuer
+        + BackchannelStore
+        + SessionStore
+        + AuthnStore
+        + CeremonyStore
+        + RecoveryStore
+        + RecoveryStore
+        + Send
+        + Sync
+        + 'static,
+    R: RefreshStore + Send + Sync + 'static,
+    A: AuditSink + Send + Sync + 'static,
+    S: ClientStore + Send + Sync + 'static,
+    U: Send + Sync + 'static,
+    P: ReplayStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
+{
+    recovery_response(
+        crate::endpoints::recovery::start(
+            &state.codes,
+            state.tenant_id(),
+            &request,
+            &state.tenant.blind_index,
+        )
+        .await,
+    )
+}
+
+async fn recovery_evidence<C, R, A, S, U, P, X>(
+    State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    Json(request): Json<crate::endpoints::recovery::PresentEvidence>,
+) -> Response
+where
+    C: CodeStore
+        + CodeIssuer
+        + BackchannelStore
+        + SessionStore
+        + AuthnStore
+        + CeremonyStore
+        + RecoveryStore
+        + RecoveryStore
+        + Send
+        + Sync
+        + 'static,
+    R: RefreshStore + Send + Sync + 'static,
+    A: AuditSink + Send + Sync + 'static,
+    S: ClientStore + Send + Sync + 'static,
+    U: Send + Sync + 'static,
+    P: ReplayStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
+{
+    recovery_response(
+        crate::endpoints::recovery::present_evidence(
+            &state.codes,
+            state.tenant_id(),
+            &request,
+            now(),
+        )
+        .await,
+    )
+}
+
+async fn recovery_rebind<C, R, A, S, U, P, X>(
+    State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    Json(request): Json<crate::endpoints::recovery::AttemptRef>,
+) -> Response
+where
+    C: CodeStore
+        + CodeIssuer
+        + BackchannelStore
+        + SessionStore
+        + AuthnStore
+        + CeremonyStore
+        + RecoveryStore
+        + RecoveryStore
+        + Send
+        + Sync
+        + 'static,
+    R: RefreshStore + Send + Sync + 'static,
+    A: AuditSink + Send + Sync + 'static,
+    S: ClientStore + Send + Sync + 'static,
+    U: Send + Sync + 'static,
+    P: ReplayStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
+{
+    recovery_response(
+        crate::endpoints::recovery::open_rebind(&state.codes, state.tenant_id(), &request, now())
+            .await,
+    )
+}
+
+async fn recovery_deny<C, R, A, S, U, P, X>(
+    State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    Json(request): Json<crate::endpoints::recovery::AttemptRef>,
+) -> Response
+where
+    C: CodeStore
+        + CodeIssuer
+        + BackchannelStore
+        + SessionStore
+        + AuthnStore
+        + CeremonyStore
+        + RecoveryStore
+        + RecoveryStore
+        + Send
+        + Sync
+        + 'static,
+    R: RefreshStore + Send + Sync + 'static,
+    A: AuditSink + Send + Sync + 'static,
+    S: ClientStore + Send + Sync + 'static,
+    U: Send + Sync + 'static,
+    P: ReplayStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
+{
+    recovery_response(
+        crate::endpoints::recovery::deny(&state.codes, state.tenant_id(), &request, now()).await,
+    )
+}
+
 fn webauthn_refusal(err: crate::endpoints::webauthn::WebauthnError) -> Response {
     use crate::endpoints::webauthn::WebauthnError;
 
@@ -454,6 +609,7 @@ where
         + SessionStore
         + AuthnStore
         + CeremonyStore
+        + RecoveryStore
         + Send
         + Sync
         + 'static,
@@ -497,6 +653,7 @@ where
         + SessionStore
         + AuthnStore
         + CeremonyStore
+        + RecoveryStore
         + Send
         + Sync
         + 'static,
@@ -537,6 +694,7 @@ where
         + SessionStore
         + AuthnStore
         + CeremonyStore
+        + RecoveryStore
         + Send
         + Sync
         + 'static,
@@ -578,6 +736,7 @@ where
         + SessionStore
         + AuthnStore
         + CeremonyStore
+        + RecoveryStore
         + Send
         + Sync
         + 'static,
@@ -628,6 +787,7 @@ where
         + SessionStore
         + AuthnStore
         + CeremonyStore
+        + RecoveryStore
         + Send
         + Sync
         + 'static,
@@ -677,6 +837,7 @@ where
         + SessionStore
         + AuthnStore
         + CeremonyStore
+        + RecoveryStore
         + Send
         + Sync,
     R: RefreshStore + Send + Sync,
@@ -708,6 +869,7 @@ where
         + SessionStore
         + AuthnStore
         + CeremonyStore
+        + RecoveryStore
         + Send
         + Sync,
     R: RefreshStore + Send + Sync,
@@ -750,6 +912,7 @@ where
         + SessionStore
         + AuthnStore
         + CeremonyStore
+        + RecoveryStore
         + Send
         + Sync
         + 'static,
@@ -773,6 +936,7 @@ where
         + SessionStore
         + AuthnStore
         + CeremonyStore
+        + RecoveryStore
         + Send
         + Sync
         + 'static,
@@ -797,6 +961,7 @@ where
         + SessionStore
         + AuthnStore
         + CeremonyStore
+        + RecoveryStore
         + Send
         + Sync,
     R: RefreshStore + Send + Sync,
@@ -855,6 +1020,7 @@ where
         + SessionStore
         + AuthnStore
         + CeremonyStore
+        + RecoveryStore
         + Send
         + Sync
         + 'static,
@@ -959,6 +1125,7 @@ where
         + SessionStore
         + AuthnStore
         + CeremonyStore
+        + RecoveryStore
         + Send
         + Sync
         + 'static,
@@ -1035,6 +1202,7 @@ where
         + SessionStore
         + AuthnStore
         + CeremonyStore
+        + RecoveryStore
         + Send
         + Sync
         + 'static,
@@ -1070,6 +1238,19 @@ where
         .route("/token", post(token_handler::<C, R, A, S, U, P, X>))
         .route("/login", post(login_handler::<C, R, A, S, U, P, X>))
         .route("/register", post(register_handler::<C, R, A, S, U, P, X>))
+        .route(
+            "/recovery/start",
+            post(recovery_start::<C, R, A, S, U, P, X>),
+        )
+        .route(
+            "/recovery/evidence",
+            post(recovery_evidence::<C, R, A, S, U, P, X>),
+        )
+        .route(
+            "/recovery/rebind",
+            post(recovery_rebind::<C, R, A, S, U, P, X>),
+        )
+        .route("/recovery/deny", post(recovery_deny::<C, R, A, S, U, P, X>))
         .route(
             "/webauthn/register/start",
             post(webauthn_register_start::<C, R, A, S, U, P, X>),

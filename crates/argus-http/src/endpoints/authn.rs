@@ -1,4 +1,5 @@
 use argus_core::aal::Aal;
+use argus_core::authn::{AuthnState, Event, Factor, advance, start};
 use argus_core::id::{TenantId, UserId};
 use argus_core::pkce::Sha256;
 use argus_core::time::{Duration, Timestamp};
@@ -61,11 +62,54 @@ where
         None => None,
     };
 
-    let phc = stored.unwrap_or_else(|| DUMMY_PHC.to_owned());
+    let required = match subject {
+        Some(user) => match store.required_aal(tenant, user).await {
+            Ok(level) => level,
+            Err(_) => return (LoginOutcome::Unavailable, None),
+        },
+        None => Aal::One,
+    };
 
+    let mut enrolled = Vec::new();
+    if stored.is_some() {
+        enrolled.push(Factor::Password);
+    }
+    if let Some(user) = subject
+        && let Ok(passkeys) = store.webauthn_credentials(tenant, user).await
+        && !passkeys.is_empty()
+    {
+        enrolled.push(Factor::Passkey);
+    }
+
+    let attempt = start(required, now);
+    let attempt = advance(
+        &attempt,
+        Event::IdentifierResolved {
+            subject,
+            enrolled: &enrolled,
+        },
+        now,
+    );
+
+    let phc = stored.unwrap_or_else(|| DUMMY_PHC.to_owned());
     let verdict = verify_password(&form.password, &phc).unwrap_or(Verdict::Wrong);
 
-    let (Some(subject), true) = (subject, verdict != Verdict::Wrong) else {
+    let attempt = advance(
+        &attempt,
+        if verdict == Verdict::Wrong {
+            Event::FactorRejected
+        } else {
+            Event::FactorVerified {
+                factor: Factor::Password,
+            }
+        },
+        now,
+    );
+
+    let AuthnState::Authenticated {
+        subject, achieved, ..
+    } = attempt.state
+    else {
         return (LoginOutcome::Refused, None);
     };
 
@@ -75,26 +119,20 @@ where
         let _ = store.set_password(tenant, subject, &fresh).await;
     }
 
-    let Ok(required) = store.required_aal(tenant, subject).await else {
-        return (LoginOutcome::Unavailable, None);
-    };
-
-    if !Aal::One.satisfies(required) {
-        return (LoginOutcome::Refused, None);
-    }
-
     let secret = uuid::Uuid::new_v4().simple().to_string();
     let session_hash = hasher.sha256(secret.as_bytes());
 
-    let session = AuthnSession {
-        subject,
-        achieved: Aal::One,
-        authenticated_at: now,
-        expires_at: now.saturating_add(SESSION_LIFETIME),
-    };
-
     if store
-        .create_session(tenant, &session_hash, &session)
+        .create_session(
+            tenant,
+            &session_hash,
+            &AuthnSession {
+                subject,
+                achieved,
+                authenticated_at: now,
+                expires_at: now.saturating_add(SESSION_LIFETIME),
+            },
+        )
         .await
         .is_err()
     {
@@ -102,10 +140,7 @@ where
     }
 
     (
-        LoginOutcome::Established {
-            subject,
-            achieved: Aal::One,
-        },
+        LoginOutcome::Established { subject, achieved },
         Some(secret),
     )
 }

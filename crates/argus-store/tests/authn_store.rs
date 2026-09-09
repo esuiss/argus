@@ -223,3 +223,84 @@ async fn a_revoked_session_stops_loading() {
         StoreError::NotFound
     );
 }
+
+#[tokio::test]
+async fn a_recovery_attempt_round_trips_and_the_schema_refuses_weak_evidence() {
+    use argus_core::recovery::{RecoveryAttempt, RecoveryState};
+    use argus_store::traits::RecoveryStore;
+
+    let Some(s) = store().await else {
+        eprintln!("skipped: ARGUS_TEST_DATABASE_URL is not set");
+        return;
+    };
+    let t = fresh_tenant();
+    seed_tenant(t).await;
+
+    let user = UserId::from_uuid(Uuid::new_v4());
+    s.create_user(t, user, &key().compute("rec@example.com"), b"c")
+        .await
+        .expect("create");
+
+    let attempt_id = Uuid::new_v4();
+    let opened = RecoveryAttempt {
+        subject: user,
+        state: RecoveryState::Requested,
+        required: Aal::Two,
+        achieved: None,
+        evidence_consumed: false,
+        cooldown_until: None,
+        grace_until: None,
+    };
+    s.open_recovery(t, attempt_id, &opened).await.expect("open");
+
+    let loaded = s.load_recovery(t, attempt_id).await.expect("load");
+    assert_eq!(loaded.state, RecoveryState::Requested);
+    assert_eq!(loaded.required, Aal::Two);
+    assert!(!loaded.evidence_consumed);
+
+    let weak = RecoveryAttempt {
+        state: RecoveryState::RebindOpen,
+        achieved: Some(Aal::One),
+        evidence_consumed: true,
+        ..loaded.clone()
+    };
+    assert!(
+        s.advance_recovery(t, attempt_id, &weak, NOW).await.is_err(),
+        "the schema must refuse recovery weaker than the account it recovers"
+    );
+
+    let strong = RecoveryAttempt {
+        state: RecoveryState::CoolingDown,
+        achieved: Some(Aal::Two),
+        evidence_consumed: true,
+        cooldown_until: Some(NOW.saturating_add(Duration::from_seconds(86_400))),
+        ..loaded
+    };
+    assert!(
+        s.advance_recovery(t, attempt_id, &strong, NOW)
+            .await
+            .expect("advance"),
+        "sufficient evidence must be accepted"
+    );
+
+    let after = s.load_recovery(t, attempt_id).await.expect("load");
+    assert_eq!(after.state, RecoveryState::CoolingDown);
+    assert_eq!(after.achieved, Some(Aal::Two));
+    assert!(after.evidence_consumed);
+}
+
+#[tokio::test]
+async fn an_unknown_recovery_attempt_is_not_found() {
+    use argus_store::traits::RecoveryStore;
+
+    let Some(s) = store().await else {
+        return;
+    };
+    let t = fresh_tenant();
+    seed_tenant(t).await;
+
+    assert_eq!(
+        s.load_recovery(t, Uuid::new_v4()).await.unwrap_err(),
+        StoreError::NotFound
+    );
+}

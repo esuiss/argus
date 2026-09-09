@@ -40,6 +40,8 @@ pub enum AuthnState {
         satisfied: Vec<Factor>,
     },
 
+    AwaitingFactorForUnknownIdentifier,
+
     Authenticated {
         subject: UserId,
         achieved: Aal,
@@ -116,10 +118,7 @@ pub fn advance(attempt: &AuthnAttempt, event: Event<'_>, now: Timestamp) -> Auth
             };
 
             let Some(subject) = subject else {
-                next.state = AuthnState::AwaitingFactor {
-                    subject: UserId::from_uuid(uuid::Uuid::nil()),
-                    satisfied: Vec::new(),
-                };
+                next.state = AuthnState::AwaitingFactorForUnknownIdentifier;
                 return next;
             };
 
@@ -319,9 +318,56 @@ mod tests {
             },
             at(1),
         );
-        assert!(
-            matches!(a.state, AuthnState::AwaitingFactor { .. }),
-            "an unknown account must be indistinguishable from a known one"
+        assert_eq!(
+            a.state,
+            AuthnState::AwaitingFactorForUnknownIdentifier,
+            "an unknown account must still consume a factor step"
+        );
+    }
+
+    #[test]
+    fn no_sequence_of_events_authenticates_an_unknown_identifier() {
+        let mut a = start(Aal::One, NOW);
+        a = advance(
+            &a,
+            Event::IdentifierResolved {
+                subject: None,
+                enrolled: &[Factor::Password, Factor::Passkey, Factor::HardwareKey],
+            },
+            at(1),
+        );
+
+        for factor in [Factor::Password, Factor::Passkey, Factor::HardwareKey] {
+            a = advance(&a, Event::FactorVerified { factor }, at(2));
+            assert!(
+                !matches!(a.state, AuthnState::Authenticated { .. }),
+                "an identifier that resolved to nobody must never authenticate, \
+                 whatever factor is claimed: {:?}",
+                a.state
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_identifier_is_still_throttled_like_a_known_one() {
+        let mut a = start(Aal::One, NOW);
+        a = advance(
+            &a,
+            Event::IdentifierResolved {
+                subject: None,
+                enrolled: &[],
+            },
+            at(1),
+        );
+        for _ in 0..MAX_FAILURES {
+            a = advance(&a, Event::FactorRejected, at(2));
+        }
+        assert_eq!(
+            a.state,
+            AuthnState::Failed {
+                reason: AuthnFailure::Throttled
+            },
+            "throttling must look the same for both, or the counter leaks existence"
         );
     }
 

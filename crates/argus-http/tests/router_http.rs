@@ -19,7 +19,7 @@ use argus_http::memstore::{MemoryReplayStore, MemoryResourceStore};
 use argus_http::state::{AppState, TenantContext};
 use argus_http::store::{
     AuditSink, AuthnStore, BackchannelStore, CeremonyStore, ClientStore, CodeIssuer, CodeStore,
-    RefreshStore, SessionStore, StoreError,
+    RecoveryStore, RefreshStore, SessionStore, StoreError,
 };
 use argus_proto::AuthorizationServerMetadata;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
@@ -33,6 +33,7 @@ struct Codes {
     issued: Mutex<Option<StoredCode>>,
     sessions: Mutex<std::collections::HashMap<[u8; 32], argus_http::store::AuthnSession>>,
     ceremonies: Mutex<std::collections::HashMap<[u8; 32], PendingState>>,
+    recoveries: Mutex<std::collections::HashMap<uuid::Uuid, argus_core::recovery::RecoveryAttempt>>,
 }
 
 impl CodeIssuer for Codes {
@@ -610,5 +611,54 @@ impl CeremonyStore for Codes {
             .map_err(|_| StoreError::Unavailable)?
             .remove(hash)
             .ok_or(StoreError::NotFound)
+    }
+}
+
+impl RecoveryStore for Codes {
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn open_recovery(
+        &self,
+        _t: TenantId,
+        attempt_id: uuid::Uuid,
+        attempt: &argus_core::recovery::RecoveryAttempt,
+    ) -> Result<(), StoreError> {
+        self.recoveries
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .insert(attempt_id, attempt.clone());
+        Ok(())
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn load_recovery(
+        &self,
+        _t: TenantId,
+        attempt_id: uuid::Uuid,
+    ) -> Result<argus_core::recovery::RecoveryAttempt, StoreError> {
+        self.recoveries
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .get(&attempt_id)
+            .cloned()
+            .ok_or(StoreError::NotFound)
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn advance_recovery(
+        &self,
+        _t: TenantId,
+        attempt_id: uuid::Uuid,
+        attempt: &argus_core::recovery::RecoveryAttempt,
+        _at: Timestamp,
+    ) -> Result<bool, StoreError> {
+        let mut guard = self
+            .recoveries
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?;
+        if !guard.contains_key(&attempt_id) {
+            return Ok(false);
+        }
+        guard.insert(attempt_id, attempt.clone());
+        Ok(true)
     }
 }
