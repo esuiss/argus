@@ -10,7 +10,9 @@ version = "0.0.0"
 name = "argus-core"
 version = "0.0.0"
 dependencies = [
+ "base64ct",
  "insta",
+ "subtle",
  "thiserror",
  "url",
  "uuid",
@@ -43,6 +45,12 @@ version = "0.0.0"
 [[package]]
 name = "argus-store"
 version = "0.0.0"
+
+[[package]]
+name = "base64ct"
+version = "1.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
 name = "bitflags"
@@ -358,6 +366,12 @@ name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
+
+[[package]]
+name = "subtle"
+version = "2.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "syn"

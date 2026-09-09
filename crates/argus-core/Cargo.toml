@@ -10,6 +10,8 @@ repository.workspace   = true
 thiserror.workspace = true
 uuid.workspace      = true
 url.workspace       = true
+subtle.workspace    = true
+base64ct.workspace  = true
 
 [dev-dependencies]
 insta.workspace = true

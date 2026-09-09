@@ -52,3 +52,45 @@ pub enum RedirectUriError {
     #[error("redirect_uri wildcards are not supported; register each URI exactly")]
     WildcardNotSupported,
 }
+
+/// PKCE hataları (RFC 7636).
+///
+/// Bunların hiçbiri istemciye ayrıntısıyla dönmez: token endpoint'i hepsini tek bir
+/// `invalid_grant` altında toplar. Ayrım denetim kaydı ve operatör içindir —
+/// istemciye "verifier'ın uzunluğu yanlıştı" demek, saldırgana hangi adımda
+/// olduğunu söylemektir.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum PkceError {
+    /// `code_challenge_method` desteklenmiyor. `plain` dahil.
+    #[error("unsupported code_challenge_method: {method}")]
+    UnsupportedMethod {
+        /// İstekte gelen değer.
+        method: String,
+    },
+
+    /// `code_challenge` geçerli BASE64URL değil.
+    #[error("code_challenge is not valid BASE64URL")]
+    MalformedChallenge,
+
+    /// `code_challenge` çözüldüğünde 32 bayt değil.
+    #[error("code_challenge decodes to {len} bytes, S256 requires 32")]
+    ChallengeWrongLength {
+        /// Çözülen bayt sayısı.
+        len: usize,
+    },
+
+    /// `code_verifier` uzunluğu RFC 7636 §4.1 sınırları dışında (43-128).
+    #[error("code_verifier is {len} bytes, RFC 7636 §4.1 requires 43..=128")]
+    VerifierWrongLength {
+        /// Verilen uzunluk.
+        len: usize,
+    },
+
+    /// `code_verifier` unreserved olmayan karakter içeriyor.
+    #[error("code_verifier contains a character outside the unreserved set")]
+    VerifierInvalidChar,
+
+    /// Verifier biçimsel olarak doğru ama özet tutmuyor.
+    #[error("code_verifier does not match code_challenge")]
+    VerifierMismatch,
+}
