@@ -3,6 +3,7 @@
 pub mod effects;
 pub mod endpoints;
 pub mod memstore;
+pub mod replay;
 pub mod router;
 pub mod state;
 pub use argus_store::traits as store;

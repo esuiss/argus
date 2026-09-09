@@ -16,7 +16,7 @@ use argus_core::redirect_uri::RedirectUri;
 use argus_crypto::SigningKey;
 use argus_http::endpoints::authorize::DevAuthenticator;
 use argus_http::memstore::{
-    MemoryAuditSink, MemoryClientStore, MemoryCodeStore, MemoryRefreshStore,
+    MemoryAuditSink, MemoryClientStore, MemoryCodeStore, MemoryRefreshStore, MemoryReplayStore,
 };
 use argus_http::state::{AppState, TenantContext};
 use argus_proto::AuthorizationServerMetadata;
@@ -104,6 +104,7 @@ async fn main() -> ExitCode {
         authenticator: DevAuthenticator {
             user: UserId::from_uuid(Uuid::from_u128(1)),
         },
+        replay: MemoryReplayStore::default(),
     });
 
     let app = argus_http::build(state);
@@ -261,6 +262,12 @@ async fn serve_with_postgres(config: &Config, url: &str, keys: &KeySet) -> ExitC
         return ExitCode::FAILURE;
     };
 
+    if let Err(e) = argus_store::schema::validate(&pool).await {
+        eprintln!("argus: schema validation failed: {e}");
+        eprintln!("argus: run the migration job before starting the server");
+        return ExitCode::FAILURE;
+    }
+
     let store = argus_store::PostgresStore::new(pool);
 
     let state = Arc::new(AppState {
@@ -273,11 +280,12 @@ async fn serve_with_postgres(config: &Config, url: &str, keys: &KeySet) -> ExitC
         refresh: store.clone(),
         audit: store.clone(),
         tenant_id: TenantId::from_uuid(Uuid::nil()),
-        clients: store,
+        clients: store.clone(),
 
         authenticator: DevAuthenticator {
             user: UserId::from_uuid(Uuid::from_u128(1)),
         },
+        replay: store,
     });
 
     let app = argus_http::build(state);

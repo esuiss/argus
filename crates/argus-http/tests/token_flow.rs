@@ -10,7 +10,6 @@ use std::sync::{Arc, Mutex};
 use argus_core::authorize::RegisteredClient;
 use argus_core::authz_code::{CodeState, StoredCode};
 use argus_core::client_auth::ClientAuthMethod;
-use argus_core::dpop::ReplayGuard;
 use argus_core::id::{ClientId, TenantId, UserId};
 use argus_core::pkce::{CodeChallenge, CodeChallengeMethod, Sha256};
 use argus_core::redirect_uri::RedirectUri;
@@ -18,6 +17,7 @@ use argus_core::refresh::{FamilyId, RefreshState, RefreshToken};
 use argus_core::time::{Duration, Timestamp};
 use argus_crypto::{AwsLcSha256, SigningKey};
 use argus_http::endpoints::token::{TokenForm, handle};
+use argus_http::memstore::MemoryReplayStore;
 use argus_http::state::{AppState, TenantContext};
 use argus_http::store::{AuditSink, ClientStore, CodeStore, RefreshStore, StoreError};
 use argus_proto::{AuthorizationServerMetadata, OAuthErrorCode};
@@ -155,23 +155,17 @@ impl ClientStore for Clients {
     }
 }
 
-struct NoReplay;
-
-impl ReplayGuard for NoReplay {
-    fn seen(&self, _jti: &str) -> bool {
-        false
-    }
-}
+type TestState = AppState<MemCodes, MemRefresh, MemAudit, Clients, (), MemoryReplayStore>;
 
 async fn token(
-    s: &AppState<MemCodes, MemRefresh, MemAudit, Clients>,
+    s: &TestState,
     form: &TokenForm,
     binding: Option<String>,
 ) -> Result<argus_proto::TokenResponse, argus_proto::OAuthError> {
-    handle(s, form, NOW, &AwsLcSha256, binding, &NoReplay).await
+    handle(s, form, NOW, &AwsLcSha256, binding).await
 }
 
-fn state() -> AppState<MemCodes, MemRefresh, MemAudit, Clients> {
+fn state() -> TestState {
     let (key, _) = SigningKey::generate("k1").expect("key");
     let key = Arc::new(key);
     AppState {
@@ -186,6 +180,7 @@ fn state() -> AppState<MemCodes, MemRefresh, MemAudit, Clients> {
         tenant_id: tenant(),
         clients: Clients::default(),
         authenticator: (),
+        replay: MemoryReplayStore::default(),
     }
 }
 
@@ -401,9 +396,10 @@ async fn storage_outage_returns_503_not_invalid_grant() {
         tenant_id: tenant(),
         clients: Clients::default(),
         authenticator: (),
+        replay: MemoryReplayStore::default(),
     };
 
-    let err = handle(&s, &code_form(), NOW, &AwsLcSha256, None, &NoReplay)
+    let err = handle(&s, &code_form(), NOW, &AwsLcSha256, None)
         .await
         .expect_err("outage");
     assert_eq!(err.error, OAuthErrorCode::TemporarilyUnavailable);
@@ -591,7 +587,7 @@ fn assertion_payload(aud: &str, exp_offset: i64, jti: &str) -> String {
     )
 }
 
-fn confidential_state(keys: Vec<ClientKey>) -> AppState<MemCodes, MemRefresh, MemAudit, Clients> {
+fn confidential_state(keys: Vec<ClientKey>) -> TestState {
     let mut s = state();
     s.clients = Clients {
         method: ClientAuthMethod::PrivateKeyJwt,
@@ -812,24 +808,41 @@ async fn an_unregistered_client_is_refused() {
 
 #[tokio::test]
 async fn a_replayed_assertion_is_refused() {
-    struct Seen;
-    impl ReplayGuard for Seen {
-        fn seen(&self, _jti: &str) -> bool {
-            true
-        }
-    }
-
     let (signing, public) = client_key("k1");
     let s = confidential_state(vec![public]);
-    *s.codes.record.lock().expect("lock") = Some(stored_code(CodeState::Issued));
 
     let a = assertion_for(
         &signing,
         "k1",
-        &assertion_payload("https://acme.argus.test", 120, "j1"),
+        &assertion_payload("https://acme.argus.test", 120, "j-once"),
     );
-    let err = handle(&s, &assertion_form(a), NOW, &AwsLcSha256, None, &Seen)
+
+    *s.codes.record.lock().expect("lock") = Some(stored_code(CodeState::Issued));
+    token(&s, &assertion_form(a.clone()), None)
         .await
-        .expect_err("must be refused");
+        .expect("first use succeeds");
+
+    *s.codes.record.lock().expect("lock") = Some(stored_code(CodeState::Issued));
+    let err = token(&s, &assertion_form(a), None)
+        .await
+        .expect_err("the same jti must not be accepted twice");
     assert_eq!(err.error, OAuthErrorCode::InvalidClient);
+}
+
+#[tokio::test]
+async fn a_different_jti_from_the_same_client_is_accepted() {
+    let (signing, public) = client_key("k1");
+    let s = confidential_state(vec![public]);
+
+    for jti in ["j-1", "j-2"] {
+        *s.codes.record.lock().expect("lock") = Some(stored_code(CodeState::Issued));
+        let a = assertion_for(
+            &signing,
+            "k1",
+            &assertion_payload("https://acme.argus.test", 120, jti),
+        );
+        token(&s, &assertion_form(a), None)
+            .await
+            .unwrap_or_else(|e| panic!("jti {jti} must be accepted: {e:?}"));
+    }
 }

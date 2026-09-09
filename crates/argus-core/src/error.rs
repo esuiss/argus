@@ -22,6 +22,14 @@ pub enum RedirectUriError {
 
     #[error("redirect_uri wildcards are not supported; register each URI exactly")]
     WildcardNotSupported,
+
+    #[error(
+        "redirect_uri scheme {scheme} is not allowed; use https, http on a loopback host, or a private-use scheme (RFC 8252 §7)"
+    )]
+    DisallowedScheme { scheme: String },
+
+    #[error("plain http redirect_uri is only allowed on a loopback host (RFC 8252 §7.3)")]
+    InsecureHttpHost,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

@@ -1,6 +1,7 @@
 use argus_core::authz_code::{AuthorizationCode, Decision, TokenRequest, redeem};
-use argus_core::client_auth::{PresentedCredential, authenticate, validate_assertion};
-use argus_core::dpop::ReplayGuard;
+use argus_core::client_auth::{
+    MAX_ASSERTION_LIFETIME, PresentedCredential, authenticate, validate_assertion,
+};
 use argus_core::effect::Effect;
 use argus_core::id::ClientId;
 use argus_core::pkce::Sha256;
@@ -15,8 +16,11 @@ use argus_proto::{OAuthError, OAuthErrorCode, TokenResponse};
 use serde::Deserialize;
 
 use crate::effects::{EffectContext, Rotation, apply};
+use crate::replay::consume;
 use crate::state::AppState;
-use crate::store::{AuditSink, ClientStore, CodeStore, RefreshStore, StoreError};
+use crate::store::{
+    AuditSink, ClientStore, CodeStore, JtiPurpose, RefreshStore, ReplayStore, StoreError,
+};
 
 pub const PLACEHOLDER_ACCESS_TOKEN_LIFETIME: Duration = Duration::from_seconds(300);
 
@@ -58,22 +62,22 @@ const fn store_error_to_oauth(e: &StoreError) -> OAuthError {
     }
 }
 
-pub async fn handle<C, R, A, S, U, H>(
-    state: &AppState<C, R, A, S, U>,
+pub async fn handle<C, R, A, S, U, P, H>(
+    state: &AppState<C, R, A, S, U, P>,
     form: &TokenForm,
     now: Timestamp,
     hasher: &H,
     binding: Binding,
-    assertion_replay: &impl ReplayGuard,
 ) -> Result<TokenResponse, OAuthError>
 where
     C: CodeStore + Send + Sync,
     R: RefreshStore + Send + Sync,
     A: AuditSink + Send + Sync,
     S: ClientStore + Send + Sync,
+    P: ReplayStore + Send + Sync,
     H: Sha256,
 {
-    let client = authenticate_client(state, form, now, hasher, assertion_replay).await?;
+    let client = authenticate_client(state, form, now, hasher).await?;
 
     match form.grant_type.as_str() {
         "authorization_code" => {
@@ -88,18 +92,18 @@ where
     }
 }
 
-async fn authenticate_client<C, R, A, S, U, H>(
-    state: &AppState<C, R, A, S, U>,
+async fn authenticate_client<C, R, A, S, U, P, H>(
+    state: &AppState<C, R, A, S, U, P>,
     form: &TokenForm,
     now: Timestamp,
     hasher: &H,
-    replay: &impl ReplayGuard,
 ) -> Result<ClientId, OAuthError>
 where
     C: CodeStore + Send + Sync,
     R: RefreshStore + Send + Sync,
     A: AuditSink + Send + Sync,
     S: ClientStore + Send + Sync,
+    P: ReplayStore + Send + Sync,
     H: Sha256,
 {
     let tenant = state.tenant_id();
@@ -143,6 +147,17 @@ where
             let claims = argus_proto::client_assertion::verify(raw, &registered.keys)
                 .map_err(|_| OAuthError::new(OAuthErrorCode::InvalidClient))?;
 
+            let replay = consume(
+                &state.replay,
+                tenant,
+                JtiPurpose::ClientAssertion,
+                &claims.jti,
+                now,
+                MAX_ASSERTION_LIFETIME,
+            )
+            .await
+            .map_err(|e| store_error_to_oauth(&e))?;
+
             validate_assertion(
                 &claims,
                 &client,
@@ -151,7 +166,7 @@ where
                     state.tenant.metadata.token_endpoint.as_str(),
                 ],
                 now,
-                replay,
+                &replay,
             )
             .map_err(|_| OAuthError::new(OAuthErrorCode::InvalidClient))?;
 
@@ -174,8 +189,8 @@ where
     Ok(client)
 }
 
-async fn authorization_code<C, R, A, S, U, H>(
-    state: &AppState<C, R, A, S, U>,
+async fn authorization_code<C, R, A, S, U, P, H>(
+    state: &AppState<C, R, A, S, U, P>,
     form: &TokenForm,
     client: &ClientId,
     now: Timestamp,
@@ -251,8 +266,8 @@ where
     )
 }
 
-async fn refresh_token<C, R, A, S, U, H>(
-    state: &AppState<C, R, A, S, U>,
+async fn refresh_token<C, R, A, S, U, P, H>(
+    state: &AppState<C, R, A, S, U, P>,
     form: &TokenForm,
     client: &ClientId,
     now: Timestamp,
@@ -340,8 +355,8 @@ where
     }
 }
 
-async fn apply_effects<C, R, A, S, U>(
-    state: &AppState<C, R, A, S, U>,
+async fn apply_effects<C, R, A, S, U, P>(
+    state: &AppState<C, R, A, S, U, P>,
     effects: &[Effect],
     code_hash: &[u8; 32],
     rotation: Option<Rotation<'_>>,
@@ -381,8 +396,8 @@ struct IssueRequest<'a> {
     scope: Option<&'a str>,
 }
 
-fn issue<C, R, A, S, U, H>(
-    state: &AppState<C, R, A, S, U>,
+fn issue<C, R, A, S, U, P, H>(
+    state: &AppState<C, R, A, S, U, P>,
     request: &IssueRequest<'_>,
     now: Timestamp,
     hasher: &H,

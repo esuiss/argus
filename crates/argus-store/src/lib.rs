@@ -1,7 +1,12 @@
 #![forbid(unsafe_code)]
 
 pub mod postgres;
+pub mod schema;
 pub mod traits;
 
 pub use postgres::PostgresStore;
-pub use traits::{AuditSink, ClientStore, CodeIssuer, CodeStore, RefreshStore, StoreError};
+pub use schema::{EXPECTED_MIGRATIONS, SchemaError};
+pub use traits::{
+    AuditSink, ClientStore, CodeIssuer, CodeStore, JtiOutcome, JtiPurpose, RefreshStore,
+    ReplayStore, StoreError,
+};

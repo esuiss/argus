@@ -79,6 +79,44 @@ pub trait RefreshStore {
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JtiPurpose {
+    DpopProof,
+    ClientAssertion,
+}
+
+impl JtiPurpose {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::DpopProof => "dpop_proof",
+            Self::ClientAssertion => "client_assertion",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JtiOutcome {
+    Fresh,
+    Replayed,
+}
+
+pub trait ReplayStore {
+    fn consume_jti(
+        &self,
+        tenant: TenantId,
+        purpose: JtiPurpose,
+        jti: &str,
+        expires_at: Timestamp,
+    ) -> impl Future<Output = Result<JtiOutcome, StoreError>> + Send;
+
+    fn purge_expired_jtis(
+        &self,
+        tenant: TenantId,
+        now: Timestamp,
+    ) -> impl Future<Output = Result<u64, StoreError>> + Send;
+}
+
 pub trait AuditSink {
     fn record(
         &self,

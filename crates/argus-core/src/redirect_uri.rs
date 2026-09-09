@@ -32,6 +32,28 @@ impl RedirectUri {
             return Err(RedirectUriError::HasFragment);
         }
 
+        let scheme = parsed.scheme().to_owned();
+        match scheme.as_str() {
+            "https" => {}
+            "http" => {
+                let loopback = match parsed.host() {
+                    Some(Host::Ipv4(ip)) => ip.is_loopback(),
+                    Some(Host::Ipv6(ip)) => ip.is_loopback(),
+                    Some(Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
+                    None => false,
+                };
+                if !loopback {
+                    return Err(RedirectUriError::InsecureHttpHost);
+                }
+            }
+            other if other.contains('.') => {}
+            other => {
+                return Err(RedirectUriError::DisallowedScheme {
+                    scheme: other.to_owned(),
+                });
+            }
+        }
+
         Ok(Self { parsed, raw })
     }
 

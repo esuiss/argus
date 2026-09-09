@@ -1,4 +1,4 @@
-use argus_core::dpop::{DEFAULT_PROOF_WINDOW, ReplayGuard, RequestBinding};
+use argus_core::dpop::{DEFAULT_PROOF_WINDOW, ReplayGuard, RequestBinding, VerifiedProof};
 use argus_core::time::Timestamp;
 use argus_crypto::{AwsLcSha256, VerifyingKey};
 use argus_proto::jwt::AccessTokenClaims;
@@ -93,7 +93,7 @@ pub struct UserInfoRequest<'a> {
 
     pub form_access_token: Option<&'a str>,
 
-    pub dpop: Option<&'a str>,
+    pub dpop_proof: Option<&'a VerifiedProof>,
 
     pub method: &'a str,
 
@@ -129,19 +129,16 @@ pub fn handle(
             if scheme != Scheme::Dpop {
                 return Err(UserInfoError::MissingProof);
             }
-            let Some(proof_header) = request.dpop else {
+            let Some(proof) = request.dpop_proof else {
                 return Err(UserInfoError::MissingProof);
             };
-
-            let proof = argus_proto::dpop::parse_and_verify(proof_header)
-                .map_err(|_| UserInfoError::InvalidProof)?;
 
             if proof.jkt != confirmation.jkt {
                 return Err(UserInfoError::InvalidProof);
             }
 
             argus_core::dpop::validate(
-                &proof,
+                proof,
                 &RequestBinding {
                     method: request.method.to_owned(),
                     uri: request.uri.to_owned(),

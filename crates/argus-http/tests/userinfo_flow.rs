@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use argus_core::dpop::ReplayGuard;
+use argus_core::dpop::{ReplayGuard, VerifiedProof};
 use argus_core::time::{Duration, Timestamp};
 use argus_crypto::{AwsLcSha256, SigningKey};
 use argus_http::endpoints::userinfo::{UserInfoError, UserInfoRequest, handle};
@@ -79,21 +79,28 @@ fn make_proof(key: &SigningKey, htm: &str, htu: &str, iat: i64, ath: Option<&str
     format!("{input}.{}", Base64UrlUnpadded::encode_string(&sig))
 }
 
-fn request<'a>(authorization: Option<&'a str>, dpop: Option<&'a str>) -> UserInfoRequest<'a> {
+fn request<'a>(
+    authorization: Option<&'a str>,
+    dpop_proof: Option<&'a VerifiedProof>,
+) -> UserInfoRequest<'a> {
     UserInfoRequest {
         authorization,
         form_access_token: None,
-        dpop,
+        dpop_proof,
         method: "GET",
         uri: USERINFO,
     }
+}
+
+fn verified(raw: &str) -> VerifiedProof {
+    argus_proto::dpop::parse_and_verify(raw).expect("proof verifies")
 }
 
 fn body_request(token: &str) -> UserInfoRequest<'_> {
     UserInfoRequest {
         authorization: None,
         form_access_token: Some(token),
-        dpop: None,
+        dpop_proof: None,
         method: "GET",
         uri: USERINFO,
     }
@@ -255,7 +262,13 @@ fn a_proof_from_a_different_key_does_not_unlock_the_token() {
     );
 
     assert_eq!(
-        handle(&ctx, &request(Some(&header), Some(&proof)), NOW, &NoReplay).unwrap_err(),
+        handle(
+            &ctx,
+            &request(Some(&header), Some(&verified(&proof))),
+            NOW,
+            &NoReplay
+        )
+        .unwrap_err(),
         UserInfoError::InvalidProof
     );
 }
@@ -276,7 +289,13 @@ fn a_matching_proof_unlocks_the_bound_token() {
     let ath = access_token_hash(&token);
     let proof = make_proof(&holder, "GET", USERINFO, NOW.as_unix_seconds(), Some(&ath));
 
-    let info = handle(&ctx, &request(Some(&header), Some(&proof)), NOW, &NoReplay).expect("ok");
+    let info = handle(
+        &ctx,
+        &request(Some(&header), Some(&verified(&proof))),
+        NOW,
+        &NoReplay,
+    )
+    .expect("ok");
     assert_eq!(info.sub, SUBJECT);
 }
 
@@ -296,7 +315,13 @@ fn a_proof_without_ath_is_refused() {
     let proof = make_proof(&holder, "GET", USERINFO, NOW.as_unix_seconds(), None);
 
     assert_eq!(
-        handle(&ctx, &request(Some(&header), Some(&proof)), NOW, &NoReplay).unwrap_err(),
+        handle(
+            &ctx,
+            &request(Some(&header), Some(&verified(&proof))),
+            NOW,
+            &NoReplay
+        )
+        .unwrap_err(),
         UserInfoError::InvalidProof
     );
 }
@@ -324,7 +349,13 @@ fn a_proof_bound_to_another_token_is_refused() {
     );
 
     assert_eq!(
-        handle(&ctx, &request(Some(&header), Some(&proof)), NOW, &NoReplay).unwrap_err(),
+        handle(
+            &ctx,
+            &request(Some(&header), Some(&verified(&proof))),
+            NOW,
+            &NoReplay
+        )
+        .unwrap_err(),
         UserInfoError::InvalidProof
     );
 }
@@ -352,7 +383,13 @@ fn a_proof_for_another_uri_is_refused() {
     );
 
     assert_eq!(
-        handle(&ctx, &request(Some(&header), Some(&proof)), NOW, &NoReplay).unwrap_err(),
+        handle(
+            &ctx,
+            &request(Some(&header), Some(&verified(&proof))),
+            NOW,
+            &NoReplay
+        )
+        .unwrap_err(),
         UserInfoError::InvalidProof
     );
 }
@@ -376,7 +413,7 @@ fn a_replayed_proof_is_refused() {
     assert_eq!(
         handle(
             &ctx,
-            &request(Some(&header), Some(&proof)),
+            &request(Some(&header), Some(&verified(&proof))),
             NOW,
             &EverythingSeen
         )
@@ -459,7 +496,7 @@ fn presenting_the_token_twice_is_refused() {
     let r = UserInfoRequest {
         authorization: Some(&header),
         form_access_token: Some(&token),
-        dpop: None,
+        dpop_proof: None,
         method: "GET",
         uri: USERINFO,
     };

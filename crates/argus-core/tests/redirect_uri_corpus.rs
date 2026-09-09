@@ -72,6 +72,15 @@ fn redirect_uri_registration_errors() {
         "/relative/cb",
         "not a uri",
         "",
+        "http://evil.example.com/cb",
+        "http://10.0.0.5/cb",
+        "http://127.0.0.1:8080/cb",
+        "http://localhost/cb",
+        "http://[::1]/cb",
+        "ftp://x.test/cb",
+        "javascript:alert(1)",
+        "data:text/html,x",
+        "com.example.app:/oauth",
     ];
 
     let mut out = String::new();
@@ -80,7 +89,7 @@ fn redirect_uri_registration_errors() {
             Ok(_) => "OK".to_owned(),
             Err(e) => e.to_string(),
         };
-        let _ = writeln!(out, "{input:<28} -> {result}");
+        let _ = writeln!(out, "{input:<30} -> {result}");
     }
 
     insta::assert_snapshot!(out);

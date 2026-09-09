@@ -9,7 +9,10 @@ use argus_core::time::Timestamp;
 use argus_core::authorize::RegisteredClient;
 use argus_core::id::ClientId;
 
-use crate::store::{AuditSink, ClientStore, CodeIssuer, CodeStore, RefreshStore, StoreError};
+use crate::store::{
+    AuditSink, ClientStore, CodeIssuer, CodeStore, JtiOutcome, JtiPurpose, RefreshStore,
+    ReplayStore, StoreError,
+};
 
 #[derive(Debug, Default)]
 pub struct MemoryCodeStore {
@@ -197,5 +200,41 @@ impl AuditSink for MemoryAuditSink {
             .map_err(|_| StoreError::Unavailable)?
             .push((event_type.to_owned(), at.as_unix_seconds()));
         Ok(())
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct MemoryReplayStore {
+    seen: Mutex<HashMap<(TenantId, &'static str, String), i64>>,
+}
+
+impl ReplayStore for MemoryReplayStore {
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn consume_jti(
+        &self,
+        tenant: TenantId,
+        purpose: JtiPurpose,
+        jti: &str,
+        expires_at: Timestamp,
+    ) -> Result<JtiOutcome, StoreError> {
+        let mut seen = self.seen.lock().map_err(|_| StoreError::Unavailable)?;
+        let key = (tenant, purpose.as_str(), jti.to_owned());
+        if seen.contains_key(&key) {
+            return Ok(JtiOutcome::Replayed);
+        }
+        seen.insert(key, expires_at.as_unix_seconds());
+        Ok(JtiOutcome::Fresh)
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn purge_expired_jtis(
+        &self,
+        _tenant: TenantId,
+        now: Timestamp,
+    ) -> Result<u64, StoreError> {
+        let mut seen = self.seen.lock().map_err(|_| StoreError::Unavailable)?;
+        let before = seen.len();
+        seen.retain(|_, expires| *expires > now.as_unix_seconds());
+        Ok((before - seen.len()) as u64)
     }
 }

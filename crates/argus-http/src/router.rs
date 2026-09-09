@@ -18,8 +18,11 @@ use crate::endpoints::authorize::{
 use crate::endpoints::discovery;
 use crate::endpoints::token::{Binding, TokenForm, handle};
 use crate::endpoints::userinfo::{self, UserInfoRequest};
+use crate::replay::{PrecheckedReplay, consume};
 use crate::state::AppState;
-use crate::store::{AuditSink, ClientStore, CodeIssuer, CodeStore, RefreshStore};
+use crate::store::{
+    AuditSink, ClientStore, CodeIssuer, CodeStore, JtiPurpose, RefreshStore, ReplayStore,
+};
 
 fn now() -> Timestamp {
     let secs = SystemTime::now()
@@ -44,10 +47,10 @@ fn oauth_response(err: &OAuthError) -> Response {
     response
 }
 
-type SharedState<C, R, A, S, U> = Arc<AppState<C, R, A, S, U>>;
+type SharedState<C, R, A, S, U, P> = Arc<AppState<C, R, A, S, U, P>>;
 
-async fn metadata_handler<C, R, A, S, U>(
-    State(state): State<SharedState<C, R, A, S, U>>,
+async fn metadata_handler<C, R, A, S, U, P>(
+    State(state): State<SharedState<C, R, A, S, U, P>>,
 ) -> Response
 where
     C: CodeStore + CodeIssuer + Send + Sync + 'static,
@@ -55,17 +58,21 @@ where
     A: AuditSink + Send + Sync + 'static,
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
+    P: ReplayStore + Send + Sync + 'static,
 {
     Json(discovery::metadata(&state.tenant)).into_response()
 }
 
-async fn jwks_handler<C, R, A, S, U>(State(state): State<SharedState<C, R, A, S, U>>) -> Response
+async fn jwks_handler<C, R, A, S, U, P>(
+    State(state): State<SharedState<C, R, A, S, U, P>>,
+) -> Response
 where
     C: CodeStore + CodeIssuer + Send + Sync + 'static,
     R: RefreshStore + Send + Sync + 'static,
     A: AuditSink + Send + Sync + 'static,
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
+    P: ReplayStore + Send + Sync + 'static,
 {
     discovery::jwks(&state.tenant).map_or_else(
         |_| oauth_response(&OAuthError::new(OAuthErrorCode::ServerError)),
@@ -73,15 +80,16 @@ where
     )
 }
 
-struct NoReplayRecord;
-
-impl argus_core::dpop::ReplayGuard for NoReplayRecord {
-    fn seen(&self, _jti: &str) -> bool {
-        false
-    }
-}
-
-fn dpop_binding(headers: &HeaderMap, htu: &str, now: Timestamp) -> Result<Binding, OAuthError> {
+async fn dpop_binding<P>(
+    replay_store: &P,
+    tenant: argus_core::id::TenantId,
+    headers: &HeaderMap,
+    htu: &str,
+    now: Timestamp,
+) -> Result<Binding, OAuthError>
+where
+    P: ReplayStore + Sync,
+{
     let Some(raw) = headers.get("DPoP") else {
         return Ok(None);
     };
@@ -92,6 +100,17 @@ fn dpop_binding(headers: &HeaderMap, htu: &str, now: Timestamp) -> Result<Bindin
     let proof = argus_proto::dpop::parse_and_verify(proof_str)
         .map_err(|_| OAuthError::new(OAuthErrorCode::InvalidRequest))?;
 
+    let replay = consume(
+        replay_store,
+        tenant,
+        JtiPurpose::DpopProof,
+        &proof.jti,
+        now,
+        argus_core::dpop::DEFAULT_PROOF_WINDOW,
+    )
+    .await
+    .map_err(|_| OAuthError::new(OAuthErrorCode::TemporarilyUnavailable))?;
+
     argus_core::dpop::validate(
         &proof,
         &argus_core::dpop::RequestBinding {
@@ -101,15 +120,15 @@ fn dpop_binding(headers: &HeaderMap, htu: &str, now: Timestamp) -> Result<Bindin
         None,
         now,
         argus_core::dpop::DEFAULT_PROOF_WINDOW,
-        &NoReplayRecord,
+        &replay,
     )
     .map_err(|_| OAuthError::new(OAuthErrorCode::InvalidRequest))?;
 
     Ok(Some(proof.jkt))
 }
 
-async fn token_handler<C, R, A, S, U>(
-    State(state): State<SharedState<C, R, A, S, U>>,
+async fn token_handler<C, R, A, S, U, P>(
+    State(state): State<SharedState<C, R, A, S, U, P>>,
     headers: HeaderMap,
     Form(form): Form<TokenForm>,
 ) -> Response
@@ -119,14 +138,23 @@ where
     A: AuditSink + Send + Sync + 'static,
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
+    P: ReplayStore + Send + Sync + 'static,
 {
     let at = now();
-    let binding = match dpop_binding(&headers, &state.tenant.metadata.token_endpoint, at) {
+    let binding = match dpop_binding(
+        &state.replay,
+        state.tenant_id(),
+        &headers,
+        &state.tenant.metadata.token_endpoint,
+        at,
+    )
+    .await
+    {
         Ok(b) => b,
         Err(e) => return oauth_response(&e),
     };
 
-    match handle(&state, &form, at, &AwsLcSha256, binding, &NoReplayRecord).await {
+    match handle(&state, &form, at, &AwsLcSha256, binding).await {
         Ok(response) => {
             let mut r = Json(response).into_response();
             if let Ok(value) = "no-store".parse() {
@@ -175,8 +203,8 @@ fn percent_decode(value: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-async fn userinfo_handler<C, R, A, S, U>(
-    State(state): State<SharedState<C, R, A, S, U>>,
+async fn userinfo_handler<C, R, A, S, U, P>(
+    State(state): State<SharedState<C, R, A, S, U, P>>,
     headers: HeaderMap,
     body: String,
 ) -> Response
@@ -186,9 +214,10 @@ where
     A: AuditSink + Send + Sync + 'static,
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
+    P: ReplayStore + Send + Sync + 'static,
 {
     let authorization = headers.get("Authorization").and_then(|v| v.to_str().ok());
-    let dpop = headers.get("DPoP").and_then(|v| v.to_str().ok());
+    let dpop_header = headers.get("DPoP").and_then(|v| v.to_str().ok());
 
     let form_access_token = form_field(&body, "access_token");
     let uri = state
@@ -198,16 +227,43 @@ where
         .clone()
         .unwrap_or_else(|| format!("{}/userinfo", state.tenant.metadata.issuer));
 
+    let at = now();
+
+    let proof = match dpop_header.map(argus_proto::dpop::parse_and_verify) {
+        Some(Ok(proof)) => Some(proof),
+        Some(Err(_)) => return userinfo_refusal(userinfo::UserInfoError::InvalidProof),
+        None => None,
+    };
+
+    let replay = match &proof {
+        Some(proof) => match consume(
+            &state.replay,
+            state.tenant_id(),
+            JtiPurpose::DpopProof,
+            &proof.jti,
+            at,
+            argus_core::dpop::DEFAULT_PROOF_WINDOW,
+        )
+        .await
+        {
+            Ok(guard) => guard,
+            Err(_) => {
+                return oauth_response(&OAuthError::new(OAuthErrorCode::TemporarilyUnavailable));
+            }
+        },
+        None => PrecheckedReplay::fresh(),
+    };
+
     let request = UserInfoRequest {
         authorization,
         form_access_token: form_access_token.as_deref(),
-        dpop,
+        dpop_proof: proof.as_ref(),
 
         method: "GET",
         uri: &uri,
     };
 
-    match userinfo::handle(&state.tenant, &request, now(), &NoReplayRecord) {
+    match userinfo::handle(&state.tenant, &request, at, &replay) {
         Ok(info) => {
             let mut r = Json(info).into_response();
 
@@ -216,23 +272,24 @@ where
             }
             r
         }
-        Err(err) => {
-            let status =
-                StatusCode::from_u16(err.http_status()).unwrap_or(StatusCode::UNAUTHORIZED);
-            let mut r = (status, Json(err.body())).into_response();
-            if let Ok(value) = err.challenge().parse() {
-                r.headers_mut().insert("WWW-Authenticate", value);
-            }
-            if let Ok(value) = "no-store".parse() {
-                r.headers_mut().insert("Cache-Control", value);
-            }
-            r
-        }
+        Err(err) => userinfo_refusal(err),
     }
 }
 
-async fn authorize_handler<C, R, A, S, U>(
-    State(state): State<SharedState<C, R, A, S, U>>,
+fn userinfo_refusal(err: userinfo::UserInfoError) -> Response {
+    let status = StatusCode::from_u16(err.http_status()).unwrap_or(StatusCode::UNAUTHORIZED);
+    let mut r = (status, Json(err.body())).into_response();
+    if let Ok(value) = err.challenge().parse() {
+        r.headers_mut().insert("WWW-Authenticate", value);
+    }
+    if let Ok(value) = "no-store".parse() {
+        r.headers_mut().insert("Cache-Control", value);
+    }
+    r
+}
+
+async fn authorize_handler<C, R, A, S, U, P>(
+    State(state): State<SharedState<C, R, A, S, U, P>>,
     Query(query): Query<AuthorizeQuery>,
 ) -> Response
 where
@@ -241,6 +298,7 @@ where
     A: AuditSink + Send + Sync + 'static,
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
+    P: ReplayStore + Send + Sync + 'static,
 {
     let code = uuid::Uuid::new_v4().simple().to_string();
     let ctx = AuthorizeContext {
@@ -269,29 +327,33 @@ where
     }
 }
 
-pub fn build<C, R, A, S, U>(state: SharedState<C, R, A, S, U>) -> Router
+pub fn build<C, R, A, S, U, P>(state: SharedState<C, R, A, S, U, P>) -> Router
 where
     C: CodeStore + CodeIssuer + Send + Sync + 'static,
     R: RefreshStore + Send + Sync + 'static,
     A: AuditSink + Send + Sync + 'static,
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
+    P: ReplayStore + Send + Sync + 'static,
 {
     Router::new()
         .route(
             "/.well-known/oauth-authorization-server",
-            get(metadata_handler::<C, R, A, S, U>),
+            get(metadata_handler::<C, R, A, S, U, P>),
         )
         .route(
             "/.well-known/openid-configuration",
-            get(metadata_handler::<C, R, A, S, U>),
+            get(metadata_handler::<C, R, A, S, U, P>),
         )
-        .route("/.well-known/jwks.json", get(jwks_handler::<C, R, A, S, U>))
-        .route("/authorize", get(authorize_handler::<C, R, A, S, U>))
-        .route("/token", post(token_handler::<C, R, A, S, U>))
+        .route(
+            "/.well-known/jwks.json",
+            get(jwks_handler::<C, R, A, S, U, P>),
+        )
+        .route("/authorize", get(authorize_handler::<C, R, A, S, U, P>))
+        .route("/token", post(token_handler::<C, R, A, S, U, P>))
         .route(
             "/userinfo",
-            get(userinfo_handler::<C, R, A, S, U>).post(userinfo_handler::<C, R, A, S, U>),
+            get(userinfo_handler::<C, R, A, S, U, P>).post(userinfo_handler::<C, R, A, S, U, P>),
         )
         .with_state(state)
 }

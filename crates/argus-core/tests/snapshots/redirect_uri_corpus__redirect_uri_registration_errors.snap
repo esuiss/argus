@@ -2,9 +2,18 @@
 source: crates/argus-core/tests/redirect_uri_corpus.rs
 expression: out
 ---
-https://*.example.com/cb     -> redirect_uri wildcards are not supported; register each URI exactly
-https://example.com/*        -> redirect_uri wildcards are not supported; register each URI exactly
-https://example.com/cb#frag  -> redirect_uri must not contain a fragment (RFC 6749 §3.1.2)
-/relative/cb                 -> redirect_uri must be an absolute URI (RFC 6749 §3.1.2)
-not a uri                    -> redirect_uri must be an absolute URI (RFC 6749 §3.1.2)
-                             -> redirect_uri must be an absolute URI (RFC 6749 §3.1.2)
+https://*.example.com/cb       -> redirect_uri wildcards are not supported; register each URI exactly
+https://example.com/*          -> redirect_uri wildcards are not supported; register each URI exactly
+https://example.com/cb#frag    -> redirect_uri must not contain a fragment (RFC 6749 §3.1.2)
+/relative/cb                   -> redirect_uri must be an absolute URI (RFC 6749 §3.1.2)
+not a uri                      -> redirect_uri must be an absolute URI (RFC 6749 §3.1.2)
+                               -> redirect_uri must be an absolute URI (RFC 6749 §3.1.2)
+http://evil.example.com/cb     -> plain http redirect_uri is only allowed on a loopback host (RFC 8252 §7.3)
+http://10.0.0.5/cb             -> plain http redirect_uri is only allowed on a loopback host (RFC 8252 §7.3)
+http://127.0.0.1:8080/cb       -> OK
+http://localhost/cb            -> OK
+http://[::1]/cb                -> OK
+ftp://x.test/cb                -> redirect_uri scheme ftp is not allowed; use https, http on a loopback host, or a private-use scheme (RFC 8252 §7)
+javascript:alert(1)            -> redirect_uri scheme javascript is not allowed; use https, http on a loopback host, or a private-use scheme (RFC 8252 §7)
+data:text/html,x               -> redirect_uri scheme data is not allowed; use https, http on a loopback host, or a private-use scheme (RFC 8252 §7)
+com.example.app:/oauth         -> OK

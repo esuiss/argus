@@ -409,4 +409,39 @@ BEGIN;
   END $$;
 ROLLBACK;
 
-\echo 'RLS + sema: 20/20 gecti'
+BEGIN;
+  SET LOCAL ROLE argus_app;
+  SET LOCAL argus.tenant_id = :t_a;
+  DO $$
+  DECLARE bad text;
+  BEGIN
+    FOREACH bad IN ARRAY ARRAY[
+      'http://evil.example.com/cb',
+      'http://10.0.0.5/cb',
+      'ftp://x.test/cb',
+      'javascript:alert(1)',
+      'data:text/html,x'
+    ] LOOP
+      BEGIN
+        INSERT INTO client_redirect_uris (tenant_id, client_id, redirect_uri)
+          VALUES ('00000000-0000-7000-8000-00000000000a', 'acme-web', bad);
+        RAISE EXCEPTION 'FAIL redirect_uri_scheme_accepted: %', bad;
+      EXCEPTION WHEN check_violation THEN
+        NULL;
+      END;
+    END LOOP;
+
+    FOREACH bad IN ARRAY ARRAY[
+      'https://app.example.com/ok',
+      'http://127.0.0.1:8080/cb',
+      'http://localhost/cb',
+      'http://[::1]/cb',
+      'com.example.app:/oauth'
+    ] LOOP
+      INSERT INTO client_redirect_uris (tenant_id, client_id, redirect_uri)
+        VALUES ('00000000-0000-7000-8000-00000000000a', 'acme-web', bad);
+    END LOOP;
+  END $$;
+ROLLBACK;
+
+\echo 'RLS + sema: 21/21 gecti'

@@ -9,7 +9,10 @@ use argus_core::time::Timestamp;
 use base64ct::{Base64UrlUnpadded, Encoding as _};
 use sqlx::{PgPool, Postgres, Row as _, Transaction};
 
-use crate::traits::{AuditSink, ClientStore, CodeIssuer, CodeStore, RefreshStore, StoreError};
+use crate::traits::{
+    AuditSink, ClientStore, CodeIssuer, CodeStore, JtiOutcome, JtiPurpose, RefreshStore,
+    ReplayStore, StoreError,
+};
 
 #[derive(Debug, Clone)]
 pub struct PostgresStore {
@@ -388,6 +391,55 @@ impl RefreshStore for PostgresStore {
         .map_err(|e| map_err(&e))?;
 
         tx.commit().await.map_err(|e| map_err(&e))
+    }
+}
+
+impl ReplayStore for PostgresStore {
+    async fn consume_jti(
+        &self,
+        tenant: TenantId,
+        purpose: JtiPurpose,
+        jti: &str,
+        expires_at: Timestamp,
+    ) -> Result<JtiOutcome, StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        let result = sqlx::query(
+            "INSERT INTO consumed_jtis (tenant_id, purpose, jti, expires_at) \
+             VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
+        )
+        .bind(tenant.as_uuid())
+        .bind(purpose.as_str())
+        .bind(jti)
+        .bind(to_dt(expires_at))
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?;
+
+        tx.commit().await.map_err(|e| map_err(&e))?;
+
+        if result.rows_affected() == 0 {
+            Ok(JtiOutcome::Replayed)
+        } else {
+            Ok(JtiOutcome::Fresh)
+        }
+    }
+
+    async fn purge_expired_jtis(
+        &self,
+        tenant: TenantId,
+        now: Timestamp,
+    ) -> Result<u64, StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        let result = sqlx::query("DELETE FROM consumed_jtis WHERE expires_at <= $1")
+            .bind(to_dt(now))
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| map_err(&e))?;
+
+        tx.commit().await.map_err(|e| map_err(&e))?;
+        Ok(result.rows_affected())
     }
 }
 

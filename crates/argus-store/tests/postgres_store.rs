@@ -8,7 +8,10 @@ use argus_core::redirect_uri::RedirectUri;
 use argus_core::refresh::{FamilyId, RefreshState, RefreshToken};
 use argus_core::time::{Duration, Timestamp};
 use argus_store::PostgresStore;
-use argus_store::traits::{ClientStore, CodeIssuer, CodeStore, RefreshStore, StoreError};
+use argus_store::traits::{
+    ClientStore, CodeIssuer, CodeStore, JtiOutcome, JtiPurpose, RefreshStore, ReplayStore,
+    StoreError,
+};
 use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
@@ -421,4 +424,111 @@ async fn a_public_client_defaults_to_no_authentication() {
 
     assert_eq!(found.auth_method, ClientAuthMethod::None);
     assert!(found.keys.is_empty());
+}
+
+#[tokio::test]
+async fn a_jti_is_accepted_once_and_only_once() {
+    let Some(s) = store().await else {
+        eprintln!("skipped: ARGUS_TEST_DATABASE_URL is not set");
+        return;
+    };
+    let t = fresh_tenant();
+    seed(t).await;
+
+    let expiry = NOW.saturating_add(Duration::from_seconds(60));
+    assert_eq!(
+        s.consume_jti(t, JtiPurpose::DpopProof, "j1", expiry)
+            .await
+            .expect("first"),
+        JtiOutcome::Fresh
+    );
+    assert_eq!(
+        s.consume_jti(t, JtiPurpose::DpopProof, "j1", expiry)
+            .await
+            .expect("second"),
+        JtiOutcome::Replayed
+    );
+}
+
+#[tokio::test]
+async fn the_same_jti_under_a_different_purpose_is_not_a_replay() {
+    let Some(s) = store().await else {
+        return;
+    };
+    let t = fresh_tenant();
+    seed(t).await;
+
+    let expiry = NOW.saturating_add(Duration::from_seconds(60));
+    assert_eq!(
+        s.consume_jti(t, JtiPurpose::DpopProof, "shared", expiry)
+            .await
+            .expect("dpop"),
+        JtiOutcome::Fresh
+    );
+    assert_eq!(
+        s.consume_jti(t, JtiPurpose::ClientAssertion, "shared", expiry)
+            .await
+            .expect("assertion"),
+        JtiOutcome::Fresh
+    );
+}
+
+#[tokio::test]
+async fn one_tenant_cannot_burn_another_tenants_jti() {
+    let Some(s) = store().await else {
+        return;
+    };
+    let a = fresh_tenant();
+    let b = fresh_tenant();
+    seed(a).await;
+    seed(b).await;
+
+    let expiry = NOW.saturating_add(Duration::from_seconds(60));
+    assert_eq!(
+        s.consume_jti(a, JtiPurpose::DpopProof, "same", expiry)
+            .await
+            .expect("a"),
+        JtiOutcome::Fresh
+    );
+    assert_eq!(
+        s.consume_jti(b, JtiPurpose::DpopProof, "same", expiry)
+            .await
+            .expect("b"),
+        JtiOutcome::Fresh
+    );
+}
+
+#[tokio::test]
+async fn purging_removes_only_expired_records() {
+    let Some(s) = store().await else {
+        return;
+    };
+    let t = fresh_tenant();
+    seed(t).await;
+
+    let past = Timestamp::from_unix_seconds(NOW.as_unix_seconds() - 10);
+    let future = NOW.saturating_add(Duration::from_seconds(600));
+    s.consume_jti(t, JtiPurpose::DpopProof, "stale", past)
+        .await
+        .expect("stale");
+    s.consume_jti(t, JtiPurpose::DpopProof, "live", future)
+        .await
+        .expect("live");
+
+    let removed = s.purge_expired_jtis(t, NOW).await.expect("purge");
+    assert!(removed >= 1, "the expired record must be removed");
+
+    assert_eq!(
+        s.consume_jti(t, JtiPurpose::DpopProof, "stale", future)
+            .await
+            .expect("reuse after purge"),
+        JtiOutcome::Fresh,
+        "an expired jti may be used again once purged"
+    );
+    assert_eq!(
+        s.consume_jti(t, JtiPurpose::DpopProof, "live", future)
+            .await
+            .expect("still live"),
+        JtiOutcome::Replayed
+    );
 }
