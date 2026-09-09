@@ -44,7 +44,7 @@ thiserror = "2"
 # `uuidv7()`), dolayısıyla Rust tarafında yalnızca TAŞIMA ve AYRIŞTIRMA gerekiyor —
 # üretim veritabanında. Bu yüzden `v4`/`v7` özellikleri KAPALI: argus-core'un
 # rastgelelik kaynağına erişmesi gerekmiyor. Lisans: MIT OR Apache-2.0 (AGPL uyumlu).
-uuid = { version = "1", default-features = false }
+uuid = { version = "1", default-features = false, features = ["v4"] }
 
 # §1 §2.2'deki listede yoktu — gerekçe (CLAUDE.md §6 kuralı):
 # `redirect_uri` eşleştirmesi (§1 #24) exact string'dir, TEK istisnası loopback'te
@@ -81,3 +81,8 @@ aws-lc-rs = { version = "1", default-features = false, features = ["aws-lc-sys"]
 # bunlara bağımlı DEĞİLDİR (karar mantığı serde bilmez).
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# §1 §2.2 yığını. `argus-http` dışındaki hiçbir crate bunları görmez;
+# `argus-core` özellikle görmez (karar #15).
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "form", "query"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }

@@ -10,9 +10,11 @@
 pub mod discovery;
 pub mod error;
 pub mod jwks;
+pub mod jwt;
 pub mod token;
 
 pub use discovery::AuthorizationServerMetadata;
 pub use error::{OAuthError, OAuthErrorCode};
 pub use jwks::{Jwk, JwkSet};
+pub use jwt::{AccessTokenClaims, JwtError};
 pub use token::TokenResponse;
