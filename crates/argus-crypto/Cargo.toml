@@ -10,6 +10,8 @@ repository.workspace   = true
 argus-core.path     = "../argus-core"
 aws-lc-rs.workspace = true
 thiserror.workspace = true
+argon2.workspace    = true
+subtle.workspace    = true
 
 [lints.rust]
 unreachable_pub = "warn"

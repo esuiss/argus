@@ -102,6 +102,13 @@ rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", 
 tokio-rustls = { version = "0.26", default-features = false, features = ["aws-lc-rs", "tls12"] }
 rustls-pemfile = "2"
 
+# §1 §2.2 satır 400'de onaylı. Parola saklama: Argon2id, OWASP 2026 parametreleri.
+# `parallel` özelliği p>1 için; varsayılan p=1 olduğundan bugün kullanılmıyor ama
+# parametre matrisini değiştirmek yeniden derleme gerektirmesin diye açık.
+# ⚠️ §6 §593: ARM'da NEON yok, x86'da libargon2 ile fark ölçülmedi.
+# Lisans: MIT OR Apache-2.0 (AGPL uyumlu).
+argon2 = { version = "0.5", features = ["std"] }
+
 # CIMD dokümanlarını çekerken sunucu sertifikasını doğrulamak için kök depo.
 # Sistem deposu yerine sabit bir küme: kabın içinde ca-certificates olup
 # olmadığına bağlı bir güven zinciri, sessizce farklı davranan bir dağıtım

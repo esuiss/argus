@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod aal;
+pub mod authn;
 pub mod authorize;
 pub mod authz_code;
 pub mod ciba;
@@ -12,10 +14,13 @@ pub mod error;
 pub mod exchange;
 pub mod id;
 pub mod jag_consume;
+pub mod password_policy;
 pub mod pkce;
+pub mod recovery;
 pub mod redirect_uri;
 pub mod refresh;
 pub mod resource;
+pub mod rpid;
 pub mod ssrf;
 pub mod time;
 

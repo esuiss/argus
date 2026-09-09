@@ -33,6 +33,21 @@ pub enum RedirectUriError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum RpIdError {
+    #[error("an RP ID must not be empty")]
+    Empty,
+
+    #[error("an RP ID is a bare domain: no scheme, port, path or IP literal")]
+    NotABareDomain,
+
+    #[error("the origin is not a URL")]
+    MalformedOrigin,
+
+    #[error("a WebAuthn origin must be https, or http on a loopback host")]
+    InsecureOrigin,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ClientIdUrlError {
     #[error("client_id is not a URL")]
     NotAUrl,

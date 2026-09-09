@@ -444,4 +444,98 @@ BEGIN;
   END $$;
 ROLLBACK;
 
-\echo 'RLS + sema: 21/21 gecti'
+BEGIN;
+  SET LOCAL ROLE argus_app;
+  SET LOCAL argus.tenant_id = :t_a;
+  DO $$
+  BEGIN
+    BEGIN
+      INSERT INTO recovery_attempts (tenant_id, user_id, state, achieved_aal, required_aal)
+        VALUES ('00000000-0000-7000-8000-00000000000a',
+                '00000000-0000-7000-8000-0000000000a1',
+                'rebind_open', 'aal1', 'aal2');
+      RAISE EXCEPTION 'FAIL recovery_weaker_than_account_accepted';
+    EXCEPTION WHEN check_violation THEN
+      NULL;
+    END;
+
+    BEGIN
+      INSERT INTO recovery_attempts (tenant_id, user_id, state, achieved_aal, required_aal,
+                                     evidence_consumed)
+        VALUES ('00000000-0000-7000-8000-00000000000a',
+                '00000000-0000-7000-8000-0000000000a1',
+                'rebind_open', NULL, NULL, true);
+      RAISE EXCEPTION 'FAIL recovery_null_assurance_slipped_through';
+    EXCEPTION WHEN check_violation THEN
+      NULL;
+    END;
+
+    BEGIN
+      INSERT INTO recovery_attempts (tenant_id, user_id, state, achieved_aal, required_aal,
+                                     evidence_consumed)
+        VALUES ('00000000-0000-7000-8000-00000000000a',
+                '00000000-0000-7000-8000-0000000000a1',
+                'rebind_open', 'aal2', NULL, true);
+      RAISE EXCEPTION 'FAIL recovery_half_null_assurance_slipped_through';
+    EXCEPTION WHEN check_violation THEN
+      NULL;
+    END;
+
+    INSERT INTO recovery_attempts (tenant_id, user_id, state, achieved_aal, required_aal,
+                                   evidence_consumed)
+      VALUES ('00000000-0000-7000-8000-00000000000a',
+              '00000000-0000-7000-8000-0000000000a1',
+              'rebind_open', 'aal2', 'aal2', true);
+
+    INSERT INTO recovery_attempts (tenant_id, user_id, state)
+      VALUES ('00000000-0000-7000-8000-00000000000a',
+              '00000000-0000-7000-8000-0000000000a1',
+              'requested');
+
+    BEGIN
+      INSERT INTO recovery_attempts (tenant_id, user_id, state, achieved_aal, required_aal,
+                                     evidence_consumed)
+        VALUES ('00000000-0000-7000-8000-00000000000a',
+                '00000000-0000-7000-8000-0000000000a1',
+                'rebind_open', 'aal2', 'aal2', false);
+      RAISE EXCEPTION 'FAIL recovery_unconsumed_evidence_accepted';
+    EXCEPTION WHEN check_violation THEN
+      NULL;
+    END;
+  END $$;
+ROLLBACK;
+
+BEGIN;
+  SET LOCAL ROLE argus_app;
+  SET LOCAL argus.tenant_id = :t_a;
+  DO $$
+  BEGIN
+    BEGIN
+      INSERT INTO password_credentials (tenant_id, user_id, phc)
+        VALUES ('00000000-0000-7000-8000-00000000000a',
+                '00000000-0000-7000-8000-0000000000a1',
+                '$2b$12$K3JNi5xUOqZ8xJvKPQ0Zru3Qa5mzZ8FZ0O9wq3sJ1rG7hV8kYcFqK');
+      RAISE EXCEPTION 'FAIL non_argon2id_password_accepted';
+    EXCEPTION WHEN check_violation THEN
+      NULL;
+    END;
+
+    INSERT INTO password_credentials (tenant_id, user_id, phc)
+      VALUES ('00000000-0000-7000-8000-00000000000a',
+              '00000000-0000-7000-8000-0000000000a1',
+              '$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHR2YWx1ZQ$JvRTMv2FeHhBEz8xLcQK1JhDlxRj4Bi1cCPq1xIVUQU');
+  END $$;
+ROLLBACK;
+
+BEGIN;
+  DO $$
+  DECLARE ordered boolean;
+  BEGIN
+    SELECT 'aal1'::aal < 'aal2'::aal AND 'aal2'::aal < 'aal3'::aal INTO ordered;
+    IF NOT ordered THEN
+      RAISE EXCEPTION 'FAIL aal_enum_order: the schema contract aal1<aal2<aal3 is broken';
+    END IF;
+  END $$;
+COMMIT;
+
+\echo 'RLS + sema: 24/24 gecti'

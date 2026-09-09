@@ -14,6 +14,7 @@ pub const EXPECTED_MIGRATIONS: &[&str] = &[
     "0011_cross_app_connections",
     "0012_backchannel_requests",
     "0013_trusted_issuers",
+    "0014_authentication",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

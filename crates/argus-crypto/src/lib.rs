@@ -1,3 +1,5 @@
+pub mod password;
+
 use aws_lc_rs::digest;
 use aws_lc_rs::rand::SystemRandom;
 use aws_lc_rs::signature::{
