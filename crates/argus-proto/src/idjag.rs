@@ -58,6 +58,17 @@ pub fn sign_id_jag(claims: &IdJagClaims, key: &SigningKey) -> Result<String, Jwt
     ))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct UnverifiedGrant {
+    pub iss: String,
+}
+
+pub fn peek(token: &str) -> Result<UnverifiedGrant, JwtError> {
+    let claims_b64 = token.split('.').nth(1).ok_or(JwtError::Malformed)?;
+    let bytes = Base64UrlUnpadded::decode_vec(claims_b64).map_err(|_| JwtError::Malformed)?;
+    serde_json::from_slice(&bytes).map_err(|_| JwtError::Malformed)
+}
+
 pub fn verify_id_jag(token: &str, key: &VerifyingKey) -> Result<IdJagClaims, JwtError> {
     let mut parts = token.split('.');
     let (Some(header_b64), Some(claims_b64), Some(sig_b64), None) =

@@ -72,11 +72,15 @@ pub async fn fetch(
     url: &ClientIdUrl,
     resolver: &impl Resolver,
     tls: &Arc<rustls::ClientConfig>,
+    allow_loopback: bool,
 ) -> Result<FetchedDocument, FetchError> {
     let addresses = resolver.resolve(url.host(), url.port()).await?;
 
     for address in &addresses {
         if let Some(verdict) = classify(*address) {
+            if allow_loopback && verdict == AddressVerdict::Loopback {
+                continue;
+            }
             return Err(FetchError::BlockedAddress(verdict));
         }
     }

@@ -3,9 +3,11 @@ use argus_core::ciba::{PollOutcome, poll};
 use argus_core::client_auth::{
     MAX_ASSERTION_LIFETIME, PresentedCredential, authenticate, validate_assertion,
 };
+use argus_core::dpop::ReplayGuard;
 use argus_core::effect::Effect;
 use argus_core::exchange::{ExchangeRequest, authorise};
 use argus_core::id::ClientId;
+use argus_core::jag_consume::{PresentedGrant, validate as validate_grant};
 use argus_core::pkce::Sha256;
 use argus_core::refresh::{
     DEFAULT_FAMILY_LIFETIME, DEFAULT_TOKEN_LIFETIME, RefreshDecision, RefreshRequest, RefreshState,
@@ -22,8 +24,8 @@ use crate::effects::{EffectContext, Rotation, apply};
 use crate::replay::consume;
 use crate::state::AppState;
 use crate::store::{
-    AuditSink, BackchannelStore, ClientStore, CodeStore, ConnectionStore, JtiPurpose, RefreshStore,
-    ReplayStore, StoreError,
+    AuditSink, BackchannelStore, ClientStore, CodeStore, ConnectionStore, IssuerStore, JtiPurpose,
+    RefreshStore, ReplayStore, ResourceStore, StoreError,
 };
 
 pub const PLACEHOLDER_ACCESS_TOKEN_LIFETIME: Duration = Duration::from_seconds(300);
@@ -69,6 +71,8 @@ pub struct TokenForm {
     pub scope: Option<String>,
 
     pub auth_req_id: Option<String>,
+
+    pub assertion: Option<String>,
 }
 
 fn hash(hasher: &impl Sha256, secret: &str) -> [u8; 32] {
@@ -95,7 +99,7 @@ where
     A: AuditSink + Send + Sync,
     S: ClientStore + Send + Sync,
     P: ReplayStore + Send + Sync,
-    X: ConnectionStore + Send + Sync,
+    X: ConnectionStore + ResourceStore + IssuerStore + Send + Sync,
     H: Sha256,
 {
     let client = authenticate_client(state, form, now, hasher).await?;
@@ -110,6 +114,9 @@ where
         }
         argus_core::ciba::GRANT_TYPE => {
             backchannel(state, form, &client, now, hasher, binding).await
+        }
+        argus_core::jag_consume::GRANT_TYPE => {
+            jwt_bearer(state, form, &client, now, hasher, binding).await
         }
 
         _ => Err(OAuthError::with_description(
@@ -394,6 +401,153 @@ where
             )
         }
     }
+}
+
+async fn jwt_bearer<C, R, A, S, U, P, X, H>(
+    state: &AppState<C, R, A, S, U, P, X>,
+    form: &TokenForm,
+    client: &ClientId,
+    now: Timestamp,
+    hasher: &H,
+    binding: Binding,
+) -> Result<TokenResponse, OAuthError>
+where
+    C: CodeStore + BackchannelStore + Send + Sync,
+    R: RefreshStore + Send + Sync,
+    A: AuditSink + Send + Sync,
+    P: ReplayStore + Send + Sync,
+    X: ResourceStore + IssuerStore + Send + Sync,
+    H: Sha256,
+{
+    let raw = form
+        .assertion
+        .as_deref()
+        .ok_or_else(|| OAuthError::new(OAuthErrorCode::InvalidRequest))?;
+
+    let tenant = state.tenant_id();
+
+    let trusted = state
+        .resources
+        .trusted_issuers(tenant)
+        .await
+        .map_err(|e| store_error_to_oauth(&e))?;
+
+    let unverified =
+        argus_proto::idjag::peek(raw).map_err(|_| OAuthError::new(OAuthErrorCode::InvalidGrant))?;
+
+    let issuer_keys = trusted
+        .iter()
+        .find(|t| t.issuer == unverified.iss)
+        .map(|t| t.keys.clone())
+        .unwrap_or_default();
+
+    let claims = verify_against(state, raw, &unverified.iss, &issuer_keys)
+        .ok_or_else(|| OAuthError::new(OAuthErrorCode::InvalidGrant))?;
+
+    let replay = consume(
+        &state.replay,
+        tenant,
+        JtiPurpose::ClientAssertion,
+        &claims.jti,
+        now,
+        argus_core::jag_consume::MAX_ASSERTION_LIFETIME,
+    )
+    .await
+    .map_err(|e| store_error_to_oauth(&e))?;
+
+    let known: Vec<String> = state
+        .resources
+        .list_resources(tenant)
+        .await
+        .map_err(|e| store_error_to_oauth(&e))?
+        .into_iter()
+        .map(|r| r.uri.as_str().to_owned())
+        .collect();
+
+    let presented = PresentedGrant {
+        issuer: claims.iss.clone(),
+        subject: claims.sub.clone(),
+        audience: claims.aud.clone(),
+        client_id: claims.client_id.clone(),
+        jti: claims.jti.clone(),
+        expires_at: Timestamp::from_unix_seconds(claims.exp),
+        issued_at: Timestamp::from_unix_seconds(claims.iat),
+        resource: claims.resource.clone(),
+        scope: claims.scope.clone(),
+    };
+
+    validate_grant(
+        &presented,
+        client,
+        &state.tenant.metadata.issuer,
+        &trusted,
+        &known,
+        now,
+        ReplayGuard::seen(&replay, &claims.jti),
+    )
+    .map_err(|e| {
+        OAuthError::new(match e.oauth_error_code() {
+            "invalid_target" => OAuthErrorCode::InvalidTarget,
+            _ => OAuthErrorCode::InvalidGrant,
+        })
+    })?;
+
+    let subject = argus_core::id::UserId::from_uuid(
+        uuid::Uuid::parse_str(&claims.sub)
+            .map_err(|_| OAuthError::new(OAuthErrorCode::InvalidGrant))?,
+    );
+
+    let resources = match claims.resource.as_deref() {
+        Some(raw) => vec![
+            argus_core::resource::ResourceUri::parse(raw)
+                .map_err(|_| OAuthError::new(OAuthErrorCode::InvalidTarget))?,
+        ],
+        None => Vec::new(),
+    };
+
+    issue(
+        state,
+        &IssueRequest {
+            subject: &subject,
+            client,
+            refresh: None,
+            binding,
+            nonce: None,
+            scope: claims.scope.as_deref(),
+            resources: &resources,
+        },
+        now,
+        hasher,
+    )
+}
+
+fn verify_against<C, R, A, S, U, P, X>(
+    state: &AppState<C, R, A, S, U, P, X>,
+    raw: &str,
+    issuer: &str,
+    keys: &[argus_core::client_auth::ClientKey],
+) -> Option<argus_proto::IdJagClaims>
+where
+    C: CodeStore + Send + Sync,
+    R: RefreshStore + Send + Sync,
+    A: AuditSink + Send + Sync,
+{
+    if issuer == state.tenant.metadata.issuer {
+        for key in &state.tenant.published_keys {
+            if let Ok(claims) = argus_proto::idjag::verify_id_jag(raw, &key.verifying_key()) {
+                return Some(claims);
+            }
+        }
+    }
+
+    for key in keys {
+        let verifying = argus_crypto::VerifyingKey::from_components(&key.x, &key.y);
+        if let Ok(claims) = argus_proto::idjag::verify_id_jag(raw, &verifying) {
+            return Some(claims);
+        }
+    }
+
+    None
 }
 
 async fn backchannel<C, R, A, S, U, P, X, H>(

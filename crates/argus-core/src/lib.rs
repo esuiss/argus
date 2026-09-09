@@ -11,6 +11,7 @@ pub mod epoch;
 pub mod error;
 pub mod exchange;
 pub mod id;
+pub mod jag_consume;
 pub mod pkce;
 pub mod redirect_uri;
 pub mod refresh;

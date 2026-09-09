@@ -57,7 +57,7 @@ async fn a_host_resolving_to_a_private_address_is_never_contacted() {
         ("fd00::1", AddressVerdict::Private),
         ("fe80::1", AddressVerdict::LinkLocal),
     ] {
-        let err = fetch(&url(), &resolver(&[address]), &tls())
+        let err = fetch(&url(), &resolver(&[address]), &tls(), false)
             .await
             .expect_err("must be blocked");
         assert_eq!(
@@ -70,9 +70,14 @@ async fn a_host_resolving_to_a_private_address_is_never_contacted() {
 
 #[tokio::test]
 async fn an_ipv4_mapped_ipv6_answer_cannot_smuggle_a_private_address() {
-    let err = fetch(&url(), &resolver(&["::ffff:169.254.169.254"]), &tls())
-        .await
-        .expect_err("must be blocked");
+    let err = fetch(
+        &url(),
+        &resolver(&["::ffff:169.254.169.254"]),
+        &tls(),
+        false,
+    )
+    .await
+    .expect_err("must be blocked");
     assert_eq!(
         err,
         FetchError::BlockedAddress(AddressVerdict::CloudMetadata)
@@ -81,16 +86,46 @@ async fn an_ipv4_mapped_ipv6_answer_cannot_smuggle_a_private_address() {
 
 #[tokio::test]
 async fn one_bad_answer_among_many_blocks_the_whole_fetch() {
-    let err = fetch(&url(), &resolver(&["93.184.216.34", "127.0.0.1"]), &tls())
-        .await
-        .expect_err("must be blocked");
+    let err = fetch(
+        &url(),
+        &resolver(&["93.184.216.34", "127.0.0.1"]),
+        &tls(),
+        false,
+    )
+    .await
+    .expect_err("must be blocked");
     assert_eq!(err, FetchError::BlockedAddress(AddressVerdict::Loopback));
 }
 
 #[tokio::test]
 async fn a_host_that_does_not_resolve_is_refused() {
-    let err = fetch(&url(), &resolver(&[]), &tls())
+    let err = fetch(&url(), &resolver(&[]), &tls(), false)
         .await
         .expect_err("must fail");
     assert_eq!(err, FetchError::Unresolvable);
+}
+
+#[tokio::test]
+async fn the_development_loopback_exception_lets_loopback_through_but_nothing_else() {
+    let err = fetch(&url(), &resolver(&["127.0.0.1"]), &tls(), true)
+        .await
+        .expect_err("the connection itself still fails");
+    assert_ne!(
+        err,
+        FetchError::BlockedAddress(AddressVerdict::Loopback),
+        "loopback must be allowed past the address check when the exception is on"
+    );
+
+    let err = fetch(&url(), &resolver(&["169.254.169.254"]), &tls(), true)
+        .await
+        .expect_err("cloud metadata must stay blocked");
+    assert_eq!(
+        err,
+        FetchError::BlockedAddress(AddressVerdict::CloudMetadata)
+    );
+
+    let err = fetch(&url(), &resolver(&["10.0.0.5"]), &tls(), true)
+        .await
+        .expect_err("private ranges must stay blocked");
+    assert_eq!(err, FetchError::BlockedAddress(AddressVerdict::Private));
 }

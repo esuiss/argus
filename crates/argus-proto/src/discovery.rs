@@ -54,6 +54,9 @@ pub struct AuthorizationServerMetadata {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub identity_chaining_requested_token_types_supported: Option<Vec<String>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authorization_grant_profiles_supported: Option<Vec<String>>,
 }
 
 impl AuthorizationServerMetadata {
@@ -75,6 +78,7 @@ impl AuthorizationServerMetadata {
                 "refresh_token".to_owned(),
                 crate::idjag::GRANT_TYPE_TOKEN_EXCHANGE.to_owned(),
                 "urn:openid:params:grant-type:ciba".to_owned(),
+                "urn:ietf:params:oauth:grant-type:jwt-bearer".to_owned(),
             ],
             code_challenge_methods_supported: vec!["S256".to_owned()],
             token_endpoint_auth_methods_supported: vec![
@@ -101,6 +105,9 @@ impl AuthorizationServerMetadata {
             client_id_metadata_document_supported: true,
             identity_chaining_requested_token_types_supported: Some(vec![
                 crate::idjag::TOKEN_TYPE.to_owned(),
+            ]),
+            authorization_grant_profiles_supported: Some(vec![
+                crate::idjag::GRANT_PROFILE.to_owned(),
             ]),
         }
     }
@@ -154,6 +161,19 @@ mod tests {
         assert!(
             m.grant_types_supported
                 .contains(&"urn:openid:params:grant-type:ciba".to_owned())
+        );
+    }
+
+    #[test]
+    fn the_resource_authorization_server_role_is_advertised() {
+        let m = meta();
+        assert_eq!(
+            m.authorization_grant_profiles_supported.as_deref(),
+            Some(["urn:ietf:params:oauth:grant-profile:id-jag".to_owned()].as_slice())
+        );
+        assert!(
+            m.grant_types_supported
+                .contains(&"urn:ietf:params:oauth:grant-type:jwt-bearer".to_owned())
         );
     }
 

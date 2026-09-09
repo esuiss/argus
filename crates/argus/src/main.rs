@@ -113,7 +113,7 @@ async fn main() -> ExitCode {
         },
         replay: MemoryReplayStore::default(),
         resources: MemoryResourceStore::default(),
-        cimd: Some(cimd_runtime()),
+        cimd: Some(cimd_runtime(&config)),
     });
 
     let app = argus_http::build(state);
@@ -274,7 +274,7 @@ async fn serve(app: axum::Router, config: &Config, store_kind: &str) -> ExitCode
     ExitCode::SUCCESS
 }
 
-fn cimd_runtime() -> argus_http::cimd_client::CimdRuntime {
+fn cimd_runtime(config: &Config) -> argus_http::cimd_client::CimdRuntime {
     let mut roots = rustls::RootCertStore::empty();
     roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 
@@ -282,7 +282,21 @@ fn cimd_runtime() -> argus_http::cimd_client::CimdRuntime {
         .with_root_certificates(roots)
         .with_no_client_auth();
 
-    argus_http::cimd_client::CimdRuntime::new(std::sync::Arc::new(client_config))
+    let runtime = argus_http::cimd_client::CimdRuntime::new(std::sync::Arc::new(client_config));
+
+    if config.production {
+        return runtime;
+    }
+
+    if env::var("ARGUS_CIMD_ALLOW_LOOPBACK").is_ok_and(|v| v == "1") {
+        eprintln!(
+            "argus: WARNING - CIMD documents may be fetched from loopback; \
+             this exception is refused under ARGUS_ENV=production"
+        );
+        return runtime.allowing_loopback();
+    }
+
+    runtime
 }
 
 fn tls_config(config: &Config) -> Result<Option<Arc<rustls::ServerConfig>>, String> {
@@ -413,7 +427,7 @@ async fn serve_with_postgres(config: &Config, url: &str, keys: &KeySet) -> ExitC
         },
         replay: store.clone(),
         resources: store,
-        cimd: Some(cimd_runtime()),
+        cimd: Some(cimd_runtime(config)),
     });
 
     let app = argus_http::build(state);

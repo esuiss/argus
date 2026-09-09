@@ -223,6 +223,7 @@ fn code_form() -> TokenForm {
         resource: None,
         scope: None,
         auth_req_id: None,
+        assertion: None,
     }
 }
 
@@ -324,6 +325,7 @@ fn refresh_form() -> TokenForm {
         resource: None,
         scope: None,
         auth_req_id: None,
+        assertion: None,
     }
 }
 
@@ -1360,4 +1362,178 @@ async fn a_cimd_client_is_refused_when_cimd_is_disabled_rather_than_looked_up_in
         !*s.codes.consumed.lock().expect("lock"),
         "an unresolvable client must not burn the code"
     );
+}
+
+use argus_core::jag_consume::TrustedIssuer;
+
+const IDP: &str = "https://acme.idp.example";
+
+fn jag_state(trust_idp: bool) -> (TestState, SigningKey) {
+    let s = state();
+    let (idp_key, _) = SigningKey::generate("idp-k1").expect("key");
+    let components = idp_key.public_components().expect("components");
+
+    s.resources
+        .insert(argus_http::store::ProtectedResource {
+            uri: ResourceUri::parse(MCP_SERVER).expect("uri"),
+            name: None,
+            scopes: Some("chat.read".to_owned()),
+        })
+        .expect("resource");
+
+    if trust_idp {
+        s.resources
+            .trust(TrustedIssuer {
+                issuer: IDP.to_owned(),
+                keys: vec![ClientKey {
+                    kid: "idp-k1".to_owned(),
+                    x: components.x,
+                    y: components.y,
+                }],
+            })
+            .expect("trust");
+    }
+
+    (s, idp_key)
+}
+
+fn jag(key: &SigningKey, over: impl FnOnce(&mut argus_proto::IdJagClaims)) -> String {
+    let mut claims = argus_proto::IdJagClaims {
+        iss: IDP.to_owned(),
+        sub: Uuid::from_u128(0xa1).simple().to_string(),
+        aud: "https://acme.argus.test".to_owned(),
+        client_id: "acme-web".to_owned(),
+        jti: format!("j-{}", Uuid::new_v4().simple()),
+        exp: NOW.as_unix_seconds() + 300,
+        iat: NOW.as_unix_seconds(),
+        resource: Some(MCP_SERVER.to_owned()),
+        scope: Some("chat.read".to_owned()),
+        email: None,
+    };
+    over(&mut claims);
+    argus_proto::sign_id_jag(&claims, key).expect("sign")
+}
+
+fn bearer_form(assertion: String) -> TokenForm {
+    TokenForm {
+        grant_type: argus_core::jag_consume::GRANT_TYPE.to_owned(),
+        assertion: Some(assertion),
+        ..code_form()
+    }
+}
+
+#[tokio::test]
+async fn a_grant_from_a_trusted_issuer_becomes_an_audience_restricted_token() {
+    let (s, key) = jag_state(true);
+    let resp = token(&s, &bearer_form(jag(&key, |_| {})), None)
+        .await
+        .expect("token issued");
+
+    let claims = argus_proto::jwt::verify(&resp.access_token, &s.tenant.active_key.verifying_key())
+        .expect("verify");
+    assert!(claims.aud.contains(MCP_SERVER));
+    assert_eq!(claims.scope.as_deref(), Some("chat.read"));
+}
+
+#[tokio::test]
+async fn a_grant_from_an_untrusted_issuer_is_refused() {
+    let (s, key) = jag_state(false);
+    let err = token(&s, &bearer_form(jag(&key, |_| {})), None)
+        .await
+        .expect_err("must be refused");
+    assert_eq!(err.error, OAuthErrorCode::InvalidGrant);
+}
+
+#[tokio::test]
+async fn a_grant_signed_by_a_key_the_issuer_did_not_publish_is_refused() {
+    let (s, _) = jag_state(true);
+    let (forger, _) = SigningKey::generate("idp-k1").expect("key");
+    let err = token(&s, &bearer_form(jag(&forger, |_| {})), None)
+        .await
+        .expect_err("must be refused");
+    assert_eq!(err.error, OAuthErrorCode::InvalidGrant);
+}
+
+#[tokio::test]
+async fn a_grant_addressed_to_another_server_is_refused() {
+    let (s, key) = jag_state(true);
+    let assertion = jag(&key, |c| c.aud = "https://auth.other.example".to_owned());
+    let err = token(&s, &bearer_form(assertion), None)
+        .await
+        .expect_err("must be refused");
+    assert_eq!(err.error, OAuthErrorCode::InvalidGrant);
+}
+
+#[tokio::test]
+async fn client_continuity_is_enforced_on_consumption() {
+    let (s, key) = jag_state(true);
+    let assertion = jag(&key, |c| c.client_id = "someone-else".to_owned());
+    let err = token(&s, &bearer_form(assertion), None)
+        .await
+        .expect_err("must be refused");
+    assert_eq!(err.error, OAuthErrorCode::InvalidGrant);
+}
+
+#[tokio::test]
+async fn a_grant_cannot_be_redeemed_twice() {
+    let (s, key) = jag_state(true);
+    let assertion = jag(&key, |_| {});
+
+    token(&s, &bearer_form(assertion.clone()), None)
+        .await
+        .expect("first use");
+
+    let err = token(&s, &bearer_form(assertion), None)
+        .await
+        .expect_err("the same jti must not be redeemed twice");
+    assert_eq!(err.error, OAuthErrorCode::InvalidGrant);
+}
+
+#[tokio::test]
+async fn an_expired_grant_is_refused() {
+    let (s, key) = jag_state(true);
+    let assertion = jag(&key, |c| {
+        c.iat = NOW.as_unix_seconds() - 600;
+        c.exp = NOW.as_unix_seconds() - 1;
+    });
+    let err = token(&s, &bearer_form(assertion), None)
+        .await
+        .expect_err("must be refused");
+    assert_eq!(err.error, OAuthErrorCode::InvalidGrant);
+}
+
+#[tokio::test]
+async fn a_grant_naming_a_resource_this_server_does_not_host_is_invalid_target() {
+    let (s, key) = jag_state(true);
+    let assertion = jag(&key, |c| {
+        c.resource = Some("https://mcp.elsewhere.example".to_owned());
+    });
+    let err = token(&s, &bearer_form(assertion), None)
+        .await
+        .expect_err("must be refused");
+    assert_eq!(err.error, OAuthErrorCode::InvalidTarget);
+}
+
+#[tokio::test]
+async fn an_access_token_cannot_be_passed_off_as_a_grant() {
+    let (s, key) = jag_state(true);
+    let not_a_jag = argus_proto::oidc::sign_id_token(
+        &argus_proto::IdTokenClaims {
+            iss: IDP.to_owned(),
+            sub: Uuid::from_u128(0xa1).simple().to_string(),
+            aud: "https://acme.argus.test".to_owned(),
+            exp: NOW.as_unix_seconds() + 300,
+            iat: NOW.as_unix_seconds(),
+            nonce: None,
+            auth_time: None,
+            at_hash: None,
+        },
+        &key,
+    )
+    .expect("sign");
+
+    let err = token(&s, &bearer_form(not_a_jag), None)
+        .await
+        .expect_err("the typ header must be checked");
+    assert_eq!(err.error, OAuthErrorCode::InvalidGrant);
 }

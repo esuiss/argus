@@ -4,6 +4,7 @@ use argus_core::ciba::{BackchannelRequest, BackchannelState};
 use argus_core::client_auth::{ClientAuthMethod, ClientKey};
 use argus_core::exchange::CrossAppConnection;
 use argus_core::id::{ClientId, TenantId, UserId};
+use argus_core::jag_consume::TrustedIssuer;
 use argus_core::pkce::{CodeChallenge, CodeChallengeMethod};
 use argus_core::redirect_uri::RedirectUri;
 use argus_core::refresh::{FamilyId, RefreshState, RefreshToken};
@@ -13,8 +14,9 @@ use base64ct::{Base64UrlUnpadded, Encoding as _};
 use sqlx::{PgPool, Postgres, Row as _, Transaction};
 
 use crate::traits::{
-    AuditSink, BackchannelStore, ClientStore, CodeIssuer, CodeStore, ConnectionStore, JtiOutcome,
-    JtiPurpose, ProtectedResource, RefreshStore, ReplayStore, ResourceStore, StoreError,
+    AuditSink, BackchannelStore, ClientStore, CodeIssuer, CodeStore, ConnectionStore, IssuerStore,
+    JtiOutcome, JtiPurpose, ProtectedResource, RefreshStore, ReplayStore, ResourceStore,
+    StoreError,
 };
 
 #[derive(Debug, Clone)]
@@ -650,6 +652,53 @@ fn join_resources(resources: &[ResourceUri]) -> Option<String> {
             .collect::<Vec<_>>()
             .join(" "),
     )
+}
+
+impl IssuerStore for PostgresStore {
+    async fn trusted_issuers(&self, tenant: TenantId) -> Result<Vec<TrustedIssuer>, StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        let rows = sqlx::query(
+            "SELECT i.issuer, k.kid, k.x, k.y FROM trusted_issuers i \
+             LEFT JOIN trusted_issuer_keys k \
+               ON k.tenant_id = i.tenant_id AND k.issuer = i.issuer \
+             WHERE i.tenant_id = $1 ORDER BY i.issuer, k.kid",
+        )
+        .bind(tenant.as_uuid())
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?;
+
+        tx.commit().await.map_err(|e| map_err(&e))?;
+
+        let mut out: Vec<TrustedIssuer> = Vec::new();
+        for row in &rows {
+            let issuer: String = row.try_get("issuer").map_err(|e| map_err(&e))?;
+            let kid: Option<String> = row.try_get("kid").map_err(|e| map_err(&e))?;
+
+            if !out.iter().any(|i| i.issuer == issuer) {
+                out.push(TrustedIssuer {
+                    issuer: issuer.clone(),
+                    keys: Vec::new(),
+                });
+            }
+
+            let Some(kid) = kid else {
+                continue;
+            };
+            let x: Vec<u8> = row.try_get("x").map_err(|e| map_err(&e))?;
+            let y: Vec<u8> = row.try_get("y").map_err(|e| map_err(&e))?;
+            let (Ok(x), Ok(y)) = (<[u8; 32]>::try_from(x), <[u8; 32]>::try_from(y)) else {
+                return Err(StoreError::Unavailable);
+            };
+
+            if let Some(entry) = out.iter_mut().find(|i| i.issuer == issuer) {
+                entry.keys.push(ClientKey { kid, x, y });
+            }
+        }
+
+        Ok(out)
+    }
 }
 
 impl ConnectionStore for PostgresStore {

@@ -4,6 +4,7 @@ use argus_core::ciba::BackchannelRequest;
 use argus_core::exchange::CrossAppConnection;
 use argus_core::id::ClientId;
 use argus_core::id::TenantId;
+use argus_core::jag_consume::TrustedIssuer;
 use argus_core::refresh::{FamilyId, RefreshToken};
 use argus_core::resource::ResourceUri;
 use core::future::Future;
@@ -159,6 +160,13 @@ pub trait BackchannelStore {
         approved: bool,
         at: Timestamp,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
+}
+
+pub trait IssuerStore {
+    fn trusted_issuers(
+        &self,
+        tenant: TenantId,
+    ) -> impl Future<Output = Result<Vec<TrustedIssuer>, StoreError>> + Send;
 }
 
 pub trait ConnectionStore {

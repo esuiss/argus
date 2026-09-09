@@ -17,6 +17,7 @@ pub const MAX_CACHE_SECONDS: u64 = 86_400;
 
 pub struct CimdRuntime {
     tls: Arc<rustls::ClientConfig>,
+    allow_loopback: bool,
     cache: Mutex<HashMap<String, (RegisteredClient, i64)>>,
 }
 
@@ -31,8 +32,15 @@ impl CimdRuntime {
     pub fn new(tls: Arc<rustls::ClientConfig>) -> Self {
         Self {
             tls,
+            allow_loopback: false,
             cache: Mutex::new(HashMap::new()),
         }
+    }
+
+    #[must_use]
+    pub fn allowing_loopback(mut self) -> Self {
+        self.allow_loopback = true;
+        self
     }
 
     pub async fn resolve(
@@ -45,7 +53,7 @@ impl CimdRuntime {
             return Ok(hit);
         }
 
-        let fetched = fetch(url, resolver, &self.tls).await?;
+        let fetched = fetch(url, resolver, &self.tls, self.allow_loopback).await?;
         let client = to_registered_client(url, &fetched.document)?;
 
         let lifetime = fetched

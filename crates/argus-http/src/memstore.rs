@@ -10,8 +10,9 @@ use argus_core::authorize::RegisteredClient;
 use argus_core::id::ClientId;
 
 use crate::store::{
-    AuditSink, BackchannelStore, ClientStore, CodeIssuer, CodeStore, ConnectionStore, JtiOutcome,
-    JtiPurpose, ProtectedResource, RefreshStore, ReplayStore, ResourceStore, StoreError,
+    AuditSink, BackchannelStore, ClientStore, CodeIssuer, CodeStore, ConnectionStore, IssuerStore,
+    JtiOutcome, JtiPurpose, ProtectedResource, RefreshStore, ReplayStore, ResourceStore,
+    StoreError,
 };
 
 #[derive(Debug, Default)]
@@ -244,6 +245,7 @@ impl ReplayStore for MemoryReplayStore {
 pub struct MemoryResourceStore {
     resources: Mutex<Vec<ProtectedResource>>,
     connections: Mutex<Vec<argus_core::exchange::CrossAppConnection>>,
+    issuers: Mutex<Vec<argus_core::jag_consume::TrustedIssuer>>,
 }
 
 impl MemoryResourceStore {
@@ -405,5 +407,29 @@ impl BackchannelStore for MemoryCodeStore {
             };
         }
         Ok(())
+    }
+}
+
+impl MemoryResourceStore {
+    pub fn trust(&self, issuer: argus_core::jag_consume::TrustedIssuer) -> Result<(), StoreError> {
+        self.issuers
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .push(issuer);
+        Ok(())
+    }
+}
+
+impl IssuerStore for MemoryResourceStore {
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn trusted_issuers(
+        &self,
+        _tenant: TenantId,
+    ) -> Result<Vec<argus_core::jag_consume::TrustedIssuer>, StoreError> {
+        Ok(self
+            .issuers
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .clone())
     }
 }

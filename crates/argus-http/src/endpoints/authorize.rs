@@ -27,6 +27,9 @@ pub struct AuthorizeQuery {
 
     #[serde(skip)]
     pub resource: Vec<String>,
+
+    #[serde(default)]
+    pub consented: bool,
 }
 
 pub trait UserAuthenticator {
@@ -47,6 +50,12 @@ impl UserAuthenticator for DevAuthenticator {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthorizeResponse {
     Redirect(String),
+
+    NeedsConsent {
+        client_host: String,
+        redirect_host: String,
+        scope: Option<String>,
+    },
 
     ShowError(&'static str),
 
@@ -71,6 +80,8 @@ pub struct AuthorizeContext<'a, I, U, H> {
     pub new_code: &'a str,
 
     pub registered_resources: &'a [argus_core::resource::ResourceUri],
+
+    pub requires_consent: bool,
 }
 
 impl<I, U, H> Clone for AuthorizeContext<'_, I, U, H> {
@@ -100,6 +111,7 @@ where
         now,
         new_code,
         registered_resources,
+        requires_consent: _,
     } = *ctx;
 
     let client_id = ClientId::new(query.client_id.clone()).ok();
@@ -143,6 +155,14 @@ where
             let Some(user) = auth.current_user(tenant) else {
                 return Ok(AuthorizeResponse::NeedsAuthentication);
             };
+
+            if ctx.requires_consent && !query.consented {
+                return Ok(AuthorizeResponse::NeedsConsent {
+                    client_host: host_of(&query.client_id),
+                    redirect_host: host_of(redirect_uri.as_str()),
+                    scope: scope.clone(),
+                });
+            }
 
             let Some(client) = client_id else {
                 return Ok(AuthorizeResponse::ShowError("invalid client_id"));
@@ -237,6 +257,18 @@ mod tests {
 }
 
 #[must_use]
+pub fn host_of(url: &str) -> String {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .unwrap_or(url);
+    rest.split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default()
+        .to_owned()
+}
+
+#[must_use]
 pub fn repeated_query_values(raw: Option<&str>, key: &str) -> Vec<String> {
     let Some(raw) = raw else {
         return Vec::new();
@@ -282,6 +314,18 @@ fn percent_decode_value(value: &str) -> String {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod repeated_tests {
     use super::repeated_query_values;
+
+    #[test]
+    fn the_host_shown_to_the_user_carries_no_path_or_credentials() {
+        use super::host_of;
+        assert_eq!(host_of("https://example.com/client.json"), "example.com");
+        assert_eq!(host_of("http://127.0.0.1:3000/callback"), "127.0.0.1:3000");
+        assert_eq!(
+            host_of("https://evil.test/https://good.test/cb"),
+            "evil.test"
+        );
+        assert_eq!(host_of("com.example.app:/oauth"), "com.example.app:");
+    }
 
     #[test]
     fn several_occurrences_are_all_collected() {

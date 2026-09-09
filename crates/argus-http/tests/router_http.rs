@@ -354,3 +354,36 @@ impl BackchannelStore for Codes {
         Err(StoreError::Unavailable)
     }
 }
+
+#[tokio::test]
+async fn a_cimd_client_sees_the_redirect_host_before_being_sent_there() {
+    let addr = serve().await;
+    let r = get(
+        &addr,
+        "/authorize?response_type=code&client_id=https%3A%2F%2Fexample.com%2Fclient.json\
+         &redirect_uri=https%3A%2F%2Fapp.example.com%2Fcb&scope=openid\
+         &code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256",
+        "",
+    )
+    .await;
+
+    assert!(status(&r).contains("400"), "{r}");
+}
+
+#[tokio::test]
+async fn the_consent_page_escapes_what_it_shows() {
+    let addr = serve().await;
+    let r = get(
+        &addr,
+        "/authorize?response_type=code&client_id=demo-client\
+         &redirect_uri=https%3A%2F%2Fapp.example.com%2Fcb&state=%3Cscript%3E\
+         &code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256",
+        "",
+    )
+    .await;
+
+    assert!(
+        !r.contains("<script>"),
+        "unescaped markup reached the page: {r}"
+    );
+}

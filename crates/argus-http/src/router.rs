@@ -21,8 +21,8 @@ use crate::endpoints::userinfo::{self, UserInfoRequest};
 use crate::replay::{PrecheckedReplay, consume};
 use crate::state::AppState;
 use crate::store::{
-    AuditSink, BackchannelStore, ClientStore, CodeIssuer, CodeStore, ConnectionStore, JtiPurpose,
-    RefreshStore, ReplayStore, ResourceStore,
+    AuditSink, BackchannelStore, ClientStore, CodeIssuer, CodeStore, ConnectionStore, IssuerStore,
+    JtiPurpose, RefreshStore, ReplayStore, ResourceStore,
 };
 
 fn now() -> Timestamp {
@@ -60,7 +60,7 @@ where
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
-    X: ResourceStore + ConnectionStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
     Json(discovery::metadata(&state.tenant)).into_response()
 }
@@ -75,7 +75,7 @@ where
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
-    X: ResourceStore + ConnectionStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
     discovery::jwks(&state.tenant).map_or_else(
         |_| oauth_response(&OAuthError::new(OAuthErrorCode::ServerError)),
@@ -142,7 +142,7 @@ where
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
-    X: ResourceStore + ConnectionStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
     let at = now();
     let binding = match dpop_binding(
@@ -218,7 +218,7 @@ where
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
-    X: ResourceStore + ConnectionStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
     use crate::endpoints::backchannel::{
         BackchannelContext, DevBackchannelResolver, request as backchannel_request,
@@ -261,6 +261,68 @@ where
         }
         Err(err) => oauth_response(&err),
     }
+}
+
+fn consent_page(
+    client_host: &str,
+    redirect_host: &str,
+    scope: Option<&str>,
+    raw_query: Option<&str>,
+) -> Response {
+    let query = raw_query.unwrap_or_default();
+    let body = format!(
+        "<!doctype html><meta charset=\"utf-8\"><title>Authorize</title>\
+         <h1>Authorize this application?</h1>\
+         <p>Client identifier host: <strong>{}</strong></p>\
+         <p>You will be returned to: <strong>{}</strong></p>\
+         <p>Requested scope: <strong>{}</strong></p>\
+         <form method=\"get\" action=\"/authorize\">\
+         {}<button type=\"submit\" name=\"consented\" value=\"true\">Approve</button>\
+         </form>",
+        escape(client_host),
+        escape(redirect_host),
+        escape(scope.unwrap_or("(none)")),
+        hidden_fields(query),
+    );
+
+    let mut response = (StatusCode::OK, body).into_response();
+    if let Ok(value) = "text/html; charset=utf-8".parse() {
+        response.headers_mut().insert("Content-Type", value);
+    }
+    if let Ok(value) = "no-store".parse() {
+        response.headers_mut().insert("Cache-Control", value);
+    }
+    response
+}
+
+fn hidden_fields(query: &str) -> String {
+    use core::fmt::Write as _;
+
+    let mut out = String::new();
+    for pair in query.split('&') {
+        let Some((key, value)) = pair.split_once('=') else {
+            continue;
+        };
+        if key == "consented" {
+            continue;
+        }
+        let _ = write!(
+            out,
+            "<input type=\"hidden\" name=\"{}\" value=\"{}\">",
+            escape(key),
+            escape(&percent_decode(value))
+        );
+    }
+    out
+}
+
+fn escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }
 
 async fn resolve_client<C, R, A, S, U, P, X>(
@@ -310,7 +372,7 @@ where
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
-    X: ResourceStore + ConnectionStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
     prm_response(&state, &format!("/{path}")).await
 }
@@ -325,7 +387,7 @@ where
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
-    X: ResourceStore + ConnectionStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
     prm_response(&state, "").await
 }
@@ -392,7 +454,7 @@ where
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
-    X: ResourceStore + ConnectionStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
     let authorization = headers.get("Authorization").and_then(|v| v.to_str().ok());
     let dpop_header = headers.get("DPoP").and_then(|v| v.to_str().ok());
@@ -487,7 +549,7 @@ where
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
-    X: ResourceStore + ConnectionStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
     let at = now();
     let mut query = query;
@@ -517,6 +579,7 @@ where
         now: at,
         new_code: &code,
         registered_resources: &registered_resources,
+        requires_consent: argus_core::cimd::looks_like_a_url(&query.client_id),
     };
     let outcome = authorize_handle(&ctx, &query).await;
 
@@ -525,6 +588,16 @@ where
         Ok(AuthorizeResponse::ShowError(message)) => {
             (StatusCode::BAD_REQUEST, message.to_owned()).into_response()
         }
+        Ok(AuthorizeResponse::NeedsConsent {
+            client_host,
+            redirect_host,
+            scope,
+        }) => consent_page(
+            &client_host,
+            &redirect_host,
+            scope.as_deref(),
+            raw_query.as_deref(),
+        ),
         Ok(AuthorizeResponse::NeedsAuthentication) => (
             StatusCode::UNAUTHORIZED,
             "authentication required (phase 3)".to_owned(),
@@ -542,7 +615,7 @@ where
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
     P: ReplayStore + Send + Sync + 'static,
-    X: ResourceStore + ConnectionStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
     Router::new()
         .route(
