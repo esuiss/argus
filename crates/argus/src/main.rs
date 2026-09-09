@@ -22,9 +22,15 @@ use std::env;
 use std::process::ExitCode;
 use std::sync::Arc;
 
+use argus_core::authorize::RegisteredClient;
 use argus_core::id::TenantId;
+use argus_core::id::{ClientId, UserId};
+use argus_core::redirect_uri::RedirectUri;
 use argus_crypto::SigningKey;
-use argus_http::memstore::{MemoryAuditSink, MemoryCodeStore, MemoryRefreshStore};
+use argus_http::endpoints::authorize::DevAuthenticator;
+use argus_http::memstore::{
+    MemoryAuditSink, MemoryClientStore, MemoryCodeStore, MemoryRefreshStore,
+};
 use argus_http::state::{AppState, TenantContext};
 use argus_proto::AuthorizationServerMetadata;
 use uuid::Uuid;
@@ -59,6 +65,27 @@ async fn main() -> ExitCode {
     };
     let key = Arc::new(key);
 
+    // ⚠️ Geliştirme kaydı: gerçek istemci yönetimi admin API ile gelecek.
+    let clients = MemoryClientStore::default();
+    let Ok(demo_client) = ClientId::new("demo-client") else {
+        eprintln!("argus: invalid demo client_id");
+        return ExitCode::FAILURE;
+    };
+    let Ok(demo_redirect) = RedirectUri::register("http://127.0.0.1/callback") else {
+        eprintln!("argus: invalid demo redirect_uri");
+        return ExitCode::FAILURE;
+    };
+    if clients
+        .insert(RegisteredClient {
+            client_id: demo_client,
+            redirect_uris: vec![demo_redirect],
+        })
+        .is_err()
+    {
+        eprintln!("argus: failed to seed the demo client");
+        return ExitCode::FAILURE;
+    }
+
     let state = Arc::new(AppState {
         tenant: TenantContext {
             metadata: AuthorizationServerMetadata::for_issuer(&config.issuer),
@@ -69,6 +96,12 @@ async fn main() -> ExitCode {
         refresh: MemoryRefreshStore::default(),
         audit: MemoryAuditSink::default(),
         tenant_id: TenantId::from_uuid(Uuid::nil()),
+        clients,
+        // ⚠️ Faz 1 geçici kimlik doğrulayıcısı. Faz 3 bunu WebAuthn ve parola
+        // akışlarıyla değiştirecek; adı bilerek "Dev".
+        authenticator: DevAuthenticator {
+            user: UserId::from_uuid(Uuid::from_u128(1)),
+        },
     });
 
     let app = argus_http::build(state);
@@ -82,7 +115,10 @@ async fn main() -> ExitCode {
         "argus: listening on {} (issuer {})",
         config.bind, config.issuer
     );
-    eprintln!("argus: WARNING — in-memory store, keys regenerated on restart; development only");
+    eprintln!(
+        "argus: WARNING - in-memory store, keys regenerated on restart, DevAuthenticator active"
+    );
+    eprintln!("argus: WARNING - development configuration, not for production");
 
     if let Err(e) = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown())

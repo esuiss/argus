@@ -16,7 +16,10 @@ use argus_core::id::TenantId;
 use argus_core::refresh::{FamilyId, RefreshState, RefreshToken};
 use argus_core::time::Timestamp;
 
-use crate::store::{AuditSink, CodeStore, RefreshStore, StoreError};
+use argus_core::authorize::RegisteredClient;
+use argus_core::id::ClientId;
+
+use crate::store::{AuditSink, ClientStore, CodeIssuer, CodeStore, RefreshStore, StoreError};
 
 /// Bellek içi authorization code deposu.
 #[derive(Debug, Default)]
@@ -36,6 +39,62 @@ impl MemoryCodeStore {
             .map_err(|_| StoreError::Unavailable)?
             .insert(hash, code);
         Ok(())
+    }
+}
+
+impl CodeIssuer for MemoryCodeStore {
+    // Bellek erişimi senkron; `async` imzası trait'in `impl Future + Send`
+    // sözleşmesi için. `PostgreSQL` sürümü gerçekten bekleyecek.
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn issue(
+        &self,
+        _t: TenantId,
+        code_hash: &[u8; 32],
+        code: &StoredCode,
+    ) -> Result<(), StoreError> {
+        self.codes
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .insert(*code_hash, code.clone());
+        Ok(())
+    }
+}
+
+/// Bellek içi istemci kaydı.
+#[derive(Debug, Default)]
+pub struct MemoryClientStore {
+    clients: Mutex<HashMap<String, RegisteredClient>>,
+}
+
+impl MemoryClientStore {
+    /// İstemci kaydı ekler.
+    ///
+    /// # Errors
+    ///
+    /// Kilit zehirlenmişse.
+    pub fn insert(&self, client: RegisteredClient) -> Result<(), StoreError> {
+        self.clients
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .insert(client.client_id.as_str().to_owned(), client);
+        Ok(())
+    }
+}
+
+impl ClientStore for MemoryClientStore {
+    // Bellek erişimi senkron; imza trait sözleşmesi için.
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn find(
+        &self,
+        _t: TenantId,
+        client_id: &ClientId,
+    ) -> Result<Option<RegisteredClient>, StoreError> {
+        Ok(self
+            .clients
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .get(client_id.as_str())
+            .cloned())
     }
 }
 

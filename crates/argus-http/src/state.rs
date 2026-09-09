@@ -27,7 +27,7 @@ pub struct TenantContext {
 }
 
 /// Uygulama durumu.
-pub struct AppState<C, R, A>
+pub struct AppState<C, R, A, S = (), U = ()>
 where
     C: CodeStore + Send + Sync,
     R: RefreshStore + Send + Sync,
@@ -43,9 +43,15 @@ where
     pub audit: A,
     /// Çözülmüş kiracı kimliği.
     pub tenant_id: argus_core::id::TenantId,
+    /// İstemci kaydı deposu.
+    pub clients: S,
+    /// Kullanıcı kimlik doğrulayıcı.
+    ///
+    /// ⚠️ Faz 1'de geliştirme amaçlı; Faz 3 gerçeğini getirecek.
+    pub authenticator: U,
 }
 
-impl<C, R, A> AppState<C, R, A>
+impl<C, R, A, S, U> AppState<C, R, A, S, U>
 where
     C: CodeStore + Send + Sync,
     R: RefreshStore + Send + Sync,

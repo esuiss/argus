@@ -262,6 +262,21 @@ impl AuthorizationCode {
     pub const fn state(&self) -> CodeState {
         self.state
     }
+
+    /// Depoya yazılmak üzere alanlarını verir.
+    #[must_use]
+    pub fn to_stored(&self) -> StoredCode {
+        StoredCode {
+            tenant: self.tenant,
+            client: self.client.clone(),
+            subject: self.subject,
+            redirect_uri: self.redirect_uri.clone(),
+            challenge: self.challenge.clone(),
+            issued_at: self.issued_at,
+            expires_at: self.expires_at,
+            state: self.state,
+        }
+    }
 }
 
 /// Kod ömrü konfigürasyon hatası.

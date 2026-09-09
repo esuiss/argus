@@ -24,7 +24,9 @@
 //! istemciye dönerken bir kez görülür ve hiçbir yerde saklanmaz — §25 K27'nin
 //! depolama tarafındaki karşılığı.
 
+use argus_core::authorize::RegisteredClient;
 use argus_core::authz_code::StoredCode;
+use argus_core::id::ClientId;
 use argus_core::id::TenantId;
 use argus_core::refresh::{FamilyId, RefreshToken};
 use core::future::Future;
@@ -80,6 +82,33 @@ pub trait CodeStore {
         tenant: TenantId,
         code_hash: &[u8; 32],
         at: Timestamp,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+}
+
+/// İstemci kayıt deposu.
+pub trait ClientStore {
+    /// Kayıtlı istemciyi okur. Bulunamazsa `None` — bu bir hata değil,
+    /// yetkilendirme akışında `Fatal(UnknownClient)` sonucunu doğuran normal
+    /// bir durumdur.
+    fn find(
+        &self,
+        tenant: TenantId,
+        client_id: &ClientId,
+    ) -> impl Future<Output = Result<Option<RegisteredClient>, StoreError>> + Send;
+}
+
+/// Yeni authorization code yazma sınırı.
+pub trait CodeIssuer {
+    /// Kodu hash'iyle kaydeder.
+    ///
+    /// # Errors
+    ///
+    /// Depo erişilemezse.
+    fn issue(
+        &self,
+        tenant: TenantId,
+        code_hash: &[u8; 32],
+        code: &StoredCode,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
 

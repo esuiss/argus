@@ -144,6 +144,8 @@ fn state() -> AppState<MemCodes, MemRefresh, MemAudit> {
         refresh: MemRefresh::default(),
         audit: MemAudit::default(),
         tenant_id: tenant(),
+        clients: (),
+        authenticator: (),
     }
 }
 
@@ -374,6 +376,8 @@ async fn storage_outage_returns_503_not_invalid_grant() {
         refresh: MemRefresh::default(),
         audit: MemAudit::default(),
         tenant_id: tenant(),
+        clients: (),
+        authenticator: (),
     };
 
     let err = handle(&s, &code_form(), NOW, &AwsLcSha256)

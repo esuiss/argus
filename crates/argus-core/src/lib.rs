@@ -22,7 +22,9 @@
 // görmüyor — Faz 0 çıkış kriteri o araçla ifade edilmiş.
 #![forbid(unsafe_code)]
 
+pub mod authorize;
 pub mod authz_code;
+pub mod client_auth;
 pub mod dpop;
 pub mod effect;
 pub mod epoch;
@@ -33,7 +35,9 @@ pub mod redirect_uri;
 pub mod refresh;
 pub mod time;
 
+pub use authorize::{AuthorizeOutcome, AuthorizeRequest, RegisteredClient};
 pub use authz_code::{AuthorizationCode, Decision, Grant, StoredCode, TokenRequest};
+pub use client_auth::{ClientAuthError, ClientAuthMethod, PresentedCredential};
 pub use dpop::{DpopError, RequestBinding, VerifiedProof};
 pub use effect::Effect;
 pub use epoch::{AuthzEpoch, KeyEpoch, SessionEpoch};

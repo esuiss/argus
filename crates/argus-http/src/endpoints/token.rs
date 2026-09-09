@@ -75,8 +75,8 @@ const fn store_error_to_oauth(e: &StoreError) -> OAuthError {
 /// # Errors
 ///
 /// Grant geçersizse, istemci doğrulanamazsa veya depo erişilemezse.
-pub async fn handle<C, R, A, H>(
-    state: &AppState<C, R, A>,
+pub async fn handle<C, R, A, S, U, H>(
+    state: &AppState<C, R, A, S, U>,
     form: &TokenForm,
     now: Timestamp,
     hasher: &H,
@@ -106,8 +106,8 @@ fn client_of(form: &TokenForm) -> Result<ClientId, OAuthError> {
     ClientId::new(raw).map_err(|_| OAuthError::new(OAuthErrorCode::InvalidClient))
 }
 
-async fn authorization_code<C, R, A, H>(
-    state: &AppState<C, R, A>,
+async fn authorization_code<C, R, A, S, U, H>(
+    state: &AppState<C, R, A, S, U>,
     form: &TokenForm,
     now: Timestamp,
     hasher: &H,
@@ -172,8 +172,8 @@ where
     issue(state, &grant.subject, &grant.client, now, hasher, None)
 }
 
-async fn refresh_token<C, R, A, H>(
-    state: &AppState<C, R, A>,
+async fn refresh_token<C, R, A, S, U, H>(
+    state: &AppState<C, R, A, S, U>,
     form: &TokenForm,
     now: Timestamp,
     hasher: &H,
@@ -255,8 +255,8 @@ where
     }
 }
 
-async fn apply_effects<C, R, A>(
-    state: &AppState<C, R, A>,
+async fn apply_effects<C, R, A, S, U>(
+    state: &AppState<C, R, A, S, U>,
     effects: &[Effect],
     code_hash: &[u8; 32],
     rotation: Option<Rotation<'_>>,
@@ -285,8 +285,8 @@ fn new_secret() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
 
-fn issue<C, R, A, H>(
-    state: &AppState<C, R, A>,
+fn issue<C, R, A, S, U, H>(
+    state: &AppState<C, R, A, S, U>,
     subject: &argus_core::id::UserId,
     client: &ClientId,
     now: Timestamp,
