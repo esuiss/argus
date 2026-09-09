@@ -68,4 +68,16 @@ subtle = { version = "2", default-features = false }
 # `code_challenge` BASE64URL kodludur; karşılaştırma için çözmek gerekiyor.
 # `base64ct` sabit zamanlı ve no_std — RustCrypto'nun bu iş için yazdığı crate.
 # Saf hesaplama. Lisans: Apache-2.0 OR MIT.
-base64ct = { version = "1", default-features = false }
+# `alloc`: `argus-proto` JWK koordinatlarını dizgeye kodluyor. `argus-core` yalnızca
+# sabit tampona çözüyor ve tahsis yapmıyor.
+base64ct = { version = "1", default-features = false, features = ["alloc"] }
+
+# §1 §2.2 kararı: kripto sağlayıcı aws-lc-rs. §7: RS256 için doğrulanmış
+# implementasyon yok, `rsa` crate'i Marvin'e (RUSTSEC-2023-0071) hâlâ açık.
+# aws-lc-rs FIPS moduna hazır ve s2n-bignum'un makine-kontrollü ispatlarını taşır.
+aws-lc-rs = { version = "1", default-features = false, features = ["aws-lc-sys"] }
+
+# Tel formatı. `argus-proto` protokol tiplerini serde ile taşır; `argus-core`
+# bunlara bağımlı DEĞİLDİR (karar mantığı serde bilmez).
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

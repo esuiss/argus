@@ -7,6 +7,9 @@ license.workspace      = true
 repository.workspace   = true
 
 [dependencies]
+argus-core.path     = "../argus-core"
+aws-lc-rs.workspace = true
+thiserror.workspace = true
 
 [lints.rust]
 unreachable_pub = "warn"

@@ -7,6 +7,12 @@ license.workspace      = true
 repository.workspace   = true
 
 [dependencies]
+argus-core.path      = "../argus-core"
+argus-crypto.path    = "../argus-crypto"
+serde.workspace      = true
+serde_json.workspace = true
+base64ct.workspace   = true
+thiserror.workspace  = true
 
 [lints]
 workspace = true
