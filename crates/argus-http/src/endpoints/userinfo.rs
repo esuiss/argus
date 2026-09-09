@@ -16,6 +16,8 @@ pub enum UserInfoError {
     MissingProof,
 
     InvalidProof,
+
+    WrongAudience,
 }
 
 impl UserInfoError {
@@ -33,6 +35,9 @@ impl UserInfoError {
             }
             Self::MissingProof => {
                 r#"DPoP error="invalid_token", error_description="a DPoP proof is required for this token", algs="ES256""#
+            }
+            Self::WrongAudience => {
+                r#"Bearer error="invalid_token", error_description="the access token was issued for a different resource""#
             }
             Self::InvalidProof => {
                 r#"DPoP error="invalid_token", error_description="the DPoP proof does not match this token or request", algs="ES256""#
@@ -122,6 +127,18 @@ pub fn handle(
 
     if claims.exp <= now.as_unix_seconds() {
         return Err(UserInfoError::InvalidToken);
+    }
+
+    if !claims.aud.contains(&tenant.metadata.issuer)
+        && !claims.aud.contains(
+            tenant
+                .metadata
+                .userinfo_endpoint
+                .as_deref()
+                .unwrap_or_default(),
+        )
+    {
+        return Err(UserInfoError::WrongAudience);
     }
 
     match claims.cnf.as_ref() {

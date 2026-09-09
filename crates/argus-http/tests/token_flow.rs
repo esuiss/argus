@@ -237,7 +237,7 @@ async fn authorization_code_yields_a_verifiable_access_token() {
         .expect("token verifies against the published key");
 
     assert_eq!(claims.iss, "https://acme.argus.test");
-    assert!(claims.aud.contains("acme-web"));
+    assert!(claims.aud.contains("https://acme.argus.test"));
     assert_eq!(claims.exp, NOW.as_unix_seconds() + resp.expires_in);
     assert!(
         *s.codes.consumed.lock().expect("lock"),
@@ -541,7 +541,7 @@ async fn openid_scope_produces_a_verifiable_id_token() {
 
     assert_eq!(claims.iss, "https://acme.argus.test");
 
-    assert!(claims.aud.contains("acme-web"));
+    assert_eq!(claims.aud, "acme-web");
     assert!(claims.exp > claims.iat);
 }
 

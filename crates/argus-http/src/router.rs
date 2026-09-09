@@ -351,6 +351,18 @@ where
         .find(|r| argus_proto::well_known_path(r.uri.as_str()).is_some_and(|p| p == wanted));
 
     let Some(resource) = found else {
+        if suffix.is_empty() {
+            let own = argus_proto::ProtectedResourceMetadata::new(
+                &state.tenant.metadata.issuer,
+                &state.tenant.metadata.issuer,
+            )
+            .with_scopes(Some("openid"));
+            let mut r = Json(own).into_response();
+            if let Ok(value) = "public, max-age=3600".parse() {
+                r.headers_mut().insert("Cache-Control", value);
+            }
+            return r;
+        }
         return (StatusCode::NOT_FOUND, "no such protected resource").into_response();
     };
 
@@ -397,7 +409,12 @@ where
 
     let proof = match dpop_header.map(argus_proto::dpop::parse_and_verify) {
         Some(Ok(proof)) => Some(proof),
-        Some(Err(_)) => return userinfo_refusal(userinfo::UserInfoError::InvalidProof),
+        Some(Err(_)) => {
+            return userinfo_refusal(
+                userinfo::UserInfoError::InvalidProof,
+                &state.tenant.metadata.issuer,
+            );
+        }
         None => None,
     };
 
@@ -438,14 +455,18 @@ where
             }
             r
         }
-        Err(err) => userinfo_refusal(err),
+        Err(err) => userinfo_refusal(err, &state.tenant.metadata.issuer),
     }
 }
 
-fn userinfo_refusal(err: userinfo::UserInfoError) -> Response {
+fn userinfo_refusal(err: userinfo::UserInfoError, issuer: &str) -> Response {
     let status = StatusCode::from_u16(err.http_status()).unwrap_or(StatusCode::UNAUTHORIZED);
     let mut r = (status, Json(err.body())).into_response();
-    if let Ok(value) = err.challenge().parse() {
+    let challenge = format!(
+        r#"{}, resource_metadata="{issuer}/.well-known/oauth-protected-resource""#,
+        err.challenge()
+    );
+    if let Ok(value) = challenge.parse() {
         r.headers_mut().insert("WWW-Authenticate", value);
     }
     if let Ok(value) = "no-store".parse() {

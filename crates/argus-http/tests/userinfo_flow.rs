@@ -49,7 +49,7 @@ fn claims(cnf: Option<Confirmation>) -> AccessTokenClaims {
     AccessTokenClaims {
         iss: ISSUER.to_owned(),
         sub: SUBJECT.to_owned(),
-        aud: argus_proto::Audience::One("acme-web".to_owned()),
+        aud: argus_proto::Audience::One(ISSUER.to_owned()),
         exp: NOW
             .saturating_add(Duration::from_seconds(300))
             .as_unix_seconds(),
@@ -533,4 +533,54 @@ fn an_empty_body_token_is_not_credentials() {
             UserInfoError::MissingCredentials
         );
     }
+}
+
+#[test]
+fn a_token_narrowed_to_another_resource_is_refused() {
+    let (ctx, key) = tenant();
+    let mut c = claims(None);
+    c.aud = argus_proto::Audience::One("https://mcp.example.com/mcp".to_owned());
+    let token = sign(&c, &key).expect("sign");
+    let header = format!("Bearer {token}");
+
+    assert_eq!(
+        handle(&ctx, &request(Some(&header), None), NOW, &NoReplay).unwrap_err(),
+        UserInfoError::WrongAudience
+    );
+}
+
+#[test]
+fn a_token_issued_for_this_server_is_accepted() {
+    let (ctx, key) = tenant();
+    let mut c = claims(None);
+    c.aud = argus_proto::Audience::One(ISSUER.to_owned());
+    let token = sign(&c, &key).expect("sign");
+    let header = format!("Bearer {token}");
+
+    assert!(handle(&ctx, &request(Some(&header), None), NOW, &NoReplay).is_ok());
+}
+
+#[test]
+fn the_userinfo_endpoint_url_is_also_an_accepted_audience() {
+    let (ctx, key) = tenant();
+    let mut c = claims(None);
+    c.aud = argus_proto::Audience::One(USERINFO.to_owned());
+    let token = sign(&c, &key).expect("sign");
+    let header = format!("Bearer {token}");
+
+    assert!(handle(&ctx, &request(Some(&header), None), NOW, &NoReplay).is_ok());
+}
+
+#[test]
+fn a_multi_valued_audience_is_accepted_when_it_includes_this_server() {
+    let (ctx, key) = tenant();
+    let mut c = claims(None);
+    c.aud = argus_proto::Audience::Many(vec![
+        "https://mcp.example.com/mcp".to_owned(),
+        ISSUER.to_owned(),
+    ]);
+    let token = sign(&c, &key).expect("sign");
+    let header = format!("Bearer {token}");
+
+    assert!(handle(&ctx, &request(Some(&header), None), NOW, &NoReplay).is_ok());
 }

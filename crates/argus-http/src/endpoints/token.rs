@@ -654,7 +654,7 @@ where
     let exp = now.saturating_add(PLACEHOLDER_ACCESS_TOKEN_LIFETIME);
 
     let audience = if request.resources.is_empty() {
-        Audience::One(request.client.as_str().to_owned())
+        Audience::One(state.tenant.metadata.issuer.clone())
     } else {
         Audience::of(
             &request
