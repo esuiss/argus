@@ -40,6 +40,7 @@ fn tenant() -> (TenantContext, Arc<SigningKey>) {
             metadata: AuthorizationServerMetadata::for_issuer(ISSUER),
             active_key: Arc::clone(&key),
             published_keys: vec![Arc::clone(&key)],
+            blind_index: test_blind_index(),
         },
         key,
     )
@@ -199,6 +200,7 @@ fn a_token_signed_by_a_retired_but_published_key_still_verifies() {
         metadata: AuthorizationServerMetadata::for_issuer(ISSUER),
         active_key: Arc::clone(&new),
         published_keys: vec![Arc::clone(&old), new],
+        blind_index: test_blind_index(),
     };
 
     let token = sign(&claims(None), &old).expect("sign");
@@ -583,4 +585,8 @@ fn a_multi_valued_audience_is_accepted_when_it_includes_this_server() {
     let header = format!("Bearer {token}");
 
     assert!(handle(&ctx, &request(Some(&header), None), NOW, &NoReplay).is_ok());
+}
+
+fn test_blind_index() -> argus_crypto::blind_index::BlindIndexKey {
+    argus_crypto::blind_index::BlindIndexKey::new(&[7u8; 32]).expect("key")
 }

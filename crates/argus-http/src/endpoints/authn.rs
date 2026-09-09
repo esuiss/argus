@@ -2,6 +2,7 @@ use argus_core::aal::Aal;
 use argus_core::id::{TenantId, UserId};
 use argus_core::pkce::Sha256;
 use argus_core::time::{Duration, Timestamp};
+use argus_crypto::blind_index::BlindIndexKey;
 use argus_crypto::password::{Verdict, hash as hash_password, verify as verify_password};
 use serde::{Deserialize, Serialize};
 
@@ -37,15 +38,15 @@ pub async fn password_login<S>(
     tenant: TenantId,
     form: &PasswordLoginForm,
     hasher: &impl Sha256,
+    blind_index: &BlindIndexKey,
     now: Timestamp,
 ) -> (LoginOutcome, Option<String>)
 where
     S: AuthnStore + SessionStore + Sync,
 {
-    let subject = match store
-        .find_user_by_identifier(tenant, &form.identifier)
-        .await
-    {
+    let index = blind_index.compute(&form.identifier);
+
+    let subject = match store.find_user_by_blind_index(tenant, &index).await {
         Ok(found) => found,
         Err(StoreError::Unavailable) => return (LoginOutcome::Unavailable, None),
         Err(StoreError::NotFound) => None,

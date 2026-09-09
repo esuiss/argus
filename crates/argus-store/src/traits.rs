@@ -189,11 +189,19 @@ impl CeremonyPurpose {
 }
 
 pub trait AuthnStore {
-    fn find_user_by_identifier(
+    fn find_user_by_blind_index(
         &self,
         tenant: TenantId,
-        identifier: &str,
+        blind_index: &[u8; 32],
     ) -> impl Future<Output = Result<Option<UserId>, StoreError>> + Send;
+
+    fn create_user(
+        &self,
+        tenant: TenantId,
+        user: UserId,
+        blind_index: &[u8; 32],
+        email_ciphertext: &[u8],
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 
     fn password_of(
         &self,

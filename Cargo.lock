@@ -59,6 +59,7 @@ dependencies = [
  "argus-http",
  "argus-proto",
  "argus-store",
+ "aws-lc-rs",
  "axum",
  "hyper",
  "hyper-util",
@@ -147,6 +148,7 @@ name = "argus-store"
 version = "0.0.0"
 dependencies = [
  "argus-core",
+ "argus-crypto",
  "base64ct",
  "chrono",
  "sqlx",

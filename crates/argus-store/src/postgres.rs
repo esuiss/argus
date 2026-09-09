@@ -657,19 +657,19 @@ fn join_resources(resources: &[ResourceUri]) -> Option<String> {
 }
 
 impl AuthnStore for PostgresStore {
-    async fn find_user_by_identifier(
+    async fn find_user_by_blind_index(
         &self,
         tenant: TenantId,
-        identifier: &str,
+        blind_index: &[u8; 32],
     ) -> Result<Option<UserId>, StoreError> {
         let mut tx = self.scoped(tenant).await?;
 
         let row = sqlx::query(
             "SELECT user_id FROM users \
-             WHERE tenant_id = $1 AND email_blind_index = digest($2, 'sha256')",
+             WHERE tenant_id = $1 AND email_blind_index = $2",
         )
         .bind(tenant.as_uuid())
-        .bind(identifier)
+        .bind(blind_index.as_slice())
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| map_err(&e))?;
@@ -681,6 +681,41 @@ impl AuthnStore for PostgresStore {
         };
         let id: uuid::Uuid = row.try_get("user_id").map_err(|e| map_err(&e))?;
         Ok(Some(UserId::from_uuid(id)))
+    }
+
+    async fn create_user(
+        &self,
+        tenant: TenantId,
+        user: UserId,
+        blind_index: &[u8; 32],
+        email_ciphertext: &[u8],
+    ) -> Result<(), StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        sqlx::query(
+            "INSERT INTO user_keys (tenant_id, user_id, dek_wrapped, kek_id) \
+             VALUES ($1, $2, $3, 'bootstrap')",
+        )
+        .bind(tenant.as_uuid())
+        .bind(user.as_uuid())
+        .bind([0u8; 1].as_slice())
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?;
+
+        sqlx::query(
+            "INSERT INTO users (tenant_id, user_id, email_ciphertext, email_blind_index) \
+             VALUES ($1, $2, $3, $4)",
+        )
+        .bind(tenant.as_uuid())
+        .bind(user.as_uuid())
+        .bind(email_ciphertext)
+        .bind(blind_index.as_slice())
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?;
+
+        tx.commit().await.map_err(|e| map_err(&e))
     }
 
     async fn password_of(

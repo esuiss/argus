@@ -60,6 +60,14 @@ async fn main() -> ExitCode {
 
     let config = Config::from_env();
 
+    let blind_index = match load_blind_index(&config) {
+        Ok(key) => key,
+        Err(message) => {
+            eprintln!("argus: {message}");
+            return ExitCode::FAILURE;
+        }
+    };
+
     let keys = match load_keys(&config) {
         Ok(k) => k,
         Err(message) => {
@@ -92,7 +100,7 @@ async fn main() -> ExitCode {
     }
 
     if let Some(url) = config.database_url.clone() {
-        return serve_with_postgres(&config, &url, &keys).await;
+        return serve_with_postgres(&config, &url, &keys, &blind_index).await;
     }
 
     let state = Arc::new(AppState {
@@ -100,6 +108,7 @@ async fn main() -> ExitCode {
             metadata: AuthorizationServerMetadata::for_issuer(&config.issuer),
             active_key: Arc::clone(&keys.active),
             published_keys: keys.published.clone(),
+            blind_index: blind_index.clone(),
         },
         codes: MemoryCodeStore::default(),
         refresh: MemoryRefreshStore::default(),
@@ -171,6 +180,32 @@ struct KeySet {
     active: Arc<SigningKey>,
 
     published: Vec<Arc<SigningKey>>,
+}
+
+fn load_blind_index(config: &Config) -> Result<argus_crypto::blind_index::BlindIndexKey, String> {
+    let Ok(raw) = env::var("ARGUS_BLIND_INDEX_KEY") else {
+        if config.production {
+            return Err(
+                "ARGUS_ENV=production requires ARGUS_BLIND_INDEX_KEY; without a stable \
+                 key every lookup index changes on restart and no account is findable"
+                    .to_owned(),
+            );
+        }
+        eprintln!(
+            "argus: WARNING - no ARGUS_BLIND_INDEX_KEY; a throwaway key is used and \
+             existing accounts become unfindable on restart"
+        );
+        let mut key = [0u8; 32];
+        if aws_lc_rs::rand::fill(&mut key).is_err() {
+            return Err("cannot generate a blind index key".to_owned());
+        }
+        return argus_crypto::blind_index::BlindIndexKey::new(&key)
+            .map_err(|_| "cannot build a blind index key".to_owned());
+    };
+
+    let bytes = raw.as_bytes();
+    argus_crypto::blind_index::BlindIndexKey::new(bytes)
+        .map_err(|_| "ARGUS_BLIND_INDEX_KEY must be at least 32 bytes".to_owned())
 }
 
 fn load_keys(config: &Config) -> Result<KeySet, String> {
@@ -389,7 +424,12 @@ async fn shutdown() {
     eprintln!("argus: shutting down");
 }
 
-async fn serve_with_postgres(config: &Config, url: &str, keys: &KeySet) -> ExitCode {
+async fn serve_with_postgres(
+    config: &Config,
+    url: &str,
+    keys: &KeySet,
+    blind_index: &argus_crypto::blind_index::BlindIndexKey,
+) -> ExitCode {
     let Ok(pool) = sqlx::postgres::PgPoolOptions::new()
         .max_connections(16)
         .connect(url)
@@ -412,6 +452,7 @@ async fn serve_with_postgres(config: &Config, url: &str, keys: &KeySet) -> ExitC
             metadata: AuthorizationServerMetadata::for_issuer(&config.issuer),
             active_key: Arc::clone(&keys.active),
             published_keys: keys.published.clone(),
+            blind_index: blind_index.clone(),
         },
         codes: store.clone(),
         refresh: store.clone(),

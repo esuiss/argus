@@ -375,8 +375,15 @@ where
     use crate::endpoints::authn::{LoginOutcome, LoginResponse, password_login, session_cookie};
 
     let at = now();
-    let (outcome, secret) =
-        password_login(&state.codes, state.tenant_id(), &form, &AwsLcSha256, at).await;
+    let (outcome, secret) = password_login(
+        &state.codes,
+        state.tenant_id(),
+        &form,
+        &AwsLcSha256,
+        &state.tenant.blind_index,
+        at,
+    )
+    .await;
 
     let mut response = match outcome {
         LoginOutcome::Established { .. } => {

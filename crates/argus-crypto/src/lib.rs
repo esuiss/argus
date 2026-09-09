@@ -1,3 +1,4 @@
+pub mod blind_index;
 pub mod password;
 
 use aws_lc_rs::digest;

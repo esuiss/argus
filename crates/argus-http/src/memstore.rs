@@ -482,12 +482,23 @@ impl SessionStore for MemoryCodeStore {
 
 impl AuthnStore for MemoryCodeStore {
     #[allow(clippy::unused_async_trait_impl)]
-    async fn find_user_by_identifier(
+    async fn find_user_by_blind_index(
         &self,
         _t: TenantId,
-        _identifier: &str,
+        _index: &[u8; 32],
     ) -> Result<Option<UserId>, StoreError> {
         Ok(None)
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn create_user(
+        &self,
+        _t: TenantId,
+        _u: UserId,
+        _i: &[u8; 32],
+        _e: &[u8],
+    ) -> Result<(), StoreError> {
+        Ok(())
     }
 
     #[allow(clippy::unused_async_trait_impl)]

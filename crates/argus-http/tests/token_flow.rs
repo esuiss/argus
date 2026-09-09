@@ -177,6 +177,7 @@ fn state() -> TestState {
             metadata: AuthorizationServerMetadata::for_issuer("https://acme.argus.test"),
             active_key: Arc::clone(&key),
             published_keys: vec![key],
+            blind_index: test_blind_index(),
         },
         codes: MemCodes::default(),
         refresh: MemRefresh::default(),
@@ -464,6 +465,7 @@ async fn storage_outage_returns_503_not_invalid_grant() {
             metadata: AuthorizationServerMetadata::for_issuer("https://acme.argus.test"),
             active_key: Arc::clone(&key),
             published_keys: vec![key],
+            blind_index: test_blind_index(),
         },
         codes: DeadCodes,
         refresh: MemRefresh::default(),
@@ -1536,4 +1538,8 @@ async fn an_access_token_cannot_be_passed_off_as_a_grant() {
         .await
         .expect_err("the typ header must be checked");
     assert_eq!(err.error, OAuthErrorCode::InvalidGrant);
+}
+
+fn test_blind_index() -> argus_crypto::blind_index::BlindIndexKey {
+    argus_crypto::blind_index::BlindIndexKey::new(&[7u8; 32]).expect("key")
 }

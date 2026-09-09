@@ -8,6 +8,7 @@ repository.workspace   = true
 
 [dependencies]
 argus-core.path     = "../argus-core"
+argus-crypto.path   = "../argus-crypto"
 sqlx.workspace      = true
 thiserror.workspace = true
 uuid.workspace      = true

@@ -11,6 +11,7 @@ pub struct TenantContext {
     pub active_key: Arc<SigningKey>,
 
     pub published_keys: Vec<Arc<SigningKey>>,
+    pub blind_index: argus_crypto::blind_index::BlindIndexKey,
 }
 
 pub struct AppState<C, R, A, S = (), U = (), P = (), X = ()>

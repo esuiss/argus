@@ -24,6 +24,10 @@ mod tests {
     use argus_proto::AuthorizationServerMetadata;
     use std::sync::Arc;
 
+    fn test_blind_index() -> argus_crypto::blind_index::BlindIndexKey {
+        argus_crypto::blind_index::BlindIndexKey::new(&[7u8; 32]).expect("key")
+    }
+
     fn ctx() -> TenantContext {
         let (old, _) = SigningKey::generate("old").expect("key");
         let (new, _) = SigningKey::generate("new").expect("key");
@@ -32,6 +36,7 @@ mod tests {
             metadata: AuthorizationServerMetadata::for_issuer("https://acme.argus.test"),
             active_key: Arc::clone(&new),
             published_keys: vec![Arc::new(old), new],
+            blind_index: test_blind_index(),
         }
     }
 

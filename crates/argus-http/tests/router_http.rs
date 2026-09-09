@@ -130,6 +130,7 @@ async fn serve() -> String {
             metadata: AuthorizationServerMetadata::for_issuer("http://argus.test"),
             active_key: Arc::clone(&key),
             published_keys: vec![key],
+            blind_index: test_blind_index(),
         },
         codes: Codes::default(),
         refresh: Refresh,
@@ -459,12 +460,23 @@ impl SessionStore for Codes {
 
 impl AuthnStore for Codes {
     #[allow(clippy::unused_async_trait_impl)]
-    async fn find_user_by_identifier(
+    async fn find_user_by_blind_index(
         &self,
         _t: TenantId,
-        _identifier: &str,
+        _index: &[u8; 32],
     ) -> Result<Option<UserId>, StoreError> {
         Ok(None)
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn create_user(
+        &self,
+        _t: TenantId,
+        _u: UserId,
+        _i: &[u8; 32],
+        _e: &[u8],
+    ) -> Result<(), StoreError> {
+        Ok(())
     }
 
     #[allow(clippy::unused_async_trait_impl)]
@@ -560,4 +572,8 @@ async fn a_forged_session_cookie_does_not_authenticate() {
     .await;
 
     assert!(status(&r).contains("401"), "{r}");
+}
+
+fn test_blind_index() -> argus_crypto::blind_index::BlindIndexKey {
+    argus_crypto::blind_index::BlindIndexKey::new(&[7u8; 32]).expect("key")
 }
