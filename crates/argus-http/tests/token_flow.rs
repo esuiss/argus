@@ -922,8 +922,6 @@ async fn a_different_jti_from_the_same_client_is_accepted() {
     }
 }
 
-// --- Token Exchange / ID-JAG — draft-ietf-oauth-identity-assertion-authz-grant
-
 use argus_core::exchange::CrossAppConnection;
 use argus_core::resource::ResourceUri;
 
@@ -1215,8 +1213,6 @@ impl BackchannelStore for MemCodes {
     }
 }
 
-// --- CIBA — OpenID Connect Client-Initiated Backchannel Authentication ------
-
 use argus_core::ciba::{BackchannelRequest, BackchannelState, DEFAULT_POLL_INTERVAL};
 
 const AUTH_REQ_ID: &str = "the-auth-req-id";
@@ -1348,8 +1344,6 @@ async fn the_auth_req_id_is_required() {
     assert_eq!(err.error, OAuthErrorCode::InvalidRequest);
 }
 
-/// CIMD istemcisi `/authorize`'da çözülüyorsa `/token`'da da çözülmeli; aksi
-/// hâlde akış ortada kırılır ve istemci kodunu asla token'a çeviremez.
 #[tokio::test]
 async fn a_cimd_client_is_refused_when_cimd_is_disabled_rather_than_looked_up_in_the_store() {
     let s = state();
