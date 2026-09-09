@@ -10,6 +10,7 @@ repository.workspace   = true
 argus-core.path      = "../argus-core"
 argus-crypto.path    = "../argus-crypto"
 argus-proto.path     = "../argus-proto"
+argus-store.path     = "../argus-store"
 axum.workspace       = true
 tokio.workspace      = true
 serde.workspace      = true

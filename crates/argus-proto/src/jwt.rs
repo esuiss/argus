@@ -40,6 +40,21 @@ pub struct AccessTokenClaims {
     /// §1 #18: oturum geçersizleme sayacı token'ın İÇİNDE taşınır; doğrulamada
     /// node cache'indeki değerle karşılaştırılır ve ağ turu gerekmez.
     pub sess: u64,
+
+    /// `RFC` 9449 §6: token'ı istemcinin anahtarına bağlayan doğrulama.
+    ///
+    /// Yoksa token bearer'dır ve **sahip olan herkes** kullanabilir. Varsa,
+    /// kaynak sunucu sunulan `DPoP` kanıtının thumbprint'ini buradakiyle
+    /// karşılaştırır; token'ı çalmak yetmez, anahtarı da çalmak gerekir.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cnf: Option<Confirmation>,
+}
+
+/// `RFC` 7800 doğrulama claim'i.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Confirmation {
+    /// `JWK` thumbprint (`RFC` 7638).
+    pub jkt: String,
 }
 
 /// JWT hataları.
@@ -141,6 +156,7 @@ mod tests {
             jti: "jti-1".to_owned(),
             scope: Some("openid".to_owned()),
             sess: 7,
+            cnf: None,
         }
     }
 

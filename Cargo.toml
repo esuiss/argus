@@ -86,3 +86,10 @@ serde_json = "1"
 # `argus-core` özellikle görmez (karar #15).
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "form", "query"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+
+# §1 §2.2 kararı. Derleme zamanı sorgu doğrulaması (`query!` makrosu) KULLANILMIYOR:
+# canlı bir `DATABASE_URL` olmadan derlenemez ve derlemeyi ortama bağımlı kılar.
+# Sorgular çalışma zamanında bağlanıyor; doğrulamayı gerçek veritabanına karşı
+# koşan testler yapıyor.
+sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls-ring", "uuid", "chrono", "macros"] }
+chrono = { version = "0.4", default-features = false, features = ["std"] }

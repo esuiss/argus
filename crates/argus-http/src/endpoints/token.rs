@@ -13,7 +13,7 @@ use argus_core::refresh::{
     RefreshToken, rotate,
 };
 use argus_core::time::{Duration, Timestamp};
-use argus_proto::jwt::{AccessTokenClaims, sign};
+use argus_proto::jwt::{AccessTokenClaims, Confirmation, sign};
 use argus_proto::{OAuthError, OAuthErrorCode, TokenResponse};
 use serde::Deserialize;
 
@@ -29,6 +29,13 @@ use crate::store::{AuditSink, CodeStore, RefreshStore, StoreError};
 /// kapatmak olurdu. Beş dakika, §19 §7.2'nin degraded mode analiziyle tutarlı
 /// olan **muhafazakâr** taraftır.
 pub const PLACEHOLDER_ACCESS_TOKEN_LIFETIME: Duration = Duration::from_seconds(300);
+
+/// `DPoP` bağlaması: kanıt doğrulandıysa thumbprint, aksi hâlde yok.
+///
+/// ⚠️ §1 §4.1: **bearer varsayılan değildir.** `None` dönmesi bir eksikliktir,
+/// tercih değil: istemci `DPoP` başlığı göndermediyse token bearer olur ve onu
+/// çalan herkes kullanabilir.
+pub type Binding = Option<String>;
 
 /// `POST /token` gövdesi (form-encoded).
 ///
@@ -80,6 +87,7 @@ pub async fn handle<C, R, A, S, U, H>(
     form: &TokenForm,
     now: Timestamp,
     hasher: &H,
+    binding: Binding,
 ) -> Result<TokenResponse, OAuthError>
 where
     C: CodeStore + Send + Sync,
@@ -88,8 +96,8 @@ where
     H: Sha256,
 {
     match form.grant_type.as_str() {
-        "authorization_code" => authorization_code(state, form, now, hasher).await,
-        "refresh_token" => refresh_token(state, form, now, hasher).await,
+        "authorization_code" => authorization_code(state, form, now, hasher, binding).await,
+        "refresh_token" => refresh_token(state, form, now, hasher, binding).await,
         // OAuth 2.1: `password` ve `implicit` yok. Bilinmeyen grant da buraya düşer.
         _ => Err(OAuthError::with_description(
             OAuthErrorCode::UnsupportedGrantType,
@@ -111,6 +119,7 @@ async fn authorization_code<C, R, A, S, U, H>(
     form: &TokenForm,
     now: Timestamp,
     hasher: &H,
+    binding: Binding,
 ) -> Result<TokenResponse, OAuthError>
 where
     C: CodeStore + Send + Sync,
@@ -169,7 +178,15 @@ where
     };
 
     apply_effects(state, &effects, &code_hash, None, now).await?;
-    issue(state, &grant.subject, &grant.client, now, hasher, None)
+    issue(
+        state,
+        &grant.subject,
+        &grant.client,
+        now,
+        hasher,
+        None,
+        binding,
+    )
 }
 
 async fn refresh_token<C, R, A, S, U, H>(
@@ -177,6 +194,7 @@ async fn refresh_token<C, R, A, S, U, H>(
     form: &TokenForm,
     now: Timestamp,
     hasher: &H,
+    binding: Binding,
 ) -> Result<TokenResponse, OAuthError>
 where
     C: CodeStore + Send + Sync,
@@ -250,6 +268,7 @@ where
                 now,
                 hasher,
                 Some(new_secret),
+                binding,
             )
         }
     }
@@ -292,6 +311,7 @@ fn issue<C, R, A, S, U, H>(
     now: Timestamp,
     _hasher: &H,
     refresh: Option<String>,
+    binding: Binding,
 ) -> Result<TokenResponse, OAuthError>
 where
     C: CodeStore + Send + Sync,
@@ -309,16 +329,25 @@ where
         jti: uuid::Uuid::new_v4().simple().to_string(),
         scope: None,
         sess: 0,
+        // `RFC` 9449 §6: token'ı istemcinin anahtarına bağlar.
+        cnf: binding.map(|jkt| Confirmation { jkt }),
     };
+
+    let bound = claims.cnf.is_some();
 
     let access_token = sign(&claims, &state.tenant.active_key)
         .map_err(|_| OAuthError::new(OAuthErrorCode::ServerError))?;
 
     Ok(TokenResponse {
         access_token,
-        // §1 §4.1: bearer varsayılan değildir. DPoP bağlama gelene kadar
-        // `Bearer` dönülüyor ve bu bir eksiklik olarak işaretli.
-        token_type: "Bearer".to_owned(),
+        // `RFC` 9449 §5: bağlı token'ın tipi `DPoP`'tur. İstemci `Bearer`
+        // görürse token'ı `Authorization: Bearer` ile gönderir ve bağlama
+        // sessizce devre dışı kalırdı.
+        token_type: if bound {
+            "DPoP".to_owned()
+        } else {
+            "Bearer".to_owned()
+        },
         expires_in: PLACEHOLDER_ACCESS_TOKEN_LIFETIME.as_seconds(),
         refresh_token: refresh,
         scope: None,

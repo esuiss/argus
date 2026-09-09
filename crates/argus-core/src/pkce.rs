@@ -107,6 +107,17 @@ impl CodeChallenge {
         self.method
     }
 
+    /// Çözülmüş özet.
+    ///
+    /// Özet **sır değildir**: yetkilendirme isteğinde açıkça gider. Sabit zamanlı
+    /// karşılaştırma gerekliliği değerin gizliliğinden değil, karşılaştırmanın
+    /// kendisinden gelir — bu yüzden değeri okumak (depoya yazmak için) sorun
+    /// değil, ama karşılaştırmayı elle yapmak yerine [`Self::verify`] kullanılmalı.
+    #[must_use]
+    pub const fn digest(&self) -> &[u8; 32] {
+        &self.digest
+    }
+
     /// Token isteğinde sunulan `code_verifier`'ı doğrular.
     ///
     /// Karşılaştırma sabit zamanlıdır (bkz. modül notu).

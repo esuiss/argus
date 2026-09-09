@@ -180,7 +180,7 @@ async fn authorization_code_yields_a_verifiable_access_token() {
     let s = state();
     *s.codes.record.lock().expect("lock") = Some(stored_code(CodeState::Issued));
 
-    let resp = handle(&s, &code_form(), NOW, &AwsLcSha256)
+    let resp = handle(&s, &code_form(), NOW, &AwsLcSha256, None)
         .await
         .expect("token issued");
 
@@ -216,7 +216,7 @@ async fn wrong_pkce_verifier_is_rejected_and_burns_the_code() {
         ..code_form()
     };
 
-    let err = handle(&s, &form, NOW, &AwsLcSha256)
+    let err = handle(&s, &form, NOW, &AwsLcSha256, None)
         .await
         .expect_err("must be denied");
     assert_eq!(err.error, OAuthErrorCode::InvalidGrant);
@@ -234,7 +234,7 @@ async fn replayed_code_triggers_revocation_of_derived_tokens() {
         at: Timestamp::from_unix_seconds(999_999),
     }));
 
-    let err = handle(&s, &code_form(), NOW, &AwsLcSha256)
+    let err = handle(&s, &code_form(), NOW, &AwsLcSha256, None)
         .await
         .expect_err("replay must be denied");
     assert_eq!(err.error, OAuthErrorCode::InvalidGrant);
@@ -282,7 +282,7 @@ async fn refresh_rotates_and_returns_a_new_token() {
     let s = state();
     *s.refresh.record.lock().expect("lock") = Some(stored_refresh(RefreshState::Active));
 
-    let resp = handle(&s, &refresh_form(), NOW, &AwsLcSha256)
+    let resp = handle(&s, &refresh_form(), NOW, &AwsLcSha256, None)
         .await
         .expect("rotation");
 
@@ -309,7 +309,7 @@ async fn reusing_a_rotated_refresh_token_brings_the_family_down() {
         at: Timestamp::from_unix_seconds(999_999),
     }));
 
-    let err = handle(&s, &refresh_form(), NOW, &AwsLcSha256)
+    let err = handle(&s, &refresh_form(), NOW, &AwsLcSha256, None)
         .await
         .expect_err("reuse must be denied");
     assert_eq!(err.error, OAuthErrorCode::InvalidGrant);
@@ -330,7 +330,7 @@ async fn unsupported_grant_types_are_rejected() {
             grant_type: gt.to_owned(),
             ..code_form()
         };
-        let err = handle(&s, &form, NOW, &AwsLcSha256)
+        let err = handle(&s, &form, NOW, &AwsLcSha256, None)
             .await
             .expect_err("must be rejected");
         assert_eq!(
@@ -380,7 +380,7 @@ async fn storage_outage_returns_503_not_invalid_grant() {
         authenticator: (),
     };
 
-    let err = handle(&s, &code_form(), NOW, &AwsLcSha256)
+    let err = handle(&s, &code_form(), NOW, &AwsLcSha256, None)
         .await
         .expect_err("outage");
     assert_eq!(err.error, OAuthErrorCode::TemporarilyUnavailable);
@@ -394,4 +394,51 @@ fn the_flow_uses_real_sha256() {
     let digest = AwsLcSha256.sha256(VERIFIER.as_bytes());
     let expected = base64ct::Base64UrlUnpadded::decode_vec(CHALLENGE).expect("b64");
     assert_eq!(digest.as_slice(), expected.as_slice());
+}
+
+// --- `DPoP` bağlaması ------------------------------------------------------
+
+/// `RFC` 9449 §5-6: bağlı token'ın tipi `DPoP` olmalı ve `cnf.jkt` taşımalı.
+/// İstemci `Bearer` görürse token'ı `Authorization: Bearer` ile gönderir ve
+/// bağlama sessizce devre dışı kalır.
+#[tokio::test]
+async fn dpop_binding_changes_the_token_type_and_adds_cnf() {
+    let s = state();
+    *s.codes.record.lock().expect("lock") = Some(stored_code(CodeState::Issued));
+
+    let resp = handle(
+        &s,
+        &code_form(),
+        NOW,
+        &AwsLcSha256,
+        Some("thumbprint-abc".to_owned()),
+    )
+    .await
+    .expect("token issued");
+
+    assert_eq!(resp.token_type, "DPoP");
+
+    let claims = argus_proto::jwt::verify(&resp.access_token, &s.tenant.active_key.verifying_key())
+        .expect("verify");
+    assert_eq!(
+        claims.cnf.expect("cnf must be present").jkt,
+        "thumbprint-abc"
+    );
+}
+
+/// Bağlama yoksa token bearer'dır ve `cnf` taşımaz — bu bir eksikliktir,
+/// tercih değil (§1 §4.1).
+#[tokio::test]
+async fn without_dpop_the_token_stays_bearer() {
+    let s = state();
+    *s.codes.record.lock().expect("lock") = Some(stored_code(CodeState::Issued));
+
+    let resp = handle(&s, &code_form(), NOW, &AwsLcSha256, None)
+        .await
+        .expect("token issued");
+
+    assert_eq!(resp.token_type, "Bearer");
+    let claims = argus_proto::jwt::verify(&resp.access_token, &s.tenant.active_key.verifying_key())
+        .expect("verify");
+    assert!(claims.cnf.is_none());
 }

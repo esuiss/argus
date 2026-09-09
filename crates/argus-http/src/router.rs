@@ -12,6 +12,7 @@ use argus_core::time::Timestamp;
 use argus_crypto::AwsLcSha256;
 use argus_proto::{OAuthError, OAuthErrorCode};
 use axum::extract::{Query, State};
+use axum::http::HeaderMap;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -22,7 +23,7 @@ use crate::endpoints::authorize::{
     handle as authorize_handle,
 };
 use crate::endpoints::discovery;
-use crate::endpoints::token::{TokenForm, handle};
+use crate::endpoints::token::{Binding, TokenForm, handle};
 use crate::state::AppState;
 use crate::store::{AuditSink, ClientStore, CodeIssuer, CodeStore, RefreshStore};
 
@@ -85,8 +86,57 @@ where
     )
 }
 
+/// ⚠️ Tekrar kaydı **henüz yok**.
+///
+/// `RFC` 9449 §11.1 `jti` tekrar korumasını istiyor ve bu tip şu an her `jti`'yi
+/// yeni sayıyor. Tek node'da bile eksik; çok node'lu dağıtımda paylaşımlı bir
+/// kayıt (Redis/Postgres) şart. §6 §4.4 bunu Bloom/cuckoo filtrenin **tek meşru
+/// kullanım alanı** olarak işaretliyor: yanlış pozitifin bedeli tek bir isteğin
+/// reddi, kullanıcı çıkışı değil.
+struct NoReplayRecord;
+
+impl argus_core::dpop::ReplayGuard for NoReplayRecord {
+    fn seen(&self, _jti: &str) -> bool {
+        false
+    }
+}
+
+/// `DPoP` başlığını doğrular ve bağlamayı çıkarır.
+///
+/// Kanıt varsa **doğrulanmadan** kullanılmaz: imza, `typ`, `alg`, metot ve URI
+/// eşleşmesi ve tekrar kontrolü geçmeden bağlama kurulmaz. Geçersiz bir kanıt
+/// sessizce yok sayılmaz — `invalid_dpop_proof` ile reddedilir, aksi hâlde
+/// saldırgan bozuk kanıt göndererek token'ı bearer'a düşürebilirdi.
+fn dpop_binding(headers: &HeaderMap, htu: &str, now: Timestamp) -> Result<Binding, OAuthError> {
+    let Some(raw) = headers.get("DPoP") else {
+        return Ok(None);
+    };
+    let Ok(proof_str) = raw.to_str() else {
+        return Err(OAuthError::new(OAuthErrorCode::InvalidRequest));
+    };
+
+    let proof = argus_proto::dpop::parse_and_verify(proof_str)
+        .map_err(|_| OAuthError::new(OAuthErrorCode::InvalidRequest))?;
+
+    argus_core::dpop::validate(
+        &proof,
+        &argus_core::dpop::RequestBinding {
+            method: "POST".to_owned(),
+            uri: htu.to_owned(),
+        },
+        None,
+        now,
+        argus_core::dpop::DEFAULT_PROOF_WINDOW,
+        &NoReplayRecord,
+    )
+    .map_err(|_| OAuthError::new(OAuthErrorCode::InvalidRequest))?;
+
+    Ok(Some(proof.jkt))
+}
+
 async fn token_handler<C, R, A, S, U>(
     State(state): State<SharedState<C, R, A, S, U>>,
+    headers: HeaderMap,
     Form(form): Form<TokenForm>,
 ) -> Response
 where
@@ -96,7 +146,13 @@ where
     S: ClientStore + Send + Sync + 'static,
     U: UserAuthenticator + Send + Sync + 'static,
 {
-    match handle(&state, &form, now(), &AwsLcSha256).await {
+    let at = now();
+    let binding = match dpop_binding(&headers, &state.tenant.metadata.token_endpoint, at) {
+        Ok(b) => b,
+        Err(e) => return oauth_response(&e),
+    };
+
+    match handle(&state, &form, at, &AwsLcSha256, binding).await {
         Ok(response) => {
             let mut r = Json(response).into_response();
             if let Ok(value) = "no-store".parse() {

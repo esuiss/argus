@@ -1,4 +1,10 @@
-//! Depolama sınırı.
+//! Depolama sınırı — trait tanımları.
+//!
+//! # Neden burada, `argus-http`'de değil
+//!
+//! Bağımlılık yönü: `argus-http` depolamayı KULLANIR, `argus-store` onu SAĞLAR.
+//! Trait'ler HTTP katmanında kalsaydı, `argus-store`'un `argus-http`'ye bağımlı
+//! olması gerekirdi — yani veri katmanının web katmanını tanıması.
 //!
 //! # Neden trait
 //!
