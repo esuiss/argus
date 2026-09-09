@@ -165,7 +165,7 @@ mod tests {
             "  leading and trailing  ",
             "パスワード",
             "🔐🔐🔐",
-            "şifre çok güçlü",
+            "contraseña muy segura",
         ] {
             let stored = hash(password).expect("hash");
             assert_eq!(
