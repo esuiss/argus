@@ -33,6 +33,30 @@ pub enum RedirectUriError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum ClientIdUrlError {
+    #[error("client_id is not a URL")]
+    NotAUrl,
+
+    #[error("a Client Identifier URL must use https (CIMD §3)")]
+    NotHttps,
+
+    #[error("a Client Identifier URL must not contain userinfo (CIMD §3)")]
+    HasUserinfo,
+
+    #[error("a Client Identifier URL must not contain a fragment (CIMD §3)")]
+    HasFragment,
+
+    #[error("a Client Identifier URL must have a path component (CIMD §3)")]
+    NoPath,
+
+    #[error("a Client Identifier URL must not contain . or .. path segments (CIMD §3)")]
+    DottedPathSegment,
+
+    #[error("a Client Identifier URL must name a routable host, not localhost or an IP literal")]
+    NotRoutable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ResourceUriError {
     #[error("resource must be an absolute URI with a host (RFC 8707 §2)")]
     NotAbsolute,

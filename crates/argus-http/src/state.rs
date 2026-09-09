@@ -34,6 +34,7 @@ where
     pub authenticator: U,
     pub replay: P,
     pub resources: X,
+    pub cimd: Option<crate::cimd_client::CimdRuntime>,
 }
 
 impl<C, R, A, S, U, P, X> AppState<C, R, A, S, U, P, X>

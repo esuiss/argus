@@ -21,6 +21,7 @@ tokio-rustls.workspace   = true
 rustls-pemfile.workspace = true
 hyper.workspace          = true
 hyper-util.workspace     = true
+webpki-roots.workspace   = true
 
 [lints]
 workspace = true

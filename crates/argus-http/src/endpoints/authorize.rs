@@ -5,7 +5,7 @@ use argus_core::pkce::Sha256;
 use argus_core::time::Timestamp;
 use serde::Deserialize;
 
-use crate::store::{ClientStore, CodeIssuer, StoreError};
+use crate::store::{CodeIssuer, StoreError};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AuthorizeQuery {
@@ -53,12 +53,12 @@ pub enum AuthorizeResponse {
     NeedsAuthentication,
 }
 
-pub struct AuthorizeContext<'a, S, I, U, H> {
+pub struct AuthorizeContext<'a, I, U, H> {
     pub tenant: TenantId,
 
     pub issuer: &'a str,
 
-    pub clients: &'a S,
+    pub client: Option<&'a RegisteredClient>,
 
     pub codes: &'a I,
 
@@ -73,20 +73,19 @@ pub struct AuthorizeContext<'a, S, I, U, H> {
     pub registered_resources: &'a [argus_core::resource::ResourceUri],
 }
 
-impl<S, I, U, H> Clone for AuthorizeContext<'_, S, I, U, H> {
+impl<I, U, H> Clone for AuthorizeContext<'_, I, U, H> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<S, I, U, H> Copy for AuthorizeContext<'_, S, I, U, H> {}
+impl<I, U, H> Copy for AuthorizeContext<'_, I, U, H> {}
 
-pub async fn handle<S, I, U, H>(
-    ctx: &AuthorizeContext<'_, S, I, U, H>,
+pub async fn handle<I, U, H>(
+    ctx: &AuthorizeContext<'_, I, U, H>,
     query: &AuthorizeQuery,
 ) -> Result<AuthorizeResponse, StoreError>
 where
-    S: ClientStore + Sync,
     I: CodeIssuer + Sync,
     U: UserAuthenticator + Sync,
     H: Sha256,
@@ -94,7 +93,7 @@ where
     let AuthorizeContext {
         tenant,
         issuer,
-        clients,
+        client: registered,
         codes,
         auth,
         hasher,
@@ -104,10 +103,6 @@ where
     } = *ctx;
 
     let client_id = ClientId::new(query.client_id.clone()).ok();
-    let registered: Option<RegisteredClient> = match client_id.as_ref() {
-        Some(id) => clients.find(tenant, id).await?,
-        None => None,
-    };
 
     let request = AuthorizeRequest {
         response_type: query.response_type.clone(),
@@ -121,7 +116,7 @@ where
         resources: query.resource.clone(),
     };
 
-    match validate(&request, registered.as_ref(), registered_resources) {
+    match validate(&request, registered, registered_resources) {
         AuthorizeOutcome::Fatal(_) => Ok(AuthorizeResponse::ShowError(
             "the redirect_uri is not registered for this client",
         )),

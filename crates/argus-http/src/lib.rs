@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod cimd_client;
+pub mod cimd_fetch;
 pub mod effects;
 pub mod endpoints;
 pub mod memstore;

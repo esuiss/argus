@@ -41,6 +41,8 @@ pub struct AuthorizationServerMetadata {
     pub scopes_supported: Option<Vec<String>>,
 
     pub authorization_response_iss_parameter_supported: bool,
+
+    pub client_id_metadata_document_supported: bool,
 }
 
 impl AuthorizationServerMetadata {
@@ -80,6 +82,7 @@ impl AuthorizationServerMetadata {
             dpop_signing_alg_values_supported: Some(vec!["ES256".to_owned()]),
             scopes_supported: Some(vec!["openid".to_owned()]),
             authorization_response_iss_parameter_supported: true,
+            client_id_metadata_document_supported: true,
         }
     }
 }
@@ -115,6 +118,13 @@ mod tests {
     #[test]
     fn iss_parameter_is_always_advertised() {
         assert!(meta().authorization_response_iss_parameter_supported);
+    }
+
+    #[test]
+    fn cimd_support_is_advertised() {
+        assert!(meta().client_id_metadata_document_supported);
+        let json = serde_json::to_string(&meta()).unwrap();
+        assert!(json.contains(r#""client_id_metadata_document_supported":true"#));
     }
 
     #[test]

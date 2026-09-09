@@ -2,6 +2,7 @@
 
 pub mod authorize;
 pub mod authz_code;
+pub mod cimd;
 pub mod client_auth;
 pub mod dpop;
 pub mod effect;
@@ -12,6 +13,7 @@ pub mod pkce;
 pub mod redirect_uri;
 pub mod refresh;
 pub mod resource;
+pub mod ssrf;
 pub mod time;
 
 pub use authorize::{AuthorizeOutcome, AuthorizeRequest, RegisteredClient};

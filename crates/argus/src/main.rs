@@ -113,6 +113,7 @@ async fn main() -> ExitCode {
         },
         replay: MemoryReplayStore::default(),
         resources: MemoryResourceStore::default(),
+        cimd: Some(cimd_runtime()),
     });
 
     let app = argus_http::build(state);
@@ -273,6 +274,17 @@ async fn serve(app: axum::Router, config: &Config, store_kind: &str) -> ExitCode
     ExitCode::SUCCESS
 }
 
+fn cimd_runtime() -> argus_http::cimd_client::CimdRuntime {
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+
+    let client_config = rustls::ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+
+    argus_http::cimd_client::CimdRuntime::new(std::sync::Arc::new(client_config))
+}
+
 fn tls_config(config: &Config) -> Result<Option<Arc<rustls::ServerConfig>>, String> {
     let (cert_path, key_path) = match (config.tls_cert.as_deref(), config.tls_key.as_deref()) {
         (Some(c), Some(k)) => (c, k),
@@ -401,6 +413,7 @@ async fn serve_with_postgres(config: &Config, url: &str, keys: &KeySet) -> ExitC
         },
         replay: store.clone(),
         resources: store,
+        cimd: Some(cimd_runtime()),
     });
 
     let app = argus_http::build(state);

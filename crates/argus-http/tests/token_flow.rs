@@ -183,6 +183,7 @@ fn state() -> TestState {
         authenticator: (),
         replay: MemoryReplayStore::default(),
         resources: MemoryResourceStore::default(),
+        cimd: None,
     }
 }
 
@@ -401,6 +402,7 @@ async fn storage_outage_returns_503_not_invalid_grant() {
         authenticator: (),
         replay: MemoryReplayStore::default(),
         resources: MemoryResourceStore::default(),
+        cimd: None,
     };
 
     let err = handle(&s, &code_form(), NOW, &AwsLcSha256, None)

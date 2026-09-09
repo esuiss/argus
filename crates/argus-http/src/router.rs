@@ -207,6 +207,42 @@ fn percent_decode(value: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+async fn resolve_client<C, R, A, S, U, P, X>(
+    state: &AppState<C, R, A, S, U, P, X>,
+    client_id: &str,
+    now: Timestamp,
+) -> Result<Option<argus_core::authorize::RegisteredClient>, Box<Response>>
+where
+    C: CodeStore + CodeIssuer + Send + Sync,
+    R: RefreshStore + Send + Sync,
+    A: AuditSink + Send + Sync,
+    S: ClientStore + Send + Sync,
+{
+    if argus_core::cimd::looks_like_a_url(client_id) {
+        let Some(cimd) = state.cimd.as_ref() else {
+            return Ok(None);
+        };
+        let Ok(url) = argus_core::cimd::ClientIdUrl::parse(client_id) else {
+            return Ok(None);
+        };
+        return Ok(cimd
+            .resolve(&url, &crate::cimd_fetch::SystemResolver, now)
+            .await
+            .ok());
+    }
+
+    let Ok(id) = argus_core::id::ClientId::new(client_id) else {
+        return Ok(None);
+    };
+
+    match state.clients.find(state.tenant_id(), &id).await {
+        Ok(found) => Ok(found),
+        Err(_) => Err(Box::new(oauth_response(&OAuthError::new(
+            OAuthErrorCode::TemporarilyUnavailable,
+        )))),
+    }
+}
+
 async fn prm_handler<C, R, A, S, U, P, X>(
     State(state): State<SharedState<C, R, A, S, U, P, X>>,
     axum::extract::Path(path): axum::extract::Path<String>,
@@ -376,6 +412,7 @@ where
     P: ReplayStore + Send + Sync + 'static,
     X: ResourceStore + Send + Sync + 'static,
 {
+    let at = now();
     let mut query = query;
     query.resource =
         crate::endpoints::authorize::repeated_query_values(raw_query.as_deref(), "resource");
@@ -388,14 +425,19 @@ where
         }
     };
 
+    let resolved = match resolve_client(&state, &query.client_id, at).await {
+        Ok(client) => client,
+        Err(response) => return *response,
+    };
+
     let ctx = AuthorizeContext {
         tenant: state.tenant_id(),
         issuer: &state.tenant.metadata.issuer,
-        clients: &state.clients,
+        client: resolved.as_ref(),
         codes: &state.codes,
         auth: &state.authenticator,
         hasher: &AwsLcSha256,
-        now: now(),
+        now: at,
         new_code: &code,
         registered_resources: &registered_resources,
     };

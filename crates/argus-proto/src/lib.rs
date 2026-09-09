@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod cimd;
 pub mod client_assertion;
 pub mod discovery;
 pub mod dpop;
@@ -10,6 +11,7 @@ pub mod oidc;
 pub mod prm;
 pub mod token;
 
+pub use cimd::{ClientIdMetadataDocument, DocumentError, MAX_DOCUMENT_BYTES};
 pub use client_assertion::{ASSERTION_TYPE, AssertionError};
 pub use discovery::AuthorizationServerMetadata;
 pub use dpop::{DpopParseError, jwk_thumbprint, parse_and_verify};

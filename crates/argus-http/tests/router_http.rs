@@ -132,6 +132,7 @@ async fn serve() -> String {
         },
         replay: MemoryReplayStore::default(),
         resources: MemoryResourceStore::default(),
+        cimd: None,
     });
 
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
