@@ -12,6 +12,7 @@ pub struct TenantContext {
 
     pub published_keys: Vec<Arc<SigningKey>>,
     pub blind_index: argus_crypto::blind_index::BlindIndexKey,
+    pub relying_party: Option<Arc<argus_proto::webauthn::RelyingParty>>,
 }
 
 pub struct AppState<C, R, A, S = (), U = (), P = (), X = ()>
@@ -45,6 +46,10 @@ where
     A: AuditSink + Send + Sync,
 {
     #[must_use]
+    pub fn relying_party(&self) -> Option<&argus_proto::webauthn::RelyingParty> {
+        self.tenant.relying_party.as_deref()
+    }
+
     pub const fn tenant_id(&self) -> argus_core::id::TenantId {
         self.tenant_id
     }

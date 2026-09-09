@@ -10,16 +10,20 @@ use argus_core::authorize::RegisteredClient;
 use argus_core::id::ClientId;
 
 use crate::store::{
-    AuditSink, AuthnSession, AuthnStore, BackchannelStore, ClientStore, CodeIssuer, CodeStore,
-    ConnectionStore, IssuerStore, JtiOutcome, JtiPurpose, ProtectedResource, RefreshStore,
-    ReplayStore, ResourceStore, SessionStore, StoreError,
+    AuditSink, AuthnSession, AuthnStore, BackchannelStore, CeremonyPurpose, CeremonyStore,
+    ClientStore, CodeIssuer, CodeStore, ConnectionStore, IssuerStore, JtiOutcome, JtiPurpose,
+    PendingCeremony, ProtectedResource, RefreshStore, ReplayStore, ResourceStore, SessionStore,
+    StoreError,
 };
+
+type PendingState = (Option<UserId>, String);
 
 #[derive(Debug, Default)]
 pub struct MemoryCodeStore {
     codes: Mutex<HashMap<[u8; 32], StoredCode>>,
     backchannel: Mutex<HashMap<[u8; 32], argus_core::ciba::BackchannelRequest>>,
     sessions: Mutex<HashMap<[u8; 32], AuthnSession>>,
+    ceremonies: Mutex<HashMap<[u8; 32], PendingState>>,
 }
 
 impl MemoryCodeStore {
@@ -559,5 +563,36 @@ impl AuthnStore for MemoryCodeStore {
         _at: Timestamp,
     ) -> Result<bool, StoreError> {
         Ok(true)
+    }
+}
+
+impl CeremonyStore for MemoryCodeStore {
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn store_ceremony(
+        &self,
+        _t: TenantId,
+        hash: &[u8; 32],
+        ceremony: &PendingCeremony<'_>,
+    ) -> Result<(), StoreError> {
+        self.ceremonies
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .insert(*hash, (ceremony.user, ceremony.state.to_owned()));
+        Ok(())
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn take_ceremony(
+        &self,
+        _t: TenantId,
+        hash: &[u8; 32],
+        _purpose: CeremonyPurpose,
+        _now: Timestamp,
+    ) -> Result<(Option<UserId>, String), StoreError> {
+        self.ceremonies
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .remove(hash)
+            .ok_or(StoreError::NotFound)
     }
 }

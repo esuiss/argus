@@ -110,6 +110,64 @@ where
     )
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct RegistrationForm {
+    pub identifier: String,
+    pub password: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegistrationOutcome {
+    Created,
+    Refused,
+    Unavailable,
+}
+
+pub async fn register<S>(
+    store: &S,
+    tenant: TenantId,
+    form: &RegistrationForm,
+    blind_index: &BlindIndexKey,
+    corpus: &impl argus_core::password_policy::BreachCorpus,
+) -> RegistrationOutcome
+where
+    S: AuthnStore + Sync,
+{
+    if argus_core::password_policy::check(&form.password, corpus).is_err() {
+        return RegistrationOutcome::Refused;
+    }
+
+    let index = blind_index.compute(&form.identifier);
+
+    let Ok(existing) = store.find_user_by_blind_index(tenant, &index).await else {
+        return RegistrationOutcome::Unavailable;
+    };
+
+    let Ok(phc) = hash_password(&form.password) else {
+        return RegistrationOutcome::Unavailable;
+    };
+
+    if existing.is_some() {
+        return RegistrationOutcome::Created;
+    }
+
+    let subject = UserId::from_uuid(uuid::Uuid::new_v4());
+
+    if store
+        .create_user(tenant, subject, &index, form.identifier.as_bytes())
+        .await
+        .is_err()
+    {
+        return RegistrationOutcome::Unavailable;
+    }
+
+    if store.set_password(tenant, subject, &phc).await.is_err() {
+        return RegistrationOutcome::Unavailable;
+    }
+
+    RegistrationOutcome::Created
+}
+
 #[must_use]
 pub fn session_cookie(secret: &str, secure: bool) -> String {
     let flags = if secure { "; Secure" } else { "" };

@@ -113,6 +113,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "uuid",
+ "webauthn-rs",
  "webpki-roots 1.0.9",
 ]
 

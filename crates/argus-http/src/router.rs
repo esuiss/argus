@@ -20,8 +20,9 @@ use crate::endpoints::userinfo::{self, UserInfoRequest};
 use crate::replay::{PrecheckedReplay, consume};
 use crate::state::AppState;
 use crate::store::{
-    AuditSink, AuthnStore, BackchannelStore, ClientStore, CodeIssuer, CodeStore, ConnectionStore,
-    IssuerStore, JtiPurpose, RefreshStore, ReplayStore, ResourceStore, SessionStore,
+    AuditSink, AuthnStore, BackchannelStore, CeremonyStore, ClientStore, CodeIssuer, CodeStore,
+    ConnectionStore, IssuerStore, JtiPurpose, RefreshStore, ReplayStore, ResourceStore,
+    SessionStore,
 };
 
 fn now() -> Timestamp {
@@ -58,6 +59,7 @@ where
         + BackchannelStore
         + SessionStore
         + AuthnStore
+        + CeremonyStore
         + Send
         + Sync
         + 'static,
@@ -80,6 +82,7 @@ where
         + BackchannelStore
         + SessionStore
         + AuthnStore
+        + CeremonyStore
         + Send
         + Sync
         + 'static,
@@ -154,6 +157,7 @@ where
         + BackchannelStore
         + SessionStore
         + AuthnStore
+        + CeremonyStore
         + Send
         + Sync
         + 'static,
@@ -237,6 +241,7 @@ where
         + BackchannelStore
         + SessionStore
         + AuthnStore
+        + CeremonyStore
         + Send
         + Sync
         + 'static,
@@ -362,6 +367,7 @@ where
         + BackchannelStore
         + SessionStore
         + AuthnStore
+        + CeremonyStore
         + Send
         + Sync
         + 'static,
@@ -418,13 +424,261 @@ where
     response
 }
 
+fn webauthn_refusal(err: crate::endpoints::webauthn::WebauthnError) -> Response {
+    use crate::endpoints::webauthn::WebauthnError;
+
+    let status = match err {
+        WebauthnError::NeedsSession => StatusCode::UNAUTHORIZED,
+        WebauthnError::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
+        _ => StatusCode::BAD_REQUEST,
+    };
+    let mut r = (
+        status,
+        Json(serde_json::json!({ "error": err.to_string() })),
+    )
+        .into_response();
+    if let Ok(value) = "no-store".parse() {
+        r.headers_mut().insert("Cache-Control", value);
+    }
+    r
+}
+
+async fn webauthn_register_start<C, R, A, S, U, P, X>(
+    State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    headers: HeaderMap,
+) -> Response
+where
+    C: CodeStore
+        + CodeIssuer
+        + BackchannelStore
+        + SessionStore
+        + AuthnStore
+        + CeremonyStore
+        + Send
+        + Sync
+        + 'static,
+    R: RefreshStore + Send + Sync + 'static,
+    A: AuditSink + Send + Sync + 'static,
+    S: ClientStore + Send + Sync + 'static,
+    U: Send + Sync + 'static,
+    P: ReplayStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
+{
+    let Some(rp) = state.relying_party() else {
+        return (StatusCode::NOT_IMPLEMENTED, "WebAuthn is not configured").into_response();
+    };
+
+    let at = now();
+    let subject = resolve_subject(&state, &headers, at).await;
+
+    match crate::endpoints::webauthn::start_registration(
+        &state.codes,
+        rp,
+        state.tenant_id(),
+        subject,
+        &AwsLcSha256,
+        at,
+    )
+    .await
+    {
+        Ok(challenge) => no_store(Json(challenge).into_response()),
+        Err(err) => webauthn_refusal(err),
+    }
+}
+
+async fn webauthn_register_finish<C, R, A, S, U, P, X>(
+    State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    Json(request): Json<crate::endpoints::webauthn::FinishRegistration>,
+) -> Response
+where
+    C: CodeStore
+        + CodeIssuer
+        + BackchannelStore
+        + SessionStore
+        + AuthnStore
+        + CeremonyStore
+        + Send
+        + Sync
+        + 'static,
+    R: RefreshStore + Send + Sync + 'static,
+    A: AuditSink + Send + Sync + 'static,
+    S: ClientStore + Send + Sync + 'static,
+    U: Send + Sync + 'static,
+    P: ReplayStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
+{
+    let Some(rp) = state.relying_party() else {
+        return (StatusCode::NOT_IMPLEMENTED, "WebAuthn is not configured").into_response();
+    };
+
+    match crate::endpoints::webauthn::finish_registration(
+        &state.codes,
+        rp,
+        state.tenant_id(),
+        &request,
+        &AwsLcSha256,
+        now(),
+    )
+    .await
+    {
+        Ok(()) => no_store(StatusCode::NO_CONTENT.into_response()),
+        Err(err) => webauthn_refusal(err),
+    }
+}
+
+async fn webauthn_authenticate_start<C, R, A, S, U, P, X>(
+    State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    Json(request): Json<crate::endpoints::webauthn::StartAuthentication>,
+) -> Response
+where
+    C: CodeStore
+        + CodeIssuer
+        + BackchannelStore
+        + SessionStore
+        + AuthnStore
+        + CeremonyStore
+        + Send
+        + Sync
+        + 'static,
+    R: RefreshStore + Send + Sync + 'static,
+    A: AuditSink + Send + Sync + 'static,
+    S: ClientStore + Send + Sync + 'static,
+    U: Send + Sync + 'static,
+    P: ReplayStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
+{
+    let Some(rp) = state.relying_party() else {
+        return (StatusCode::NOT_IMPLEMENTED, "WebAuthn is not configured").into_response();
+    };
+
+    match crate::endpoints::webauthn::start_authentication(
+        &state.codes,
+        rp,
+        state.tenant_id(),
+        &request,
+        &state.tenant.blind_index,
+        &AwsLcSha256,
+        now(),
+    )
+    .await
+    {
+        Ok(challenge) => no_store(Json(challenge).into_response()),
+        Err(err) => webauthn_refusal(err),
+    }
+}
+
+async fn webauthn_authenticate_finish<C, R, A, S, U, P, X>(
+    State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    Json(request): Json<crate::endpoints::webauthn::FinishAuthentication>,
+) -> Response
+where
+    C: CodeStore
+        + CodeIssuer
+        + BackchannelStore
+        + SessionStore
+        + AuthnStore
+        + CeremonyStore
+        + Send
+        + Sync
+        + 'static,
+    R: RefreshStore + Send + Sync + 'static,
+    A: AuditSink + Send + Sync + 'static,
+    S: ClientStore + Send + Sync + 'static,
+    U: Send + Sync + 'static,
+    P: ReplayStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
+{
+    let Some(rp) = state.relying_party() else {
+        return (StatusCode::NOT_IMPLEMENTED, "WebAuthn is not configured").into_response();
+    };
+
+    match crate::endpoints::webauthn::finish_authentication(
+        &state.codes,
+        rp,
+        state.tenant_id(),
+        &request,
+        &AwsLcSha256,
+        now(),
+    )
+    .await
+    {
+        Ok((_, secret)) => {
+            let secure = state.tenant.metadata.issuer.starts_with("https://");
+            let mut r = Json(crate::endpoints::authn::LoginResponse {
+                authenticated: true,
+            })
+            .into_response();
+            if let Ok(value) = crate::endpoints::authn::session_cookie(&secret, secure).parse() {
+                r.headers_mut().insert("Set-Cookie", value);
+            }
+            no_store(r)
+        }
+        Err(err) => webauthn_refusal(err),
+    }
+}
+
+async fn register_handler<C, R, A, S, U, P, X>(
+    State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    Form(form): Form<crate::endpoints::authn::RegistrationForm>,
+) -> Response
+where
+    C: CodeStore
+        + CodeIssuer
+        + BackchannelStore
+        + SessionStore
+        + AuthnStore
+        + CeremonyStore
+        + Send
+        + Sync
+        + 'static,
+    R: RefreshStore + Send + Sync + 'static,
+    A: AuditSink + Send + Sync + 'static,
+    S: ClientStore + Send + Sync + 'static,
+    U: Send + Sync + 'static,
+    P: ReplayStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
+{
+    use crate::endpoints::authn::{RegistrationOutcome, register};
+
+    let outcome = register(
+        &state.codes,
+        state.tenant_id(),
+        &form,
+        &state.tenant.blind_index,
+        &argus_core::password_policy::NoBreachCorpus,
+    )
+    .await;
+
+    let status = match outcome {
+        RegistrationOutcome::Created => StatusCode::CREATED,
+        RegistrationOutcome::Refused => StatusCode::BAD_REQUEST,
+        RegistrationOutcome::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
+    };
+
+    no_store(status.into_response())
+}
+
+fn no_store(mut response: Response) -> Response {
+    if let Ok(value) = "no-store".parse() {
+        response.headers_mut().insert("Cache-Control", value);
+    }
+    response
+}
+
 async fn resolve_subject<C, R, A, S, U, P, X>(
     state: &AppState<C, R, A, S, U, P, X>,
     headers: &HeaderMap,
     now: Timestamp,
 ) -> Option<argus_core::id::UserId>
 where
-    C: CodeStore + SessionStore + Send + Sync,
+    C: CodeStore
+        + CodeIssuer
+        + BackchannelStore
+        + SessionStore
+        + AuthnStore
+        + CeremonyStore
+        + Send
+        + Sync,
     R: RefreshStore + Send + Sync,
     A: AuditSink + Send + Sync,
 {
@@ -448,7 +702,14 @@ async fn resolve_client<C, R, A, S, U, P, X>(
     now: Timestamp,
 ) -> Result<Option<argus_core::authorize::RegisteredClient>, Box<Response>>
 where
-    C: CodeStore + CodeIssuer + BackchannelStore + SessionStore + AuthnStore + Send + Sync,
+    C: CodeStore
+        + CodeIssuer
+        + BackchannelStore
+        + SessionStore
+        + AuthnStore
+        + CeremonyStore
+        + Send
+        + Sync,
     R: RefreshStore + Send + Sync,
     A: AuditSink + Send + Sync,
     S: ClientStore + Send + Sync,
@@ -488,6 +749,7 @@ where
         + BackchannelStore
         + SessionStore
         + AuthnStore
+        + CeremonyStore
         + Send
         + Sync
         + 'static,
@@ -510,6 +772,7 @@ where
         + BackchannelStore
         + SessionStore
         + AuthnStore
+        + CeremonyStore
         + Send
         + Sync
         + 'static,
@@ -528,7 +791,14 @@ async fn prm_response<C, R, A, S, U, P, X>(
     suffix: &str,
 ) -> Response
 where
-    C: CodeStore + CodeIssuer + BackchannelStore + SessionStore + AuthnStore + Send + Sync,
+    C: CodeStore
+        + CodeIssuer
+        + BackchannelStore
+        + SessionStore
+        + AuthnStore
+        + CeremonyStore
+        + Send
+        + Sync,
     R: RefreshStore + Send + Sync,
     A: AuditSink + Send + Sync,
     X: ResourceStore + Send + Sync,
@@ -584,6 +854,7 @@ where
         + BackchannelStore
         + SessionStore
         + AuthnStore
+        + CeremonyStore
         + Send
         + Sync
         + 'static,
@@ -687,6 +958,7 @@ where
         + BackchannelStore
         + SessionStore
         + AuthnStore
+        + CeremonyStore
         + Send
         + Sync
         + 'static,
@@ -762,6 +1034,7 @@ where
         + BackchannelStore
         + SessionStore
         + AuthnStore
+        + CeremonyStore
         + Send
         + Sync
         + 'static,
@@ -796,6 +1069,23 @@ where
         .route("/authorize", get(authorize_handler::<C, R, A, S, U, P, X>))
         .route("/token", post(token_handler::<C, R, A, S, U, P, X>))
         .route("/login", post(login_handler::<C, R, A, S, U, P, X>))
+        .route("/register", post(register_handler::<C, R, A, S, U, P, X>))
+        .route(
+            "/webauthn/register/start",
+            post(webauthn_register_start::<C, R, A, S, U, P, X>),
+        )
+        .route(
+            "/webauthn/register/finish",
+            post(webauthn_register_finish::<C, R, A, S, U, P, X>),
+        )
+        .route(
+            "/webauthn/authenticate/start",
+            post(webauthn_authenticate_start::<C, R, A, S, U, P, X>),
+        )
+        .route(
+            "/webauthn/authenticate/finish",
+            post(webauthn_authenticate_finish::<C, R, A, S, U, P, X>),
+        )
         .route(
             "/bc-authorize",
             post(backchannel_handler::<C, R, A, S, U, P, X>),

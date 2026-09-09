@@ -109,6 +109,7 @@ async fn main() -> ExitCode {
             active_key: Arc::clone(&keys.active),
             published_keys: keys.published.clone(),
             blind_index: blind_index.clone(),
+            relying_party: relying_party(&config),
         },
         codes: MemoryCodeStore::default(),
         refresh: MemoryRefreshStore::default(),
@@ -180,6 +181,22 @@ struct KeySet {
     active: Arc<SigningKey>,
 
     published: Vec<Arc<SigningKey>>,
+}
+
+fn relying_party(config: &Config) -> Option<Arc<argus_proto::webauthn::RelyingParty>> {
+    let host = config
+        .issuer
+        .strip_prefix("https://")
+        .or_else(|| config.issuer.strip_prefix("http://"))?
+        .split(['/', ':'])
+        .next()?;
+
+    let rp_id = env::var("ARGUS_WEBAUTHN_RP_ID").unwrap_or_else(|_| host.to_owned());
+    let rp_id = argus_core::rpid::RpId::register(&rp_id).ok()?;
+
+    argus_proto::webauthn::RelyingParty::new(&rp_id, &config.issuer, "Argus")
+        .ok()
+        .map(Arc::new)
 }
 
 fn load_blind_index(config: &Config) -> Result<argus_crypto::blind_index::BlindIndexKey, String> {
@@ -453,6 +470,7 @@ async fn serve_with_postgres(
             active_key: Arc::clone(&keys.active),
             published_keys: keys.published.clone(),
             blind_index: blind_index.clone(),
+            relying_party: relying_party(config),
         },
         codes: store.clone(),
         refresh: store.clone(),

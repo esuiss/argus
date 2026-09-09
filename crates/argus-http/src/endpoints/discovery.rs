@@ -37,6 +37,7 @@ mod tests {
             active_key: Arc::clone(&new),
             published_keys: vec![Arc::new(old), new],
             blind_index: test_blind_index(),
+            relying_party: None,
         }
     }
 

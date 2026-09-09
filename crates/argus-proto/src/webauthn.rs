@@ -28,6 +28,7 @@ pub struct StoredCredential {
 
 pub struct RelyingParty {
     inner: Webauthn,
+    rp_id: String,
 }
 
 impl core::fmt::Debug for RelyingParty {
@@ -53,7 +54,15 @@ impl RelyingParty {
             .build()
             .map_err(|_| CeremonyError::BadConfiguration)?;
 
-        Ok(Self { inner })
+        Ok(Self {
+            inner,
+            rp_id: rp_id.as_str().to_owned(),
+        })
+    }
+
+    #[must_use]
+    pub fn rp_id(&self) -> &str {
+        self.rp_id.as_str()
     }
 
     pub fn start_registration(

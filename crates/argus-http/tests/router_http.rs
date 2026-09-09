@@ -18,18 +18,21 @@ use argus_crypto::SigningKey;
 use argus_http::memstore::{MemoryReplayStore, MemoryResourceStore};
 use argus_http::state::{AppState, TenantContext};
 use argus_http::store::{
-    AuditSink, AuthnStore, BackchannelStore, ClientStore, CodeIssuer, CodeStore, RefreshStore,
-    SessionStore, StoreError,
+    AuditSink, AuthnStore, BackchannelStore, CeremonyStore, ClientStore, CodeIssuer, CodeStore,
+    RefreshStore, SessionStore, StoreError,
 };
 use argus_proto::AuthorizationServerMetadata;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::{TcpListener, TcpStream};
 use uuid::Uuid;
 
+type PendingState = (Option<UserId>, String);
+
 #[derive(Default)]
 struct Codes {
     issued: Mutex<Option<StoredCode>>,
     sessions: Mutex<std::collections::HashMap<[u8; 32], argus_http::store::AuthnSession>>,
+    ceremonies: Mutex<std::collections::HashMap<[u8; 32], PendingState>>,
 }
 
 impl CodeIssuer for Codes {
@@ -131,6 +134,7 @@ async fn serve() -> String {
             active_key: Arc::clone(&key),
             published_keys: vec![key],
             blind_index: test_blind_index(),
+            relying_party: None,
         },
         codes: Codes::default(),
         refresh: Refresh,
@@ -576,4 +580,35 @@ async fn a_forged_session_cookie_does_not_authenticate() {
 
 fn test_blind_index() -> argus_crypto::blind_index::BlindIndexKey {
     argus_crypto::blind_index::BlindIndexKey::new(&[7u8; 32]).expect("key")
+}
+
+impl CeremonyStore for Codes {
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn store_ceremony(
+        &self,
+        _t: TenantId,
+        hash: &[u8; 32],
+        ceremony: &argus_http::store::PendingCeremony<'_>,
+    ) -> Result<(), StoreError> {
+        self.ceremonies
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .insert(*hash, (ceremony.user, ceremony.state.to_owned()));
+        Ok(())
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    async fn take_ceremony(
+        &self,
+        _t: TenantId,
+        hash: &[u8; 32],
+        _purpose: argus_http::store::CeremonyPurpose,
+        _now: Timestamp,
+    ) -> Result<(Option<UserId>, String), StoreError> {
+        self.ceremonies
+            .lock()
+            .map_err(|_| StoreError::Unavailable)?
+            .remove(hash)
+            .ok_or(StoreError::NotFound)
+    }
 }

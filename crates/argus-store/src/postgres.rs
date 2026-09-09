@@ -7,6 +7,7 @@ use argus_core::exchange::CrossAppConnection;
 use argus_core::id::{ClientId, TenantId, UserId};
 use argus_core::jag_consume::TrustedIssuer;
 use argus_core::pkce::{CodeChallenge, CodeChallengeMethod};
+use argus_core::recovery::{RecoveryAttempt, RecoveryState};
 use argus_core::redirect_uri::RedirectUri;
 use argus_core::refresh::{FamilyId, RefreshState, RefreshToken};
 use argus_core::resource::ResourceUri;
@@ -17,8 +18,8 @@ use sqlx::{PgPool, Postgres, Row as _, Transaction};
 use crate::traits::{
     AuditSink, AuthnSession, AuthnStore, BackchannelStore, CeremonyPurpose, CeremonyStore,
     ClientStore, CodeIssuer, CodeStore, ConnectionStore, IssuerStore, JtiOutcome, JtiPurpose,
-    PendingCeremony, ProtectedResource, RefreshStore, ReplayStore, ResourceStore, SessionStore,
-    StoreError,
+    PendingCeremony, ProtectedResource, RecoveryStore, RefreshStore, ReplayStore, ResourceStore,
+    SessionStore, StoreError,
 };
 
 #[derive(Debug, Clone)]
@@ -946,6 +947,120 @@ impl CeremonyStore for PostgresStore {
         let user: Option<uuid::Uuid> = row.try_get("user_id").map_err(|e| map_err(&e))?;
         let state: String = row.try_get("state").map_err(|e| map_err(&e))?;
         Ok((user.map(UserId::from_uuid), state))
+    }
+}
+
+impl RecoveryStore for PostgresStore {
+    async fn open_recovery(
+        &self,
+        tenant: TenantId,
+        attempt_id: uuid::Uuid,
+        attempt: &RecoveryAttempt,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        sqlx::query(
+            "INSERT INTO recovery_attempts \
+             (tenant_id, attempt_id, user_id, state, required_aal) \
+             VALUES ($1, $2, $3, $4, $5::aal)",
+        )
+        .bind(tenant.as_uuid())
+        .bind(attempt_id)
+        .bind(attempt.subject.as_uuid())
+        .bind(attempt.state.as_str())
+        .bind(attempt.required.as_str())
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?;
+
+        tx.commit().await.map_err(|e| map_err(&e))
+    }
+
+    async fn load_recovery(
+        &self,
+        tenant: TenantId,
+        attempt_id: uuid::Uuid,
+    ) -> Result<RecoveryAttempt, StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        let row = sqlx::query(
+            "SELECT user_id, state, achieved_aal::text, required_aal::text, \
+                    evidence_consumed, cooldown_until, grace_until \
+             FROM recovery_attempts WHERE tenant_id = $1 AND attempt_id = $2",
+        )
+        .bind(tenant.as_uuid())
+        .bind(attempt_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?
+        .ok_or(StoreError::NotFound)?;
+
+        tx.commit().await.map_err(|e| map_err(&e))?;
+
+        let user: uuid::Uuid = row.try_get("user_id").map_err(|e| map_err(&e))?;
+        let raw_state: String = row.try_get("state").map_err(|e| map_err(&e))?;
+        let achieved: Option<String> = row.try_get("achieved_aal").map_err(|e| map_err(&e))?;
+        let required: Option<String> = row.try_get("required_aal").map_err(|e| map_err(&e))?;
+        let consumed: bool = row.try_get("evidence_consumed").map_err(|e| map_err(&e))?;
+        let cooldown: Option<chrono::DateTime<chrono::Utc>> =
+            row.try_get("cooldown_until").map_err(|e| map_err(&e))?;
+        let grace: Option<chrono::DateTime<chrono::Utc>> =
+            row.try_get("grace_until").map_err(|e| map_err(&e))?;
+
+        let state = match raw_state.as_str() {
+            "requested" => RecoveryState::Requested,
+            "evidence_met" => RecoveryState::EvidenceMet,
+            "cooling_down" => RecoveryState::CoolingDown,
+            "rebind_open" => RecoveryState::RebindOpen,
+            "grace_period" => RecoveryState::GracePeriod,
+            "closed" => RecoveryState::Closed,
+            "denied" => RecoveryState::Denied,
+            "throttled" => RecoveryState::Throttled,
+            "locked" => RecoveryState::Locked,
+            _ => return Err(StoreError::Unavailable),
+        };
+
+        Ok(RecoveryAttempt {
+            subject: UserId::from_uuid(user),
+            state,
+            required: required.as_deref().and_then(Aal::parse).unwrap_or(Aal::One),
+            achieved: achieved.as_deref().and_then(Aal::parse),
+            evidence_consumed: consumed,
+            cooldown_until: cooldown.map(from_dt),
+            grace_until: grace.map(from_dt),
+        })
+    }
+
+    async fn advance_recovery(
+        &self,
+        tenant: TenantId,
+        attempt_id: uuid::Uuid,
+        attempt: &RecoveryAttempt,
+        at: Timestamp,
+    ) -> Result<bool, StoreError> {
+        let mut tx = self.scoped(tenant).await?;
+
+        let result = sqlx::query(
+            "UPDATE recovery_attempts SET state = $3, achieved_aal = $4::aal, \
+                    evidence_consumed = $5, cooldown_until = $6, grace_until = $7, \
+                    state_changed_at = $8 \
+             WHERE tenant_id = $1 AND attempt_id = $2 AND evidence_consumed = false \
+             OR (tenant_id = $1 AND attempt_id = $2 AND $5 = evidence_consumed)",
+        )
+        .bind(tenant.as_uuid())
+        .bind(attempt_id)
+        .bind(attempt.state.as_str())
+        .bind(attempt.achieved.map(Aal::as_str))
+        .bind(attempt.evidence_consumed)
+        .bind(attempt.cooldown_until.map(to_dt))
+        .bind(attempt.grace_until.map(to_dt))
+        .bind(to_dt(at))
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| map_err(&e))?;
+
+        tx.commit().await.map_err(|e| map_err(&e))?;
+        Ok(result.rows_affected() == 1)
     }
 }
 

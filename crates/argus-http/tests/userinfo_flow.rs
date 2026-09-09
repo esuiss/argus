@@ -41,6 +41,7 @@ fn tenant() -> (TenantContext, Arc<SigningKey>) {
             active_key: Arc::clone(&key),
             published_keys: vec![Arc::clone(&key)],
             blind_index: test_blind_index(),
+            relying_party: None,
         },
         key,
     )
@@ -201,6 +202,7 @@ fn a_token_signed_by_a_retired_but_published_key_still_verifies() {
         active_key: Arc::clone(&new),
         published_keys: vec![Arc::clone(&old), new],
         blind_index: test_blind_index(),
+        relying_party: None,
     };
 
     let token = sign(&claims(None), &old).expect("sign");

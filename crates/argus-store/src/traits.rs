@@ -7,6 +7,7 @@ use argus_core::id::ClientId;
 use argus_core::id::TenantId;
 use argus_core::id::UserId;
 use argus_core::jag_consume::TrustedIssuer;
+use argus_core::recovery::RecoveryAttempt;
 use argus_core::refresh::{FamilyId, RefreshToken};
 use argus_core::resource::ResourceUri;
 use core::future::Future;
@@ -276,6 +277,29 @@ pub trait CeremonyStore {
         purpose: CeremonyPurpose,
         now: Timestamp,
     ) -> impl Future<Output = Result<(Option<UserId>, String), StoreError>> + Send;
+}
+
+pub trait RecoveryStore {
+    fn open_recovery(
+        &self,
+        tenant: TenantId,
+        attempt_id: uuid::Uuid,
+        attempt: &RecoveryAttempt,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    fn load_recovery(
+        &self,
+        tenant: TenantId,
+        attempt_id: uuid::Uuid,
+    ) -> impl Future<Output = Result<RecoveryAttempt, StoreError>> + Send;
+
+    fn advance_recovery(
+        &self,
+        tenant: TenantId,
+        attempt_id: uuid::Uuid,
+        attempt: &RecoveryAttempt,
+        at: Timestamp,
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send;
 }
 
 pub trait SessionStore {
