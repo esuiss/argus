@@ -23,6 +23,7 @@
 #![forbid(unsafe_code)]
 
 pub mod authz_code;
+pub mod dpop;
 pub mod effect;
 pub mod epoch;
 pub mod error;
@@ -33,6 +34,7 @@ pub mod refresh;
 pub mod time;
 
 pub use authz_code::{AuthorizationCode, Decision, Grant, StoredCode, TokenRequest};
+pub use dpop::{DpopError, RequestBinding, VerifiedProof};
 pub use effect::Effect;
 pub use epoch::{AuthzEpoch, KeyEpoch, SessionEpoch};
 pub use error::{IdError, PkceError, RedirectUriError};

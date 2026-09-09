@@ -3,10 +3,22 @@
 //! # Neden trait
 //!
 //! `argus-core` karar verir, bu katman kararı **uygular**. Uygulama bir depoya
-//! ihtiyaç duyar ama hangi depo olduğu HTTP katmanını ilgilendirmez: aynı
-//! endpoint kodu bellek içi bir depoyla (test) ve PostgreSQL'le (üretim) çalışır.
+//! ihtiyaç duyar ama hangi depo olduğu `HTTP` katmanını ilgilendirmez: aynı
+//! endpoint kodu bellek içi bir depoyla (test) ve `PostgreSQL`'le (üretim) çalışır.
 //!
 //! # Sır değerleri burada da geçmez
+//!
+//! Metotlar `async`: gerçek depo ağ üzerinden konuşur ve senkron bir imza,
+//! çağıranı ya bloklamaya ya da sonradan her şeyi çevirmeye zorlardı.
+//! `argus-core` bundan etkilenmez — orada I/O yok (karar #15).
+//!
+//! # Neden `async fn` değil, `impl Future + Send`
+//!
+//! Trait'te `async fn` yazmak dönen future'ın `Send` olduğunu **ifade edemez**.
+//! Çok thread'li bir çalışma zamanında (tokio multi-thread) handler'lar
+//! thread'ler arasında taşınır; `Send` olmayan bir future orada derlenmez ve
+//! hata, trait tanımında değil çok uzaktaki çağrı yerinde patlar. Sınırı burada
+//! açıkça yazmak, o hatayı doğduğu yere taşır.
 //!
 //! Arayüz kodun/token'ın **hash'ini** alır, kendisini değil. Ham değer yalnızca
 //! istemciye dönerken bir kez görülür ve hiçbir yerde saklanmaz — §25 K27'nin
@@ -15,6 +27,8 @@
 use argus_core::authz_code::StoredCode;
 use argus_core::id::TenantId;
 use argus_core::refresh::{FamilyId, RefreshToken};
+use core::future::Future;
+
 use argus_core::time::Timestamp;
 
 /// Depo hataları.
@@ -38,7 +52,11 @@ pub trait CodeStore {
     /// # Errors
     ///
     /// Kayıt yoksa veya depo erişilemezse.
-    fn load(&self, tenant: TenantId, code_hash: &[u8; 32]) -> Result<StoredCode, StoreError>;
+    fn load(
+        &self,
+        tenant: TenantId,
+        code_hash: &[u8; 32],
+    ) -> impl Future<Output = Result<StoredCode, StoreError>> + Send;
 
     /// Kodu tüketilmiş işaretler.
     ///
@@ -50,7 +68,7 @@ pub trait CodeStore {
         tenant: TenantId,
         code_hash: &[u8; 32],
         at: Timestamp,
-    ) -> Result<(), StoreError>;
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 
     /// Bu koddan türeyen tüm token'ları iptal eder (RFC 9700 §4.1.1).
     ///
@@ -62,7 +80,7 @@ pub trait CodeStore {
         tenant: TenantId,
         code_hash: &[u8; 32],
         at: Timestamp,
-    ) -> Result<(), StoreError>;
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// Refresh token deposu.
@@ -72,7 +90,11 @@ pub trait RefreshStore {
     /// # Errors
     ///
     /// Kayıt yoksa veya depo erişilemezse.
-    fn load(&self, tenant: TenantId, token_hash: &[u8; 32]) -> Result<RefreshToken, StoreError>;
+    fn load(
+        &self,
+        tenant: TenantId,
+        token_hash: &[u8; 32],
+    ) -> impl Future<Output = Result<RefreshToken, StoreError>> + Send;
 
     /// Eskisini döndürülmüş işaretler, yenisini yazar.
     ///
@@ -86,7 +108,7 @@ pub trait RefreshStore {
         new_hash: &[u8; 32],
         new_token: &RefreshToken,
         at: Timestamp,
-    ) -> Result<(), StoreError>;
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 
     /// Zincirin tamamını iptal eder (RFC 9700 §4.14.2).
     ///
@@ -98,7 +120,7 @@ pub trait RefreshStore {
         tenant: TenantId,
         family: FamilyId,
         at: Timestamp,
-    ) -> Result<(), StoreError>;
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// Denetim kaydı sınırı.
@@ -113,5 +135,10 @@ pub trait AuditSink {
     ///
     /// Depo erişilemezse. **Bu hata yutulmaz:** kaydedilemeyen bir olay,
     /// isteğin başarısız olması demektir (AU-12/PCI 10.2 "all").
-    fn record(&self, tenant: TenantId, event_type: &str, at: Timestamp) -> Result<(), StoreError>;
+    fn record(
+        &self,
+        tenant: TenantId,
+        event_type: &str,
+        at: Timestamp,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }

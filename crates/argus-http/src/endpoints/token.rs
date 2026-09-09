@@ -75,7 +75,7 @@ const fn store_error_to_oauth(e: &StoreError) -> OAuthError {
 /// # Errors
 ///
 /// Grant geçersizse, istemci doğrulanamazsa veya depo erişilemezse.
-pub fn handle<C, R, A, H>(
+pub async fn handle<C, R, A, H>(
     state: &AppState<C, R, A>,
     form: &TokenForm,
     now: Timestamp,
@@ -88,8 +88,8 @@ where
     H: Sha256,
 {
     match form.grant_type.as_str() {
-        "authorization_code" => authorization_code(state, form, now, hasher),
-        "refresh_token" => refresh_token(state, form, now, hasher),
+        "authorization_code" => authorization_code(state, form, now, hasher).await,
+        "refresh_token" => refresh_token(state, form, now, hasher).await,
         // OAuth 2.1: `password` ve `implicit` yok. Bilinmeyen grant da buraya düşer.
         _ => Err(OAuthError::with_description(
             OAuthErrorCode::UnsupportedGrantType,
@@ -106,7 +106,7 @@ fn client_of(form: &TokenForm) -> Result<ClientId, OAuthError> {
     ClientId::new(raw).map_err(|_| OAuthError::new(OAuthErrorCode::InvalidClient))
 }
 
-fn authorization_code<C, R, A, H>(
+async fn authorization_code<C, R, A, H>(
     state: &AppState<C, R, A>,
     form: &TokenForm,
     now: Timestamp,
@@ -139,6 +139,7 @@ where
     let stored = state
         .codes
         .load(tenant, &code_hash)
+        .await
         .map_err(|e| store_error_to_oauth(&e))?;
     let record = AuthorizationCode::from_stored(stored);
 
@@ -159,7 +160,7 @@ where
         Decision::Deny { reason, effects } => {
             // Ret yolunda da etkiler uygulanır: kodun tüketilmesi ve — tekrar
             // kullanımda — zincirin düşürülmesi tam olarak burada olur.
-            apply_effects(state, &effects, &code_hash, None, now)?;
+            apply_effects(state, &effects, &code_hash, None, now).await?;
             return Err(OAuthError::new(match reason.oauth_error_code() {
                 "invalid_grant" => OAuthErrorCode::InvalidGrant,
                 _ => OAuthErrorCode::InvalidRequest,
@@ -167,11 +168,11 @@ where
         }
     };
 
-    apply_effects(state, &effects, &code_hash, None, now)?;
+    apply_effects(state, &effects, &code_hash, None, now).await?;
     issue(state, &grant.subject, &grant.client, now, hasher, None)
 }
 
-fn refresh_token<C, R, A, H>(
+async fn refresh_token<C, R, A, H>(
     state: &AppState<C, R, A>,
     form: &TokenForm,
     now: Timestamp,
@@ -195,6 +196,7 @@ where
     let stored = state
         .refresh
         .load(tenant, &old_hash)
+        .await
         .map_err(|e| store_error_to_oauth(&e))?;
 
     let decision = rotate(
@@ -215,7 +217,7 @@ where
                 new_token: &stored,
                 family: stored.family,
             };
-            apply_effects(state, &effects, &old_hash, Some(rotation), now)?;
+            apply_effects(state, &effects, &old_hash, Some(rotation), now).await?;
             let _ = reason;
             Err(OAuthError::new(OAuthErrorCode::InvalidGrant))
         }
@@ -239,7 +241,7 @@ where
                 new_token: &new_token,
                 family: grant.family,
             };
-            apply_effects(state, &effects, &old_hash, Some(rotation), now)?;
+            apply_effects(state, &effects, &old_hash, Some(rotation), now).await?;
 
             issue(
                 state,
@@ -253,7 +255,7 @@ where
     }
 }
 
-fn apply_effects<C, R, A>(
+async fn apply_effects<C, R, A>(
     state: &AppState<C, R, A>,
     effects: &[Effect],
     code_hash: &[u8; 32],
@@ -272,6 +274,7 @@ where
         now,
     };
     apply(effects, &ctx, &state.codes, &state.refresh, &state.audit)
+        .await
         .map_err(|e| store_error_to_oauth(&e))
 }
 

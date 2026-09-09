@@ -53,7 +53,7 @@ pub struct Rotation<'a> {
 ///
 /// Panic etmez; eksik bağlam [`StoreError::Unavailable`] olarak raporlanır çünkü
 /// bu bir programlama hatasıdır ve istemciye ayrıntısı verilmez.
-pub fn apply<C, R, A>(
+pub async fn apply<C, R, A>(
     effects: &[Effect],
     ctx: &EffectContext<'_>,
     codes: &C,
@@ -69,24 +69,28 @@ where
         match effect {
             Effect::ConsumeCode => {
                 let hash = ctx.code_hash.ok_or(StoreError::Unavailable)?;
-                codes.consume(ctx.tenant, hash, ctx.now)?;
+                codes.consume(ctx.tenant, hash, ctx.now).await?;
             }
             Effect::RevokeTokensIssuedForCode => {
                 let hash = ctx.code_hash.ok_or(StoreError::Unavailable)?;
-                codes.revoke_tokens_issued_for_code(ctx.tenant, hash, ctx.now)?;
+                codes
+                    .revoke_tokens_issued_for_code(ctx.tenant, hash, ctx.now)
+                    .await?;
             }
             Effect::RotateRefreshToken => {
                 let r = ctx.rotation.as_ref().ok_or(StoreError::Unavailable)?;
-                refresh.rotate(ctx.tenant, r.old_hash, r.new_hash, r.new_token, ctx.now)?;
+                refresh
+                    .rotate(ctx.tenant, r.old_hash, r.new_hash, r.new_token, ctx.now)
+                    .await?;
             }
             Effect::RevokeRefreshFamily => {
                 let r = ctx.rotation.as_ref().ok_or(StoreError::Unavailable)?;
-                refresh.revoke_family(ctx.tenant, r.family, ctx.now)?;
+                refresh.revoke_family(ctx.tenant, r.family, ctx.now).await?;
             }
             Effect::RecordAudit(event_type) => {
                 // §1 #23: denetim kaydı yutulmaz. Kaydedilemeyen bir olay,
                 // isteğin başarısız olması demektir (AU-12/PCI 10.2 "all").
-                audit.record(ctx.tenant, event_type, ctx.now)?;
+                audit.record(ctx.tenant, event_type, ctx.now).await?;
             }
         }
     }

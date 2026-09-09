@@ -4,7 +4,13 @@
 //! `argus-http`'nin etki uygulaması, `argus-crypto`'nun imzası ve
 //! `argus-proto`'nun tel formatı tek bir istekte buluşuyor.
 
-#![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+#![allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::panic,
+    // Sahte depolar bellek içi ve senkron; `async` imzası trait sözleşmesi için.
+    clippy::unused_async_trait_impl
+)]
 
 use std::sync::{Arc, Mutex};
 
@@ -44,18 +50,18 @@ struct MemCodes {
 }
 
 impl CodeStore for MemCodes {
-    fn load(&self, _t: TenantId, _h: &[u8; 32]) -> Result<StoredCode, StoreError> {
+    async fn load(&self, _t: TenantId, _h: &[u8; 32]) -> Result<StoredCode, StoreError> {
         self.record
             .lock()
             .expect("lock")
             .clone()
             .ok_or(StoreError::NotFound)
     }
-    fn consume(&self, _t: TenantId, _h: &[u8; 32], _at: Timestamp) -> Result<(), StoreError> {
+    async fn consume(&self, _t: TenantId, _h: &[u8; 32], _at: Timestamp) -> Result<(), StoreError> {
         *self.consumed.lock().expect("lock") = true;
         Ok(())
     }
-    fn revoke_tokens_issued_for_code(
+    async fn revoke_tokens_issued_for_code(
         &self,
         _t: TenantId,
         _h: &[u8; 32],
@@ -74,14 +80,14 @@ struct MemRefresh {
 }
 
 impl RefreshStore for MemRefresh {
-    fn load(&self, _t: TenantId, _h: &[u8; 32]) -> Result<RefreshToken, StoreError> {
+    async fn load(&self, _t: TenantId, _h: &[u8; 32]) -> Result<RefreshToken, StoreError> {
         self.record
             .lock()
             .expect("lock")
             .clone()
             .ok_or(StoreError::NotFound)
     }
-    fn rotate(
+    async fn rotate(
         &self,
         _t: TenantId,
         _o: &[u8; 32],
@@ -92,7 +98,12 @@ impl RefreshStore for MemRefresh {
         *self.rotated.lock().expect("lock") = true;
         Ok(())
     }
-    fn revoke_family(&self, _t: TenantId, _f: FamilyId, _at: Timestamp) -> Result<(), StoreError> {
+    async fn revoke_family(
+        &self,
+        _t: TenantId,
+        _f: FamilyId,
+        _at: Timestamp,
+    ) -> Result<(), StoreError> {
         *self.family_revoked.lock().expect("lock") = true;
         Ok(())
     }
@@ -104,7 +115,12 @@ struct MemAudit {
 }
 
 impl AuditSink for MemAudit {
-    fn record(&self, _t: TenantId, event_type: &str, _at: Timestamp) -> Result<(), StoreError> {
+    async fn record(
+        &self,
+        _t: TenantId,
+        event_type: &str,
+        _at: Timestamp,
+    ) -> Result<(), StoreError> {
         self.events
             .lock()
             .expect("lock")
@@ -157,12 +173,14 @@ fn code_form() -> TokenForm {
 
 // --- Authorization code ---------------------------------------------------
 
-#[test]
-fn authorization_code_yields_a_verifiable_access_token() {
+#[tokio::test]
+async fn authorization_code_yields_a_verifiable_access_token() {
     let s = state();
     *s.codes.record.lock().expect("lock") = Some(stored_code(CodeState::Issued));
 
-    let resp = handle(&s, &code_form(), NOW, &AwsLcSha256).expect("token issued");
+    let resp = handle(&s, &code_form(), NOW, &AwsLcSha256)
+        .await
+        .expect("token issued");
 
     // Token gerçekten bu sunucunun yayınladığı anahtarla doğrulanabilmeli.
     let claims = argus_proto::jwt::verify(&resp.access_token, &s.tenant.active_key.verifying_key())
@@ -186,8 +204,8 @@ fn authorization_code_yields_a_verifiable_access_token() {
 
 /// PKCE yanlışsa token verilmez ve kod yine de tüketilir — saldırgan aynı kodu
 /// farklı verifier'larla deneyemesin.
-#[test]
-fn wrong_pkce_verifier_is_rejected_and_burns_the_code() {
+#[tokio::test]
+async fn wrong_pkce_verifier_is_rejected_and_burns_the_code() {
     let s = state();
     *s.codes.record.lock().expect("lock") = Some(stored_code(CodeState::Issued));
 
@@ -196,7 +214,9 @@ fn wrong_pkce_verifier_is_rejected_and_burns_the_code() {
         ..code_form()
     };
 
-    let err = handle(&s, &form, NOW, &AwsLcSha256).expect_err("must be denied");
+    let err = handle(&s, &form, NOW, &AwsLcSha256)
+        .await
+        .expect_err("must be denied");
     assert_eq!(err.error, OAuthErrorCode::InvalidGrant);
     assert!(
         *s.codes.consumed.lock().expect("lock"),
@@ -205,14 +225,16 @@ fn wrong_pkce_verifier_is_rejected_and_burns_the_code() {
 }
 
 /// RFC 9700 §4.1.1: tekrar kullanılan kod, o koddan türeyen her şeyi düşürür.
-#[test]
-fn replayed_code_triggers_revocation_of_derived_tokens() {
+#[tokio::test]
+async fn replayed_code_triggers_revocation_of_derived_tokens() {
     let s = state();
     *s.codes.record.lock().expect("lock") = Some(stored_code(CodeState::Redeemed {
         at: Timestamp::from_unix_seconds(999_999),
     }));
 
-    let err = handle(&s, &code_form(), NOW, &AwsLcSha256).expect_err("replay must be denied");
+    let err = handle(&s, &code_form(), NOW, &AwsLcSha256)
+        .await
+        .expect_err("replay must be denied");
     assert_eq!(err.error, OAuthErrorCode::InvalidGrant);
     assert!(
         *s.codes.revoked_for_code.lock().expect("lock"),
@@ -253,12 +275,14 @@ fn refresh_form() -> TokenForm {
     }
 }
 
-#[test]
-fn refresh_rotates_and_returns_a_new_token() {
+#[tokio::test]
+async fn refresh_rotates_and_returns_a_new_token() {
     let s = state();
     *s.refresh.record.lock().expect("lock") = Some(stored_refresh(RefreshState::Active));
 
-    let resp = handle(&s, &refresh_form(), NOW, &AwsLcSha256).expect("rotation");
+    let resp = handle(&s, &refresh_form(), NOW, &AwsLcSha256)
+        .await
+        .expect("rotation");
 
     assert!(
         *s.refresh.rotated.lock().expect("lock"),
@@ -276,14 +300,16 @@ fn refresh_rotates_and_returns_a_new_token() {
 }
 
 /// RFC 9700 §4.14.2: döndürülmüş bir token yeniden sunulduğunda zincir düşer.
-#[test]
-fn reusing_a_rotated_refresh_token_brings_the_family_down() {
+#[tokio::test]
+async fn reusing_a_rotated_refresh_token_brings_the_family_down() {
     let s = state();
     *s.refresh.record.lock().expect("lock") = Some(stored_refresh(RefreshState::Rotated {
         at: Timestamp::from_unix_seconds(999_999),
     }));
 
-    let err = handle(&s, &refresh_form(), NOW, &AwsLcSha256).expect_err("reuse must be denied");
+    let err = handle(&s, &refresh_form(), NOW, &AwsLcSha256)
+        .await
+        .expect_err("reuse must be denied");
     assert_eq!(err.error, OAuthErrorCode::InvalidGrant);
     assert!(
         *s.refresh.family_revoked.lock().expect("lock"),
@@ -294,15 +320,17 @@ fn reusing_a_rotated_refresh_token_brings_the_family_down() {
 // --- Grant tipi ve arıza davranışı ----------------------------------------
 
 /// OAuth 2.1 `password` ve implicit'i kaldırdı; desteklenmedikleri net olmalı.
-#[test]
-fn unsupported_grant_types_are_rejected() {
+#[tokio::test]
+async fn unsupported_grant_types_are_rejected() {
     let s = state();
     for gt in ["password", "implicit", "client_credentials", "nonsense"] {
         let form = TokenForm {
             grant_type: gt.to_owned(),
             ..code_form()
         };
-        let err = handle(&s, &form, NOW, &AwsLcSha256).expect_err("must be rejected");
+        let err = handle(&s, &form, NOW, &AwsLcSha256)
+            .await
+            .expect_err("must be rejected");
         assert_eq!(
             err.error,
             OAuthErrorCode::UnsupportedGrantType,
@@ -314,17 +342,17 @@ fn unsupported_grant_types_are_rejected() {
 /// §19 §7.1: depo erişilemezken `invalid_grant` DÖNÜLMEZ. `invalid_grant`
 /// istemciye "yeniden yetkilendir" dedirtir ve geçici bir arızayı kalıcı bir
 /// çıkışa çevirir. Doğru cevap 503'tür.
-#[test]
-fn storage_outage_returns_503_not_invalid_grant() {
+#[tokio::test]
+async fn storage_outage_returns_503_not_invalid_grant() {
     struct DeadCodes;
     impl CodeStore for DeadCodes {
-        fn load(&self, _: TenantId, _: &[u8; 32]) -> Result<StoredCode, StoreError> {
+        async fn load(&self, _: TenantId, _: &[u8; 32]) -> Result<StoredCode, StoreError> {
             Err(StoreError::Unavailable)
         }
-        fn consume(&self, _: TenantId, _: &[u8; 32], _: Timestamp) -> Result<(), StoreError> {
+        async fn consume(&self, _: TenantId, _: &[u8; 32], _: Timestamp) -> Result<(), StoreError> {
             Err(StoreError::Unavailable)
         }
-        fn revoke_tokens_issued_for_code(
+        async fn revoke_tokens_issued_for_code(
             &self,
             _: TenantId,
             _: &[u8; 32],
@@ -348,7 +376,9 @@ fn storage_outage_returns_503_not_invalid_grant() {
         tenant_id: tenant(),
     };
 
-    let err = handle(&s, &code_form(), NOW, &AwsLcSha256).expect_err("outage");
+    let err = handle(&s, &code_form(), NOW, &AwsLcSha256)
+        .await
+        .expect_err("outage");
     assert_eq!(err.error, OAuthErrorCode::TemporarilyUnavailable);
     assert_eq!(err.http_status(), 503);
 }

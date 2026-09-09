@@ -5,6 +5,15 @@ version = 4
 [[package]]
 name = "argus"
 version = "0.0.0"
+dependencies = [
+ "argus-core",
+ "argus-crypto",
+ "argus-http",
+ "argus-proto",
+ "axum",
+ "tokio",
+ "uuid",
+]
 
 [[package]]
 name = "argus-core"
