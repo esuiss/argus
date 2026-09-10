@@ -538,4 +538,4 @@ BEGIN;
   END $$;
 COMMIT;
 
-\echo 'RLS + sema: 24/24 gecti'
+\echo 'RLS + schema: 24/24 passed'

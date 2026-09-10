@@ -11,6 +11,7 @@ use serde_json::{Map, Value};
 pub const DEFAULT_CONFIGURATION_LIFETIME: Duration = Duration::from_seconds(86_400);
 pub const DEFAULT_SUBORDINATE_LIFETIME: Duration = Duration::from_seconds(3_600);
 
+#[derive(Clone)]
 pub struct FederationIdentity {
     pub entity: EntityIdentifier,
     pub role: Role,

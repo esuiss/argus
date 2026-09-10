@@ -80,6 +80,27 @@ fn utf16_order(left: &str, right: &str) -> core::cmp::Ordering {
     }
 }
 
+const fn hex_digit(nibble: u32) -> char {
+    match nibble {
+        0 => '0',
+        1 => '1',
+        2 => '2',
+        3 => '3',
+        4 => '4',
+        5 => '5',
+        6 => '6',
+        7 => '7',
+        8 => '8',
+        9 => '9',
+        10 => 'a',
+        11 => 'b',
+        12 => 'c',
+        13 => 'd',
+        14 => 'e',
+        _ => 'f',
+    }
+}
+
 fn write_string(text: &str, out: &mut String) {
     out.push('"');
 
@@ -93,8 +114,10 @@ fn write_string(text: &str, out: &mut String) {
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
             c if (c as u32) < 0x20 => {
-                out.push_str("\\u");
-                out.push_str(&format!("{:04x}", c as u32));
+                let value = c as u32;
+                out.push_str("\\u00");
+                out.push(hex_digit(value >> 4));
+                out.push(hex_digit(value & 0x0F));
             }
             c => out.push(c),
         }

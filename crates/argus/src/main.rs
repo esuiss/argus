@@ -891,7 +891,13 @@ fn federation_identity(
     let entity_id = config.federation_entity_id.clone()?;
     let dir = config.federation_key_dir.as_ref()?;
 
-    let entity = argus_core::federation::statement::EntityIdentifier::parse(&entity_id).ok()?;
+    let entity = match argus_core::federation::statement::EntityIdentifier::parse(&entity_id) {
+        Ok(entity) => entity,
+        Err(e) => {
+            eprintln!("argus: ARGUS_FEDERATION_ENTITY_ID is not a usable entity identifier: {e}");
+            return None;
+        }
+    };
     let keys = load_key_dir(dir);
 
     if keys.is_empty() {
@@ -1219,6 +1225,8 @@ async fn serve_with_postgres(
         }),
     });
 
+    let federation = federation_identity(config);
+
     let state = Arc::new(AppState {
         tenant: TenantContext {
             metadata: published_metadata.clone(),
@@ -1239,7 +1247,7 @@ async fn serve_with_postgres(
         resources: store.clone(),
         cimd: Some(cimd_runtime(config)),
         federation: federation_runtime(config, tls_client_config()),
-        federation_identity: federation_identity(config),
+        federation_identity: federation.clone(),
         pushed_requests: Some(Arc::clone(&pushed_requests)),
     });
 
@@ -1255,7 +1263,7 @@ async fn serve_with_postgres(
         store: Some(store.clone()),
         issuer: config.issuer.clone(),
         published_keys: keys.published.clone(),
-        federation: federation_identity(config),
+        federation: federation.clone(),
         provider_metadata: argus_http::differentiation::metadata_value(&published_metadata),
         agent_card_key: config
             .agent_card_key_dir

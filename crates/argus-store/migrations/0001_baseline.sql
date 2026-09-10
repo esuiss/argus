@@ -19,7 +19,7 @@ AS $$
 $$;
 
 COMMENT ON FUNCTION argus_current_tenant() IS
-  'Transaction-yerel kiracı kapsamı. Ayarlanmamışsa NULL doner ve tum RLS politikalari fail-closed olur.';
+  'Transaction-local tenant scope. Returns NULL when unset, so every RLS policy fails closed.';
 
 CREATE TABLE tenants (
   tenant_id    uuid        NOT NULL DEFAULT uuidv7(),
