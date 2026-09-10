@@ -21,6 +21,7 @@ pub mod redirect_uri;
 pub mod refresh;
 pub mod resource;
 pub mod rpid;
+pub mod scim_patch;
 pub mod ssrf;
 pub mod time;
 
