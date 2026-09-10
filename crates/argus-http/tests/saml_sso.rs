@@ -85,6 +85,8 @@ fn state(
             "as.test",
             argus_http::tenancy::TenantEntry {
                 id: TenantId::from_uuid(Uuid::nil()),
+                theme: argus_core::theme::Theme::default(),
+                client_themes: std::collections::BTreeMap::new(),
                 issuer: "https://as.test".to_owned(),
                 context: test_context(),
             },
@@ -390,6 +392,8 @@ fn test_tenant() -> argus_http::tenancy::Tenant {
         "as.test",
         argus_http::tenancy::TenantEntry {
             id: TenantId::from_uuid(Uuid::nil()),
+            theme: argus_core::theme::Theme::default(),
+            client_themes: std::collections::BTreeMap::new(),
             issuer: "https://as.test".to_owned(),
             context: test_context(),
         },

@@ -14,7 +14,7 @@ const BOX: &str = "<form method=\"post\" action=\"/login\">the sign-in box</form
 
 #[test]
 fn the_default_shell_places_the_sign_in_box() {
-    let page = Shell::new().render(&theme(), BOX).expect("render");
+    let page = Shell::new().render(&theme(), None, BOX).expect("render");
     assert!(page.contains("the sign-in box"));
     assert!(page.contains("Acme"));
 }
@@ -36,7 +36,7 @@ fn a_shell_cannot_reach_anything_it_was_not_given() {
             shell: Some(source.to_owned()),
             ..theme()
         };
-        let page = shell.render(&theme, BOX);
+        let page = shell.render(&theme, None, BOX);
         assert!(
             page.is_err() || page.as_deref().is_ok_and(|p| !p.contains("secret")),
             "{source} reached something it was not handed"
@@ -59,13 +59,13 @@ fn the_shell_never_sees_request_data() {
     // Ölçüldü: liquid verilmemiş bir değişkende sessizce boş basmıyor, HATA
     // veriyor. Varsaydığımdan güçlü — bir kabuk istek verisine uzanmaya
     // kalkarsa sayfa çıkmaz, ve `render_or_default` derlenmiş kabuğa düşer.
-    let outcome = Shell::new().render(&theme, BOX);
+    let outcome = Shell::new().render(&theme, None, BOX);
     assert!(
         matches!(outcome, Err(ShellFault::NotValid(_))),
         "reaching for request data must fail, not render empty: {outcome:?}"
     );
 
-    let page = Shell::new().render_or_default(&theme, BOX);
+    let page = Shell::new().render_or_default(&theme, None, BOX);
     assert!(page.contains("the sign-in box"));
     assert!(
         !page.contains("[]"),
@@ -99,7 +99,7 @@ fn a_broken_shell_falls_back_to_the_compiled_one() {
         ..theme()
     };
 
-    let page = Shell::new().render_or_default(&theme, BOX);
+    let page = Shell::new().render_or_default(&theme, None, BOX);
     assert!(
         page.contains("the sign-in box"),
         "the fallback must still carry the box: {page}"
@@ -233,7 +233,7 @@ fn a_tenant_can_rebuild_the_whole_shell_around_the_box() {
     };
 
     theme.check().expect("a valid theme");
-    let page = Shell::new().render(&theme, BOX).expect("render");
+    let page = Shell::new().render(&theme, None, BOX).expect("render");
 
     // Kabuk kiracının: iki sütun, tanıtım paneli, altbilgi bağlantıları.
     assert!(page.contains(r#"class="split""#));
@@ -257,11 +257,39 @@ fn a_script_in_the_shell_runs_nowhere() {
     };
 
     // Sunucu tarafı: render sorunsuz biter, hiçbir kod çalışmaz.
-    let page = Shell::new().render(&theme, BOX).expect("render");
+    let page = Shell::new().render(&theme, None, BOX).expect("render");
     assert!(page.contains("the sign-in box"));
 
     // Tarayıcı tarafı: politika hiçbir script kaynağına izin vermiyor.
     let policy = content_security_policy(&theme);
     assert!(policy.contains("default-src 'none'"));
     assert!(!policy.contains("script"));
+}
+
+/// Liquid'de boş dizge ve boş dizi DOĞRU sayılır. Bunu bilmeden yazılan bir
+/// `{% if theme.logo_url %}`, logosu olmayan kiracıda boş bir img etiketi
+/// çizer. Ölçüldü ve sabitlendi.
+#[test]
+fn an_absent_logo_and_an_empty_footer_draw_nothing() {
+    let page = Shell::new().render(&theme(), None, BOX).expect("render");
+    assert!(
+        !page.contains("<img"),
+        "an empty logo must not be drawn: {page}"
+    );
+    assert!(
+        !page.contains("<footer"),
+        "an empty footer must not be drawn: {page}"
+    );
+
+    let with = Theme {
+        logo_url: Some("https://cdn.acme.test/logo.png".to_owned()),
+        footer_links: vec![Link {
+            label: "help".to_owned(),
+            url: "https://acme.test/help".to_owned(),
+        }],
+        ..theme()
+    };
+    let page = Shell::new().render(&with, None, BOX).expect("render");
+    assert!(page.contains("https://cdn.acme.test/logo.png"));
+    assert!(page.contains("<footer"));
 }

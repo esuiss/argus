@@ -24,6 +24,7 @@ pub const EXPECTED_MIGRATIONS: &[&str] = &[
     "0021_admin_api",
     "0022_platform_role",
     "0023_audit_checkpoints",
+    "0024_themes",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

@@ -368,6 +368,41 @@ Bu tablodaki kararlar **gün-1'de verilmek zorunda olanlardır** — sonradan de
 
 > **Bu yirmi yedi maddenin hepsi şemayı, crate sınırlarını, UI mimarisini, API yüzeyini veya dağıtım modelini etkiliyor. Hiçbiri "sonra bakarız" değil.**
 
+#### 1.1 Sonradan verilen kararlar
+
+Gün-1 tablosundan sonra verilen mimari kararlar burada, CLAUDE.md §8'in
+zorunlu alanlarıyla birlikte.
+
+---
+
+**K28 — Kiracı giriş sayfası: script çalıştırmayan şablon (Liquid), giriş kutusu derlenmiş**
+
+| Alan | İçerik |
+|---|---|
+| **Kimlik** | K28 |
+| **Statü** | **MT** — kabul edilmiş mimari tercih |
+| **Karar** | Kiracı, giriş sayfasının **kabuğunu** Liquid ile yazabilir. **Giriş kutusu derlenmiş kodda kalır** ve kiracı onu yalnızca `argus_login_box` yer tutucusuyla YERLEŞTİRİR. Sunucuda kod çalıştıran şablon (FreeMarker sınıfı) hiç implemente edilmez. |
+| **Gerekçe** | §23 §8 #18'in orijinal gerekçesi "kiracı düşman olabilir" idi ve Argus'ta kiracılar birinci taraf olduğu için **bu gerekçe geçerli değil**. Karar yine de ayakta, ama iki farklı ve daha dar sebeple: (a) bu oturumda gerçek bir yönetim API'si yazıldı ve **yönetim yüzeyini ele geçiren kişi birinci taraf değildir**; sunucuda çalışan bir şablon motoru tenant-admin yetkisini RCE'ye çevirir. (b) Kazanç sıfıra yakın: §9.5 #1 tek binary tek komut diyor, her değişiklikte zaten dağıtım yapılıyor. **Performans bu kararı belirlemiyor** — ölçüm: aynı istekteki Argon2 bu donanımda ~11 ms, şablon render'ı mikrosaniyeler. |
+| **Neden kutu kiracıya açılmıyor** | Alan adları, alan sıralaması, neyin gönderildiği ve identifier adımının sabit biçimli cevabı (§23 §8 #2) güvenlik garantileridir. Auth0 Universal Login de aynı sınırı çiziyor: Liquid **prompt'un etrafını** kontrol eder, prompt'un kendisini değil. |
+| **Geçerlilik koşulu** | Liquid'in iki ölçülmüş özelliği: (1) fonksiyon çağırma sözdizimi yok ve şablon kendisine elden verilmeyen hiçbir şeye ulaşamıyor — nesne grafiği, metot, ortam adı yok; (2) verilmemiş bir ada başvurmak boş dizge değil **hata** üretiyor. Bir sürüm yükseltmesi bu ikisini değiştirirse karar yeniden değerlendirilmeli. |
+| **Kabul testi** | `crates/argus-http/tests/theme_shell.rs`. İkisi de sabitlenmiş: şablonun verilmeyene ulaşamadığı, ve istek verisinin kabuğa hiç girmediği. Ayrıca: kutuyu yerleştirmeyen kabuk saklanmadan reddediliyor, bozuk kabuk derlenmiş olana düşüyor, `javascript:` bir logo alanından geçemiyor (kontrol söküldüğünde iki test düşüyor), ve CSP hiçbir script kaynağına izin vermiyor. |
+| **Hangi karşı örnek bu kararı geçersiz kılar** | Kiracıların giriş **kutusunun içini** — alan sırası, alan ekleme, adımlar arası içerik — dağıtım yapmadan değiştirmesinin ürün gereksinimi hâline gelmesi. Yalnızca kabuk yetmediğinde. Kabuğun yetmediği tek başına yeterli değildir; kabuk zaten Liquid'e açık. |
+| **Kalan risk ve kontrolü** | FreeMarker'ın RCE'si yok, ama iki risk kalıyor: **XSS** — kiracı kabuğuna script yazabilir, kontrolü CSP (`default-src 'none'`, hiçbir script kaynağı yok, satır içi stil yok); **kaynak tüketimi** — Liquid döngü kurabilir, kontrolü kabuk boyutu, render süresi ve çıktı boyutu sınırları. |
+| **Kaynak satır** | §23 §5.1 (üç ürünün yaklaşımı), §23 §5.2 (özelleştirmenin güvenlik maliyeti), §23 §8 #14/#16/#18/#19, §1 #19, §1 #20, §9.5 #1 |
+
+**K29 — Tema verisi kayıt defterinde tutulur, istek başına veritabanına gidilmez**
+
+| Alan | İçerik |
+|---|---|
+| **Kimlik** | K29 |
+| **Statü** | **MT** |
+| **Karar** | Tema `(kiracı, istemci)` ile anahtarlanmış bir veri kaydıdır; istemciye özel yoksa kiracıya, o da yoksa derlenmiş varsayılana düşülür. Veritabanında saklanır ama **başlangıçta kiracı kayıt defterine yüklenir**; render başına yapılan iş bir map aramasıdır, sorgu değil. Değişiklikten sonra yönetim ucu o kiracının girdisini tazeler; süreç yeniden başlatılmaz. |
+| **Gerekçe** | Bir kiracının logosu yılda bir değişir, istek başına okunacak bir şey değil. Keycloak'ın modeli de fiilen budur: tema JAR'ı bir dağıtım artefaktıdır ve üretimde şablonlar bellekte cache'lenir. Fark, cache'te ne durduğu: Keycloak yorumlanacak bir şablon ağacı tutar, burada derlenmiş kod ve veri durur. |
+| **Granülerlik gerekçesi** | Keycloak realm ve client düzeyinde tema seçimine izin veriyor; aynı granülerlik veri modelinde yalnızca bir anahtar meselesi ve ek maliyeti yok. |
+| **Kabul testi** | Tema değişikliğinden sonra tazeleme ucu çağrılınca yeni tema sunuluyor; tazeleme çağrılmadan eski tema sunuluyor. |
+| **Hangi karşı örnek bu kararı geçersiz kılar** | Tema sayısının bellekte tutulamayacak kadar büyümesi — kiracı başına birden çok istemci temasının toplam boyutunun süreç bellek bütçesini zorlaması. O noktada doğru cevap veritabanına dönmek değil, sınırlı bir LRU. |
+| **Kaynak satır** | §23 §5.1, §18, §9.5 boyutlandırma |
+
 ---
 
 ### 2. Teknoloji yığını

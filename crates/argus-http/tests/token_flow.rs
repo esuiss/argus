@@ -179,6 +179,8 @@ fn state() -> TestState {
             "acme.argus.test",
             argus_http::tenancy::TenantEntry {
                 id: tenant(),
+                theme: argus_core::theme::Theme::default(),
+                client_themes: std::collections::BTreeMap::new(),
                 issuer: "https://acme.argus.test".to_owned(),
                 context: TenantContext {
                     metadata: AuthorizationServerMetadata::for_issuer("https://acme.argus.test"),
@@ -486,6 +488,8 @@ async fn storage_outage_returns_503_not_invalid_grant() {
             "acme.argus.test",
             argus_http::tenancy::TenantEntry {
                 id: tenant(),
+                theme: argus_core::theme::Theme::default(),
+                client_themes: std::collections::BTreeMap::new(),
                 issuer: "https://acme.argus.test".to_owned(),
                 context: TenantContext {
                     metadata: AuthorizationServerMetadata::for_issuer("https://acme.argus.test"),

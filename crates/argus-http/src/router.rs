@@ -318,6 +318,95 @@ where
     }
 }
 
+// §23 §8 #16: bu sayfa Argus'un kendi first-party arayüzü. OAuth istemcisi
+// değil; kimlik doğrulandığında bir token değil bir session cookie alıyor.
+async fn stylesheet_handler<C, R, A, S, U, P, X>(
+    State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    tenant_headers: HeaderMap,
+    axum::extract::Query(query): axum::extract::Query<std::collections::BTreeMap<String, String>>,
+) -> Response
+where
+    C: CodeStore
+        + CodeIssuer
+        + BackchannelStore
+        + SessionStore
+        + AuthnStore
+        + CeremonyStore
+        + RecoveryStore
+        + Send
+        + Sync
+        + 'static,
+    R: RefreshStore + Send + Sync + 'static,
+    A: AuditSink + Send + Sync + 'static,
+    S: ClientStore + Send + Sync + 'static,
+    U: Send + Sync + 'static,
+    P: ReplayStore + Send + Sync + 'static,
+    X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
+{
+    let tenant = match crate::tenancy::resolve(&state.tenants, &tenant_headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
+
+    // Stil sayfayla aynı temayı izlemeli; `client_id` sorgudan gelir çünkü
+    // stil dosyası ayrı bir istektir ve hangi istemcinin sayfası olduğunu
+    // başka türlü bilemez.
+    let client = query.get("client_id").map(String::as_str);
+    let mut response = crate::pages::stylesheet(tenant.theme_for(client)).into_response();
+    for (name, value) in [
+        ("Content-Type", "text/css; charset=utf-8"),
+        // Kiracıya göre değişiyor, o yüzden paylaşımlı bir ara katman
+        // önbelleğe alamaz.
+        ("Cache-Control", "private, max-age=300"),
+        ("X-Content-Type-Options", "nosniff"),
+    ] {
+        if let Ok(parsed) = value.parse() {
+            response.headers_mut().insert(name, parsed);
+        }
+    }
+    response
+}
+
+fn login_page(
+    tenant: &crate::tenancy::Tenant,
+    client_id: Option<&str>,
+    failed: bool,
+    return_to: Option<&str>,
+) -> Response {
+    use crate::pages::{LoginBox, Shell, content_security_policy, login_box, safe_return_to};
+
+    // §1 K29: istemciye özel tema, yoksa kiracının varsayılanı.
+    let theme = tenant.theme_for(client_id);
+    let return_to = return_to.and_then(safe_return_to);
+
+    let body = login_box(&LoginBox {
+        theme,
+        failed,
+        return_to,
+    });
+    let page = Shell::new().render_or_default(theme, client_id, &body);
+
+    let status = if failed {
+        StatusCode::UNAUTHORIZED
+    } else {
+        StatusCode::OK
+    };
+
+    let mut response = (status, page).into_response();
+    for (name, value) in [
+        ("Content-Type", "text/html; charset=utf-8".to_owned()),
+        ("Cache-Control", "no-store".to_owned()),
+        ("Content-Security-Policy", content_security_policy(theme)),
+        ("Referrer-Policy", "no-referrer".to_owned()),
+        ("X-Content-Type-Options", "nosniff".to_owned()),
+    ] {
+        if let Ok(parsed) = value.parse() {
+            response.headers_mut().insert(name, parsed);
+        }
+    }
+    response
+}
+
 fn consent_page(
     client_host: &str,
     redirect_host: &str,
@@ -440,22 +529,45 @@ where
                 return oauth_response(&OAuthError::new(OAuthErrorCode::ServerError));
             };
             let secure = tenant.metadata.issuer.starts_with("https://");
-            let mut r = Json(LoginResponse {
-                authenticated: true,
-            })
-            .into_response();
+
+            // Form geldiyse akış kaldığı yerden sürer; API çağrısıysa JSON.
+            // Dönüş adresi doğrulanır, yoksa açık yönlendirme olur.
+            let onward = form
+                .return_to
+                .as_deref()
+                .and_then(crate::pages::safe_return_to);
+
+            let mut r = match onward {
+                Some(path) => (
+                    StatusCode::SEE_OTHER,
+                    [(axum::http::header::LOCATION, path.to_owned())],
+                )
+                    .into_response(),
+                None => Json(LoginResponse {
+                    authenticated: true,
+                })
+                .into_response(),
+            };
+
             if let Ok(value) = session_cookie(&secret, secure).parse() {
                 r.headers_mut().insert("Set-Cookie", value);
             }
             r
         }
-        LoginOutcome::Refused => (
-            StatusCode::UNAUTHORIZED,
-            Json(LoginResponse {
-                authenticated: false,
-            }),
-        )
-            .into_response(),
+        LoginOutcome::Refused => {
+            // Formdan geldiyse ekranı tek ve sabit mesajla yeniden göster
+            // (§23 §8 #2). API çağrısıysa JSON.
+            if form.return_to.is_some() {
+                return login_page(&tenant, None, true, form.return_to.as_deref());
+            }
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(LoginResponse {
+                    authenticated: false,
+                }),
+            )
+                .into_response()
+        }
         LoginOutcome::Unavailable => {
             return oauth_response(&OAuthError::new(OAuthErrorCode::TemporarilyUnavailable));
         }
@@ -1308,11 +1420,16 @@ where
             scope.as_deref(),
             raw_query.as_deref(),
         ),
-        Ok(AuthorizeResponse::NeedsAuthentication) => (
-            StatusCode::UNAUTHORIZED,
-            "authentication required (phase 3)".to_owned(),
-        )
-            .into_response(),
+        Ok(AuthorizeResponse::NeedsAuthentication) => {
+            // §23 §8 #14: hosted login tek desteklenen üretim modu. Kullanıcı
+            // buraya oturumsuz geldiyse ona bir sayfa gösterilir, bir hata
+            // kodu değil. Dönüş adresi orijinal isteğin kendisidir, böylece
+            // giriş bittiğinde akış kaldığı yerden sürer.
+            let return_to = raw_query
+                .as_deref()
+                .map_or_else(|| "/authorize".to_owned(), |q| format!("/authorize?{q}"));
+            login_page(&tenant, Some(&query.client_id), false, Some(&return_to))
+        }
         Err(_) => oauth_response(&OAuthError::new(OAuthErrorCode::TemporarilyUnavailable)),
     }
 }
@@ -1356,6 +1473,10 @@ where
         .route(
             "/.well-known/oauth-protected-resource/{*path}",
             get(prm_handler::<C, R, A, S, U, P, X>),
+        )
+        .route(
+            crate::pages::STYLESHEET_PATH,
+            get(stylesheet_handler::<C, R, A, S, U, P, X>),
         )
         .route("/authorize", get(authorize_handler::<C, R, A, S, U, P, X>))
         .route("/token", post(token_handler::<C, R, A, S, U, P, X>))

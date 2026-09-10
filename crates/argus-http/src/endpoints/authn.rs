@@ -20,6 +20,11 @@ const DUMMY_PHC: &str = "$argon2id$v=19$m=19456,t=2,p=1$\
 pub struct PasswordLoginForm {
     pub identifier: String,
     pub password: String,
+
+    /// Hosted login formundan gelir. Doğrulanmadan bir yönlendirmeye
+    /// girmez; §1 #24 ile aynı sınıf bir açık yönlendirme yüzeyi.
+    #[serde(default)]
+    pub return_to: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -235,6 +235,12 @@ async fn serve_main(args: Vec<String>) -> ExitCode {
         argus_http::tenancy::TenantEntry {
             id: TenantId::from_uuid(Uuid::nil()),
             issuer: config.issuer.clone(),
+            // Tema tablosu henüz yok; kiracının adı issuer host'undan gelir.
+            theme: argus_core::theme::Theme {
+                name: host_of_issuer(&config.issuer).unwrap_or("Argus").to_owned(),
+                ..argus_core::theme::Theme::default()
+            },
+            client_themes: std::collections::BTreeMap::new(),
             context: TenantContext {
                 metadata: AuthorizationServerMetadata::for_issuer(&config.issuer),
                 active_key: Arc::clone(&keys.active),
@@ -1061,6 +1067,44 @@ fn tenant_metadata(
     metadata
 }
 
+/// §1 K29. Kiracının varsayılan teması ve istemciye özel olanları. Tema hiç
+/// yoksa slug'dan bir ad üretilir; giriş ekranı her hâlükârda çıkar.
+async fn load_themes(
+    store: &argus_store::PostgresStore,
+    tenant: TenantId,
+    slug: &str,
+) -> (
+    argus_core::theme::Theme,
+    std::collections::BTreeMap<String, argus_core::theme::Theme>,
+) {
+    let mut fallback = argus_core::theme::Theme {
+        name: slug.to_owned(),
+        ..argus_core::theme::Theme::default()
+    };
+    let mut per_client = std::collections::BTreeMap::new();
+
+    let Ok(rows) = store.themes_of(tenant).await else {
+        return (fallback, per_client);
+    };
+
+    for (client_id, theme) in rows {
+        // Şemadan geçmiş ama çekirdeğin kabul etmediği bir tema sunulmaz;
+        // o kiracı derlenmiş varsayılanı görür.
+        if theme.check().is_err() {
+            eprintln!("argus: WARNING - tenant {slug} has a theme the core refuses; ignoring it");
+            continue;
+        }
+
+        if client_id == argus_store::theme::TENANT_DEFAULT {
+            fallback = theme;
+        } else {
+            per_client.insert(client_id, theme);
+        }
+    }
+
+    (fallback, per_client)
+}
+
 fn host_of_issuer(issuer: &str) -> Option<&str> {
     issuer
         .strip_prefix("https://")
@@ -1447,11 +1491,17 @@ async fn serve_with_postgres(
             published: keys.published.clone(),
         });
 
+        // §1 K29: tema veritabanından bir kez okunur ve kayıt defterinde
+        // durur; istek başına sorgu yok.
+        let (theme, client_themes) = load_themes(&store, TenantId::from_uuid(id), &row.slug).await;
+
         registry.register(
             &row.issuer_host,
             argus_http::tenancy::TenantEntry {
                 id: TenantId::from_uuid(id),
                 issuer: issuer.clone(),
+                theme,
+                client_themes,
                 context: argus_http::state::TenantContext {
                     metadata: tenant_metadata(&issuer, config, &rsa_keys),
                     active_key: Arc::clone(&tenant_keys.active),
@@ -1473,6 +1523,11 @@ async fn serve_with_postgres(
             argus_http::tenancy::TenantEntry {
                 id: tenant_id,
                 issuer: config.issuer.clone(),
+                theme: argus_core::theme::Theme {
+                    name: host_of_issuer(&config.issuer).unwrap_or("Argus").to_owned(),
+                    ..argus_core::theme::Theme::default()
+                },
+                client_themes: std::collections::BTreeMap::new(),
                 context: argus_http::state::TenantContext {
                     metadata: published_metadata.clone(),
                     active_key: Arc::clone(&keys.active),

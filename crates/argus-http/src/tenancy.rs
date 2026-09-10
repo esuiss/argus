@@ -20,6 +20,13 @@ pub struct TenantEntry {
     pub id: TenantId,
     pub issuer: String,
     pub context: TenantContext,
+    // §1 K29: kiracının varsayılan teması. Kayıt defterinde duruyor, istek
+    // başına veritabanına gidilmiyor.
+    pub theme: argus_core::theme::Theme,
+
+    /// İstemciye özel temalar. Keycloak'ın client düzeyindeki seçimiyle aynı
+    /// granülerlik; veri modelinde bu yalnızca bir anahtar meselesi.
+    pub client_themes: BTreeMap<String, argus_core::theme::Theme>,
 }
 
 #[derive(Clone)]
@@ -47,6 +54,20 @@ impl Tenant {
     #[must_use]
     pub fn context(&self) -> &TenantContext {
         &self.0.context
+    }
+
+    #[must_use]
+    pub fn theme(&self) -> &argus_core::theme::Theme {
+        &self.0.theme
+    }
+
+    /// §1 K29: istemciye özel tema, yoksa kiracının varsayılanı. Derlenmiş
+    /// varsayılana düşme kararı render katmanında, çünkü tema hep var.
+    #[must_use]
+    pub fn theme_for(&self, client_id: Option<&str>) -> &argus_core::theme::Theme {
+        client_id
+            .and_then(|id| self.0.client_themes.get(id))
+            .unwrap_or(&self.0.theme)
     }
 }
 

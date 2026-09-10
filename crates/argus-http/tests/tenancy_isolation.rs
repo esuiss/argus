@@ -96,6 +96,8 @@ async fn harness() -> Option<Harness> {
         HOST_ONE,
         TenantEntry {
             id: one,
+            theme: argus_core::theme::Theme::default(),
+            client_themes: std::collections::BTreeMap::new(),
             issuer: issuer(HOST_ONE),
             context: context(HOST_ONE, &key),
         },
@@ -104,6 +106,8 @@ async fn harness() -> Option<Harness> {
         HOST_TWO,
         TenantEntry {
             id: two,
+            theme: argus_core::theme::Theme::default(),
+            client_themes: std::collections::BTreeMap::new(),
             issuer: issuer(HOST_TWO),
             context: context(HOST_TWO, &key),
         },

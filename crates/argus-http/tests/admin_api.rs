@@ -85,6 +85,8 @@ async fn harness() -> Option<Harness> {
             "as.test",
             argus_http::tenancy::TenantEntry {
                 id: tenant,
+                theme: argus_core::theme::Theme::default(),
+                client_themes: std::collections::BTreeMap::new(),
                 issuer: ISSUER.to_owned(),
                 context: test_context(),
             },
@@ -363,6 +365,8 @@ async fn a_deployment_with_no_control_plane_connection_does_not_carry_its_routes
             "as.test",
             argus_http::tenancy::TenantEntry {
                 id: tenant,
+                theme: argus_core::theme::Theme::default(),
+                client_themes: std::collections::BTreeMap::new(),
                 issuer: ISSUER.to_owned(),
                 context: test_context(),
             },

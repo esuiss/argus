@@ -134,6 +134,8 @@ async fn serve() -> String {
             "argus.test",
             argus_http::tenancy::TenantEntry {
                 id: TenantId::from_uuid(Uuid::nil()),
+                theme: argus_core::theme::Theme::default(),
+                client_themes: std::collections::BTreeMap::new(),
                 issuer: "http://argus.test".to_owned(),
                 context: TenantContext {
                     metadata: AuthorizationServerMetadata::for_issuer("http://argus.test"),
@@ -568,11 +570,22 @@ async fn an_authorize_request_without_a_session_is_not_authenticated() {
     )
     .await;
 
+    // §23 §8 #14: oturumsuz gelen kullanıcıya bir hata kodu değil hosted
+    // login sayfası döndürülür. Testin asıl iddiası değişmedi ve daha
+    // güçlendi: kod üretilmiyor ve hiçbir yere yönlendirme yok.
+    assert!(status(&r).contains("200"), "{r}");
     assert!(
-        status(&r).contains("401"),
+        !r.to_lowercase().contains("location:"),
         "an unauthenticated authorize request must not mint a code: {r}"
     );
-    assert!(!r.to_lowercase().contains("location:"), "{r}");
+    assert!(
+        !r.contains("code="),
+        "no authorization code may appear: {r}"
+    );
+    assert!(
+        r.contains("action=\"/login\""),
+        "the user must be given a way to sign in: {r}"
+    );
 }
 
 #[tokio::test]
@@ -587,7 +600,15 @@ async fn a_forged_session_cookie_does_not_authenticate() {
     )
     .await;
 
-    assert!(status(&r).contains("401"), "{r}");
+    // Uydurulmuş çerez bir oturum değildir: kod yok, yönlendirme yok, ve
+    // kullanıcı giriş ekranına düşer.
+    assert!(status(&r).contains("200"), "{r}");
+    assert!(!r.to_lowercase().contains("location:"), "{r}");
+    assert!(
+        !r.contains("code="),
+        "a forged cookie must not mint a code: {r}"
+    );
+    assert!(r.contains("action=\"/login\""), "{r}");
 }
 
 fn test_blind_index() -> argus_crypto::blind_index::BlindIndexKey {

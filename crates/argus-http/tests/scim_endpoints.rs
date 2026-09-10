@@ -130,6 +130,8 @@ async fn harness() -> Option<Harness> {
             "as.test",
             argus_http::tenancy::TenantEntry {
                 id: tenant,
+                theme: argus_core::theme::Theme::default(),
+                client_themes: std::collections::BTreeMap::new(),
                 issuer: ISSUER.to_owned(),
                 context: test_context(),
             },
