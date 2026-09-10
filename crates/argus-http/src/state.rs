@@ -37,6 +37,10 @@ where
     pub replay: P,
     pub resources: X,
     pub cimd: Option<crate::cimd_client::CimdRuntime>,
+    pub federation: Option<
+        crate::federation::client::FederationRuntime<crate::federation::fetch::SystemResolver>,
+    >,
+    pub federation_identity: Option<crate::federation::publish::FederationIdentity>,
 }
 
 impl<C, R, A, S, U, P, X> AppState<C, R, A, S, U, P, X>

@@ -8,6 +8,7 @@ pub mod ciba;
 pub mod cimd;
 pub mod client_auth;
 pub mod client_resolution;
+pub mod delegation;
 pub mod dpop;
 pub mod effect;
 pub mod epoch;
@@ -30,6 +31,7 @@ pub mod scim_event;
 pub mod scim_patch;
 pub mod ssrf;
 pub mod time;
+pub mod vault;
 
 pub use authorize::{AuthorizeOutcome, AuthorizeRequest, RegisteredClient};
 pub use authz_code::{AuthorizationCode, Decision, Grant, StoredCode, TokenRequest};

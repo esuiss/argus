@@ -46,6 +46,12 @@ struct Config {
     ldap_base_dn: Option<String>,
     ldap_cert: Option<String>,
     ldap_key: Option<String>,
+
+    federation_entity_id: Option<String>,
+    federation_key_dir: Option<String>,
+    federation_trust_anchors: Option<String>,
+    agent_card_key_dir: Option<String>,
+    vault_key: Option<String>,
 }
 
 impl Config {
@@ -68,6 +74,11 @@ impl Config {
             ldap_base_dn: env::var("ARGUS_LDAP_BASE_DN").ok(),
             ldap_cert: env::var("ARGUS_LDAP_CERT").ok(),
             ldap_key: env::var("ARGUS_LDAP_KEY").ok(),
+            federation_entity_id: env::var("ARGUS_FEDERATION_ENTITY_ID").ok(),
+            federation_key_dir: env::var("ARGUS_FEDERATION_KEY_DIR").ok(),
+            federation_trust_anchors: env::var("ARGUS_FEDERATION_TRUST_ANCHORS").ok(),
+            agent_card_key_dir: env::var("ARGUS_AGENT_CARD_KEY_DIR").ok(),
+            vault_key: env::var("ARGUS_VAULT_KEY").ok(),
         }
     }
 }
@@ -150,6 +161,8 @@ async fn main() -> ExitCode {
         replay: MemoryReplayStore::default(),
         resources: MemoryResourceStore::default(),
         cimd: Some(cimd_runtime(&config)),
+        federation: None,
+        federation_identity: None,
     });
 
     let app = argus_http::build(state);
@@ -596,6 +609,17 @@ async fn serve(app: axum::Router, config: &Config, store_kind: &str) -> ExitCode
     ExitCode::SUCCESS
 }
 
+fn tls_client_config() -> Arc<rustls::ClientConfig> {
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+
+    Arc::new(
+        rustls::ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth(),
+    )
+}
+
 fn cimd_runtime(config: &Config) -> argus_http::cimd_client::CimdRuntime {
     let mut roots = rustls::RootCertStore::empty();
     roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
@@ -712,6 +736,126 @@ async fn serve_tls(
 async fn shutdown() {
     let _ = tokio::signal::ctrl_c().await;
     eprintln!("argus: shutting down");
+}
+
+fn load_key_dir(dir: &str) -> Vec<Arc<argus_crypto::SigningKey>> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+
+    let mut keys = Vec::new();
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(OsStr::to_str) != Some("pkcs8") {
+            continue;
+        }
+
+        let Some(kid) = path.file_stem().and_then(OsStr::to_str) else {
+            continue;
+        };
+
+        let Ok(material) = std::fs::read(&path) else {
+            continue;
+        };
+
+        if let Ok(key) = argus_crypto::SigningKey::from_pkcs8(kid, &material) {
+            keys.push(Arc::new(key));
+        }
+    }
+
+    keys.sort_by(|left, right| left.kid().cmp(right.kid()));
+    keys
+}
+
+fn federation_identity(
+    config: &Config,
+) -> Option<argus_http::federation::publish::FederationIdentity> {
+    let entity_id = config.federation_entity_id.clone()?;
+    let dir = config.federation_key_dir.as_ref()?;
+
+    let entity = argus_core::federation::statement::EntityIdentifier::parse(&entity_id).ok()?;
+    let keys = load_key_dir(dir);
+
+    if keys.is_empty() {
+        eprintln!("argus: no federation signing key found in {dir}");
+        return None;
+    }
+
+    Some(argus_http::federation::publish::FederationIdentity {
+        entity,
+        role: argus_core::federation::statement::Role::Leaf,
+        signing_keys: keys,
+        authority_hints: trust_anchors(config),
+        organization_name: None,
+        trust_marks: Vec::new(),
+    })
+}
+
+fn trust_anchors(config: &Config) -> Vec<argus_core::federation::statement::EntityIdentifier> {
+    config
+        .federation_trust_anchors
+        .as_deref()
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|raw| !raw.is_empty())
+        .filter_map(|raw| argus_core::federation::statement::EntityIdentifier::parse(raw).ok())
+        .collect()
+}
+
+fn federation_runtime(
+    config: &Config,
+    tls: Arc<rustls::ClientConfig>,
+) -> Option<
+    argus_http::federation::client::FederationRuntime<
+        argus_http::federation::fetch::SystemResolver,
+    >,
+> {
+    let anchors = trust_anchors(config);
+
+    if anchors.is_empty() {
+        return None;
+    }
+
+    Some(argus_http::federation::client::FederationRuntime::new(
+        argus_http::federation::resolver::Federation {
+            resolver: argus_http::federation::fetch::SystemResolver,
+            tls,
+            trust_anchors: anchors,
+            allow_loopback: !config.production,
+        },
+    ))
+}
+
+fn vault_runtime(
+    config: &Config,
+    store: &argus_store::PostgresStore,
+) -> Option<argus_http::differentiation::VaultRuntime> {
+    let raw = config.vault_key.as_ref()?;
+    let material = decode_key_material(raw)?;
+
+    match argus_crypto::sealing::SealingKey::new(&material) {
+        Ok(sealing) => Some(argus_http::differentiation::VaultRuntime {
+            store: store.clone(),
+            sealing,
+        }),
+        Err(e) => {
+            eprintln!("argus: ARGUS_VAULT_KEY is not usable: {e}");
+            None
+        }
+    }
+}
+
+fn decode_key_material(raw: &str) -> Option<Vec<u8>> {
+    if let Ok(decoded) = argus_http::differentiation::decode_base64(raw.trim())
+        && decoded.len() == argus_crypto::sealing::KEY_BYTES
+    {
+        return Some(decoded);
+    }
+
+    eprintln!("argus: ARGUS_VAULT_KEY must be 32 base64 encoded bytes");
+    None
 }
 
 struct MetadataRegistry {
@@ -881,8 +1025,10 @@ async fn serve_with_postgres(
 
         authenticator: (),
         replay: store.clone(),
-        resources: store,
+        resources: store.clone(),
         cimd: Some(cimd_runtime(config)),
+        federation: federation_runtime(config, tls_client_config()),
+        federation_identity: federation_identity(config),
     });
 
     let mut app = argus_http::build(state).merge(argus_http::scim::routes::build(scim));
@@ -891,6 +1037,33 @@ async fn serve_with_postgres(
         app = app.merge(saml);
         eprintln!("argus: SAML identity provider at /saml/metadata and /saml/sso");
     }
+
+    let differentiation = Arc::new(argus_http::differentiation::DifferentiationState {
+        tenant_id,
+        issuer: config.issuer.clone(),
+        published_keys: keys.published.clone(),
+        federation: federation_identity(config),
+        provider_metadata: argus_http::differentiation::metadata_value(
+            &AuthorizationServerMetadata::for_issuer(&config.issuer),
+        ),
+        agent_card_key: config
+            .agent_card_key_dir
+            .as_deref()
+            .and_then(|dir| load_key_dir(dir).into_iter().next()),
+        vault: vault_runtime(config, &store),
+    });
+
+    if differentiation.federation.is_some() {
+        eprintln!("argus: federation entity configuration at /.well-known/openid-federation");
+    }
+    if differentiation.agent_card_key.is_some() {
+        eprintln!("argus: agent card signing at /agent-cards/sign");
+    }
+    if differentiation.vault.is_some() {
+        eprintln!("argus: credential vault at /vault/lease and /vault/redeem");
+    }
+
+    app = app.merge(argus_http::differentiation::build(differentiation));
 
     eprintln!("argus: WARNING - DevAuthenticator active, development only");
     warn_if_keys_are_ephemeral(config);

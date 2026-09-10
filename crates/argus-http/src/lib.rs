@@ -2,6 +2,7 @@
 
 pub mod cimd_client;
 pub mod cimd_fetch;
+pub mod differentiation;
 pub mod effects;
 pub mod endpoints;
 pub mod federation;

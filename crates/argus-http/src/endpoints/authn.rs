@@ -236,23 +236,51 @@ mod tests {
         );
     }
 
+    const TIMING_SAMPLES: usize = 9;
+
+    fn measure(password: &str, phc: &str) -> f64 {
+        let start = std::time::Instant::now();
+        let _ = argus_crypto::password::verify(password, phc);
+        start.elapsed().as_secs_f64()
+    }
+
+    #[allow(
+        clippy::integer_division,
+        reason = "the middle index of a sample set is an exact integer position"
+    )]
+    fn median(mut samples: Vec<f64>) -> f64 {
+        samples.sort_by(f64::total_cmp);
+        samples.get(samples.len() / 2).copied().unwrap_or(0.0)
+    }
+
     #[test]
     fn an_unknown_account_costs_about_as_much_as_a_known_one() {
         let real = argus_crypto::password::hash("a real password").expect("hash");
 
-        let start = std::time::Instant::now();
-        let _ = argus_crypto::password::verify("wrong", &real);
-        let known = start.elapsed();
+        let _ = measure("wrong", &real);
+        let _ = measure("wrong", DUMMY_PHC);
 
-        let start = std::time::Instant::now();
-        let _ = argus_crypto::password::verify("wrong", DUMMY_PHC);
-        let unknown = start.elapsed();
+        let mut known = Vec::with_capacity(TIMING_SAMPLES);
+        let mut unknown = Vec::with_capacity(TIMING_SAMPLES);
 
-        let ratio = unknown.as_secs_f64() / known.as_secs_f64();
+        for round in 0..TIMING_SAMPLES {
+            if round % 2 == 0 {
+                known.push(measure("wrong", &real));
+                unknown.push(measure("wrong", DUMMY_PHC));
+            } else {
+                unknown.push(measure("wrong", DUMMY_PHC));
+                known.push(measure("wrong", &real));
+            }
+        }
+
+        let known = median(known);
+        let unknown = median(unknown);
+
+        let ratio = unknown / known;
         assert!(
             (0.5..2.0).contains(&ratio),
-            "the two paths must not be distinguishable by cost: known={known:?} \
-             unknown={unknown:?} ratio={ratio}"
+            "the two paths must not be distinguishable by cost: known={known}s \
+             unknown={unknown}s ratio={ratio}"
         );
     }
 

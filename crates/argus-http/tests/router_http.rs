@@ -146,6 +146,8 @@ async fn serve() -> String {
         replay: MemoryReplayStore::default(),
         resources: MemoryResourceStore::default(),
         cimd: None,
+        federation: None,
+        federation_identity: None,
     });
 
     {

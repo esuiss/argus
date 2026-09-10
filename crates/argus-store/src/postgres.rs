@@ -47,7 +47,10 @@ impl PostgresStore {
         Ok(self.scoped(tenant).await?)
     }
 
-    async fn scoped(&self, tenant: TenantId) -> Result<Transaction<'_, Postgres>, StoreError> {
+    pub(crate) async fn scoped(
+        &self,
+        tenant: TenantId,
+    ) -> Result<Transaction<'_, Postgres>, StoreError> {
         let mut tx = self.pool.begin().await.map_err(|e| map_err(&e))?;
 
         sqlx::query("SELECT set_config('argus.tenant_id', $1, true)")

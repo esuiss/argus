@@ -5,6 +5,7 @@ pub mod postgres;
 pub mod schema;
 pub mod scim;
 pub mod traits;
+pub mod vault;
 
 pub use postgres::PostgresStore;
 pub use schema::{EXPECTED_MIGRATIONS, SchemaError};

@@ -877,6 +877,12 @@ where
     S: ClientStore + Send + Sync,
 {
     if argus_core::cimd::looks_like_a_url(client_id) {
+        if let Some(federation) = state.federation.as_ref()
+            && let Ok((registered, _)) = federation.resolve(client_id, now).await
+        {
+            return Ok(Some(registered));
+        }
+
         let Some(cimd) = state.cimd.as_ref() else {
             return Ok(None);
         };

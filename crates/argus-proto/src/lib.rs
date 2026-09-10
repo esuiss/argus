@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod agent_card;
 pub mod cimd;
 pub mod client_assertion;
 pub mod discovery;
@@ -7,6 +8,7 @@ pub mod dpop;
 pub mod error;
 pub mod federation;
 pub mod idjag;
+pub mod jcs;
 pub mod jwks;
 pub mod jwt;
 pub mod oidc;
