@@ -15,16 +15,11 @@ use super::guard::{
     AdminState, Idempotency, Shared, admit, close_idempotency, hidden, open_idempotency, problem,
 };
 
-/// Fields the subordinate resource exposes. §24 #5 and #26: a filter or a
-/// projection naming anything else is an error, and a GET never invents a
-/// field the caller did not set.
 const SUBORDINATE_FIELDS: &[&str] = &["id", "jwks", "metadataPolicy", "constraints"];
 
 const CLIENT_FIELDS: &[&str] = &["clientId", "clientType", "authMethod", "redirectUris"];
 
 fn requirement(method: &str, path: &str) -> &'static argus_core::admin::RouteRequirement {
-    // The router is built from the manifest, so this cannot miss. Failing
-    // closed rather than unwrapping keeps that true even if it ever can.
     argus_core::admin::requirement(method, path).unwrap_or(&argus_core::admin::RouteRequirement {
         method: "NONE",
         path: "",
@@ -202,7 +197,6 @@ async fn write_subordinate(
         return problem(503, "unavailable", "the registry is unwritable");
     }
 
-    // §24 #3: the full representation in the body, not an id in a header.
     let view = subordinate_view(id, &record);
     let status = if created { 201 } else { 200 };
     close_idempotency(state, key.as_deref(), Surface::Tenant, status, &view).await;
@@ -250,7 +244,6 @@ pub(super) async fn create_subordinate(
     write_subordinate(&state, key.as_deref(), id, &body, true).await
 }
 
-/// §24 #2: PUT is an upsert, and the status says which happened.
 pub(super) async fn put_subordinate(
     State(state): State<Shared>,
     headers: HeaderMap,
@@ -310,8 +303,6 @@ fn client_from(body: &Value, id: &str) -> Result<AdminClient, Box<Response>> {
         .unwrap_or("public")
         .to_owned();
 
-    // The schema couples the two, and a public client with a credential is a
-    // contradiction rather than a preference.
     let auth_method = body
         .get("authMethod")
         .and_then(Value::as_str)
@@ -452,10 +443,6 @@ pub(super) async fn create_client(
         return *refusal;
     }
 
-    // The idempotency gate comes before the conflict check, or a retry of a
-    // request that already succeeded would be told the resource exists rather
-    // than being handed back what its first attempt produced. That is exactly
-    // the case §24 #33 exists for.
     let key = match open_idempotency(&state, &headers, Surface::Tenant, &body).await {
         Ok(Idempotency::Replay(response)) => return response,
         Ok(Idempotency::Run(key)) => key,
@@ -503,8 +490,6 @@ pub(super) async fn put_client(
     save_client(&state, key.as_deref(), &id, &body).await
 }
 
-/// §24 #2 and #12: the patch is checked against the resource's own fields
-/// before anything is applied, and clientId cannot move.
 pub(super) async fn patch_client(
     State(state): State<Shared>,
     headers: HeaderMap,

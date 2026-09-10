@@ -1,8 +1,3 @@
-//! The administrative API's decision logic. ARGUS.md §24 turns a survey of
-//! five vendors' admin APIs into 38 concrete choices; the ones that are
-//! decisions rather than plumbing live here, and argus-http only carries them
-//! over the wire.
-
 pub mod idempotency;
 pub mod job;
 pub mod manifest;

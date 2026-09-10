@@ -50,8 +50,6 @@ pub enum ModelError {
 }
 
 impl EntityRef {
-    /// The three characters the tuple grammar uses as separators can never appear
-    /// inside an identifier, or a parsed tuple would be ambiguous.
     fn check_identifier(value: &str) -> Result<(), ModelError> {
         if value.is_empty() {
             return Err(ModelError::Empty);
@@ -96,9 +94,6 @@ impl core::fmt::Display for EntityRef {
     }
 }
 
-/// A subject is either an entity or every subject holding a relation on an
-/// entity. `group:eng#member` is the second form and is what makes the model
-/// relationship based rather than role based.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SubjectRef {
     entity: EntityRef,
@@ -171,8 +166,6 @@ impl core::fmt::Display for Tuple {
     }
 }
 
-/// How a relation is computed. `This` is the only form that reads tuples
-/// directly; every other form rewrites the question into other relations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rewrite {
     This,
@@ -181,9 +174,6 @@ pub enum Rewrite {
         relation: String,
     },
 
-    /// For every object reachable through `tupleset` on this object, ask
-    /// `computed` on that object. This is what makes permissions inherit
-    /// through containers: a folder's viewers view every document in it.
     TupleToUserset {
         tupleset: String,
         computed: String,
@@ -193,8 +183,6 @@ pub enum Rewrite {
 
     Intersection(Vec<Rewrite>),
 
-    /// Grants `base` except to subjects that satisfy `subtract`. Exclusion is
-    /// the only non-monotonic form, so adding a tuple can revoke access.
     Exclusion {
         base: Box<Rewrite>,
         subtract: Box<Rewrite>,
@@ -229,9 +217,6 @@ impl Rewrite {
         }
     }
 
-    /// Relations this rewrite reaches on the SAME object without reading a
-    /// tuple first. A relation appearing in its own set would loop forever
-    /// inside one object, so the model refuses it up front.
     fn same_object_relations(&self, out: &mut BTreeSet<String>) {
         match self {
             Self::This | Self::TupleToUserset { .. } => {}
@@ -325,8 +310,6 @@ impl Model {
         self.types.keys().map(String::as_str)
     }
 
-    /// A model that fails this is refused before any tuple is written, so a
-    /// resolution can assume every relation it meets exists.
     pub fn validate(&self) -> Result<(), ModelError> {
         if self.types.len() > MAX_TYPES {
             return Err(ModelError::TooManyTypes {

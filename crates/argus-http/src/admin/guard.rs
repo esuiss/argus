@@ -25,12 +25,8 @@ pub struct AdminState {
 
 pub type Shared = Arc<AdminState>;
 
-/// The control plane is a single object. §24 #21 keeps it narrow, and one
-/// object is the narrowest it can be.
 pub const PLATFORM_OBJECT: &str = "control-plane";
 
-/// Boxed so the error path does not widen every result. The wire shape is the
-/// one §24 #1's guideline names: a `snake_case` code plus an optional sentence.
 pub type Refusal = Box<Response>;
 
 #[derive(Debug, Clone)]
@@ -48,8 +44,6 @@ pub(super) fn problem(status: u16, error: &str, description: &str) -> Response {
         .into_response()
 }
 
-/// §24 #15. The caller is told the resource is not there, which is the same
-/// answer they get when it really is not there.
 pub(super) fn hidden() -> Response {
     problem(404, "not_found", "no such resource")
 }
@@ -78,8 +72,6 @@ fn bearer(headers: &HeaderMap) -> Option<&str> {
 }
 
 fn audience_matches(claims: &AccessTokenClaims, issuer: &str, surface: Surface) -> bool {
-    // §24 #19: the two surfaces do not share an audience, so a tenant token
-    // cannot be replayed against the platform control plane.
     let expected = format!("{issuer}{}", surface.audience_suffix());
     claims.aud.contains(&expected)
 }
@@ -129,8 +121,6 @@ fn verify(state: &AdminState, headers: &HeaderMap) -> Result<AccessTokenClaims, 
     Ok(claims)
 }
 
-/// The whole gate: token, surface, tenant, permission. Nothing in this module
-/// reaches a resource without passing through here.
 pub(super) async fn admit(
     state: &AdminState,
     headers: &HeaderMap,
@@ -139,16 +129,9 @@ pub(super) async fn admit(
     let claims = verify(state, headers)?;
 
     if !audience_matches(&claims, &state.issuer, requirement.surface) {
-        // Wrong surface reads as "no such route", not as "you are close".
         return Err(Box::new(hidden()));
     }
 
-    // §24 #20: the tenant is taken from the verified token. Auth0's My
-    // Organization API removes the whole IDOR class this way, so no request
-    // body or path segment is consulted for it.
-    // The tenant surface is scoped to this tenant; the control plane is one
-    // object, not one per tenant, or a platform administrator would have to be
-    // granted the same relation once per tenant to see the list of them.
     let object_id = match requirement.surface {
         Surface::Tenant => state.tenant_id.as_uuid().to_string(),
         Surface::Platform => PLATFORM_OBJECT.to_owned(),
@@ -203,8 +186,6 @@ pub(super) async fn admit(
     })
 }
 
-/// §24 #33. A mutating request either runs now, replays a stored result, or is
-/// told which of the two failure shapes it hit.
 pub(super) enum Idempotency {
     Run(Option<String>),
     Replay(Response),
@@ -276,7 +257,6 @@ pub(super) async fn open_idempotency(
         .map_err(|_| Box::new(problem(503, "unavailable", "the key store is unwritable")))?;
 
     if !claimed {
-        // Another request took the key between the read and the write.
         return Err(Box::new(problem(
             409,
             "request_in_flight",
@@ -309,8 +289,6 @@ pub(super) async fn close_idempotency(
 }
 
 fn fingerprint_of(body: &Value) -> [u8; 32] {
-    // The canonical form, so two encodings of the same document share a
-    // fingerprint and key reuse is judged on meaning rather than whitespace.
     use argus_core::pkce::Sha256 as _;
     let canonical = argus_proto::jcs::canonicalize(body).unwrap_or_default();
     argus_crypto::AwsLcSha256.sha256(canonical.as_bytes())

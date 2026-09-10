@@ -1,14 +1,9 @@
 use serde_json::Value;
 
-/// §24 #28: AIP-151 makes anything over roughly ten seconds a long running
-/// operation. Every vendor surveyed declared SCIM /Bulk unsupported and wrote
-/// an async job API instead, so this is the shape bulk takes here.
 pub const LONG_RUNNING_THRESHOLD_SECONDS: u64 = 10;
 
 pub const MAX_ITEMS: usize = 10_000;
 
-/// §24 #29: Auth0 deletes job results after twenty four hours, which is too
-/// short to investigate a partial failure found the next morning.
 pub const RESULT_RETENTION_SECONDS: u64 = 7 * 24 * 60 * 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,9 +11,6 @@ pub enum JobState {
     Pending,
     Running,
     Succeeded,
-    /// Some items applied and some did not. AIP-151 keeps this out of the
-    /// terminal response and in the metadata, so a caller cannot mistake a
-    /// partial run for a clean one.
     PartiallySucceeded,
     Failed,
 }
@@ -59,8 +51,6 @@ pub enum JobFault {
     },
 }
 
-/// One item's outcome. §24 #29 wants a machine code beside the human message,
-/// because a caller retrying ten thousand records cannot parse prose.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ItemResult {
     pub index: usize,
@@ -143,8 +133,6 @@ impl Job {
         Ok(self.state)
     }
 
-    /// AIP-151 splits progress from the terminal result. Progress is readable
-    /// while the job runs; the result exists only once it is over.
     #[must_use]
     pub fn metadata(&self) -> Value {
         serde_json::json!({

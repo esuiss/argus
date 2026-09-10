@@ -1,7 +1,3 @@
--- §24 #33 makes the idempotency key a day-one feature on every mutating
--- endpoint. §9.5 #3 keeps volatile state in the database rather than in a
--- process, so a restart does not lose a key mid-flight and let a retry run
--- the same request twice.
 
 CREATE TABLE admin_idempotency (
   tenant_id    uuid        NOT NULL,
@@ -26,15 +22,12 @@ CREATE TABLE admin_idempotency (
   CONSTRAINT admin_idempotency_fingerprint_is_a_digest CHECK (length(fingerprint) = 32),
   CONSTRAINT admin_idempotency_state_is_known
     CHECK (state IN ('in_flight', 'succeeded', 'failed')),
-  -- A stored response only makes sense once there is one.
   CONSTRAINT admin_idempotency_terminal_carries_a_response
     CHECK (state = 'in_flight' OR status_code IS NOT NULL)
 );
 
 CREATE INDEX admin_idempotency_by_age ON admin_idempotency (tenant_id, stored_at);
 
--- §24 #28: bulk is an async job, not SCIM /Bulk. Every vendor surveyed
--- declared /Bulk unsupported and wrote this instead.
 CREATE TABLE admin_jobs (
   tenant_id   uuid        NOT NULL,
   job_id      uuid        NOT NULL DEFAULT uuidv7(),

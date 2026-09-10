@@ -3,12 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::index::TupleIndex;
 use super::model::{EntityRef, Model, ModelError, Rewrite, SubjectRef};
 
-/// §20 §7.5: the same ceiling `OpenFGA` uses. A cycle that survives the visited
-/// set still terminates here.
 pub const MAX_DEPTH: u32 = 25;
 
-/// Fan-out ceiling. A tupleset wider than this is refused rather than walked,
-/// so one relation cannot turn a check into a scan.
 pub const MAX_WIDTH: usize = 10;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -44,8 +40,6 @@ pub struct Decision {
     pub reason_admin: Option<String>,
 }
 
-/// One step of the walk, kept so a decision can be explained without being
-/// re-derived. §24 #10 wants every allow and every deny to be auditable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraceStep {
     pub depth: u32,
@@ -69,8 +63,6 @@ struct Resolver<'a> {
 }
 
 fn memo_key(object: &EntityRef, relation: &str, subject: &SubjectRef) -> (String, String, String) {
-    // Length prefixed, never concatenated. §20 §7.5 cites CVE-2026-48096:
-    // a key built by joining strings lets one field bleed into the next.
     let object = format!("{}:{}|{}", object.kind().len(), object.kind(), object.id());
     let relation = format!("{}|{relation}", relation.len());
     let subject = format!("{}|{subject}", subject.to_string().len());
@@ -123,8 +115,6 @@ impl<'a> Resolver<'a> {
             return Ok(*known);
         }
 
-        // A relation reached again while it is still being resolved is a cycle.
-        // Answering false is the fail-closed choice and terminates the walk.
         if !self.visiting.insert(key.clone()) {
             self.record(depth, object, relation, "cycle", false);
             return Ok(false);
@@ -157,8 +147,6 @@ impl<'a> Resolver<'a> {
                     return Ok(true);
                 }
 
-                // A userset subject stands for everyone holding that relation,
-                // so each one is a further question.
                 let usersets: Vec<SubjectRef> = written
                     .into_iter()
                     .filter(|candidate| !candidate.is_direct())
@@ -229,8 +217,6 @@ impl<'a> Resolver<'a> {
 
             Rewrite::Intersection(operands) => {
                 if operands.is_empty() {
-                    // An empty intersection grants nothing. The alternative
-                    // reading, vacuous truth, would hand out access.
                     self.record(depth, object, relation, "intersection", false);
                     return Ok(false);
                 }
@@ -257,8 +243,6 @@ impl<'a> Resolver<'a> {
     }
 }
 
-/// The single decision point. Everything else in the engine is a caller of
-/// this function; §24 #9 depends on there being exactly one.
 pub fn check(
     model: &Model,
     index: &TupleIndex,
@@ -298,9 +282,6 @@ pub enum BatchSemantics {
     PermitOnFirstPermit,
 }
 
-/// `AuthZEN` /evaluations. The three semantics differ only in when the loop
-/// stops; every request that is not evaluated is reported as denied so a
-/// short circuit can never read as a grant.
 pub fn batch_check(
     model: &Model,
     index: &TupleIndex,

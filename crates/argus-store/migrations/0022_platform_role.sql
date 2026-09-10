@@ -1,13 +1,3 @@
--- §24 #21: a tenant administrator works from its own tenant's issuer, and the
--- platform control plane is separate and narrow. Keycloak routes every realm
--- through the master realm, which makes master both the single point of
--- failure and the single point of compromise.
---
--- The tenant policy on `tenants` is scoped to argus_current_tenant(), so no
--- role that serves tenant traffic can enumerate tenants. Rather than weaken
--- that policy or hand anything BYPASSRLS, the control plane gets its own role
--- with one explicit policy. §1 #3 is untouched: RLS stays enabled and forced,
--- and this role is NOSUPERUSER NOBYPASSRLS like every other.
 
 DO $$
 BEGIN
@@ -17,8 +7,6 @@ BEGIN
 END
 $$;
 
--- Only the tenant registry, and only through this role. Nothing else in the
--- schema becomes visible by switching to it.
 CREATE POLICY platform_control_plane ON tenants
   TO argus_platform
   USING (true)
@@ -44,7 +32,6 @@ BEGIN
 END
 $$;
 
--- And the control plane role must not have picked up anything else.
 DO $$
 DECLARE leaked text;
 BEGIN

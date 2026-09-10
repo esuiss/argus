@@ -25,7 +25,6 @@ use crate::traits::{
 #[derive(Debug, Clone)]
 pub struct PostgresStore {
     pool: PgPool,
-    /// Present only in a process that serves the control plane. §24 #21.
     platform_pool: Option<PgPool>,
 }
 
@@ -66,15 +65,6 @@ impl PostgresStore {
         Ok(tx)
     }
 
-    /// A transaction on the control plane role. §24 #21: this reaches the
-    /// tenant registry and nothing else, which migration 0022 asserts at the
-    /// end of itself rather than leaving to convention.
-    ///
-    /// It runs on its own connection, with its own login. A process that
-    /// serves tenant traffic and one that serves the control plane are then
-    /// different database principals, so the separation §24 #19 asks for is a
-    /// boundary rather than a convention: a tenant-serving process cannot
-    /// reach the registry even if its own code asked it to.
     pub(crate) async fn platform(&self) -> Result<Transaction<'_, Postgres>, StoreError> {
         let pool = self.platform_pool.as_ref().ok_or(StoreError::NotFound)?;
         let mut tx = pool.begin().await.map_err(|e| map_err(&e))?;

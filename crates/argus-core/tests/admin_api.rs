@@ -14,8 +14,6 @@ use serde_json::{Value, json};
 
 const FIELDS: &[&str] = &["clientId", "displayName", "enabled", "createdAt"];
 
-/// RFC 7396 Appendix A, verbatim. A merge patch implementation that passes
-/// its own examples is the cheapest correctness a spec ever offers.
 #[test]
 fn the_rfc_7396_examples_all_hold() {
     let cases: &[(Value, Value, Value)] = &[
@@ -58,8 +56,6 @@ fn the_rfc_7396_examples_all_hold() {
 
 #[test]
 fn a_null_removes_a_member_rather_than_setting_it_to_null() {
-    // The whole reason §24 #2 chose merge patch: Keycloak cannot tell "not
-    // set" from "set to null" and says so in its own issue tracker.
     let out = apply(&json!({"displayName":"x"}), &json!({"displayName":null})).expect("patch");
     assert_eq!(out, json!({}));
     assert!(out.get("displayName").is_none());
@@ -79,7 +75,6 @@ fn a_patch_nested_past_the_limit_is_refused() {
 
 #[test]
 fn a_patch_touching_an_immutable_field_is_refused_before_it_is_applied() {
-    // authentik CVE-2024-37905: a token whose owner could be patched.
     let patch = json!({"owner":"someone-else"});
     assert!(matches!(
         check_patch(&patch, &["owner", "displayName"], &["owner"]),
@@ -104,8 +99,6 @@ fn a_filter_over_a_declared_field_parses() {
 
 #[test]
 fn a_filter_naming_a_field_the_resource_does_not_have_is_refused() {
-    // SCIM ignores this. An ignored filter returns every record, which is why
-    // §24 #5 makes it an error instead.
     assert!(matches!(
         parse_filter(r#"secret eq "x""#, FIELDS),
         Err(QueryError::UnknownField { .. })

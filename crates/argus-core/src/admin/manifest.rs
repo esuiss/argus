@@ -1,6 +1,3 @@
-/// §24 #19 keeps the two administrative surfaces apart: different audience,
-/// different scope namespace, different rate limit budget. Auth0 had to split
-/// them after the fact when customers hit the wall; this starts split.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Surface {
     Platform,
@@ -25,10 +22,6 @@ impl Surface {
     }
 }
 
-/// What a route requires before it runs. §24 #10: Zitadel CVE-2025-27507 was
-/// one wrong string in a service definition opening twelve endpoints, so the
-/// requirement is data rather than an annotation, and the router is built from
-/// this table. A route with no entry here cannot be mounted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RouteRequirement {
     pub method: &'static str,
@@ -48,6 +41,8 @@ pub const JOB: &str = "/admin/api/jobs/v1/{id}";
 pub const TENANTS: &str = "/admin/platform/tenants/v1";
 pub const TENANT: &str = "/admin/platform/tenants/v1/{id}";
 pub const OPENAPI: &str = "/admin/api/openapi/v1";
+pub const AUDIT_PROOF: &str = "/admin/api/audit-proofs/v1/{id}";
+pub const AUDIT_CHECKPOINTS: &str = "/admin/api/audit-checkpoints/v1";
 
 pub const MANIFEST: &[RouteRequirement] = &[
     RouteRequirement {
@@ -148,6 +143,22 @@ pub const MANIFEST: &[RouteRequirement] = &[
     },
     RouteRequirement {
         method: "GET",
+        path: AUDIT_PROOF,
+        surface: Surface::Tenant,
+        object_kind: "tenant",
+        relation: "view_audit",
+        mutating: false,
+    },
+    RouteRequirement {
+        method: "POST",
+        path: AUDIT_CHECKPOINTS,
+        surface: Surface::Tenant,
+        object_kind: "tenant",
+        relation: "manage_audit",
+        mutating: true,
+    },
+    RouteRequirement {
+        method: "GET",
         path: OPENAPI,
         surface: Surface::Tenant,
         object_kind: "tenant",
@@ -187,8 +198,6 @@ pub fn requirement(method: &str, path: &str) -> Option<&'static RouteRequirement
         .find(|entry| entry.method == method && entry.path == path)
 }
 
-/// Relations the tenant surface uses, which is also the set the authorization
-/// model has to declare for the admin API to be usable at all.
 #[must_use]
 pub fn tenant_relations() -> Vec<&'static str> {
     let mut out: Vec<&'static str> = MANIFEST

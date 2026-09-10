@@ -282,6 +282,7 @@ version = "0.0.0"
 dependencies = [
  "argus-core",
  "argus-crypto",
+ "argus-proto",
  "base64ct",
  "chrono",
  "serde_json",

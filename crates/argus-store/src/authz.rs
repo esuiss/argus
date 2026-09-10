@@ -7,8 +7,6 @@ use sqlx::Row as _;
 use crate::postgres::PostgresStore;
 use crate::traits::StoreError;
 
-/// §20 §7.4 uses the largest bigint as "not deleted", so a live row needs no
-/// NULL handling in a range predicate.
 const NEVER_DELETED: i64 = i64::MAX;
 
 fn row_to_tuple(
@@ -32,8 +30,6 @@ fn row_to_tuple(
 }
 
 impl PostgresStore {
-    /// The revision the tenant is currently at. A tenant that has never had a
-    /// tuple written sits at zero, which is a valid revision to read at.
     pub async fn authz_revision(&self, tenant: TenantId) -> Result<i64, StoreError> {
         let mut tx = self.scoped(tenant).await?;
 
@@ -50,9 +46,6 @@ impl PostgresStore {
             .unwrap_or(0))
     }
 
-    /// Every tuple alive at `revision`. F1 of §20 §7.7 loads the tenant's
-    /// graph and resolves in process; a materialized index is a later stage
-    /// and must be differentially tested against this one.
     pub async fn authz_index_at(
         &self,
         tenant: TenantId,
@@ -102,8 +95,6 @@ impl PostgresStore {
                 &subject_id,
                 &subject_relation,
             ) else {
-                // A stored row the model layer cannot represent is a schema
-                // violation, not a tuple to skip quietly.
                 return Err(StoreError::Unavailable);
             };
 
@@ -120,16 +111,11 @@ impl PostgresStore {
         self.authz_index_at(tenant, revision).await
     }
 
-    /// Applies a batch and returns the revision it produced. The revision bump
-    /// and the rows land in one transaction, so a reader at revision R never
-    /// sees half a batch.
     pub async fn authz_apply(
         &self,
         tenant: TenantId,
         ops: &[TupleOp],
     ) -> Result<i64, AuthzWriteError> {
-        // argus-core enforces this too; the store repeats it because it is the
-        // last place before the rows land.
         if ops.len() > argus_core::authz::MAX_TUPLES_PER_WRITE {
             return Err(AuthzWriteError::TooManyTuples {
                 allowed: argus_core::authz::MAX_TUPLES_PER_WRITE,
@@ -139,8 +125,6 @@ impl PostgresStore {
 
         let mut tx = self.scoped(tenant).await.map_err(AuthzWriteError::Store)?;
 
-        // The row lock serialises concurrent batches for this tenant, so two
-        // writers cannot be handed the same revision.
         let row = sqlx::query(
             "INSERT INTO authz_revisions (tenant_id, revision) VALUES ($1, 1) \
              ON CONFLICT (tenant_id) DO UPDATE \
@@ -185,8 +169,6 @@ impl PostgresStore {
                 }
 
                 TupleOp::Delete(_) => {
-                    // Tombstoned, never removed: a decision taken at an older
-                    // revision has to stay reproducible.
                     sqlx::query(
                         "UPDATE authz_tuples SET deleted_rev = $8 \
                           WHERE tenant_id = $1 AND object_type = $2 AND object_id = $3 \

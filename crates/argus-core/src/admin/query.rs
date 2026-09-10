@@ -23,9 +23,6 @@ pub enum QueryError {
     Malformed(String),
 }
 
-/// §24 #5 adopts a subset of RFC 7644 §3.4.2.2 rather than inventing a
-/// dialect, and deliberately leaves the ordered comparisons out. Keycloak's
-/// v2 query API made the same two choices.
 const fn operator_name(op: CompareOp) -> &'static str {
     match op {
         CompareOp::Eq => "eq",
@@ -47,9 +44,6 @@ const fn is_supported(op: CompareOp) -> bool {
     )
 }
 
-/// Every path in the filter has to name a declared field. §24 #5: SCIM
-/// ignores an unknown attribute, and an ignored filter is a filter that
-/// returns every record, so this API refuses instead.
 pub fn check_filter(filter: &Filter, fields: &[&str]) -> Result<(), QueryError> {
     match filter {
         Filter::Present { path } => known(path, fields),
@@ -91,9 +85,6 @@ pub fn parse_filter(raw: &str, fields: &[&str]) -> Result<Filter, QueryError> {
     Ok(filter)
 }
 
-/// `fields=a,b,c`. An unknown name is refused for the same reason an unknown
-/// filter path is: silently dropping it hides a client bug behind a response
-/// that looks fine.
 pub fn projection(raw: &str, fields: &[&str]) -> Result<Vec<String>, QueryError> {
     let wanted: Vec<&str> = raw
         .split(',')

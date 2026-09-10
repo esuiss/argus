@@ -202,9 +202,6 @@ async fn one_tenants_tuples_are_invisible_to_another() {
 
 #[tokio::test]
 async fn the_row_level_policy_and_not_the_query_is_what_hides_another_tenant() {
-    // The query above carries a tenant predicate, so it would pass even with
-    // no policy at all. This one reads the table with no predicate: under
-    // argus_test, which is NOBYPASSRLS, only the policy can answer.
     let Some(store) = store().await else {
         return;
     };

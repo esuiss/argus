@@ -22,6 +22,7 @@ use argus_http::state::{AppState, TenantContext};
 use argus_proto::AuthorizationServerMetadata;
 use uuid::Uuid;
 
+#[allow(clippy::struct_excessive_bools)]
 struct Config {
     issuer: String,
     bind: String,
@@ -56,19 +57,10 @@ struct Config {
     federation_role_anchor: bool,
     rsa_key_dir: Option<String>,
 
-    /// §24 #21: a separate login for the control plane. Absent in a process
-    /// that serves tenant traffic, and the platform routes are then not
-    /// mounted at all.
     platform_database_url: Option<String>,
 
-    /// Whether the issuer was chosen rather than defaulted. §9.5 #2 refuses a
-    /// production start on a guessed issuer: Keycloak's own warning is that an
-    /// attacker who can steer it gets tokens from an issuer of their choosing.
     issuer_was_set: bool,
 
-    /// §9.5 #2 and §24 #34: the administrative surface listens somewhere else.
-    /// Keycloak leaves this a recommendation; here it is required in
-    /// production and honoured everywhere.
     admin_bind: Option<String>,
 }
 
@@ -671,9 +663,6 @@ async fn serve(app: axum::Router, config: &Config, store_kind: &str) -> ExitCode
         }
     };
 
-    // §9.5 #2: refuse an unsafe production configuration rather than warn
-    // about it. Keycloak's own list leaves these as recommendations, and they
-    // are the ones that silently defeat everything above them.
     if config.production {
         if !config.issuer_was_set {
             eprintln!(
@@ -1207,9 +1196,6 @@ async fn serve_with_postgres(
 
     let mut store = argus_store::PostgresStore::new(pool);
 
-    // §24 #21. The control plane is a separate database principal, so a
-    // deployment that does not configure one cannot reach the tenant registry
-    // at all rather than merely declining to.
     if let Some(url) = config.platform_database_url.as_deref() {
         let Ok(control) = sqlx::postgres::PgPoolOptions::new()
             .max_connections(4)
@@ -1340,8 +1326,6 @@ async fn serve_with_postgres(
         .merge(argus_http::differentiation::build(differentiation))
         .merge(argus_http::par::build(Arc::clone(&pushed_requests)));
 
-    // §24. The router is generated from the permission manifest, so mounting
-    // it mounts exactly the routes somebody declared a permission for.
     let admin = argus_http::admin::build(Arc::new(argus_http::admin::AdminState {
         tenant_id,
         issuer: config.issuer.clone(),
@@ -1351,36 +1335,19 @@ async fn serve_with_postgres(
         policy: argus_core::admin::policy(),
     }));
 
-    // §9.5 #2 and §24 #34: on its own address when one is given, so the
-    // administrative surface can be reached from somewhere the public one
-    // cannot. Keycloak leaves this a recommendation and its stored cross site
-    // scripting findings are all a low privileged administrator reaching a
-    // higher privileged one's browser.
-    let admin_listener = match config.admin_bind.as_deref() {
-        None => None,
-        Some(bind) => match tokio::net::TcpListener::bind(bind).await {
-            Ok(listener) => {
-                eprintln!("argus: administrative API on {bind}");
-                Some(listener)
-            }
-            Err(_) => {
-                eprintln!("argus: cannot bind {bind}");
-                return ExitCode::FAILURE;
-            }
-        },
-    };
-
-    match admin_listener {
-        Some(listener) => {
-            let admin = admin.clone();
-            tokio::spawn(async move {
-                let _ = axum::serve(listener, admin).await;
-            });
-        }
-        None => {
-            eprintln!("argus: administrative API at /admin, on the main listener");
-            app = app.merge(admin);
-        }
+    if let Some(bind) = config.admin_bind.as_deref() {
+        let Ok(listener) = tokio::net::TcpListener::bind(bind).await else {
+            eprintln!("argus: cannot bind {bind}");
+            return ExitCode::FAILURE;
+        };
+        eprintln!("argus: administrative API on {bind}");
+        let admin = admin.clone();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, admin).await;
+        });
+    } else {
+        eprintln!("argus: administrative API at /admin, on the main listener");
+        app = app.merge(admin);
     }
 
     if config.fapi_profile {

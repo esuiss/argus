@@ -7,11 +7,6 @@ use serde_json::{Map, Value, json};
 
 use super::guard::{Shared, admit};
 
-/// §24 #8: the specification is generated from the same table the router is
-/// built from, so it cannot drift. Keycloak's v1 spec was written beside the
-/// code and its own maintainer called it insufficient to generate clients
-/// from. Keycloak v2's other good idea is here too: the document is served at
-/// run time, so a generator adapts to the server it is talking to.
 pub(super) async fn document(State(state): State<Shared>, headers: HeaderMap) -> Response {
     let entry = argus_core::admin::requirement("GET", argus_core::admin::manifest::OPENAPI);
     if let Some(entry) = entry
@@ -49,8 +44,6 @@ pub(super) async fn document(State(state): State<Shared>, headers: HeaderMap) ->
                 json!({ "description": "the idempotency key was reused with another payload" }),
             );
         }
-        // §24 #15: a caller without the permission is told the resource is not
-        // there, so the document does not advertise a 403 that never comes.
         responses.insert(
             "404".to_owned(),
             json!({ "description": "no such resource, or not visible to this caller" }),

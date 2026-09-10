@@ -28,9 +28,6 @@ async fn store() -> Option<PostgresStore> {
 
     let store = PostgresStore::new(pool);
 
-    // §24 #21: the control plane has its own login. Without one the platform
-    // routes are not mounted at all, which is what a tenant-serving
-    // deployment looks like.
     let Some(control) = std::env::var("ARGUS_TEST_PLATFORM_DATABASE_URL").ok() else {
         return Some(store);
     };
@@ -121,8 +118,6 @@ fn token(harness: &Harness, subject: &str, surface: Surface) -> String {
     argus_proto::jwt::sign(&claims, &harness.key).expect("sign")
 }
 
-/// Makes the subject an administrator of the object, which is the one relation
-/// everything else is derived from.
 async fn make_admin(harness: &Harness, subject: &str, kind: &str, id: &str) {
     let tuple = Tuple::new(
         EntityRef::new(kind, id).expect("object"),
@@ -138,8 +133,6 @@ async fn make_admin(harness: &Harness, subject: &str, kind: &str, id: &str) {
         .expect("apply");
 }
 
-/// `clients.client_id` is unique across the whole cluster, not per tenant, so
-/// a fixed name in a test collides with the row its own previous run left.
 fn named(harness: &Harness, name: &str) -> String {
     format!(
         "{name}-{}",
@@ -251,9 +244,6 @@ async fn call(
 
 #[test]
 fn every_route_the_manifest_declares_has_a_handler() {
-    // §24 #10 wants the requirement to be data and the wiring derived from it.
-    // A declared route with nothing behind it would be a 404 in production and
-    // a lie in the generated specification.
     assert_eq!(
         unimplemented(),
         Vec::<(&str, &str)>::new(),
@@ -272,8 +262,6 @@ async fn a_request_with_no_token_is_refused() {
 
 #[tokio::test]
 async fn a_caller_without_the_relation_is_told_the_resource_is_not_there() {
-    // §24 #15: a 403 confirms the resource exists. Keycloak's Organizations
-    // FGAP hides them entirely, in the console and in the API alike.
     let Some(harness) = harness().await else {
         return;
     };
@@ -288,9 +276,6 @@ async fn a_caller_without_the_relation_is_told_the_resource_is_not_there() {
     );
 }
 
-/// §24 #10's second half: every route is exercised without its permission and
-/// must refuse. The list comes from the manifest, so a route added later is
-/// covered the day it is added.
 #[tokio::test]
 async fn no_route_serves_a_caller_that_holds_nothing() {
     let Some(harness) = harness().await else {
@@ -316,8 +301,6 @@ async fn no_route_serves_a_caller_that_holds_nothing() {
 
 #[tokio::test]
 async fn a_tenant_token_cannot_reach_the_platform_surface() {
-    // §24 #19: separate audiences. Auth0 had to split these after customers
-    // hit the wall; a token for one must be inert against the other.
     let Some(harness) = harness().await else {
         return;
     };
@@ -349,8 +332,6 @@ async fn a_tenant_token_cannot_reach_the_platform_surface() {
     assert_eq!(status_of(&response), 200);
 }
 
-/// §24 #21. Without a control plane connection the platform routes are not
-/// mounted, so a tenant-serving deployment does not carry them at all.
 #[tokio::test]
 async fn a_deployment_with_no_control_plane_connection_does_not_carry_its_routes() {
     let Some(store) = store().await else {
@@ -412,8 +393,6 @@ async fn a_deployment_with_no_control_plane_connection_does_not_carry_its_routes
 
 #[tokio::test]
 async fn an_administrator_can_enrol_a_federation_subordinate() {
-    // The gap this API closes: before it the registry could be read and never
-    // written, so a trust anchor could serve no subordinate at all.
     let Some(harness) = harness().await else {
         return;
     };
@@ -432,7 +411,6 @@ async fn an_administrator_can_enrol_a_federation_subordinate() {
 
     assert_eq!(status_of(&response), 201);
     let body = body_of(&response);
-    // §24 #3: the full representation, not an id in a Location header.
     assert_eq!(
         body.get("id").and_then(Value::as_str),
         Some("https://leaf.test")
@@ -489,7 +467,6 @@ async fn creating_a_client_returns_the_whole_resource_and_put_upserts_it() {
         "§24 #7: one request has to be enough to create the whole resource"
     );
 
-    // §24 #2: PUT on something that exists updates and says 200.
     let response = call(
         &harness,
         "PUT",
@@ -500,7 +477,6 @@ async fn creating_a_client_returns_the_whole_resource_and_put_upserts_it() {
     .await;
     assert_eq!(status_of(&response), 200);
 
-    // And on something that does not, it creates and says 201.
     let response = call(
         &harness,
         "PUT",
@@ -738,4 +714,86 @@ async fn the_specification_is_generated_from_the_same_table_as_the_router() {
             entry.path
         );
     }
+}
+
+#[tokio::test]
+async fn an_audit_event_proves_itself_through_the_api() {
+    let Some(harness) = harness().await else {
+        return;
+    };
+    let subject = harness.tenant.as_uuid().to_string();
+    make_admin(&harness, "root", "tenant", &subject).await;
+    let token = token(&harness, "root", Surface::Tenant);
+
+    let url = std::env::var("ARGUS_TEST_DATABASE_URL").expect("url");
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+        .expect("pool");
+    let mut tx = pool.begin().await.expect("begin");
+    sqlx::query("SELECT set_config('argus.tenant_id', $1, true)")
+        .bind(harness.tenant.as_uuid().to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("scope");
+
+    let event = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO audit_events \
+           (tenant_id, occurred_at, event_id, event_type, outcome, actor_kind) \
+         VALUES ($1, now() - interval '60 seconds', $2, 'token.issued', 'success', 'client')",
+    )
+    .bind(harness.tenant.as_uuid())
+    .bind(event)
+    .execute(&mut *tx)
+    .await
+    .expect("event");
+    tx.commit().await.expect("commit");
+
+    let response = call(
+        &harness,
+        "GET",
+        &format!("/admin/api/audit-proofs/v1/{event}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(status_of(&response), 404);
+
+    let response = call(
+        &harness,
+        "POST",
+        "/admin/api/audit-checkpoints/v1",
+        Some(&token),
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status_of(&response), 201);
+    let published = body_of(&response);
+    let root = published
+        .get("root")
+        .and_then(Value::as_str)
+        .expect("a published root");
+
+    let response = call(
+        &harness,
+        "GET",
+        &format!("/admin/api/audit-proofs/v1/{event}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(status_of(&response), 200);
+
+    let proof = body_of(&response);
+    assert_eq!(proof.get("root").and_then(Value::as_str), Some(root));
+    assert!(proof.get("path").and_then(Value::as_array).is_some());
+    assert!(
+        proof
+            .get("chain_uid")
+            .and_then(Value::as_str)
+            .is_some_and(|uid| uid.starts_with(argus_core::audit::CHAIN_UID_PREFIX)),
+        "the OCSF chain identifier must name this log"
+    );
 }

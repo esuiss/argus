@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod admin;
+pub mod audit;
 pub mod authz;
 pub mod directory;
 pub mod par;

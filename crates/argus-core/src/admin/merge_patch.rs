@@ -14,10 +14,6 @@ pub enum MergePatchError {
     Unknown { field: String },
 }
 
-/// RFC 7396. §24 #2 chose merge patch over the ad hoc verbs Keycloak grew,
-/// and it is also what answers the explicit null question: a null in the patch
-/// removes the member, so "unset" and "never set" stop being the same wire
-/// form.
 pub fn apply(target: &Value, patch: &Value) -> Result<Value, MergePatchError> {
     apply_at(target, patch, 0)
 }
@@ -28,7 +24,6 @@ fn apply_at(target: &Value, patch: &Value, depth: u32) -> Result<Value, MergePat
     }
 
     let Some(members) = patch.as_object() else {
-        // A non-object patch replaces the target outright, arrays included.
         return Ok(patch.clone());
     };
 
@@ -50,9 +45,6 @@ fn apply_at(target: &Value, patch: &Value, depth: u32) -> Result<Value, MergePat
     Ok(Value::Object(out))
 }
 
-/// Fields the patch touches, at the top level only. A caller checks these
-/// against what the resource allows before applying anything, so a rejected
-/// patch changes nothing.
 #[must_use]
 pub fn touched(patch: &Value) -> Vec<String> {
     patch
@@ -61,9 +53,6 @@ pub fn touched(patch: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// §24 #12: an owner field is fixed at creation. authentik CVE-2024-37905 was
-/// a token whose user id could be patched, which made every authenticated
-/// user one request away from superuser.
 pub fn check_patch(
     patch: &Value,
     known: &[&str],

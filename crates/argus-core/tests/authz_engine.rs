@@ -25,7 +25,6 @@ fn tuple(object: EntityRef, relation: &str, subject: SubjectRef) -> Tuple {
     Tuple::new(object, relation, subject).expect("tuple")
 }
 
-/// document is contained by folder; a folder's viewers view its documents.
 fn document_model() -> Model {
     Model::new()
         .with("user", TypeDef::new())
@@ -423,9 +422,6 @@ fn a_relation_fanning_out_past_the_width_limit_is_refused() {
 
 #[test]
 fn two_questions_that_would_collide_under_a_concatenated_key_stay_separate() {
-    // CVE-2026-48096 is a cache key built by joining fields: "ab" + "c" and
-    // "a" + "bc" become the same string. The answer for one must never be
-    // served for the other.
     let model = Model::new().with(
         "group",
         TypeDef::new()
@@ -570,7 +566,6 @@ fn an_actor_cannot_grant_a_relation_it_does_not_hold() {
     let mut index = TupleIndex::new();
     index.insert(tuple(e("document", "d1"), "owner", user("alice")));
 
-    // alice administers d1 but is not a viewer, so she cannot mint viewers.
     let ops = vec![TupleOp::Write(tuple(
         e("document", "d1"),
         "viewer",
@@ -632,9 +627,6 @@ fn a_type_with_no_administrative_relation_declared_accepts_no_writes() {
 
 #[test]
 fn reparenting_a_privileged_group_under_ones_own_is_refused() {
-    // The shape of CVE-2026-9099 and GitLab CVE-2026-35595: mallory owns her
-    // own group and moves the privileged group under it, inheriting its
-    // membership through the hierarchy.
     let model = grant_model();
     let mut index = TupleIndex::new();
 
@@ -654,8 +646,6 @@ fn reparenting_a_privileged_group_under_ones_own_is_refused() {
         "mallory must not be an admin before the move"
     );
 
-    // membership flows from parent to child, so making admins a child of her
-    // own group is what pulls mallory into it.
     let ops = vec![TupleOp::Write(tuple(
         e("group", "admins"),
         "parent",
@@ -786,8 +776,6 @@ fn a_search_that_runs_out_of_budget_says_so_instead_of_truncating_silently() {
 
 #[test]
 fn a_search_never_returns_a_resource_the_check_would_deny() {
-    // §20 §6.2 invariant 4: check and list must agree. Five of the CVEs in
-    // that section are the two disagreeing.
     let model = document_model();
     let mut index = TupleIndex::new();
 

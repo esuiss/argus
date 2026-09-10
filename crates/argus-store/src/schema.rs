@@ -23,6 +23,7 @@ pub const EXPECTED_MIGRATIONS: &[&str] = &[
     "0020_authz_tuples",
     "0021_admin_api",
     "0022_platform_role",
+    "0023_audit_checkpoints",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

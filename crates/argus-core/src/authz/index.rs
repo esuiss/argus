@@ -4,9 +4,6 @@ use super::model::{EntityRef, SubjectRef, Tuple};
 
 pub const MAX_TUPLES_PER_WRITE: usize = 1000;
 
-/// The forward and reverse views the resolver walks. §20 §7.4 keeps two
-/// indexes because a check walks forward and a search walks backward, and no
-/// single ordering serves both.
 #[derive(Debug, Clone, Default)]
 pub struct TupleIndex {
     forward: BTreeMap<(String, String, String), BTreeSet<SubjectRef>>,
@@ -71,8 +68,6 @@ impl TupleIndex {
             .is_some_and(|set| set.contains(&tuple.subject))
     }
 
-    /// Subjects written directly against this object and relation. This is the
-    /// only place the resolver reads stored data.
     #[must_use]
     pub fn subjects(&self, object: &EntityRef, relation: &str) -> Vec<SubjectRef> {
         self.forward
@@ -81,7 +76,6 @@ impl TupleIndex {
             .unwrap_or_default()
     }
 
-    /// Objects this subject is written against, used by the reverse walk.
     #[must_use]
     pub fn objects_of(&self, subject: &SubjectRef) -> Vec<(EntityRef, String)> {
         self.reverse

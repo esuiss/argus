@@ -15,9 +15,6 @@ pub enum PageError {
     EmptyLimit,
 }
 
-/// §24 #6 refuses offset paging. Keycloak's own user showed offset skipping
-/// records when the set changes under the reader, and Keycloak's v2 API chose
-/// offset anyway; this is the fork in the road where the two differ.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PageRequest {
     pub after: Option<String>,
@@ -66,8 +63,6 @@ pub fn decode_cursor(raw: &str) -> Result<String, PageError> {
         .map_err(|_| PageError::InvalidCursor)
 }
 
-/// RFC 5988. §24 #6 and the Keycloak REST guideline both ask for the next page
-/// to be a link the client follows rather than an arithmetic it performs.
 #[must_use]
 pub fn link_header(base: &str, next: Option<&str>, previous: Option<&str>) -> Option<String> {
     let mut parts = Vec::new();

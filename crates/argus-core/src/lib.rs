@@ -2,6 +2,7 @@
 
 pub mod aal;
 pub mod admin;
+pub mod audit;
 pub mod authn;
 pub mod authorize;
 pub mod authz;

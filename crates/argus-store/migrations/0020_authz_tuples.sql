@@ -1,6 +1,3 @@
--- §20 §7.4. The MVCC columns are what make a consistency token meaningful:
--- a read at revision R sees exactly the rows created at or before R and not
--- yet deleted at R, so a decision can be reproduced later.
 
 CREATE TABLE authz_models (
   tenant_id   uuid        NOT NULL,
@@ -24,8 +21,6 @@ CREATE UNIQUE INDEX authz_models_live
   ON authz_models (tenant_id)
   WHERE retired_at IS NULL;
 
--- One sequence per tenant would be ideal but a sequence is a schema object;
--- a counter row gives the same monotonic revision under the tenant policy.
 CREATE TABLE authz_revisions (
   tenant_id   uuid        NOT NULL,
   revision    bigint      NOT NULL DEFAULT 0,
@@ -47,12 +42,9 @@ CREATE TABLE authz_tuples (
   relation         text   NOT NULL,
   subject_type     text   NOT NULL,
   subject_id       text   NOT NULL,
-  -- '' is a direct subject; anything else is a userset.
   subject_relation text   NOT NULL DEFAULT '',
 
   created_rev      bigint NOT NULL,
-  -- The sentinel is the largest bigint: a row alive now is alive at every
-  -- future revision, so a range predicate needs no NULL handling.
   deleted_rev      bigint NOT NULL DEFAULT 9223372036854775807,
 
   CONSTRAINT authz_tuples_pkey PRIMARY KEY
@@ -73,23 +65,17 @@ CREATE TABLE authz_tuples (
     length(subject_relation) <= 256
   ),
 
-  -- The grammar separators must not appear inside a field or a rendered
-  -- tuple could be read back as a different tuple.
   CONSTRAINT authz_tuples_identifiers_are_unambiguous CHECK (
     object_type !~ '[:#@]' AND object_id !~ '[:#@]' AND relation !~ '[:#@]' AND
     subject_type !~ '[:#@]' AND subject_id !~ '[:#@]' AND subject_relation !~ '[:#@]'
   )
 );
 
--- Forward: a check asks "who holds this relation on this object".
 CREATE INDEX authz_tuples_forward
   ON authz_tuples (tenant_id, object_type, object_id, relation)
   INCLUDE (subject_type, subject_id, subject_relation)
   WHERE deleted_rev = 9223372036854775807;
 
--- Reverse: a search asks "what is this subject attached to". §20 §7.4 keeps
--- both because no single ordering answers both, which is also the reason a
--- search costs more than a check.
 CREATE INDEX authz_tuples_reverse
   ON authz_tuples (tenant_id, subject_type, subject_id, subject_relation, relation)
   INCLUDE (object_type, object_id)

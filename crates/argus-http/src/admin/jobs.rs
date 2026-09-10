@@ -11,9 +11,6 @@ use super::guard::{
     Idempotency, Shared, admit, close_idempotency, hidden, open_idempotency, problem,
 };
 
-/// §24 #28: bulk is a long running operation, not a synchronous batch. Every
-/// vendor surveyed declared SCIM /Bulk unsupported and wrote this instead, so
-/// this is the shape rather than an envelope of sub-requests.
 pub(super) async fn submit(
     State(state): State<Shared>,
     headers: HeaderMap,
@@ -85,9 +82,6 @@ pub(super) async fn submit(
     let _ = job.finish();
     let _ = state.store.save_job(state.tenant_id, &job).await;
 
-    // 202 with a job resource to poll, per AIP-151. The terminal result is on
-    // the job, never inlined here, so a caller cannot mistake acceptance for
-    // completion.
     let body = json!({
         "id": job.id,
         "metadata": job.metadata(),

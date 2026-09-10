@@ -82,9 +82,6 @@ impl PostgresStore {
         )))
     }
 
-    /// Claims the key for this attempt. §24 #33 stores the record only once
-    /// the run has begun, so a validation error never locks a client out of
-    /// retrying with a corrected payload.
     pub async fn idempotency_begin(
         &self,
         tenant: TenantId,
@@ -267,9 +264,6 @@ impl PostgresStore {
     }
 }
 
-/// The administrative view of a client. §24 #7 wants a resource to be
-/// creatable in one request, so the redirect URIs travel with it rather than
-/// needing a second call the way Keycloak's roles do.
 pub struct AdminClient {
     pub client_id: String,
     pub client_type: String,
@@ -286,8 +280,6 @@ impl core::fmt::Debug for AdminClient {
 }
 
 impl PostgresStore {
-    /// One more than asked for, so a caller can tell whether a further page
-    /// exists without a second query or a count.
     pub async fn list_clients(
         &self,
         tenant: TenantId,
@@ -404,8 +396,6 @@ impl PostgresStore {
         }))
     }
 
-    /// Creates or replaces a client and its redirect URIs in one transaction,
-    /// so a half written client never becomes reachable.
     pub async fn upsert_client(
         &self,
         tenant: TenantId,

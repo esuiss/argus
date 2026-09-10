@@ -4,13 +4,8 @@ use super::check::{CheckError, CheckRequest, check};
 use super::index::TupleIndex;
 use super::model::{EntityRef, Model, SubjectRef};
 
-/// §20 §7.5 caps a search at 1000 results and makes paging mandatory. A caller
-/// asking for more than this gets this many.
 pub const MAX_RESULTS: usize = 1000;
 
-/// The wall clock deadline in §20 §7.5 belongs to the caller; argus-core reads
-/// no clock. What it can bound is work, so a search carries a step budget and
-/// reports honestly when the budget ran out rather than truncating in silence.
 pub const DEFAULT_STEP_BUDGET: u32 = 50_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,8 +22,6 @@ pub struct ResourceSearch {
 pub struct Page {
     pub objects: Vec<EntityRef>,
     pub next: Option<String>,
-    /// True when the step budget ran out before the walk finished. The page is
-    /// then a partial answer and must never be read as "these are all of them".
     pub exhausted: bool,
 }
 
@@ -41,10 +34,6 @@ pub enum SearchError {
     Check(#[from] CheckError),
 }
 
-/// Candidate objects of the requested kind: everything the subject is written
-/// against, plus everything reachable from those objects. F0 of §20 §7.7 is
-/// deliberately the naive walk, so this enumerates and then checks rather than
-/// consulting a materialized index.
 fn candidates(
     index: &TupleIndex,
     subject: &SubjectRef,
@@ -69,8 +58,6 @@ fn candidates(
             if object.kind() == kind {
                 found.insert(object.clone());
             }
-            // The object may itself stand in for further subjects, which is how
-            // membership of a group that is a member of a group is reached.
             if let Ok(next) = SubjectRef::userset(object.clone(), &relation) {
                 frontier.push(next);
             }
@@ -137,7 +124,6 @@ pub fn search_resources(
         objects.push(object);
     }
 
-    // The cursor is the last id returned, so the next page resumes after it.
     if next.is_some() {
         next = objects.last().map(|last| last.id().to_owned());
     }
