@@ -15,7 +15,8 @@ use axum::response::{IntoResponse, Response};
 use serde_json::{Value, json};
 
 pub struct AdminState {
-    pub tenant_id: TenantId,
+    // §18: kiracı istekten çözülür.
+    pub tenants: Arc<crate::tenancy::TenantRegistry>,
     pub issuer: String,
     pub store: PostgresStore,
     pub published_keys: Vec<Arc<SigningKey>>,
@@ -44,6 +45,7 @@ pub type Refusal = Box<Response>;
 pub struct Caller {
     subject: String,
     surface: Surface,
+    tenant: crate::tenancy::Tenant,
 }
 
 impl Caller {
@@ -55,6 +57,11 @@ impl Caller {
     #[must_use]
     pub const fn surface(&self) -> Surface {
         self.surface
+    }
+
+    #[must_use]
+    pub fn tenant(&self) -> TenantId {
+        self.tenant.id()
     }
 }
 
@@ -165,8 +172,10 @@ pub(super) async fn admit(
     // tane değil TEK bir nesnedir, yoksa bir platform yöneticisine kiracı
     // listesini görmek için aynı ilişkiyi kiracı başına bir kez vermek
     // gerekirdi.
+    let tenant = crate::tenancy::resolve(&state.tenants, headers)?;
+
     let object_id = match requirement.surface {
-        Surface::Tenant => state.tenant_id.as_uuid().to_string(),
+        Surface::Tenant => tenant.id().as_uuid().to_string(),
         Surface::Platform => PLATFORM_OBJECT.to_owned(),
     };
 
@@ -189,17 +198,13 @@ pub(super) async fn admit(
         ))
     })?);
 
-    let index = state
-        .store
-        .authz_index(state.tenant_id)
-        .await
-        .map_err(|_| {
-            Box::new(problem(
-                503,
-                "unavailable",
-                "the relation graph is unreadable",
-            ))
-        })?;
+    let index = state.store.authz_index(tenant.id()).await.map_err(|_| {
+        Box::new(problem(
+            503,
+            "unavailable",
+            "the relation graph is unreadable",
+        ))
+    })?;
 
     let decision = check(
         &state.model,
@@ -219,6 +224,7 @@ pub(super) async fn admit(
     Ok(Caller {
         subject: claims.sub,
         surface: requirement.surface,
+        tenant,
     })
 }
 
@@ -231,6 +237,7 @@ pub(super) enum Idempotency {
 
 pub(super) async fn open_idempotency(
     state: &AdminState,
+    caller: &Caller,
     headers: &HeaderMap,
     surface: Surface,
     body: &Value,
@@ -251,7 +258,7 @@ pub(super) async fn open_idempotency(
 
     let existing = state
         .store
-        .idempotency_record(state.tenant_id, name, key.as_str())
+        .idempotency_record(caller.tenant(), name, key.as_str())
         .await
         .map_err(|_| Box::new(problem(503, "unavailable", "the key store is unreadable")))?;
 
@@ -290,7 +297,7 @@ pub(super) async fn open_idempotency(
 
     let claimed = state
         .store
-        .idempotency_begin(state.tenant_id, name, key.as_str(), &fingerprint)
+        .idempotency_begin(caller.tenant(), name, key.as_str(), &fingerprint)
         .await
         .map_err(|_| Box::new(problem(503, "unavailable", "the key store is unwritable")))?;
 
@@ -308,6 +315,7 @@ pub(super) async fn open_idempotency(
 
 pub(super) async fn close_idempotency(
     state: &AdminState,
+    caller: &Caller,
     key: Option<&str>,
     surface: Surface,
     status: u16,
@@ -323,7 +331,7 @@ pub(super) async fn close_idempotency(
     let succeeded = (200..300).contains(&status);
     let _ = state
         .store
-        .idempotency_finish(state.tenant_id, name, key, succeeded, status, body)
+        .idempotency_finish(caller.tenant(), name, key, succeeded, status, body)
         .await;
 }
 

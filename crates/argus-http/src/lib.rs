@@ -14,6 +14,7 @@ pub mod router;
 pub mod saml;
 pub mod scim;
 pub mod state;
+pub mod tenancy;
 pub use argus_store::traits as store;
 
 pub use router::build;

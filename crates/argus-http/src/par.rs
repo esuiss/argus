@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use argus_core::client_auth::{
     ClientAuthMethod, MAX_ASSERTION_LIFETIME, PresentedCredential, authenticate, validate_assertion,
 };
-use argus_core::id::{ClientId, TenantId};
+use argus_core::id::ClientId;
 use argus_core::par::{
     IDENTIFIER_BYTES, ParFault, Profile, PushedRequest, check_authorize_entry, check_push,
     check_redemption, identifier_of, lifetime, request_uri_for,
@@ -21,7 +21,8 @@ use serde_json::json;
 
 pub struct ParState {
     pub store: PostgresStore,
-    pub tenant_id: TenantId,
+    // §18: kiracı istekten çözülür, duruma sabitlenmez.
+    pub tenants: Arc<crate::tenancy::TenantRegistry>,
     pub profile: Profile,
     pub issuer: String,
     pub endpoint: String,
@@ -111,6 +112,7 @@ fn decode(value: &str) -> String {
 
 pub async fn push(
     state: &ParState,
+    tenant: &crate::tenancy::Tenant,
     parameters: &[(String, String)],
     authenticated: &ClientId,
     requested_lifetime: Option<Duration>,
@@ -126,7 +128,7 @@ pub async fn push(
     state
         .store
         .push_request(
-            state.tenant_id,
+            tenant.id(),
             &identifier,
             authenticated,
             parameters,
@@ -146,6 +148,7 @@ pub async fn push(
 
 pub async fn redeem(
     state: &ParState,
+    tenant: &crate::tenancy::Tenant,
     request_uri: &str,
     presenting: &ClientId,
 ) -> Result<PushedRequest, ParFault> {
@@ -153,7 +156,7 @@ pub async fn redeem(
 
     let request = state
         .store
-        .consume_request(state.tenant_id, identifier)
+        .consume_request(tenant.id(), identifier)
         .await
         .map_err(|_| ParFault::UnknownRequestUri)?;
 
@@ -172,6 +175,7 @@ pub fn entry_check(state: &ParState, request_uri: Option<&str>) -> Result<(), Pa
 )]
 pub async fn authenticate_pusher(
     state: &ParState,
+    tenant: &crate::tenancy::Tenant,
     parameters: &[(String, String)],
 ) -> Result<ClientId, Refusal> {
     use crate::store::{ClientStore as _, JtiPurpose, ReplayStore as _};
@@ -201,7 +205,7 @@ pub async fn authenticate_pusher(
 
     let registered = state
         .store
-        .find(state.tenant_id, &client)
+        .find(tenant.id(), &client)
         .await
         .map_err(|_| {
             error(
@@ -237,7 +241,7 @@ pub async fn authenticate_pusher(
             let outcome = state
                 .store
                 .consume_jti(
-                    state.tenant_id,
+                    tenant.id(),
                     JtiPurpose::ClientAssertion,
                     &claims.jti,
                     at.saturating_add(MAX_ASSERTION_LIFETIME),
@@ -310,15 +314,19 @@ impl argus_core::dpop::ReplayGuard for AlwaysFresh {
 }
 
 async fn par_handler(State(state): State<Shared>, headers: HeaderMap, body: String) -> Response {
-    let _ = headers;
+    let tenant = match crate::tenancy::resolve(&state.tenants, &headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
+
     let parameters = parse_form(&body);
 
-    let client = match authenticate_pusher(&state, &parameters).await {
+    let client = match authenticate_pusher(&state, &tenant, &parameters).await {
         Ok(client) => client,
         Err(response) => return *response,
     };
 
-    match push(&state, &parameters, &client, None).await {
+    match push(&state, &tenant, &parameters, &client, None).await {
         Ok((request_uri, window)) => {
             let mut response = (
                 StatusCode::CREATED,

@@ -126,7 +126,14 @@ async fn harness() -> Option<Harness> {
 
     let state = Arc::new(ScimState {
         store: PostgresStore::new(pool),
-        tenant_id: tenant,
+        tenants: std::sync::Arc::new(argus_http::tenancy::TenantRegistry::single(
+            "as.test",
+            argus_http::tenancy::TenantEntry {
+                id: tenant,
+                issuer: ISSUER.to_owned(),
+                context: test_context(),
+            },
+        )),
         issuer: ISSUER.to_owned(),
         base: ISSUER.to_owned(),
         published_keys: vec![Arc::clone(&key)],
@@ -1043,5 +1050,19 @@ async fn the_config_advertises_exactly_the_events_the_server_emits() {
                 "{uri} was emitted but the configuration never announced it"
             );
         }
+    }
+}
+
+fn test_context() -> argus_http::state::TenantContext {
+    let (key, _) = argus_crypto::SigningKey::generate("t1".to_owned()).expect("key");
+    let key = std::sync::Arc::new(key);
+    argus_http::state::TenantContext {
+        metadata: argus_proto::AuthorizationServerMetadata::for_issuer("https://as.test"),
+        active_key: std::sync::Arc::clone(&key),
+        published_keys: vec![key],
+        rsa_keys: Vec::new(),
+        blind_index: argus_crypto::blind_index::BlindIndexKey::new(&[7_u8; 32])
+            .expect("blind index"),
+        relying_party: None,
     }
 }

@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use argus_core::client_resolution::TrustLevel;
 use argus_core::delegation::parse_chain;
 use argus_core::federation::statement::ENTITY_TYPE_OPENID_PROVIDER;
-use argus_core::id::{TenantId, UserId};
+use argus_core::id::UserId;
 use argus_core::time::{Duration, Timestamp};
 use argus_core::vault::{
     Lease, READ_SCOPE, Requester, SecretRecord, VaultFault, associated_data, lease_lifetime,
@@ -28,7 +28,8 @@ use crate::federation::publish::{DEFAULT_CONFIGURATION_LIFETIME, FederationIdent
 pub const AGENT_CARD_SCOPE: &str = "urn:argus:agent-card:sign";
 
 pub struct DifferentiationState {
-    pub tenant_id: TenantId,
+    // §18: kiracı istekten çözülür.
+    pub tenants: Arc<crate::tenancy::TenantRegistry>,
     pub store: Option<PostgresStore>,
     pub issuer: String,
     pub published_keys: Vec<Arc<SigningKey>>,
@@ -168,7 +169,12 @@ fn holds(claims: &AccessTokenClaims, scope: &str) -> bool {
         .any(|granted| granted == scope)
 }
 
-async fn entity_configuration(State(state): State<Shared>) -> Response {
+async fn entity_configuration(State(state): State<Shared>, headers: HeaderMap) -> Response {
+    let tenant = match crate::tenancy::resolve(&state.tenants, &headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
+    let _ = &tenant;
     let Some(identity) = state.federation.as_ref() else {
         return federation_error(404, "not_found", "this server is not a federation entity");
     };
@@ -190,7 +196,12 @@ async fn entity_configuration(State(state): State<Shared>) -> Response {
     }
 }
 
-async fn federation_list(State(state): State<Shared>) -> Response {
+async fn federation_list(State(state): State<Shared>, headers: HeaderMap) -> Response {
+    let tenant = match crate::tenancy::resolve(&state.tenants, &headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
+    let _ = &tenant;
     let Some(identity) = state.federation.as_ref() else {
         return federation_error(404, "not_found", "this server is not a federation entity");
     };
@@ -207,7 +218,7 @@ async fn federation_list(State(state): State<Shared>) -> Response {
         );
     };
 
-    match store.list_subordinates(state.tenant_id).await {
+    match store.list_subordinates(tenant.id()).await {
         Ok(subjects) => Json(subjects).into_response(),
         Err(_) => federation_error(
             503,
@@ -226,8 +237,14 @@ pub struct FetchQuery {
 
 async fn federation_fetch(
     State(state): State<Shared>,
+    headers: HeaderMap,
     axum::extract::Query(query): axum::extract::Query<FetchQuery>,
 ) -> Response {
+    let tenant = match crate::tenancy::resolve(&state.tenants, &headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
+
     let Some(identity) = state.federation.as_ref() else {
         return federation_error(404, "not_found", "this server is not a federation entity");
     };
@@ -266,7 +283,7 @@ async fn federation_fetch(
         );
     };
 
-    let Ok(subordinate) = store.find_subordinate(state.tenant_id, &query.sub).await else {
+    let Ok(subordinate) = store.find_subordinate(tenant.id(), &query.sub).await else {
         return federation_error(404, "not_found", "this entity has no such subordinate");
     };
 
@@ -402,7 +419,12 @@ async fn federation_resolve(
     }
 }
 
-async fn federation_keys(State(state): State<Shared>) -> Response {
+async fn federation_keys(State(state): State<Shared>, headers: HeaderMap) -> Response {
+    let tenant = match crate::tenancy::resolve(&state.tenants, &headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
+    let _ = &tenant;
     let Some(identity) = state.federation.as_ref() else {
         return federation_error(404, "not_found", "this server is not a federation entity");
     };
@@ -435,7 +457,12 @@ async fn sign_agent_card(
     }
 }
 
-async fn agent_card_keys(State(state): State<Shared>) -> Response {
+async fn agent_card_keys(State(state): State<Shared>, headers: HeaderMap) -> Response {
+    let tenant = match crate::tenancy::resolve(&state.tenants, &headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
+    let _ = &tenant;
     let Some(key) = state.agent_card_key.as_ref() else {
         return problem(404, "this server does not sign agent cards");
     };
@@ -510,6 +537,11 @@ async fn take_lease(
     headers: HeaderMap,
     Json(request): Json<LeaseRequest>,
 ) -> Response {
+    let tenant = match crate::tenancy::resolve(&state.tenants, &headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
+
     let claims = match authorize(&state, &headers) {
         Ok(claims) => claims,
         Err(response) => return *response,
@@ -530,7 +562,7 @@ async fn take_lease(
 
     let Ok(stored) = vault
         .store
-        .load_secret(state.tenant_id, &request.secret_id)
+        .load_secret(tenant.id(), &request.secret_id)
         .await
     else {
         return problem(404, "the secret does not exist");
@@ -553,7 +585,7 @@ async fn take_lease(
     match vault
         .store
         .issue_lease(
-            state.tenant_id,
+            tenant.id(),
             &request.secret_id,
             &holder,
             at.saturating_add(lifetime),
@@ -585,6 +617,11 @@ async fn redeem_lease(
     headers: HeaderMap,
     Json(request): Json<RedeemRequest>,
 ) -> Response {
+    let tenant = match crate::tenancy::resolve(&state.tenants, &headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
+
     let claims = match authorize(&state, &headers) {
         Ok(claims) => claims,
         Err(response) => return *response,
@@ -603,7 +640,7 @@ async fn redeem_lease(
 
     let lease: Lease = match vault
         .store
-        .spend_lease(state.tenant_id, &request.lease_id)
+        .spend_lease(tenant.id(), &request.lease_id)
         .await
     {
         Ok(lease) => lease,
@@ -614,11 +651,7 @@ async fn redeem_lease(
         return problem(vault_status(&fault), &fault.to_string());
     }
 
-    let Ok(stored) = vault
-        .store
-        .load_secret(state.tenant_id, &lease.secret_id)
-        .await
-    else {
+    let Ok(stored) = vault.store.load_secret(tenant.id(), &lease.secret_id).await else {
         return problem(404, "the secret does not exist");
     };
 
@@ -626,7 +659,7 @@ async fn redeem_lease(
         return problem(vault_status(&fault), &fault.to_string());
     }
 
-    let context = associated_data(state.tenant_id, &stored.record.secret_id);
+    let context = associated_data(tenant.id(), &stored.record.secret_id);
 
     match vault.sealing.open(&stored.sealed, &context) {
         Ok(plaintext) => match String::from_utf8(plaintext) {

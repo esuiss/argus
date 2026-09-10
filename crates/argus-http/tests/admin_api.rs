@@ -81,7 +81,14 @@ async fn harness() -> Option<Harness> {
     let key = Arc::new(key);
 
     let app = build(Arc::new(AdminState {
-        tenant_id: tenant,
+        tenants: std::sync::Arc::new(argus_http::tenancy::TenantRegistry::single(
+            "as.test",
+            argus_http::tenancy::TenantEntry {
+                id: tenant,
+                issuer: ISSUER.to_owned(),
+                context: test_context(),
+            },
+        )),
         issuer: ISSUER.to_owned(),
         store: store.clone(),
         published_keys: vec![Arc::clone(&key)],
@@ -352,7 +359,14 @@ async fn a_deployment_with_no_control_plane_connection_does_not_carry_its_routes
     assert!(!tenant_only.serves_control_plane());
 
     let app = build(Arc::new(AdminState {
-        tenant_id: tenant,
+        tenants: std::sync::Arc::new(argus_http::tenancy::TenantRegistry::single(
+            "as.test",
+            argus_http::tenancy::TenantEntry {
+                id: tenant,
+                issuer: ISSUER.to_owned(),
+                context: test_context(),
+            },
+        )),
         issuer: ISSUER.to_owned(),
         store: tenant_only,
         published_keys: vec![Arc::clone(&key)],
@@ -796,4 +810,18 @@ async fn an_audit_event_proves_itself_through_the_api() {
             .is_some_and(|uid| uid.starts_with(argus_core::audit::CHAIN_UID_PREFIX)),
         "the OCSF chain identifier must name this log"
     );
+}
+
+fn test_context() -> argus_http::state::TenantContext {
+    let (key, _) = argus_crypto::SigningKey::generate("t1".to_owned()).expect("key");
+    let key = std::sync::Arc::new(key);
+    argus_http::state::TenantContext {
+        metadata: argus_proto::AuthorizationServerMetadata::for_issuer("https://as.test"),
+        active_key: std::sync::Arc::clone(&key),
+        published_keys: vec![key],
+        rsa_keys: Vec::new(),
+        blind_index: argus_crypto::blind_index::BlindIndexKey::new(&[7_u8; 32])
+            .expect("blind index"),
+        relying_party: None,
+    }
 }

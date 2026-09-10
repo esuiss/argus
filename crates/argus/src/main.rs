@@ -164,19 +164,28 @@ async fn main() -> ExitCode {
         return serve_with_postgres(&config, &url, &keys, &blind_index).await;
     }
 
-    let state = Arc::new(AppState {
-        tenant: TenantContext {
-            metadata: AuthorizationServerMetadata::for_issuer(&config.issuer),
-            active_key: Arc::clone(&keys.active),
-            published_keys: keys.published.clone(),
-            rsa_keys: Vec::new(),
-            blind_index: blind_index.clone(),
-            relying_party: relying_party(&config),
+    let mut registry = argus_http::tenancy::TenantRegistry::new();
+    registry.register(
+        host_of_issuer(&config.issuer).unwrap_or("localhost"),
+        argus_http::tenancy::TenantEntry {
+            id: TenantId::from_uuid(Uuid::nil()),
+            issuer: config.issuer.clone(),
+            context: TenantContext {
+                metadata: AuthorizationServerMetadata::for_issuer(&config.issuer),
+                active_key: Arc::clone(&keys.active),
+                published_keys: keys.published.clone(),
+                rsa_keys: Vec::new(),
+                blind_index: blind_index.clone(),
+                relying_party: relying_party(&config),
+            },
         },
+    );
+
+    let state = Arc::new(AppState {
+        tenants: Arc::new(registry),
         codes: MemoryCodeStore::default(),
         refresh: MemoryRefreshStore::default(),
         audit: MemoryAuditSink::default(),
-        tenant_id: TenantId::from_uuid(Uuid::nil()),
         clients,
 
         authenticator: (),
@@ -553,6 +562,18 @@ struct KeySet {
     published: Vec<Arc<SigningKey>>,
 }
 
+fn relying_party_for(
+    config: &Config,
+    host: &str,
+) -> Option<Arc<argus_proto::webauthn::RelyingParty>> {
+    let rp_id = argus_core::rpid::RpId::register(host).ok()?;
+    let issuer = format!("https://{host}");
+    let _ = config;
+    argus_proto::webauthn::RelyingParty::new(&rp_id, &issuer, "Argus")
+        .ok()
+        .map(Arc::new)
+}
+
 fn relying_party(config: &Config) -> Option<Arc<argus_proto::webauthn::RelyingParty>> {
     let host = config
         .issuer
@@ -888,6 +909,57 @@ fn load_rsa_key_dir(dir: &str) -> Vec<Arc<argus_crypto::rsa::RsaSigningKey>> {
     keys
 }
 
+// §18 ve §1 #8: kayıt defteri kiracı tablosundan kurulur ve her giriş kendi
+// issuer host'uyla anahtarlanır. Kontrol düzlemi bağlantısı yoksa dağıtım tek
+// kiracılıdır ve ARGUS_ISSUER'dan tek bir giriş yapılır.
+//
+// §1 #4: imzalama anahtarı kiracı başınadır. Anahtarlar `<key_dir>/<slug>/`
+// altında aranır; orada yoksa paylaşımlı dizine düşülür ve bu UYARILIR, çünkü
+// paylaşımlı anahtar bir kiracının token'ını başka bir kiracının doğrulayabilmesi
+// demektir.
+fn tenant_keys(config: &Config, slug: &str) -> Option<KeySet> {
+    let dir = config.key_dir.as_deref()?;
+    let scoped = format!("{dir}/{slug}");
+
+    let keys = load_key_dir(&scoped);
+    if keys.is_empty() {
+        return None;
+    }
+
+    let active = match config.active_kid.as_deref() {
+        Some(kid) => keys.iter().find(|k| k.kid() == kid).map(Arc::clone),
+        None => keys.first().map(Arc::clone),
+    }?;
+
+    Some(KeySet {
+        active,
+        published: keys,
+    })
+}
+
+fn tenant_metadata(
+    issuer: &str,
+    config: &Config,
+    rsa_keys: &[Arc<argus_crypto::rsa::RsaSigningKey>],
+) -> AuthorizationServerMetadata {
+    let mut metadata = AuthorizationServerMetadata::for_issuer(issuer);
+    metadata.require_pushed_authorization_requests = config.fapi_profile;
+    if !rsa_keys.is_empty() {
+        metadata
+            .id_token_signing_alg_values_supported
+            .push("RS256".to_owned());
+    }
+    metadata
+}
+
+fn host_of_issuer(issuer: &str) -> Option<&str> {
+    issuer
+        .strip_prefix("https://")
+        .or_else(|| issuer.strip_prefix("http://"))?
+        .split(['/', ':'])
+        .next()
+}
+
 fn load_key_dir(dir: &str) -> Vec<Arc<argus_crypto::SigningKey>> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
@@ -1109,7 +1181,7 @@ impl argus_saml::nameid::PairwiseIdentifier for HmacPairwise {
 fn saml_router(
     config: &Config,
     blind_index: &argus_crypto::blind_index::BlindIndexKey,
-    tenant_id: TenantId,
+    tenants: &Arc<argus_http::tenancy::TenantRegistry>,
 ) -> Option<axum::Router> {
     let key_path = config.saml_key.as_ref()?;
     let cert_path = config.saml_cert.as_ref()?;
@@ -1156,7 +1228,7 @@ fn saml_router(
             signer,
             registry: MetadataRegistry { providers },
             subjects: NoSamlSubject,
-            tenant_id,
+            tenants: Arc::clone(tenants),
             entity_id,
             sso_location: format!("{}/saml/sso", config.issuer),
             certificate_base64,
@@ -1234,16 +1306,91 @@ async fn serve_with_postgres(
         );
     }
 
-    let published_metadata = {
-        let mut metadata = AuthorizationServerMetadata::for_issuer(&config.issuer);
-        metadata.require_pushed_authorization_requests = config.fapi_profile;
-        if !rsa_keys.is_empty() {
-            metadata
-                .id_token_signing_alg_values_supported
-                .push("RS256".to_owned());
-        }
-        metadata
+    let published_metadata = tenant_metadata(&config.issuer, config, &rsa_keys);
+
+    // §18: kayıt defteri. Kontrol düzlemi bağlantısı varsa kiracı tablosundan
+    // kurulur, yoksa dağıtım tek kiracılıdır.
+    let mut registry = argus_http::tenancy::TenantRegistry::new();
+
+    let rows = if store.serves_control_plane() {
+        store.list_tenants(None, 1000).await.unwrap_or_default()
+    } else {
+        Vec::new()
     };
+
+    for row in &rows {
+        let Ok(id) = Uuid::parse_str(&row.tenant_id) else {
+            continue;
+        };
+        let issuer = format!("https://{}", row.issuer_host);
+
+        let scoped = tenant_keys(config, &row.slug);
+        if scoped.is_none() {
+            eprintln!(
+                "argus: WARNING - tenant {} has no key directory of its own; \
+                 it shares the deployment key, which lets one tenant's tokens \
+                 verify under another (§1 #4)",
+                row.slug
+            );
+        }
+        let tenant_keys = scoped.unwrap_or_else(|| KeySet {
+            active: Arc::clone(&keys.active),
+            published: keys.published.clone(),
+        });
+
+        registry.register(
+            &row.issuer_host,
+            argus_http::tenancy::TenantEntry {
+                id: TenantId::from_uuid(id),
+                issuer: issuer.clone(),
+                context: argus_http::state::TenantContext {
+                    metadata: tenant_metadata(&issuer, config, &rsa_keys),
+                    active_key: Arc::clone(&tenant_keys.active),
+                    published_keys: tenant_keys.published.clone(),
+                    rsa_keys: rsa_keys.clone(),
+                    blind_index: blind_index.clone(),
+                    relying_party: relying_party_for(config, &row.issuer_host),
+                },
+            },
+        );
+    }
+
+    if registry.is_empty() {
+        let host = host_of_issuer(&config.issuer)
+            .unwrap_or("localhost")
+            .to_owned();
+        registry.register(
+            &host,
+            argus_http::tenancy::TenantEntry {
+                id: tenant_id,
+                issuer: config.issuer.clone(),
+                context: argus_http::state::TenantContext {
+                    metadata: published_metadata.clone(),
+                    active_key: Arc::clone(&keys.active),
+                    published_keys: keys.published.clone(),
+                    rsa_keys: rsa_keys.clone(),
+                    blind_index: blind_index.clone(),
+                    relying_party: relying_party(config),
+                },
+            },
+        );
+    }
+
+    // Host listesi bir dağıtımda binlerce satır olabilir; sayı ile birkaç örnek
+    // yeter, tamamı zaten kontrol düzleminden okunabilir.
+    let sample: Vec<&str> = registry.hosts().into_iter().take(3).collect();
+    eprintln!(
+        "argus: serving {} tenant(s), for example {}{}",
+        registry.len(),
+        sample.join(", "),
+        if registry.len() > sample.len() {
+            " ..."
+        } else {
+            ""
+        }
+    );
+
+    let tenants = Arc::new(registry);
 
     let profile = if config.fapi_profile {
         argus_core::par::Profile::financial_grade()
@@ -1253,7 +1400,7 @@ async fn serve_with_postgres(
 
     let pushed_requests = Arc::new(argus_http::par::ParState {
         store: store.clone(),
-        tenant_id,
+        tenants: Arc::clone(&tenants),
         profile,
         issuer: config.issuer.clone(),
         endpoint: format!("{}/par", config.issuer),
@@ -1261,7 +1408,7 @@ async fn serve_with_postgres(
 
     let scim = Arc::new(argus_http::scim::ScimState {
         store: store.clone(),
-        tenant_id,
+        tenants: Arc::clone(&tenants),
         issuer: config.issuer.clone(),
         base: config.issuer.clone(),
         published_keys: keys.published.clone(),
@@ -1277,18 +1424,10 @@ async fn serve_with_postgres(
     let federation = federation_identity(config);
 
     let state = Arc::new(AppState {
-        tenant: TenantContext {
-            metadata: published_metadata.clone(),
-            active_key: Arc::clone(&keys.active),
-            published_keys: keys.published.clone(),
-            rsa_keys: rsa_keys.clone(),
-            blind_index: blind_index.clone(),
-            relying_party: relying_party(config),
-        },
+        tenants: Arc::clone(&tenants),
         codes: store.clone(),
         refresh: store.clone(),
         audit: store.clone(),
-        tenant_id,
         clients: store.clone(),
 
         authenticator: (),
@@ -1302,13 +1441,13 @@ async fn serve_with_postgres(
 
     let mut app = argus_http::build(state).merge(argus_http::scim::routes::build(scim));
 
-    if let Some(saml) = saml_router(config, blind_index, tenant_id) {
+    if let Some(saml) = saml_router(config, blind_index, &tenants) {
         app = app.merge(saml);
         eprintln!("argus: SAML identity provider at /saml/metadata and /saml/sso");
     }
 
     let differentiation = Arc::new(argus_http::differentiation::DifferentiationState {
-        tenant_id,
+        tenants: Arc::clone(&tenants),
         store: Some(store.clone()),
         issuer: config.issuer.clone(),
         published_keys: keys.published.clone(),
@@ -1339,7 +1478,7 @@ async fn serve_with_postgres(
     // §24. Router izin manifestosundan üretilir; mount etmek, tam olarak birinin
     // izin bildirdiği route'ları mount etmek demektir.
     let admin = argus_http::admin::build(Arc::new(argus_http::admin::AdminState {
-        tenant_id,
+        tenants: Arc::clone(&tenants),
         issuer: config.issuer.clone(),
         store: store.clone(),
         published_keys: keys.published.clone(),

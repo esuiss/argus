@@ -52,6 +52,7 @@ type SharedState<C, R, A, S, U, P, X> = Arc<AppState<C, R, A, S, U, P, X>>;
 
 async fn metadata_handler<C, R, A, S, U, P, X>(
     State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    tenant_headers: HeaderMap,
 ) -> Response
 where
     C: CodeStore
@@ -71,11 +72,16 @@ where
     P: ReplayStore + Send + Sync + 'static,
     X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
-    Json(discovery::metadata(&state.tenant)).into_response()
+    let tenant = match crate::tenancy::resolve(&state.tenants, &tenant_headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
+    Json(discovery::metadata(&tenant)).into_response()
 }
 
 async fn jwks_handler<C, R, A, S, U, P, X>(
     State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    tenant_headers: HeaderMap,
 ) -> Response
 where
     C: CodeStore
@@ -95,7 +101,11 @@ where
     P: ReplayStore + Send + Sync + 'static,
     X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
-    discovery::jwks(&state.tenant).map_or_else(
+    let tenant = match crate::tenancy::resolve(&state.tenants, &tenant_headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
+    discovery::jwks(&tenant).map_or_else(
         |_| oauth_response(&OAuthError::new(OAuthErrorCode::ServerError)),
         |set| Json(set).into_response(),
     )
@@ -171,12 +181,16 @@ where
     P: ReplayStore + Send + Sync + 'static,
     X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
+    let tenant = match crate::tenancy::resolve(&state.tenants, &headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
     let at = now();
     let binding = match dpop_binding(
         &state.replay,
-        state.tenant_id(),
+        tenant.id(),
         &headers,
-        &state.tenant.metadata.token_endpoint,
+        &tenant.metadata.token_endpoint,
         at,
     )
     .await
@@ -185,7 +199,7 @@ where
         Err(e) => return oauth_response(&e),
     };
 
-    match handle(&state, &form, at, &AwsLcSha256, binding).await {
+    match handle(&state, &tenant, &form, at, &AwsLcSha256, binding).await {
         Ok(response) => {
             let mut r = Json(response).into_response();
             if let Ok(value) = "no-store".parse() {
@@ -236,6 +250,7 @@ fn percent_decode(value: &str) -> String {
 
 async fn backchannel_handler<C, R, A, S, U, P, X>(
     State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    tenant_headers: HeaderMap,
     Form(form): Form<crate::endpoints::backchannel::BackchannelForm>,
 ) -> Response
 where
@@ -259,6 +274,10 @@ where
     use crate::endpoints::backchannel::{
         BackchannelContext, DevBackchannelResolver, request as backchannel_request,
     };
+    let tenant = match crate::tenancy::resolve(&state.tenants, &tenant_headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
 
     let at = now();
 
@@ -266,7 +285,7 @@ where
         return oauth_response(&OAuthError::new(OAuthErrorCode::InvalidClient));
     };
 
-    let resolved = match resolve_client(&state, &raw_client, at).await {
+    let resolved = match resolve_client(&state, &tenant, &raw_client, at).await {
         Ok(Some(client)) => client,
         Ok(None) => return oauth_response(&OAuthError::new(OAuthErrorCode::InvalidClient)),
         Err(response) => return *response,
@@ -275,7 +294,7 @@ where
     let auth_req_id = uuid::Uuid::new_v4().simple().to_string();
 
     let ctx = BackchannelContext {
-        tenant: state.tenant_id(),
+        tenant: tenant.id(),
         client: &resolved.client_id,
         store: &state.codes,
         hasher: &AwsLcSha256,
@@ -363,6 +382,7 @@ fn escape(value: &str) -> String {
 
 async fn login_handler<C, R, A, S, U, P, X>(
     State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    tenant_headers: HeaderMap,
     Form(form): Form<crate::endpoints::authn::PasswordLoginForm>,
 ) -> Response
 where
@@ -385,13 +405,17 @@ where
 {
     use crate::endpoints::authn::{LoginOutcome, LoginResponse, password_login, session_cookie};
 
+    let tenant = match crate::tenancy::resolve(&state.tenants, &tenant_headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
     let at = now();
     let (outcome, secret) = password_login(
         &state.codes,
-        state.tenant_id(),
+        tenant.id(),
         &form,
         &AwsLcSha256,
-        &state.tenant.blind_index,
+        &tenant.blind_index,
         at,
     )
     .await;
@@ -401,7 +425,7 @@ where
             let Some(secret) = secret else {
                 return oauth_response(&OAuthError::new(OAuthErrorCode::ServerError));
             };
-            let secure = state.tenant.metadata.issuer.starts_with("https://");
+            let secure = tenant.metadata.issuer.starts_with("https://");
             let mut r = Json(LoginResponse {
                 authenticated: true,
             })
@@ -456,6 +480,7 @@ fn recovery_response(
 
 async fn recovery_start<C, R, A, S, U, P, X>(
     State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    tenant_headers: HeaderMap,
     Json(request): Json<crate::endpoints::recovery::StartRecovery>,
 ) -> Response
 where
@@ -477,19 +502,19 @@ where
     P: ReplayStore + Send + Sync + 'static,
     X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
+    let tenant = match crate::tenancy::resolve(&state.tenants, &tenant_headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
     recovery_response(
-        crate::endpoints::recovery::start(
-            &state.codes,
-            state.tenant_id(),
-            &request,
-            &state.tenant.blind_index,
-        )
-        .await,
+        crate::endpoints::recovery::start(&state.codes, tenant.id(), &request, &tenant.blind_index)
+            .await,
     )
 }
 
 async fn recovery_evidence<C, R, A, S, U, P, X>(
     State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    tenant_headers: HeaderMap,
     Json(request): Json<crate::endpoints::recovery::PresentEvidence>,
 ) -> Response
 where
@@ -511,19 +536,19 @@ where
     P: ReplayStore + Send + Sync + 'static,
     X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
+    let tenant = match crate::tenancy::resolve(&state.tenants, &tenant_headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
     recovery_response(
-        crate::endpoints::recovery::present_evidence(
-            &state.codes,
-            state.tenant_id(),
-            &request,
-            now(),
-        )
-        .await,
+        crate::endpoints::recovery::present_evidence(&state.codes, tenant.id(), &request, now())
+            .await,
     )
 }
 
 async fn recovery_rebind<C, R, A, S, U, P, X>(
     State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    tenant_headers: HeaderMap,
     Json(request): Json<crate::endpoints::recovery::AttemptRef>,
 ) -> Response
 where
@@ -545,14 +570,18 @@ where
     P: ReplayStore + Send + Sync + 'static,
     X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
+    let tenant = match crate::tenancy::resolve(&state.tenants, &tenant_headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
     recovery_response(
-        crate::endpoints::recovery::open_rebind(&state.codes, state.tenant_id(), &request, now())
-            .await,
+        crate::endpoints::recovery::open_rebind(&state.codes, tenant.id(), &request, now()).await,
     )
 }
 
 async fn recovery_deny<C, R, A, S, U, P, X>(
     State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    tenant_headers: HeaderMap,
     Json(request): Json<crate::endpoints::recovery::AttemptRef>,
 ) -> Response
 where
@@ -574,8 +603,12 @@ where
     P: ReplayStore + Send + Sync + 'static,
     X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
+    let tenant = match crate::tenancy::resolve(&state.tenants, &tenant_headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
     recovery_response(
-        crate::endpoints::recovery::deny(&state.codes, state.tenant_id(), &request, now()).await,
+        crate::endpoints::recovery::deny(&state.codes, tenant.id(), &request, now()).await,
     )
 }
 
@@ -620,17 +653,21 @@ where
     P: ReplayStore + Send + Sync + 'static,
     X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
-    let Some(rp) = state.relying_party() else {
+    let tenant = match crate::tenancy::resolve(&state.tenants, &headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
+    let Some(rp) = tenant.relying_party.as_deref() else {
         return (StatusCode::NOT_IMPLEMENTED, "WebAuthn is not configured").into_response();
     };
 
     let at = now();
-    let subject = resolve_subject(&state, &headers, at).await;
+    let subject = resolve_subject(&state, &tenant, &headers, at).await;
 
     match crate::endpoints::webauthn::start_registration(
         &state.codes,
         rp,
-        state.tenant_id(),
+        tenant.id(),
         subject,
         &AwsLcSha256,
         at,
@@ -644,6 +681,7 @@ where
 
 async fn webauthn_register_finish<C, R, A, S, U, P, X>(
     State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    tenant_headers: HeaderMap,
     Json(request): Json<crate::endpoints::webauthn::FinishRegistration>,
 ) -> Response
 where
@@ -664,14 +702,18 @@ where
     P: ReplayStore + Send + Sync + 'static,
     X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
-    let Some(rp) = state.relying_party() else {
+    let tenant = match crate::tenancy::resolve(&state.tenants, &tenant_headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
+    let Some(rp) = tenant.relying_party.as_deref() else {
         return (StatusCode::NOT_IMPLEMENTED, "WebAuthn is not configured").into_response();
     };
 
     match crate::endpoints::webauthn::finish_registration(
         &state.codes,
         rp,
-        state.tenant_id(),
+        tenant.id(),
         &request,
         &AwsLcSha256,
         now(),
@@ -685,6 +727,7 @@ where
 
 async fn webauthn_authenticate_start<C, R, A, S, U, P, X>(
     State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    tenant_headers: HeaderMap,
     Json(request): Json<crate::endpoints::webauthn::StartAuthentication>,
 ) -> Response
 where
@@ -705,16 +748,20 @@ where
     P: ReplayStore + Send + Sync + 'static,
     X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
-    let Some(rp) = state.relying_party() else {
+    let tenant = match crate::tenancy::resolve(&state.tenants, &tenant_headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
+    let Some(rp) = tenant.relying_party.as_deref() else {
         return (StatusCode::NOT_IMPLEMENTED, "WebAuthn is not configured").into_response();
     };
 
     match crate::endpoints::webauthn::start_authentication(
         &state.codes,
         rp,
-        state.tenant_id(),
+        tenant.id(),
         &request,
-        &state.tenant.blind_index,
+        &tenant.blind_index,
         &AwsLcSha256,
         now(),
     )
@@ -727,6 +774,7 @@ where
 
 async fn webauthn_authenticate_finish<C, R, A, S, U, P, X>(
     State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    tenant_headers: HeaderMap,
     Json(request): Json<crate::endpoints::webauthn::FinishAuthentication>,
 ) -> Response
 where
@@ -747,14 +795,18 @@ where
     P: ReplayStore + Send + Sync + 'static,
     X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
-    let Some(rp) = state.relying_party() else {
+    let tenant = match crate::tenancy::resolve(&state.tenants, &tenant_headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
+    let Some(rp) = tenant.relying_party.as_deref() else {
         return (StatusCode::NOT_IMPLEMENTED, "WebAuthn is not configured").into_response();
     };
 
     match crate::endpoints::webauthn::finish_authentication(
         &state.codes,
         rp,
-        state.tenant_id(),
+        tenant.id(),
         &request,
         &AwsLcSha256,
         now(),
@@ -762,7 +814,7 @@ where
     .await
     {
         Ok((_, secret)) => {
-            let secure = state.tenant.metadata.issuer.starts_with("https://");
+            let secure = tenant.metadata.issuer.starts_with("https://");
             let mut r = Json(crate::endpoints::authn::LoginResponse {
                 authenticated: true,
             })
@@ -778,6 +830,7 @@ where
 
 async fn register_handler<C, R, A, S, U, P, X>(
     State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    tenant_headers: HeaderMap,
     Form(form): Form<crate::endpoints::authn::RegistrationForm>,
 ) -> Response
 where
@@ -800,11 +853,15 @@ where
 {
     use crate::endpoints::authn::{RegistrationOutcome, register};
 
+    let tenant = match crate::tenancy::resolve(&state.tenants, &tenant_headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
     let outcome = register(
         &state.codes,
-        state.tenant_id(),
+        tenant.id(),
         &form,
-        &state.tenant.blind_index,
+        &tenant.blind_index,
         &argus_core::password_policy::NoBreachCorpus,
     )
     .await;
@@ -827,6 +884,7 @@ fn no_store(mut response: Response) -> Response {
 
 async fn resolve_subject<C, R, A, S, U, P, X>(
     state: &AppState<C, R, A, S, U, P, X>,
+    tenant: &crate::tenancy::Tenant,
     headers: &HeaderMap,
     now: Timestamp,
 ) -> Option<argus_core::id::UserId>
@@ -851,7 +909,7 @@ where
 
     state
         .codes
-        .load_session(state.tenant_id(), &hash, now)
+        .load_session(tenant.id(), &hash, now)
         .await
         .ok()
         .map(|session| session.subject)
@@ -859,6 +917,7 @@ where
 
 async fn resolve_client<C, R, A, S, U, P, X>(
     state: &AppState<C, R, A, S, U, P, X>,
+    tenant: &crate::tenancy::Tenant,
     client_id: &str,
     now: Timestamp,
 ) -> Result<Option<argus_core::authorize::RegisteredClient>, Box<Response>>
@@ -899,7 +958,7 @@ where
         return Ok(None);
     };
 
-    match state.clients.find(state.tenant_id(), &id).await {
+    match state.clients.find(tenant.id(), &id).await {
         Ok(found) => Ok(found),
         Err(_) => Err(Box::new(oauth_response(&OAuthError::new(
             OAuthErrorCode::TemporarilyUnavailable,
@@ -909,6 +968,7 @@ where
 
 async fn prm_handler<C, R, A, S, U, P, X>(
     State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    tenant_headers: HeaderMap,
     axum::extract::Path(path): axum::extract::Path<String>,
 ) -> Response
 where
@@ -929,11 +989,16 @@ where
     P: ReplayStore + Send + Sync + 'static,
     X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
-    prm_response(&state, &format!("/{path}")).await
+    let tenant = match crate::tenancy::resolve(&state.tenants, &tenant_headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
+    prm_response(&state, &tenant, &format!("/{path}")).await
 }
 
 async fn prm_root_handler<C, R, A, S, U, P, X>(
     State(state): State<SharedState<C, R, A, S, U, P, X>>,
+    tenant_headers: HeaderMap,
 ) -> Response
 where
     C: CodeStore
@@ -953,11 +1018,16 @@ where
     P: ReplayStore + Send + Sync + 'static,
     X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
-    prm_response(&state, "").await
+    let tenant = match crate::tenancy::resolve(&state.tenants, &tenant_headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
+    prm_response(&state, &tenant, "").await
 }
 
 async fn prm_response<C, R, A, S, U, P, X>(
     state: &AppState<C, R, A, S, U, P, X>,
+    tenant: &crate::tenancy::Tenant,
     suffix: &str,
 ) -> Response
 where
@@ -974,7 +1044,7 @@ where
     A: AuditSink + Send + Sync,
     X: ResourceStore + Send + Sync,
 {
-    let Ok(resources) = state.resources.list_resources(state.tenant_id()).await else {
+    let Ok(resources) = state.resources.list_resources(tenant.id()).await else {
         return oauth_response(&OAuthError::new(OAuthErrorCode::TemporarilyUnavailable));
     };
 
@@ -987,8 +1057,8 @@ where
     let Some(resource) = found else {
         if suffix.is_empty() {
             let own = argus_proto::ProtectedResourceMetadata::new(
-                &state.tenant.metadata.issuer,
-                &state.tenant.metadata.issuer,
+                &tenant.metadata.issuer,
+                &tenant.metadata.issuer,
             )
             .with_scopes(Some("openid"));
             let mut r = Json(own).into_response();
@@ -1000,12 +1070,10 @@ where
         return (StatusCode::NOT_FOUND, "no such protected resource").into_response();
     };
 
-    let metadata = argus_proto::ProtectedResourceMetadata::new(
-        resource.uri.as_str(),
-        &state.tenant.metadata.issuer,
-    )
-    .with_name(resource.name)
-    .with_scopes(resource.scopes.as_deref());
+    let metadata =
+        argus_proto::ProtectedResourceMetadata::new(resource.uri.as_str(), &tenant.metadata.issuer)
+            .with_name(resource.name)
+            .with_scopes(resource.scopes.as_deref());
 
     let mut r = Json(metadata).into_response();
     if let Ok(value) = "public, max-age=3600".parse() {
@@ -1037,16 +1105,19 @@ where
     P: ReplayStore + Send + Sync + 'static,
     X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
+    let tenant = match crate::tenancy::resolve(&state.tenants, &headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
     let authorization = headers.get("Authorization").and_then(|v| v.to_str().ok());
     let dpop_header = headers.get("DPoP").and_then(|v| v.to_str().ok());
 
     let form_access_token = form_field(&body, "access_token");
-    let uri = state
-        .tenant
+    let uri = tenant
         .metadata
         .userinfo_endpoint
         .clone()
-        .unwrap_or_else(|| format!("{}/userinfo", state.tenant.metadata.issuer));
+        .unwrap_or_else(|| format!("{}/userinfo", tenant.metadata.issuer));
 
     let at = now();
 
@@ -1055,7 +1126,7 @@ where
         Some(Err(_)) => {
             return userinfo_refusal(
                 userinfo::UserInfoError::InvalidProof,
-                &state.tenant.metadata.issuer,
+                &tenant.metadata.issuer,
             );
         }
         None => None,
@@ -1064,7 +1135,7 @@ where
     let replay = match &proof {
         Some(proof) => match consume(
             &state.replay,
-            state.tenant_id(),
+            tenant.id(),
             JtiPurpose::DpopProof,
             &proof.jti,
             at,
@@ -1089,7 +1160,7 @@ where
         uri: &uri,
     };
 
-    match userinfo::handle(&state.tenant, &request, at, &replay) {
+    match userinfo::handle(&tenant, &request, at, &replay) {
         Ok(info) => {
             let mut r = Json(info).into_response();
 
@@ -1098,7 +1169,7 @@ where
             }
             r
         }
-        Err(err) => userinfo_refusal(err, &state.tenant.metadata.issuer),
+        Err(err) => userinfo_refusal(err, &tenant.metadata.issuer),
     }
 }
 
@@ -1142,6 +1213,10 @@ where
     P: ReplayStore + Send + Sync + 'static,
     X: ResourceStore + ConnectionStore + IssuerStore + Send + Sync + 'static,
 {
+    let tenant = match crate::tenancy::resolve(&state.tenants, &headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
     let at = now();
     let mut query = query;
     query.resource =
@@ -1162,7 +1237,7 @@ where
                 return oauth_response(&OAuthError::new(OAuthErrorCode::InvalidRequest));
             };
 
-            match crate::par::redeem(par, request_uri, &client).await {
+            match crate::par::redeem(par, &tenant, request_uri, &client).await {
                 Err(fault) => {
                     return (StatusCode::BAD_REQUEST, fault.to_string()).into_response();
                 }
@@ -1176,23 +1251,23 @@ where
     }
 
     let code = uuid::Uuid::new_v4().simple().to_string();
-    let registered_resources = match state.resources.list_resources(state.tenant_id()).await {
+    let registered_resources = match state.resources.list_resources(tenant.id()).await {
         Ok(list) => list.into_iter().map(|r| r.uri).collect::<Vec<_>>(),
         Err(_) => {
             return oauth_response(&OAuthError::new(OAuthErrorCode::TemporarilyUnavailable));
         }
     };
 
-    let subject = resolve_subject(&state, &headers, at).await;
+    let subject = resolve_subject(&state, &tenant, &headers, at).await;
 
-    let resolved = match resolve_client(&state, &query.client_id, at).await {
+    let resolved = match resolve_client(&state, &tenant, &query.client_id, at).await {
         Ok(client) => client,
         Err(response) => return *response,
     };
 
     let ctx = AuthorizeContext {
-        tenant: state.tenant_id(),
-        issuer: &state.tenant.metadata.issuer,
+        tenant: tenant.id(),
+        issuer: &tenant.metadata.issuer,
         client: resolved.as_ref(),
         codes: &state.codes,
         subject,

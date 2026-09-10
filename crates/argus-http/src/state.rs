@@ -22,15 +22,15 @@ where
     R: RefreshStore + Send + Sync,
     A: AuditSink + Send + Sync,
 {
-    pub tenant: TenantContext,
+    // §18: host'tan kiracıya çözümleme. Göç sırasında `tenant` ile birlikte
+    // duruyor; taşınan her handler kayıt defterinden çözer.
+    pub tenants: Arc<crate::tenancy::TenantRegistry>,
 
     pub codes: C,
 
     pub refresh: R,
 
     pub audit: A,
-
-    pub tenant_id: argus_core::id::TenantId,
 
     pub clients: S,
 
@@ -52,11 +52,7 @@ where
     A: AuditSink + Send + Sync,
 {
     #[must_use]
-    pub fn relying_party(&self) -> Option<&argus_proto::webauthn::RelyingParty> {
-        self.tenant.relying_party.as_deref()
-    }
-
-    pub const fn tenant_id(&self) -> argus_core::id::TenantId {
-        self.tenant_id
+    pub fn tenants(&self) -> &crate::tenancy::TenantRegistry {
+        &self.tenants
     }
 }

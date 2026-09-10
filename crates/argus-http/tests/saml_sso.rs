@@ -81,7 +81,14 @@ fn state(
         signer: BergshamraSigner::from_rsa_private_pem(IDP_KEY).expect("signer"),
         registry: OneProvider,
         subjects: KnownUser(subject),
-        tenant_id: TenantId::from_uuid(Uuid::nil()),
+        tenants: std::sync::Arc::new(argus_http::tenancy::TenantRegistry::single(
+            "as.test",
+            argus_http::tenancy::TenantEntry {
+                id: TenantId::from_uuid(Uuid::nil()),
+                issuer: "https://as.test".to_owned(),
+                context: test_context(),
+            },
+        )),
         entity_id: ENTITY.to_owned(),
         sso_location: SSO.to_owned(),
         certificate_base64: certificate(),
@@ -130,6 +137,7 @@ fn posted(outcome: &SsoOutcome) -> (&str, String) {
 fn the_assertion_this_endpoint_produces_verifies_against_the_published_certificate() {
     let request = authn_request("");
     let outcome = handle(
+        &test_tenant(),
         &state(Some((
             UserId::from_uuid(Uuid::from_u128(7)),
             Some("bjensen@example.com".to_owned()),
@@ -154,6 +162,7 @@ fn the_assertion_this_endpoint_produces_verifies_against_the_published_certifica
 fn the_assertion_is_bound_to_the_request_that_asked_for_it() {
     let request = authn_request("");
     let outcome = handle(
+        &test_tenant(),
         &state(Some((UserId::from_uuid(Uuid::from_u128(7)), None, false))),
         &sso(&request, None),
     )
@@ -176,6 +185,7 @@ fn an_unregistered_service_provider_gets_no_assertion() {
 
     assert!(
         handle(
+            &test_tenant(),
             &state(Some((UserId::from_uuid(Uuid::from_u128(7)), None, false))),
             &sso(&encoded, None)
         )
@@ -187,6 +197,7 @@ fn an_unregistered_service_provider_gets_no_assertion() {
 fn an_unregistered_delivery_location_gets_no_assertion() {
     let encoded = authn_request(r#" AssertionConsumerServiceURL="https://attacker.test/collect""#);
     let error = handle(
+        &test_tenant(),
         &state(Some((UserId::from_uuid(Uuid::from_u128(7)), None, false))),
         &sso(&encoded, None),
     )
@@ -203,6 +214,7 @@ fn a_request_addressed_to_another_server_is_refused() {
 
     assert!(
         handle(
+            &test_tenant(),
             &state(Some((UserId::from_uuid(Uuid::from_u128(7)), None, false))),
             &sso(&encoded, None)
         )
@@ -218,7 +230,7 @@ fn an_anonymous_visitor_is_sent_to_authenticate_rather_than_given_an_assertion()
     sso_request.subject = None;
 
     assert_eq!(
-        handle(&state(None), &sso_request).expect("sso"),
+        handle(&test_tenant(), &state(None), &sso_request).expect("sso"),
         SsoOutcome::NeedsAuthentication
     );
 }
@@ -229,7 +241,7 @@ fn a_passive_request_from_an_anonymous_visitor_answers_with_no_passive() {
     let mut sso_request = sso(&request, None);
     sso_request.subject = None;
 
-    let outcome = handle(&state(None), &sso_request).expect("sso");
+    let outcome = handle(&test_tenant(), &state(None), &sso_request).expect("sso");
     let (_, document) = posted(&outcome);
 
     assert!(document.contains("status:NoPassive"));
@@ -244,7 +256,12 @@ fn a_persistent_identifier_differs_per_service_provider() {
     let request = authn_request("");
     let user = UserId::from_uuid(Uuid::from_u128(7));
 
-    let outcome = handle(&state(Some((user, None, false))), &sso(&request, None)).expect("sso");
+    let outcome = handle(
+        &test_tenant(),
+        &state(Some((user, None, false))),
+        &sso(&request, None),
+    )
+    .expect("sso");
     let (_, document) = posted(&outcome);
 
     assert!(document.contains("nameid-format:persistent"));
@@ -266,6 +283,7 @@ fn an_email_identifier_is_refused_when_the_account_carries_no_address() {
     sso_request.subject = Some((UserId::from_uuid(Uuid::from_u128(7)), None, false));
 
     let outcome = handle(
+        &test_tenant(),
         &state(Some((UserId::from_uuid(Uuid::from_u128(7)), None, false))),
         &sso_request,
     )
@@ -283,6 +301,7 @@ fn a_multi_factor_session_is_reported_in_the_authentication_context() {
     sso_request.subject = Some((UserId::from_uuid(Uuid::from_u128(7)), None, true));
 
     let outcome = handle(
+        &test_tenant(),
         &state(Some((UserId::from_uuid(Uuid::from_u128(7)), None, true))),
         &sso_request,
     )
@@ -301,6 +320,7 @@ fn a_relay_state_beyond_the_saml_limit_is_refused() {
     let long = "a".repeat(81);
     assert!(
         handle(
+            &test_tenant(),
             &state(Some((UserId::from_uuid(Uuid::from_u128(7)), None, false))),
             &sso(&request, Some(&long))
         )
@@ -312,6 +332,7 @@ fn a_relay_state_beyond_the_saml_limit_is_refused() {
 fn a_relay_state_within_the_limit_is_carried_back_unchanged() {
     let request = authn_request("");
     let outcome = handle(
+        &test_tenant(),
         &state(Some((UserId::from_uuid(Uuid::from_u128(7)), None, false))),
         &sso(&request, Some("/dashboard")),
     )
@@ -341,6 +362,7 @@ fn a_relay_state_carrying_markup_cannot_break_out_of_the_auto_post_form() {
 fn a_request_that_is_not_base64_is_refused_before_any_parsing() {
     assert!(
         handle(
+            &test_tenant(),
             &state(Some((UserId::from_uuid(Uuid::from_u128(7)), None, false))),
             &sso("not base64 !!!", None)
         )
@@ -355,9 +377,37 @@ fn a_request_carrying_a_doctype_is_refused() {
     ));
 
     let error = handle(
+        &test_tenant(),
         &state(Some((UserId::from_uuid(Uuid::from_u128(7)), None, false))),
         &sso(&encoded, None),
     )
     .expect_err("a doctype must never reach the parser");
     assert!(error.to_string().contains("document type declaration"));
+}
+
+fn test_tenant() -> argus_http::tenancy::Tenant {
+    argus_http::tenancy::TenantRegistry::single(
+        "as.test",
+        argus_http::tenancy::TenantEntry {
+            id: TenantId::from_uuid(Uuid::nil()),
+            issuer: "https://as.test".to_owned(),
+            context: test_context(),
+        },
+    )
+    .resolve("as.test")
+    .expect("registered")
+}
+
+fn test_context() -> argus_http::state::TenantContext {
+    let (key, _) = argus_crypto::SigningKey::generate("t1".to_owned()).expect("key");
+    let key = std::sync::Arc::new(key);
+    argus_http::state::TenantContext {
+        metadata: argus_proto::AuthorizationServerMetadata::for_issuer("https://as.test"),
+        active_key: std::sync::Arc::clone(&key),
+        published_keys: vec![key],
+        rsa_keys: Vec::new(),
+        blind_index: argus_crypto::blind_index::BlindIndexKey::new(&[7_u8; 32])
+            .expect("blind index"),
+        relying_party: None,
+    }
 }
