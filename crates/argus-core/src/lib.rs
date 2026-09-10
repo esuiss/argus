@@ -3,6 +3,7 @@
 pub mod aal;
 pub mod authn;
 pub mod authorize;
+pub mod authz;
 pub mod authz_code;
 pub mod ciba;
 pub mod cimd;

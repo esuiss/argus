@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod authz;
 pub mod directory;
 pub mod par;
 pub mod postgres;
