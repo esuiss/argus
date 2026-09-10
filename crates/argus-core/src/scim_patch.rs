@@ -83,7 +83,94 @@ pub fn apply(resource: &Value, operations: &[Operation]) -> Result<PatchOutcome,
     })
 }
 
+pub const KNOWN_SCHEMAS: [&str; 3] = [
+    crate::scim::USER_SCHEMA,
+    crate::scim::GROUP_SCHEMA,
+    "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
+];
+
+fn split_schema(raw: &str) -> Option<(&'static str, &str)> {
+    if !raw.starts_with("urn:") {
+        return None;
+    }
+
+    for schema in KNOWN_SCHEMAS {
+        if raw.len() == schema.len() && raw.eq_ignore_ascii_case(schema) {
+            return Some((schema, ""));
+        }
+
+        let Some(rest) = raw.get(..schema.len()) else {
+            continue;
+        };
+
+        if rest.eq_ignore_ascii_case(schema) && raw.as_bytes().get(schema.len()) == Some(&b':') {
+            return Some((schema, raw.get(schema.len() + 1..).unwrap_or_default()));
+        }
+    }
+
+    None
+}
+
+fn extension_slot<'a>(resource: &'a mut Value, schema: &str) -> Result<&'a mut Value, PatchError> {
+    let target = object_mut(resource)?;
+    Ok(target
+        .entry(schema.to_owned())
+        .or_insert_with(|| Value::Object(Map::new())))
+}
+
 fn apply_one(resource: &mut Value, operation: &Operation) -> Result<bool, PatchError> {
+    if let Some(raw) = operation.path.as_deref()
+        && let Some((schema, rest)) = split_schema(raw)
+    {
+        let core = schema == crate::scim::USER_SCHEMA || schema == crate::scim::GROUP_SCHEMA;
+
+        if core {
+            if rest.is_empty() {
+                return Err(PatchError::InvalidPath);
+            }
+            let inner = Operation {
+                op: operation.op,
+                path: Some(rest.to_owned()),
+                value: operation.value.clone(),
+            };
+            return apply_one(resource, &inner);
+        }
+
+        if rest.is_empty() {
+            let changed = whole_extension(resource, schema, operation)?;
+            if changed && operation.op != Op::Remove {
+                declare(resource, schema);
+            }
+            return Ok(changed);
+        }
+
+        let inner = Operation {
+            op: operation.op,
+            path: Some(rest.to_owned()),
+            value: operation.value.clone(),
+        };
+
+        let slot = extension_slot(resource, schema)?;
+        let changed = apply_one(slot, &inner)?;
+
+        let emptied = resource
+            .as_object()
+            .and_then(|object| object.get(schema))
+            .and_then(Value::as_object)
+            .is_some_and(Map::is_empty);
+
+        if emptied {
+            if let Some(object) = resource.as_object_mut() {
+                object.remove(schema);
+            }
+            undeclare(resource, schema);
+        } else if changed {
+            declare(resource, schema);
+        }
+
+        return Ok(changed);
+    }
+
     match operation.op {
         Op::Remove => {
             let raw = operation.path.as_deref().ok_or(PatchError::NoTarget)?;
@@ -109,6 +196,55 @@ fn apply_one(resource: &mut Value, operation: &Operation) -> Result<bool, PatchE
                     replace(resource, &path, &value)
                 }
             }
+        }
+    }
+}
+
+fn declare(resource: &mut Value, schema: &str) {
+    let Some(object) = resource.as_object_mut() else {
+        return;
+    };
+
+    let entry = object
+        .entry("schemas".to_owned())
+        .or_insert_with(|| Value::Array(Vec::new()));
+
+    let Some(list) = entry.as_array_mut() else {
+        return;
+    };
+
+    if !list.iter().any(|value| value == schema) {
+        list.push(Value::String(schema.to_owned()));
+    }
+}
+
+fn undeclare(resource: &mut Value, schema: &str) {
+    if let Some(object) = resource.as_object_mut()
+        && let Some(list) = object.get_mut("schemas").and_then(Value::as_array_mut)
+    {
+        list.retain(|value| value != schema);
+    }
+}
+
+fn whole_extension(
+    resource: &mut Value,
+    schema: &str,
+    operation: &Operation,
+) -> Result<bool, PatchError> {
+    let target = object_mut(resource)?;
+
+    match operation.op {
+        Op::Remove => Ok(target.remove(schema).is_some()),
+        Op::Add | Op::Replace => {
+            let value = operation.value.clone().ok_or(PatchError::InvalidValue)?;
+            if !value.is_object() {
+                return Err(PatchError::InvalidValue);
+            }
+            if target.get(schema) == Some(&value) {
+                return Ok(false);
+            }
+            target.insert(schema.to_owned(), value);
+            Ok(true)
         }
     }
 }

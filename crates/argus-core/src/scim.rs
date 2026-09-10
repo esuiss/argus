@@ -48,6 +48,12 @@ pub enum ScimFault {
 
     #[error("the pagination parameters are not usable: {detail}")]
     InvalidPaging { detail: String },
+
+    #[error("the cursor is not one this server issued")]
+    InvalidCursor,
+
+    #[error("the count is not a number this server can page by")]
+    InvalidCount,
 }
 
 impl ScimFault {
@@ -57,6 +63,8 @@ impl ScimFault {
             Self::InvalidFilter { .. } => "invalidFilter",
             Self::WrongSchema { .. } | Self::NotAnObject => "invalidSyntax",
             Self::Immutable { .. } => "mutability",
+            Self::InvalidCursor => "invalidCursor",
+            Self::InvalidCount => "invalidCount",
             _ => "invalidValue",
         }
     }
@@ -242,9 +250,7 @@ pub fn paging(
     let count = match count {
         None => DEFAULT_PAGE_SIZE,
         Some(raw) => {
-            let parsed: i64 = raw.trim().parse().map_err(|_| ScimFault::InvalidPaging {
-                detail: "count must be an integer".to_owned(),
-            })?;
+            let parsed: i64 = raw.trim().parse().map_err(|_| ScimFault::InvalidCount)?;
             let parsed = usize::try_from(parsed).unwrap_or(0);
             parsed.min(MAX_PAGE_SIZE)
         }
@@ -283,13 +289,9 @@ pub fn encode_cursor(after: u64) -> String {
 
 pub fn decode_cursor(raw: &str) -> Result<u64, ScimFault> {
     if raw.len() != 16 || !raw.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(ScimFault::InvalidPaging {
-            detail: "the cursor is not one this server issued".to_owned(),
-        });
+        return Err(ScimFault::InvalidCursor);
     }
-    u64::from_str_radix(raw, 16).map_err(|_| ScimFault::InvalidPaging {
-        detail: "the cursor is not one this server issued".to_owned(),
-    })
+    u64::from_str_radix(raw, 16).map_err(|_| ScimFault::InvalidCursor)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -404,7 +406,9 @@ pub fn validate(body: &Value, kind: ResourceType, is_create: bool) -> Result<Val
 
             match out.get("active") {
                 None => {
-                    out.insert("active".to_owned(), Value::Bool(true));
+                    if is_create {
+                        out.insert("active".to_owned(), Value::Bool(true));
+                    }
                 }
                 Some(Value::Bool(_)) => {}
                 Some(_) => {
@@ -505,20 +509,37 @@ impl ScimRecord {
                 ResourceType::User => USER_SCHEMA,
                 ResourceType::Group => GROUP_SCHEMA,
             };
-            if !object
+            let mut declared: Vec<String> = object
                 .get("schemas")
                 .and_then(Value::as_array)
-                .is_some_and(|list| {
+                .map(|list| {
                     list.iter()
                         .filter_map(Value::as_str)
-                        .any(|s| s.eq_ignore_ascii_case(schema))
+                        .map(ToOwned::to_owned)
+                        .collect()
                 })
-            {
-                object.insert(
-                    "schemas".to_owned(),
-                    Value::Array(Vec::from([Value::String(schema.to_owned())])),
-                );
+                .unwrap_or_default();
+
+            if !declared.iter().any(|s| s.eq_ignore_ascii_case(schema)) {
+                declared.insert(0, schema.to_owned());
             }
+
+            let extensions: Vec<String> = object
+                .keys()
+                .filter(|key| key.starts_with("urn:"))
+                .cloned()
+                .collect();
+
+            for urn in extensions {
+                if !declared.iter().any(|s| s.eq_ignore_ascii_case(&urn)) {
+                    declared.push(urn);
+                }
+            }
+
+            object.insert(
+                "schemas".to_owned(),
+                Value::Array(declared.into_iter().map(Value::String).collect()),
+            );
         }
 
         let plural = match kind {

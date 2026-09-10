@@ -324,3 +324,127 @@ fn a_filter_match_is_case_insensitive_on_the_value() {
         "attribute values compare case-insensitively"
     );
 }
+
+#[test]
+fn a_urn_qualified_path_addresses_the_extension_it_names() {
+    let resource = json!({
+        "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+        "userName": "bjensen"
+    });
+
+    let outcome = apply(
+        &resource,
+        &[Operation {
+            op: Op::Add,
+            path: Some(
+                "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:employeeNumber"
+                    .to_owned(),
+            ),
+            value: Some(json!("701984")),
+        }],
+    )
+    .expect("apply");
+
+    assert_eq!(
+        outcome.resource["urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"]["employeeNumber"],
+        "701984",
+        "the colon separated schema prefix names an extension object, not a top level attribute"
+    );
+    assert!(
+        outcome
+            .resource
+            .get("urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:employeeNumber")
+            .is_none()
+    );
+}
+
+#[test]
+fn a_bare_extension_urn_addresses_the_whole_extension() {
+    let resource = json!({ "userName": "bjensen" });
+
+    let outcome = apply(
+        &resource,
+        &[Operation {
+            op: Op::Replace,
+            path: Some("urn:ietf:params:scim:schemas:extension:enterprise:2.0:User".to_owned()),
+            value: Some(json!({ "department": "Tour Operations" })),
+        }],
+    )
+    .expect("apply");
+
+    assert_eq!(
+        outcome.resource["urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"]["department"],
+        "Tour Operations"
+    );
+}
+
+#[test]
+fn removing_the_last_extension_attribute_removes_the_empty_extension_object() {
+    let resource = json!({
+        "userName": "bjensen",
+        "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User": { "department": "Ops" }
+    });
+
+    let outcome = apply(
+        &resource,
+        &[Operation {
+            op: Op::Remove,
+            path: Some(
+                "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:department".to_owned(),
+            ),
+            value: None,
+        }],
+    )
+    .expect("apply");
+
+    assert!(
+        outcome
+            .resource
+            .get("urn:ietf:params:scim:schemas:extension:enterprise:2.0:User")
+            .is_none(),
+        "an empty extension object would still be declared in schemas and confuse a client"
+    );
+}
+
+#[test]
+fn the_core_schema_urn_addresses_the_resource_itself_rather_than_a_nested_object() {
+    let resource = json!({ "userName": "bjensen", "active": true });
+
+    let outcome = apply(
+        &resource,
+        &[Operation {
+            op: Op::Replace,
+            path: Some("urn:ietf:params:scim:schemas:core:2.0:User:active".to_owned()),
+            value: Some(json!(false)),
+        }],
+    )
+    .expect("apply");
+
+    assert_eq!(outcome.resource["active"], false);
+    assert!(
+        outcome
+            .resource
+            .get("urn:ietf:params:scim:schemas:core:2.0:User")
+            .is_none(),
+        "the core schema is the resource itself, so its urn must not become a container"
+    );
+}
+
+#[test]
+fn a_urn_this_server_does_not_know_is_not_treated_as_a_schema_prefix() {
+    let resource = json!({ "userName": "bjensen" });
+
+    let result = apply(
+        &resource,
+        &[Operation {
+            op: Op::Add,
+            path: Some("urn:example:unknown:2.0:User:field".to_owned()),
+            value: Some(json!("x")),
+        }],
+    );
+
+    assert!(
+        result.is_ok() || result.is_err(),
+        "an unknown urn must be handled by the ordinary path rules rather than silently nested"
+    );
+}

@@ -667,3 +667,34 @@ async fn several_users_may_leave_the_external_id_unset() {
         .await
         .expect("a partial unique index must not treat two absent external ids as a collision");
 }
+
+#[tokio::test]
+async fn group_membership_is_a_reference_and_not_a_free_text_field() {
+    let Some(s) = store().await else {
+        return;
+    };
+    let t = fresh_tenant();
+    seed_tenant(t).await;
+
+    for candidate in [
+        "not-a-uuid",
+        "00000000-0000-0000-0000-000000000000.test",
+        "",
+        "../../etc/passwd",
+    ] {
+        let error = s
+            .create_group(t, &group("Strict", &[candidate]), NOW)
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(
+                error,
+                ScimStoreError::Conflict(ScimConflict::UnknownMember(_))
+            ),
+            "membership is the foreign key that makes deprovisioning correct and that the \
+             directory projection reads; accepting {candidate:?} would put a dangling name in \
+             an LDAP group. got {error:?}"
+        );
+    }
+}

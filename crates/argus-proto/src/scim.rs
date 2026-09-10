@@ -80,6 +80,8 @@ pub fn service_provider_config(base: &str) -> Value {
             "cursor": true,
             "index": true,
             "defaultPaginationMethod": "index",
+            "defaultPageSize": argus_core::scim::DEFAULT_PAGE_SIZE,
+            "maxPageSize": argus_core::scim::MAX_PAGE_SIZE,
             "cursorTimeout": 3600
         },
         "etag":          { "supported": false },
@@ -214,6 +216,7 @@ pub fn schemas(base: &str) -> Vec<Value> {
                     "subAttributes": [
                         attribute("value", "string", false, false, "immutable", "none", true),
                         attribute("display", "string", false, false, "immutable", "none", false),
+                        attribute("type", "string", false, false, "immutable", "none", false),
                         attribute("$ref", "reference", false, false, "immutable", "none", true)
                     ]
                 }

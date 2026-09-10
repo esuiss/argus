@@ -83,6 +83,10 @@ async fn main() -> ExitCode {
         return serve_ldap().await;
     }
 
+    if args.first().map(String::as_str) == Some("token") {
+        return mint_token(args.get(1..).unwrap_or_default());
+    }
+
     let config = Config::from_env();
 
     let blind_index = match load_blind_index(&config) {
@@ -336,6 +340,68 @@ async fn serve_ldap() -> ExitCode {
                 }
             }
         });
+    }
+}
+
+fn mint_token(args: &[String]) -> ExitCode {
+    let Some(scope) = args.first() else {
+        eprintln!("usage: argus token <scope> [lifetime-seconds]");
+        eprintln!("mints an access token from the configured signing key for bootstrap use");
+        return ExitCode::FAILURE;
+    };
+
+    let config = Config::from_env();
+
+    if config.key_dir.is_none() {
+        eprintln!(
+            "argus: set ARGUS_SIGNING_KEY_DIR; an ephemeral key would mint a token \
+                   nothing can verify"
+        );
+        return ExitCode::FAILURE;
+    }
+
+    let keys = match load_keys(&config) {
+        Ok(keys) => keys,
+        Err(message) => {
+            eprintln!("argus: {message}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let lifetime: i64 = args
+        .get(1)
+        .and_then(|raw| raw.parse().ok())
+        .unwrap_or(3_600);
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0));
+
+    let claims = argus_proto::jwt::AccessTokenClaims {
+        iss: config.issuer.clone(),
+        sub: format!("bootstrap:{scope}"),
+        aud: argus_proto::Audience::One(config.issuer.clone()),
+        exp: now.saturating_add(lifetime),
+        iat: now,
+        jti: Uuid::new_v4().to_string(),
+        scope: Some(scope.clone()),
+        sess: 0,
+        cnf: None,
+    };
+
+    match argus_proto::jwt::sign(&claims, &keys.active) {
+        Ok(token) => {
+            eprintln!(
+                "argus: WARNING - this token carries {scope} for {lifetime} seconds and is not \
+                 tied to any person; treat it as a credential"
+            );
+            println!("{token}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("argus: cannot sign: {e}");
+            ExitCode::FAILURE
+        }
     }
 }
 

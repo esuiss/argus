@@ -69,7 +69,10 @@ fn from_store(error: &ScimStoreError) -> Response {
         ScimStoreError::Conflict(ScimConflict::UnknownMember(id)) => fault(
             400,
             Some("invalidValue"),
-            &format!("the member {id} does not exist in this tenant"),
+            &format!(
+                "the member {id} does not exist in this tenant; provision the member before \
+                 the group that names it"
+            ),
         ),
     }
 }
@@ -671,6 +674,75 @@ resource_routes!(
     delete_group
 );
 
+async fn everything_search<S: ScimStore + Send + Sync + 'static>(
+    State(state): State<Shared<S>>,
+    headers: HeaderMap,
+    Json(request): Json<Value>,
+) -> Response {
+    if let Err(response) = guard(&state, &headers) {
+        return *response;
+    }
+
+    let query = match read_search_body(&request) {
+        Ok(query) => query,
+        Err(response) => return *response,
+    };
+
+    let users = collect::<_, _>(&query, ResourceType::User, &state.base, |after, limit| {
+        state.store.scan_users(state.tenant_id, after, limit)
+    })
+    .await;
+
+    let groups = collect::<_, _>(&query, ResourceType::Group, &state.base, |after, limit| {
+        state.store.scan_groups(state.tenant_id, after, limit)
+    })
+    .await;
+
+    let mut resources = Vec::new();
+    let mut total = 0_usize;
+
+    for outcome in [users, groups] {
+        match outcome {
+            Err(response) => return *response,
+            Ok(response) => {
+                let (parts, body) = response.into_parts();
+                if parts.status != StatusCode::OK {
+                    return Response::from_parts(parts, body);
+                }
+                if let Some(list) = list_of(body).await {
+                    total = total.saturating_add(
+                        list.get("totalResults")
+                            .and_then(Value::as_u64)
+                            .and_then(|value| usize::try_from(value).ok())
+                            .unwrap_or(0),
+                    );
+                    if let Some(items) = list.get("Resources").and_then(Value::as_array) {
+                        resources.extend(items.iter().cloned());
+                    }
+                }
+            }
+        }
+    }
+
+    let count = resources.len();
+
+    body(
+        StatusCode::OK,
+        serde_json::json!({
+            "schemas": [argus_proto::scim::LIST_RESPONSE_SCHEMA],
+            "totalResults": total,
+            "itemsPerPage": count,
+            "startIndex": 1,
+            "Resources": resources
+        }),
+    )
+}
+
+async fn list_of(body: axum::body::Body) -> Option<Value> {
+    let bytes = axum::body::to_bytes(body, 8 * 1024 * 1024).await.ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
 async fn service_provider_config<S: ScimStore + Send + Sync + 'static>(
     State(state): State<Shared<S>>,
 ) -> Response {
@@ -752,6 +824,7 @@ pub fn build<S: ScimStore + Send + Sync + 'static>(state: Shared<S>) -> Router {
             "/scim/v2/Users",
             get(users_list::<S>).post(users_create::<S>),
         )
+        .route("/scim/v2/.search", post(everything_search::<S>))
         .route("/scim/v2/Users/.search", post(users_search::<S>))
         .route(
             "/scim/v2/Users/{id}",
@@ -772,5 +845,10 @@ pub fn build<S: ScimStore + Send + Sync + 'static>(state: Shared<S>) -> Router {
                 .patch(group_patch::<S>)
                 .delete(group_delete::<S>),
         )
+        .fallback(unknown_endpoint)
         .with_state(state)
+}
+
+async fn unknown_endpoint() -> Response {
+    fault(404, None, "this server exposes no such endpoint")
 }

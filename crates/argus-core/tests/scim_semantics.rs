@@ -257,11 +257,17 @@ fn a_negative_count_asks_for_the_total_without_any_resources() {
 }
 
 #[test]
-fn a_count_that_is_not_an_integer_is_refused() {
-    assert!(matches!(
-        paging(None, Some("ten"), None).unwrap_err(),
-        ScimFault::InvalidPaging { .. }
-    ));
+fn a_count_that_is_not_an_integer_is_refused_with_the_keyword_rfc_9865_defines() {
+    let fault = paging(None, Some("ten"), None).unwrap_err();
+    assert_eq!(fault, ScimFault::InvalidCount);
+    assert_eq!(fault.scim_type(), "invalidCount");
+}
+
+#[test]
+fn a_bad_cursor_is_refused_with_the_keyword_rfc_9865_defines() {
+    let fault = paging(None, None, Some("not-a-cursor")).unwrap_err();
+    assert_eq!(fault, ScimFault::InvalidCursor);
+    assert_eq!(fault.scim_type(), "invalidCursor");
 }
 
 #[test]
