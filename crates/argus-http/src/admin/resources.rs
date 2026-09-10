@@ -12,7 +12,8 @@ use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 
 use super::guard::{
-    AdminState, Idempotency, Shared, admit, close_idempotency, hidden, open_idempotency, problem,
+    AdminState, Caller, Idempotency, Shared, admit, close_idempotency, hidden, open_idempotency,
+    problem,
 };
 
 // Alt kuruluş kaynağının yayınladığı alanlar. §24 #5 ve #26: başka bir şey
@@ -36,7 +37,7 @@ fn requirement(method: &str, path: &str) -> &'static argus_core::admin::RouteReq
     })
 }
 
-fn subordinate_view(subject: &str, record: &Subordinate) -> Value {
+fn subordinate_view(_permit: &Caller, subject: &str, record: &Subordinate) -> Value {
     let mut out = Map::new();
     out.insert("id".to_owned(), Value::String(subject.to_owned()));
     out.insert("jwks".to_owned(), record.jwks.clone());
@@ -65,6 +66,7 @@ fn project(value: &Value, fields: &[String]) -> Value {
 }
 
 fn listing(
+    _permit: &Caller,
     base: &str,
     items: Vec<Value>,
     page: &PageRequest,
@@ -122,9 +124,10 @@ pub(super) async fn list_subordinates(
     Query(raw): Query<BTreeMap<String, String>>,
 ) -> Response {
     let entry = requirement("GET", argus_core::admin::manifest::SUBORDINATES);
-    if let Err(refusal) = admit(&state, &headers, entry).await {
-        return *refusal;
-    }
+    let permit = match admit(&state, &headers, entry).await {
+        Ok(permit) => permit,
+        Err(refusal) => return *refusal,
+    };
 
     let (_, fields, page) = match query_of(&raw, SUBORDINATE_FIELDS) {
         Ok(parts) => parts,
@@ -152,10 +155,14 @@ pub(super) async fn list_subordinates(
         else {
             continue;
         };
-        items.push(project(&subordinate_view(&subject, &record), &fields));
+        items.push(project(
+            &subordinate_view(&permit, &subject, &record),
+            &fields,
+        ));
     }
 
     listing(
+        &permit,
         argus_core::admin::manifest::SUBORDINATES,
         items,
         &page,
@@ -170,6 +177,7 @@ pub(super) async fn list_subordinates(
 
 async fn write_subordinate(
     state: &AdminState,
+    permit: &Caller,
     key: Option<&str>,
     id: &str,
     body: &Value,
@@ -204,7 +212,7 @@ async fn write_subordinate(
     }
 
     // §24 #3: tam temsil gövdede, Location header'ında bir kimlik değil.
-    let view = subordinate_view(id, &record);
+    let view = subordinate_view(permit, id, &record);
     let status = if created { 201 } else { 200 };
     close_idempotency(state, key.as_deref(), Surface::Tenant, status, &view).await;
 
@@ -218,9 +226,10 @@ pub(super) async fn create_subordinate(
     Json(body): Json<Value>,
 ) -> Response {
     let entry = requirement("POST", argus_core::admin::manifest::SUBORDINATES);
-    if let Err(refusal) = admit(&state, &headers, entry).await {
-        return *refusal;
-    }
+    let permit = match admit(&state, &headers, entry).await {
+        Ok(permit) => permit,
+        Err(refusal) => return *refusal,
+    };
 
     let key = match open_idempotency(&state, &headers, Surface::Tenant, &body).await {
         Ok(Idempotency::Replay(response)) => return response,
@@ -248,7 +257,7 @@ pub(super) async fn create_subordinate(
         return response;
     }
 
-    write_subordinate(&state, key.as_deref(), id, &body, true).await
+    write_subordinate(&state, &permit, key.as_deref(), id, &body, true).await
 }
 
 // §24 #2: PUT bir upsert'tir ve hangisinin olduğunu status söyler.
@@ -259,9 +268,10 @@ pub(super) async fn put_subordinate(
     Json(body): Json<Value>,
 ) -> Response {
     let entry = requirement("PUT", argus_core::admin::manifest::SUBORDINATE);
-    if let Err(refusal) = admit(&state, &headers, entry).await {
-        return *refusal;
-    }
+    let permit = match admit(&state, &headers, entry).await {
+        Ok(permit) => permit,
+        Err(refusal) => return *refusal,
+    };
 
     let key = match open_idempotency(&state, &headers, Surface::Tenant, &body).await {
         Ok(Idempotency::Replay(response)) => return response,
@@ -275,7 +285,7 @@ pub(super) async fn put_subordinate(
         .await
         .is_ok();
 
-    write_subordinate(&state, key.as_deref(), &id, &body, !existed).await
+    write_subordinate(&state, &permit, key.as_deref(), &id, &body, !existed).await
 }
 
 pub(super) async fn delete_subordinate(
@@ -284,9 +294,12 @@ pub(super) async fn delete_subordinate(
     Path(id): Path<String>,
 ) -> Response {
     let entry = requirement("DELETE", argus_core::admin::manifest::SUBORDINATE);
-    if let Err(refusal) = admit(&state, &headers, entry).await {
-        return *refusal;
-    }
+    // 204 gövdesizdir; hiçbir şey serileştirilmediği için bir kanıt
+    // token'ının tüketicisi de yok. Kapı yine de geçildi.
+    let _permit = match admit(&state, &headers, entry).await {
+        Ok(permit) => permit,
+        Err(refusal) => return *refusal,
+    };
 
     match state.store.withdraw_subordinate(state.tenant_id, &id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
@@ -295,7 +308,7 @@ pub(super) async fn delete_subordinate(
     }
 }
 
-fn client_view(client: &AdminClient) -> Value {
+fn client_view(_permit: &Caller, client: &AdminClient) -> Value {
     json!({
         "clientId": client.client_id,
         "clientType": client.client_type,
@@ -362,9 +375,10 @@ pub(super) async fn list_clients(
     Query(raw): Query<BTreeMap<String, String>>,
 ) -> Response {
     let entry = requirement("GET", argus_core::admin::manifest::CLIENTS);
-    if let Err(refusal) = admit(&state, &headers, entry).await {
-        return *refusal;
-    }
+    let permit = match admit(&state, &headers, entry).await {
+        Ok(permit) => permit,
+        Err(refusal) => return *refusal,
+    };
 
     let (_, fields, page) = match query_of(&raw, CLIENT_FIELDS) {
         Ok(parts) => parts,
@@ -381,15 +395,21 @@ pub(super) async fn list_clients(
 
     let items: Vec<Value> = clients
         .iter()
-        .map(|client| project(&client_view(client), &fields))
+        .map(|client| project(&client_view(&permit, client), &fields))
         .collect();
 
-    listing(argus_core::admin::manifest::CLIENTS, items, &page, |item| {
-        item.get("clientId")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned()
-    })
+    listing(
+        &permit,
+        argus_core::admin::manifest::CLIENTS,
+        items,
+        &page,
+        |item| {
+            item.get("clientId")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned()
+        },
+    )
 }
 
 pub(super) async fn get_client(
@@ -398,18 +418,25 @@ pub(super) async fn get_client(
     Path(id): Path<String>,
 ) -> Response {
     let entry = requirement("GET", argus_core::admin::manifest::CLIENT);
-    if let Err(refusal) = admit(&state, &headers, entry).await {
-        return *refusal;
-    }
+    let permit = match admit(&state, &headers, entry).await {
+        Ok(permit) => permit,
+        Err(refusal) => return *refusal,
+    };
 
     match state.store.describe_client(state.tenant_id, &id).await {
-        Ok(Some(client)) => Json(client_view(&client)).into_response(),
+        Ok(Some(client)) => Json(client_view(&permit, &client)).into_response(),
         Ok(None) => hidden(),
         Err(_) => problem(503, "unavailable", "the client registry is unreadable"),
     }
 }
 
-async fn save_client(state: &AdminState, key: Option<&str>, id: &str, body: &Value) -> Response {
+async fn save_client(
+    state: &AdminState,
+    permit: &Caller,
+    key: Option<&str>,
+    id: &str,
+    body: &Value,
+) -> Response {
     let key = key.map(str::to_owned);
 
     let client = match client_from(body, id) {
@@ -422,7 +449,7 @@ async fn save_client(state: &AdminState, key: Option<&str>, id: &str, body: &Val
 
     match state.store.upsert_client(state.tenant_id, &client).await {
         Ok(created) => {
-            let view = client_view(&client);
+            let view = client_view(permit, &client);
             let status = if created { 201 } else { 200 };
             close_idempotency(state, key.as_deref(), Surface::Tenant, status, &view).await;
             let code = StatusCode::from_u16(status).unwrap_or(StatusCode::OK);
@@ -449,9 +476,10 @@ pub(super) async fn create_client(
     Json(body): Json<Value>,
 ) -> Response {
     let entry = requirement("POST", argus_core::admin::manifest::CLIENTS);
-    if let Err(refusal) = admit(&state, &headers, entry).await {
-        return *refusal;
-    }
+    let permit = match admit(&state, &headers, entry).await {
+        Ok(permit) => permit,
+        Err(refusal) => return *refusal,
+    };
 
     // Idempotency kapısı çakışma kontrolünden ÖNCE gelir, yoksa zaten başarılı
     // olmuş bir isteğin tekrarına ilk denemesinin ürettiği şey yerine kaynağın
@@ -481,7 +509,7 @@ pub(super) async fn create_client(
         return response;
     }
 
-    save_client(&state, key.as_deref(), id, &body).await
+    save_client(&state, &permit, key.as_deref(), id, &body).await
 }
 
 pub(super) async fn put_client(
@@ -491,9 +519,10 @@ pub(super) async fn put_client(
     Json(body): Json<Value>,
 ) -> Response {
     let entry = requirement("PUT", argus_core::admin::manifest::CLIENT);
-    if let Err(refusal) = admit(&state, &headers, entry).await {
-        return *refusal;
-    }
+    let permit = match admit(&state, &headers, entry).await {
+        Ok(permit) => permit,
+        Err(refusal) => return *refusal,
+    };
 
     let key = match open_idempotency(&state, &headers, Surface::Tenant, &body).await {
         Ok(Idempotency::Replay(response)) => return response,
@@ -501,7 +530,7 @@ pub(super) async fn put_client(
         Err(refusal) => return *refusal,
     };
 
-    save_client(&state, key.as_deref(), &id, &body).await
+    save_client(&state, &permit, key.as_deref(), &id, &body).await
 }
 
 // §24 #2 ve #12: patch, uygulanmadan önce kaynağın kendi alan listesine karşı
@@ -513,9 +542,10 @@ pub(super) async fn patch_client(
     Json(patch): Json<Value>,
 ) -> Response {
     let entry = requirement("PATCH", argus_core::admin::manifest::CLIENT);
-    if let Err(refusal) = admit(&state, &headers, entry).await {
-        return *refusal;
-    }
+    let permit = match admit(&state, &headers, entry).await {
+        Ok(permit) => permit,
+        Err(refusal) => return *refusal,
+    };
 
     if let Err(e) = check_patch(&patch, CLIENT_FIELDS, &["clientId"]) {
         return problem(400, "invalid_request", &e.to_string());
@@ -525,7 +555,7 @@ pub(super) async fn patch_client(
         return hidden();
     };
 
-    let updated = match merge_patch(&client_view(&current), &patch) {
+    let updated = match merge_patch(&client_view(&permit, &current), &patch) {
         Ok(value) => value,
         Err(e) => return problem(400, "invalid_request", &e.to_string()),
     };
@@ -536,7 +566,7 @@ pub(super) async fn patch_client(
         Err(refusal) => return *refusal,
     };
 
-    save_client(&state, key.as_deref(), &id, &updated).await
+    save_client(&state, &permit, key.as_deref(), &id, &updated).await
 }
 
 pub(super) async fn delete_client(
@@ -545,9 +575,12 @@ pub(super) async fn delete_client(
     Path(id): Path<String>,
 ) -> Response {
     let entry = requirement("DELETE", argus_core::admin::manifest::CLIENT);
-    if let Err(refusal) = admit(&state, &headers, entry).await {
-        return *refusal;
-    }
+    // 204 gövdesizdir; hiçbir şey serileştirilmediği için bir kanıt
+    // token'ının tüketicisi de yok. Kapı yine de geçildi.
+    let _permit = match admit(&state, &headers, entry).await {
+        Ok(permit) => permit,
+        Err(refusal) => return *refusal,
+    };
 
     match state.store.delete_client(state.tenant_id, &id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
@@ -558,7 +591,7 @@ pub(super) async fn delete_client(
 
 const TENANT_FIELDS: &[&str] = &["id", "slug", "issuerHost"];
 
-fn tenant_view(record: &argus_store::admin::TenantRecord) -> Value {
+fn tenant_view(_permit: &Caller, record: &argus_store::admin::TenantRecord) -> Value {
     json!({
         "id": record.tenant_id,
         "slug": record.slug,
@@ -572,9 +605,10 @@ pub(super) async fn list_tenants(
     Query(raw): Query<BTreeMap<String, String>>,
 ) -> Response {
     let entry = requirement("GET", argus_core::admin::manifest::TENANTS);
-    if let Err(refusal) = admit(&state, &headers, entry).await {
-        return *refusal;
-    }
+    let permit = match admit(&state, &headers, entry).await {
+        Ok(permit) => permit,
+        Err(refusal) => return *refusal,
+    };
 
     let (_, fields, page) = match query_of(&raw, TENANT_FIELDS) {
         Ok(parts) => parts,
@@ -591,15 +625,21 @@ pub(super) async fn list_tenants(
 
     let items: Vec<Value> = records
         .iter()
-        .map(|record| project(&tenant_view(record), &fields))
+        .map(|record| project(&tenant_view(&permit, record), &fields))
         .collect();
 
-    listing(argus_core::admin::manifest::TENANTS, items, &page, |item| {
-        item.get("slug")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned()
-    })
+    listing(
+        &permit,
+        argus_core::admin::manifest::TENANTS,
+        items,
+        &page,
+        |item| {
+            item.get("slug")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned()
+        },
+    )
 }
 
 pub(super) async fn get_tenant(
@@ -608,12 +648,13 @@ pub(super) async fn get_tenant(
     Path(slug): Path<String>,
 ) -> Response {
     let entry = requirement("GET", argus_core::admin::manifest::TENANT);
-    if let Err(refusal) = admit(&state, &headers, entry).await {
-        return *refusal;
-    }
+    let permit = match admit(&state, &headers, entry).await {
+        Ok(permit) => permit,
+        Err(refusal) => return *refusal,
+    };
 
     match state.store.find_tenant(&slug).await {
-        Ok(Some(record)) => Json(tenant_view(&record)).into_response(),
+        Ok(Some(record)) => Json(tenant_view(&permit, &record)).into_response(),
         Ok(None) => hidden(),
         Err(_) => problem(503, "unavailable", "the tenant registry is unreadable"),
     }
@@ -625,9 +666,10 @@ pub(super) async fn create_tenant(
     Json(body): Json<Value>,
 ) -> Response {
     let entry = requirement("POST", argus_core::admin::manifest::TENANTS);
-    if let Err(refusal) = admit(&state, &headers, entry).await {
-        return *refusal;
-    }
+    let permit = match admit(&state, &headers, entry).await {
+        Ok(permit) => permit,
+        Err(refusal) => return *refusal,
+    };
 
     let key = match open_idempotency(&state, &headers, Surface::Platform, &body).await {
         Ok(Idempotency::Replay(response)) => return response,
@@ -648,7 +690,7 @@ pub(super) async fn create_tenant(
         return problem(409, "already_exists", "the slug or issuer host is taken");
     };
 
-    let view = tenant_view(&record);
+    let view = tenant_view(&permit, &record);
     close_idempotency(&state, key.as_deref(), Surface::Platform, 201, &view).await;
     (StatusCode::CREATED, Json(view)).into_response()
 }

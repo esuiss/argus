@@ -35,9 +35,27 @@ pub const PLATFORM_OBJECT: &str = "control-plane";
 pub type Refusal = Box<Response>;
 
 #[derive(Debug, Clone)]
+// §1 #22: yetkilendirme filtresi tipte kodlanır. Alanlar özeldir ve bu modül
+// dışında bir yapıcı yoktur, dolayısıyla elde tutulan bir `Caller` `admit`'in
+// evet demiş olmasının kanıtıdır. Yanıt gövdesi kuran her yardımcı bunu ister,
+// böylece filtrelenmemiş bir koleksiyon yanıta DERLEME ZAMANINDA giremez.
+// CVE-2026-17059 tam olarak bunun yokluğuydu: `/users` doğru filtreliyordu,
+// `role-members` aynı token'a tam PII veriyordu.
 pub struct Caller {
-    pub subject: String,
-    pub surface: Surface,
+    subject: String,
+    surface: Surface,
+}
+
+impl Caller {
+    #[must_use]
+    pub fn subject(&self) -> &str {
+        &self.subject
+    }
+
+    #[must_use]
+    pub const fn surface(&self) -> Surface {
+        self.surface
+    }
 }
 
 pub(super) fn problem(status: u16, error: &str, description: &str) -> Response {

@@ -31,9 +31,10 @@ pub(super) async fn proof(
     else {
         return hidden();
     };
-    if let Err(refusal) = admit(&state, &headers, entry).await {
-        return *refusal;
-    }
+    let _permit = match admit(&state, &headers, entry).await {
+        Ok(permit) => permit,
+        Err(refusal) => return *refusal,
+    };
 
     let Ok(event_id) = uuid::Uuid::parse_str(&id) else {
         return problem(400, "invalid_request", "the event id is not a uuid");
@@ -69,9 +70,10 @@ pub(super) async fn checkpoint(
     else {
         return hidden();
     };
-    if let Err(refusal) = admit(&state, &headers, entry).await {
-        return *refusal;
-    }
+    let _permit = match admit(&state, &headers, entry).await {
+        Ok(permit) => permit,
+        Err(refusal) => return *refusal,
+    };
 
     let payload = body.map_or(Value::Null, |Json(value)| value);
     let key = match open_idempotency(&state, &headers, Surface::Tenant, &payload).await {

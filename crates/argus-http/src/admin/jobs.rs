@@ -23,9 +23,10 @@ pub(super) async fn submit(
     else {
         return hidden();
     };
-    if let Err(refusal) = admit(&state, &headers, entry).await {
-        return *refusal;
-    }
+    let _permit = match admit(&state, &headers, entry).await {
+        Ok(permit) => permit,
+        Err(refusal) => return *refusal,
+    };
 
     let key = match open_idempotency(&state, &headers, Surface::Tenant, &body).await {
         Ok(Idempotency::Replay(response)) => return response,
@@ -161,9 +162,10 @@ pub(super) async fn status(
     else {
         return hidden();
     };
-    if let Err(refusal) = admit(&state, &headers, entry).await {
-        return *refusal;
-    }
+    let _permit = match admit(&state, &headers, entry).await {
+        Ok(permit) => permit,
+        Err(refusal) => return *refusal,
+    };
 
     match state.store.load_job(state.tenant_id, &id).await {
         Ok(job) => Json(json!({

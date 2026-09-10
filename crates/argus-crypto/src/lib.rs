@@ -1,3 +1,9 @@
+// CLAUDE.md §3 kural 7 bu crate'i `unsafe` yasağından muaf tutuyor, çünkü bir
+// kripto sağlayıcısının FFI'ya inmesi gerekebilir. Bugün inmiyor: crate'te
+// tek bir `unsafe` yok. O yüzden kapı kapalı tutulur; gerçekten gerekirse
+// bu satırı kaldırmak görünür ve bilinçli bir değişiklik olur.
+#![forbid(unsafe_code)]
+
 pub mod blind_index;
 pub mod password;
 pub mod rsa;
