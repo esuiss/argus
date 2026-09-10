@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 4f130f5bb9f92fadec9ccecfbc95dec29ecab0abb356d729b9b4b62ef6809d06 # shrinks to registered = "https://example.com", suffix = "/more"
+cc be0be7a16efafd055817ad448c3f6b61861bb9c2296178859e831d2c4b8499c9 # shrinks to registered = "https://evil.test", presented = "https://evil.test/cb"
