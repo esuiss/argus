@@ -9,6 +9,7 @@ members = [
     "crates/argus-http",
     "crates/argus-sandbox",
     "crates/argus-saml",
+    "crates/argus-ldap",
     "crates/argus",
 ]
 

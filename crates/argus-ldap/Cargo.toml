@@ -1,0 +1,21 @@
+[package]
+name         = "argus-ldap"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+
+[dependencies]
+argus-core.path   = "../argus-core"
+argus-parse.path  = "../argus-parse"
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util", "net", "rt", "macros"] }
+rustls.workspace    = true
+tokio-rustls.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros", "io-util", "net"] }

@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod directory;
 pub mod postgres;
 pub mod schema;
 pub mod scim;

@@ -12,6 +12,7 @@ argus-crypto.path = "../argus-crypto"
 aws-lc-rs.workspace = true
 argus-proto.path  = "../argus-proto"
 argus-saml.path      = "../argus-saml"
+argus-ldap.path      = "../argus-ldap"
 argus-http.path   = "../argus-http"
 argus-store.path  = "../argus-store"
 sqlx.workspace    = true

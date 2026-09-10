@@ -157,6 +157,7 @@ dependencies = [
  "argus-core",
  "argus-crypto",
  "argus-http",
+ "argus-ldap",
  "argus-proto",
  "argus-saml",
  "argus-store",
@@ -221,6 +222,18 @@ dependencies = [
  "uuid",
  "webauthn-rs",
  "webpki-roots 1.0.9",
+]
+
+[[package]]
+name = "argus-ldap"
+version = "0.0.0"
+dependencies = [
+ "argus-core",
+ "argus-parse",
+ "rustls",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-rustls",
 ]
 
 [[package]]

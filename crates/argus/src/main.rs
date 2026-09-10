@@ -41,6 +41,11 @@ struct Config {
     saml_cert: Option<String>,
     saml_entity_id: Option<String>,
     saml_sp_dir: Option<String>,
+
+    ldap_bind: Option<String>,
+    ldap_base_dn: Option<String>,
+    ldap_cert: Option<String>,
+    ldap_key: Option<String>,
 }
 
 impl Config {
@@ -59,6 +64,10 @@ impl Config {
             saml_cert: env::var("ARGUS_SAML_CERT").ok(),
             saml_entity_id: env::var("ARGUS_SAML_ENTITY_ID").ok(),
             saml_sp_dir: env::var("ARGUS_SAML_SP_DIR").ok(),
+            ldap_bind: env::var("ARGUS_LDAP_BIND").ok(),
+            ldap_base_dn: env::var("ARGUS_LDAP_BASE_DN").ok(),
+            ldap_cert: env::var("ARGUS_LDAP_CERT").ok(),
+            ldap_key: env::var("ARGUS_LDAP_KEY").ok(),
         }
     }
 }
@@ -68,6 +77,10 @@ async fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("keygen") {
         return keygen(args.get(1..).unwrap_or_default());
+    }
+
+    if args.first().map(String::as_str) == Some("ldap") {
+        return serve_ldap().await;
     }
 
     let config = Config::from_env();
@@ -142,6 +155,188 @@ async fn main() -> ExitCode {
     eprintln!("argus: WARNING - development configuration, not for production");
 
     serve(app, &config, "in-memory").await
+}
+
+struct StorePasswords {
+    entries: std::collections::HashMap<String, String>,
+}
+
+impl argus_ldap::session::PasswordCheck for StorePasswords {
+    fn verify(&self, dn: &str, password: &[u8]) -> bool {
+        let Ok(parsed) = argus_core::ldap::Dn::parse(dn) else {
+            return false;
+        };
+        let Some(uid) = parsed.first_value("uid") else {
+            return false;
+        };
+        let Some(stored) = self.entries.get(&uid.to_lowercase()) else {
+            return false;
+        };
+        let Ok(candidate) = core::str::from_utf8(password) else {
+            return false;
+        };
+        matches!(
+            argus_crypto::password::verify(candidate, stored),
+            Ok(argus_crypto::password::Verdict::Correct
+                | argus_crypto::password::Verdict::CorrectButNeedsRehash)
+        )
+    }
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "the gateway start-up sequence reads as one list of preconditions"
+)]
+async fn serve_ldap() -> ExitCode {
+    let config = Config::from_env();
+
+    let Some(bind) = config.ldap_bind.clone() else {
+        eprintln!("argus: set ARGUS_LDAP_BIND to the address the directory listens on");
+        return ExitCode::FAILURE;
+    };
+
+    let base_text = config
+        .ldap_base_dn
+        .clone()
+        .unwrap_or_else(|| "dc=idm,dc=example,dc=com".to_owned());
+
+    let Ok(base) = argus_core::ldap::Dn::parse(&base_text) else {
+        eprintln!("argus: ARGUS_LDAP_BASE_DN is not a distinguished name");
+        return ExitCode::FAILURE;
+    };
+
+    let Some(url) = config.database_url.clone() else {
+        eprintln!("argus: the directory gateway reads from the database; set ARGUS_DATABASE_URL");
+        return ExitCode::FAILURE;
+    };
+
+    let Ok(pool) = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(4)
+        .connect(&url)
+        .await
+    else {
+        eprintln!("argus: cannot connect to the database");
+        return ExitCode::FAILURE;
+    };
+
+    if let Err(e) = argus_store::schema::validate(&pool).await {
+        eprintln!("argus: schema validation failed: {e}");
+        return ExitCode::FAILURE;
+    }
+
+    let tenant = TenantId::from_uuid(Uuid::nil());
+
+    let (people, groups, passwords) = match argus_store::directory::load(&pool, tenant).await {
+        Ok(loaded) => loaded,
+        Err(e) => {
+            eprintln!("argus: cannot read the directory: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let directory = argus_ldap::directory::Directory {
+        base,
+        base_text,
+        vendor_version: env!("CARGO_PKG_VERSION").to_owned(),
+        start_tls_offered: false,
+        people,
+        groups,
+    };
+
+    eprintln!(
+        "argus: directory gateway with {} people and {} groups",
+        directory.people.len(),
+        directory.groups.len()
+    );
+
+    let service = Arc::new(argus_ldap::server::Service {
+        directory,
+        passwords: StorePasswords { entries: passwords },
+    });
+
+    let tls = match (config.ldap_cert.as_deref(), config.ldap_key.as_deref()) {
+        (Some(cert), Some(key)) => {
+            let certs = match load_certs(cert) {
+                Ok(certs) => certs,
+                Err(message) => {
+                    eprintln!("argus: {message}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let key = match load_key(key) {
+                Ok(key) => key,
+                Err(message) => {
+                    eprintln!("argus: {message}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            match rustls::ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(certs, key)
+            {
+                Ok(server) => Some(Arc::new(server)),
+                Err(e) => {
+                    eprintln!("argus: the certificate and key do not match: {e}");
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
+        (None, None) => None,
+        _ => {
+            eprintln!("argus: ARGUS_LDAP_CERT and ARGUS_LDAP_KEY must be set together");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    if tls.is_none() && config.production {
+        eprintln!("argus: ARGUS_ENV=production requires ARGUS_LDAP_CERT and ARGUS_LDAP_KEY");
+        return ExitCode::FAILURE;
+    }
+
+    let Ok(listener) = tokio::net::TcpListener::bind(&bind).await else {
+        eprintln!("argus: cannot listen on {bind}");
+        return ExitCode::FAILURE;
+    };
+
+    if tls.is_some() {
+        eprintln!("argus: LDAPS on {bind}");
+    } else {
+        eprintln!("argus: LDAP on {bind}");
+        eprintln!("argus: WARNING - no TLS; this listener refuses every password bind");
+    }
+
+    loop {
+        let Ok((stream, _)) = listener.accept().await else {
+            continue;
+        };
+        let service = Arc::clone(&service);
+        let tls = tls.clone();
+
+        tokio::spawn(async move {
+            match tls {
+                None => {
+                    let mut stream = stream;
+                    let _ = argus_ldap::server::serve(
+                        &mut stream,
+                        &service,
+                        argus_ldap::session::Confidentiality::Plaintext,
+                    )
+                    .await;
+                }
+                Some(config) => {
+                    let acceptor = tokio_rustls::TlsAcceptor::from(config);
+                    if let Ok(mut protected) = acceptor.accept(stream).await {
+                        let _ = argus_ldap::server::serve(
+                            &mut protected,
+                            &service,
+                            argus_ldap::session::Confidentiality::Protected,
+                        )
+                        .await;
+                    }
+                }
+            }
+        });
+    }
 }
 
 fn keygen(args: &[String]) -> ExitCode {
