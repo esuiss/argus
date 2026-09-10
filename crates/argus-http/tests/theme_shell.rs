@@ -20,7 +20,7 @@ fn the_default_shell_places_the_sign_in_box() {
 }
 
 /// Kararın tamamı buna dayanıyor: Liquid'in fonksiyon çağırma sözdizimi yok ve
-/// şablon kendisine verilmeyene ulaşamıyor. FreeMarker'ın "kötü niyetli bir
+/// şablon kendisine verilmeyene ulaşamıyor. `FreeMarker`'ın "kötü niyetli bir
 /// şablon süreç yetkisiyle kod çalıştırabilir" sınıfı burada yok.
 #[test]
 fn a_shell_cannot_reach_anything_it_was_not_given() {
@@ -247,7 +247,7 @@ fn a_tenant_can_rebuild_the_whole_shell_around_the_box() {
 }
 
 /// Ve kiracı kabuğa bir script yazarsa: sunucuda hiçbir şey olmaz, tarayıcıda
-/// da CSP onu çalıştırmaz. FreeMarker'da aynı şablon süreç yetkisiyle kod
+/// da CSP onu çalıştırmaz. `FreeMarker`'da aynı şablon süreç yetkisiyle kod
 /// çalıştırırdı.
 #[test]
 fn a_script_in_the_shell_runs_nowhere() {
