@@ -7,7 +7,7 @@
 **Girdi:** 15 araştırma dosyası, ~1,9 MB, yaklaşık 600 birincil kaynak.
 **Bu dosyanın işi:** Araştırmayı karara çevirmek. Her karar (a) tek cümlede ifade edilir, (b) gerekçesi bir ölçüme veya birincil kaynağa dayanır, (c) geri alınabilir mi geri alınamaz mı işaretlenir.
 
-> **Okuma sırası:** Bu dosya özet ve karardır. Gerekçenin tamamı ilgili araştırma dosyasındadır — her satırda bağlantı var. Çelişen tavsiyeler 02-contradictions-and-resolutions.md (§2)'de çözülmüştür.
+> **Okuma sırası:** Bu dosya özet ve karardır. Gerekçenin tamamı ilgili araştırma dosyasındadır — her satırda bağlantı var. Çelişen tavsiyeler [02-contradictions-and-resolutions.md](02-contradictions-and-resolutions.md) (§2)'de çözülmüştür.
 
 ---
 
@@ -30,7 +30,7 @@ Bu tablodaki kararlar **gün-1'de verilmek zorunda olanlardır** — sonradan de
 
 | # | Karar | Statü | Sonradan değiştirmenin maliyeti | Kaynak |
 |---|---|---|---|---|
-| 1 | **`tenant_id` her tabloda VE her birincil anahtarda** | KŞS | Tüm PK'ları düşürüp yeniden kurmak = çevrimdışı migration. SuperTokens: 33 tablo, tüm PK'lar CASCADE | 18-multi-tenancy.md (§18) |
+| 1 | **`tenant_id` her tabloda VE her birincil anahtarda** | KŞS | Tüm PK'ları düşürüp yeniden kurmak = çevrimdışı migration. SuperTokens: 33 tablo, tüm PK'lar CASCADE | [18-multi-tenancy.md](18-multi-tenancy.md) (§18) |
 | 2 | **Her yabancı anahtar composite (`tenant_id` dahil)** | KŞS | Tek kolonlu FK'lar çapraz-kiracı referansa izin verir; RLS sonradan okumayı bozar | Logto PR #7596 |
 | 3 | **RLS + `FORCE` + non-owner rol, İSTİSNASIZ tüm tablolarda** | KŞS | Sonradan eklemek "ya hep ya hiç"tir; atlanan tek tablo = sessiz sızıntı | Logto #7685 |
 | 4 | **Kiracı başına imzalama anahtarı** (ES256 varsayılan) | KKS | Paylaşımlıdan kiracı-başınaya geçiş = tüm RP'lerin JWKS cache invalidasyonu + koordineli kesinti | Storm-0558, CVE-2026-23552 |
@@ -41,29 +41,29 @@ Bu tablodaki kararlar **gün-1'de verilmek zorunda olanlardır** — sonradan de
 | 9 | **`placement_id` silo-kaçış kolonu gün-1'de** (kullanılmasa bile) | KŞS | Yoksa bir kiracıyı ayrı kümeye taşımak mimari yeniden yazımdır | AWS silo/pool/bridge |
 | 10 | **Denetim logu kiracı + zaman partition'lı** | KŞS | Milyarlarca satırlı tabloyu sonradan partition'lamak pratikte imkânsızdır | GDPR Md. 17 |
 | 11 | **İsim değil, opak-ID/tam-yol tabanlı yetkilendirme** | MT | Token'da isim taşıyan her şey yeniden yazılır | CVE-2026-19608 |
-| 12 | **WebAuthn RP ID = apex alan adı** (login alt alan adı DEĞİL, satıcı alan adı KESİNLİKLE değil). **Çok kiracılıkta: her kiracı KENDİ RP ID'sini alır.** ⚠️ *Bu bir **ürün tercihidir**, standart zorunluluğu değil — spec, origin'in effective domain'ini de geçerli RP ID sayar (§23 §5.3).* | KKS | **Geri alınamayan tek WebAuthn kararı.** RP ID değişirse Okta'nın ifadesiyle *"the browser doesn't present them at sign-in"* — kayıtlar silinmez ama kullanılamaz. ROR (`/.well-known/webauthn`) pratikte **5 label** ile sınırlı → paylaşımlı RP ID çok kiracılıkta ölçeklenmiyor | 22-account-lifecycle.md (§22) §39.1, 23-login-flows.md (§23) §5.3 |
+| 12 | **WebAuthn RP ID = apex alan adı** (login alt alan adı DEĞİL, satıcı alan adı KESİNLİKLE değil). **Çok kiracılıkta: her kiracı KENDİ RP ID'sini alır.** ⚠️ *Bu bir **ürün tercihidir**, standart zorunluluğu değil — spec, origin'in effective domain'ini de geçerli RP ID sayar (§23 §5.3).* | KKS | **Geri alınamayan tek WebAuthn kararı.** RP ID değişirse Okta'nın ifadesiyle *"the browser doesn't present them at sign-in"* — kayıtlar silinmez ama kullanılamaz. ROR (`/.well-known/webauthn`) pratikte **5 label** ile sınırlı → paylaşımlı RP ID çok kiracılıkta ölçeklenmiyor | [22-account-lifecycle.md](22-account-lifecycle.md) (§22) §39.1, [23-login-flows.md](23-login-flows.md) (§23) §5.3 |
 | 13 | **WebAuthn `user.id` = 64 rastgele bayt**, asla e-posta veya hash'i | KKS | **İki ayrı derece — önceden tek `MUST NOT` etiketiyle birleştirilmişti:** user handle'a PII (e-posta, kullanıcı adı, salt'sız hash'i) koymak **`MUST NOT`**; **64 bayt ise `RECOMMENDED`** — spec 1–64 bayt aralığına izin verir, 64 bayt **Argus'un tercihidir**. Değiştirmek tüm credential'ları geçersiz kılar | WebAuthn L3 §5.4.3 (1–64 bayt), §14.6.1 (PII yasağı + 64 bayt önerisi) |
 | 14 | **Kullanıcı ID'si asla yeniden kullanılmaz; e-posta varsayılan olarak asla** | KŞS | Tombstone tekillik kısıtını sonradan eklemek çakışan kayıtları çözemez | RFC 9967, Gmail, GitHub |
-| 15 | **`argus-core` I/O yapmaz** — `async fn`, `tokio::`, `sqlx::`, `reqwest::` yasak, CI'da zorlanır | MT | Formel doğrulamanın tek girebileceği yer burasıdır; sonradan I/O'yu sökemezsin | 02-contradictions-and-resolutions.md (§2) §5 |
-| 16 | **Kimlik doğrulama akışı bir "flow" konfigürasyonu değil, tipli bir durum makinesi** | MT | Keycloak #40744: akıştan adım silmek auth bypass üretiyor. Genel amaçlı flow motoru bunu yapısal olarak engelleyemez | 22-account-lifecycle.md (§22) §10.3 |
+| 15 | **`argus-core` I/O yapmaz** — `async fn`, `tokio::`, `sqlx::`, `reqwest::` yasak, CI'da zorlanır | MT | Formel doğrulamanın tek girebileceği yer burasıdır; sonradan I/O'yu sökemezsin | [02-contradictions-and-resolutions.md](02-contradictions-and-resolutions.md) (§2) §5 |
+| 16 | **Kimlik doğrulama akışı bir "flow" konfigürasyonu değil, tipli bir durum makinesi** | MT | Keycloak #40744: akıştan adım silmek auth bypass üretiyor. Genel amaçlı flow motoru bunu yapısal olarak engelleyemez | [22-account-lifecycle.md](22-account-lifecycle.md) (§22) §10.3 |
 | 17 | **Her PII alanı kullanıcı başına DEK ile şifreli** (envelope encryption) | KŞS | Crypto-shredding'i sonradan eklemek tüm veriyi yeniden yazmaktır | ICO "put beyond use", EDPB CEF 2026 |
-| 18 | **Üç ayrı epoch:** `session_epoch` (kullanıcı) · `authz_epoch` (kiracı) · `key_epoch` (kiracı) | MT ⚠️ *doldurma sözleşmesi §10.3 A6* | Tek sayaca sıkıştırılırsa her izin değişimi tüm oturumları düşürür | 02-contradictions-and-resolutions.md (§2) §4 |
-| 19 | **Kiracıya server-side template execution VERİLMEZ** — Keycloak'ın FreeMarker modeli kopyalanmaz | MT | Keycloak kendi dokümanında: *"a malicious template can run code as the Keycloak process."* Çok kiracılı bir üründe bu, **kiracının RCE alması** demektir. Sonradan script-siz templating'e geçmek her kiracı temasını yeniden yazdırmaktır | 23-login-flows.md (§23) §5.2 |
-| 20 | **Argus'un kendi admin konsolu ve hosted login'i OAuth kullanmaz — doğrudan session cookie** | MT | RFC 10017 §7.1: *"Simple applications are made needlessly complex by using OAuth to replace the concept of session management."* Sonradan sökmek tüm UI auth katmanını yeniden yazmaktır | 23-login-flows.md (§23) §4.2 |
-| 21 | **Platform-admin API'si ile kiracı-admin API'si AYRI yüzeyler** — ayrı audience, ayrı scope namespace'i, ayrı rate limit bütçesi | KKS | Auth0 bunu **21 Nisan 2026'da yapmak zorunda kaldı**: Management API *"is not designed for frequent, granular calls… can quickly become a bottleneck"* ve müşteriler *"hit a wall with rate limits."* Sonradan ikinci bir API yüzeyi eklemek her entegrasyonu kırar | 24-admin-api.md (§24) §5.1 |
-| 22 | **Yetkilendirme filtresi veri erişim katmanında, handler'da değil** — tipte kodlanır: filtrelenmemiş koleksiyon serileştirilemez | MT | CVE-2026-17059 tam olarak bunun yokluğu: `/users` doğru filtreliyordu ama `role-members` aynı token'a tam PII veriyordu. Handler-başına yetkilendirme, N endpoint × M kaynak kombinasyonunda **kaçınılmaz olarak** atlanır | 24-admin-api.md (§24) §3.2 |
-| 23 | **Denetim olayı, iş değişikliğiyle AYNI transaction'da minimal bir audit outbox satırı olarak kalıcılaşır**; Merkle birleştirme, imzalama ve dışa yayın arka planda yürür | MT ✅ *kabul edilmiş yön §10.3 A1* | Keycloak'ın 1 numaralı arızası: *"Event writes ride the request transaction"* — login isteği DB insert'ini bekliyor; ayrıştırma doğru. ⚠️ **Ama çözüm bellek kuyruğu değil (düzeltme, 2. inceleme turu):** bounded in-memory kuyruk, iş değişikliği commit olduktan sonra süreç ölürse kaydı kaybeder — rol değişikliği kalıcı, denetim kaydı yok. Bu satır, §25 §7 K4'ün (Tessera: *durable* sequencing + arka planda integration) doğru okunuşudur; K8'in bellek kuyruğu K4 ile çelişiyordu | 25-observability.md (§25) §5.4, §7 K4/K8 |
-| 24 | **`redirect_uri` eşleştirmesi YALNIZCA exact string** — regex ve wildcard hiç implemente edilmez, "opt-in tehlikeli özellik" olarak bile | MT | authentik **CVE-2024-52289**: escape edilmemiş regex noktası yüzünden `app.example.com` konfigürasyonu `app0example.com` ile eşleşti → *"the victim… are directly redirected to the attacker without further user interaction."* Düzeltme "strict string matching as the default" oldu. RFC 9700 zaten exact match zorunlu kılıyor. **Tek istisna — loopback:** RFC 8252 §7.3 gereği native uygulamaların `127.0.0.1`/`localhost` redirect'lerinde **port bileşeni yok sayılarak** eşleştirilir (§14 §9.4'te ayrıntılı). Bu bir wildcard değil, standardın kendi kuralıdır; karar satırında taşınması gerekiyordu | 26-deployment-operations.md (§26) §3.3, 14-mcp-authorization.md (§14) §9.4 |
-| 25 | **İmzalama anahtarları veritabanının DIŞINDA**, pluggable backend (dosya/KMS/PKCS#11), DB yedeğinden bağımsız yedekleme | MT | **Anahtar kaybı DB kaybından yıkıcıdır**: tüm token'lar, refresh token'lar, oturumlar ölür ve hiçbir RP eski JWT'leri doğrulayamaz. Keycloak `rsa-generated` anahtarları DB'ye koyuyor ve **yedekleme prosedürü dokümante etmiyor**; Zitadel'in masterkey'i `docker compose up`'ta sessizce üretiliyor ve *"cannot be changed"* | 26-deployment-operations.md (§26) §5.2 |
-| 26 | **Şema göçü ayrı bir job; uygulama başlangıçta yalnızca `validate` yapar ve uyumsuzsa ölür** | MT | Keycloak #43252: *"Incompatible migrations and index creation locks can prevent old instances from joining clusters during rolling updates."* Uygulama başlangıcına DDL bırakmak N-1 uyumluluğunu yapısal olarak imkânsız kılar | 26-deployment-operations.md (§26) §4.4 |
-| 27 | **Minimum PostgreSQL 18** | **DH** ⚠️ *gerekçesi bir kez düzeltildi* | ⚠️ **Gerekçe düzeltildi (2. inceleme turu).** Eski gerekçe ("expand-contract'ı NOT NULL için mümkün kılan tek sürüm") **olgu olarak yanlıştı:** PG12'den beri `ADD CONSTRAINT ... CHECK (col IS NOT NULL) NOT VALID` → `VALIDATE CONSTRAINT` (SHARE UPDATE EXCLUSIVE) → `SET NOT NULL` dizisi tam tablo taraması olmadan çalışır. **Geçerli gerekçeler:** (a) yerleşik `uuidv7()` — [ÖLÇÜM] insert 1,67x hızlı, indeks %26 küçük (§6 §4.2); (b) fast-path kilit düzeltmesi (commit `c4d5cb71d`) çok-partition'lı iş yükündeki kilit uçurumunu kaldırıyor (§18 §2.2); (c) PG18'in `SET NOT NULL NOT VALID`'i aynı deseni sadeleştirir. Karar ayakta, gerekçe değişti | 26-deployment-operations.md (§26) §4.1, §6 §4.2, §18 §2.2 |
+| 18 | **Üç ayrı epoch:** `session_epoch` (kullanıcı) · `authz_epoch` (kiracı) · `key_epoch` (kiracı) | MT ⚠️ *doldurma sözleşmesi §10.3 A6* | Tek sayaca sıkıştırılırsa her izin değişimi tüm oturumları düşürür | [02-contradictions-and-resolutions.md](02-contradictions-and-resolutions.md) (§2) §4 |
+| 19 | **Kiracıya server-side template execution VERİLMEZ** — Keycloak'ın FreeMarker modeli kopyalanmaz | MT | Keycloak kendi dokümanında: *"a malicious template can run code as the Keycloak process."* Çok kiracılı bir üründe bu, **kiracının RCE alması** demektir. Sonradan script-siz templating'e geçmek her kiracı temasını yeniden yazdırmaktır | [23-login-flows.md](23-login-flows.md) (§23) §5.2 |
+| 20 | **Argus'un kendi admin konsolu ve hosted login'i OAuth kullanmaz — doğrudan session cookie** | MT | RFC 10017 §7.1: *"Simple applications are made needlessly complex by using OAuth to replace the concept of session management."* Sonradan sökmek tüm UI auth katmanını yeniden yazmaktır | [23-login-flows.md](23-login-flows.md) (§23) §4.2 |
+| 21 | **Platform-admin API'si ile kiracı-admin API'si AYRI yüzeyler** — ayrı audience, ayrı scope namespace'i, ayrı rate limit bütçesi | KKS | Auth0 bunu **21 Nisan 2026'da yapmak zorunda kaldı**: Management API *"is not designed for frequent, granular calls… can quickly become a bottleneck"* ve müşteriler *"hit a wall with rate limits."* Sonradan ikinci bir API yüzeyi eklemek her entegrasyonu kırar | [24-admin-api.md](24-admin-api.md) (§24) §5.1 |
+| 22 | **Yetkilendirme filtresi veri erişim katmanında, handler'da değil** — tipte kodlanır: filtrelenmemiş koleksiyon serileştirilemez | MT | CVE-2026-17059 tam olarak bunun yokluğu: `/users` doğru filtreliyordu ama `role-members` aynı token'a tam PII veriyordu. Handler-başına yetkilendirme, N endpoint × M kaynak kombinasyonunda **kaçınılmaz olarak** atlanır | [24-admin-api.md](24-admin-api.md) (§24) §3.2 |
+| 23 | **Denetim olayı, iş değişikliğiyle AYNI transaction'da minimal bir audit outbox satırı olarak kalıcılaşır**; Merkle birleştirme, imzalama ve dışa yayın arka planda yürür | MT ✅ *kabul edilmiş yön §10.3 A1* | Keycloak'ın 1 numaralı arızası: *"Event writes ride the request transaction"* — login isteği DB insert'ini bekliyor; ayrıştırma doğru. ⚠️ **Ama çözüm bellek kuyruğu değil (düzeltme, 2. inceleme turu):** bounded in-memory kuyruk, iş değişikliği commit olduktan sonra süreç ölürse kaydı kaybeder — rol değişikliği kalıcı, denetim kaydı yok. Bu satır, §25 §7 K4'ün (Tessera: *durable* sequencing + arka planda integration) doğru okunuşudur; K8'in bellek kuyruğu K4 ile çelişiyordu | [25-observability.md](25-observability.md) (§25) §5.4, §7 K4/K8 |
+| 24 | **`redirect_uri` eşleştirmesi YALNIZCA exact string** — regex ve wildcard hiç implemente edilmez, "opt-in tehlikeli özellik" olarak bile | MT | authentik **CVE-2024-52289**: escape edilmemiş regex noktası yüzünden `app.example.com` konfigürasyonu `app0example.com` ile eşleşti → *"the victim… are directly redirected to the attacker without further user interaction."* Düzeltme "strict string matching as the default" oldu. RFC 9700 zaten exact match zorunlu kılıyor. **Tek istisna — loopback:** RFC 8252 §7.3 gereği native uygulamaların `127.0.0.1`/`localhost` redirect'lerinde **port bileşeni yok sayılarak** eşleştirilir (§14 §9.4'te ayrıntılı). Bu bir wildcard değil, standardın kendi kuralıdır; karar satırında taşınması gerekiyordu | [26-deployment-operations.md](26-deployment-operations.md) (§26) §3.3, [14-mcp-authorization.md](14-mcp-authorization.md) (§14) §9.4 |
+| 25 | **İmzalama anahtarları veritabanının DIŞINDA**, pluggable backend (dosya/KMS/PKCS#11), DB yedeğinden bağımsız yedekleme | MT | **Anahtar kaybı DB kaybından yıkıcıdır**: tüm token'lar, refresh token'lar, oturumlar ölür ve hiçbir RP eski JWT'leri doğrulayamaz. Keycloak `rsa-generated` anahtarları DB'ye koyuyor ve **yedekleme prosedürü dokümante etmiyor**; Zitadel'in masterkey'i `docker compose up`'ta sessizce üretiliyor ve *"cannot be changed"* | [26-deployment-operations.md](26-deployment-operations.md) (§26) §5.2 |
+| 26 | **Şema göçü ayrı bir job; uygulama başlangıçta yalnızca `validate` yapar ve uyumsuzsa ölür** | MT | Keycloak #43252: *"Incompatible migrations and index creation locks can prevent old instances from joining clusters during rolling updates."* Uygulama başlangıcına DDL bırakmak N-1 uyumluluğunu yapısal olarak imkânsız kılar | [26-deployment-operations.md](26-deployment-operations.md) (§26) §4.4 |
+| 27 | **Minimum PostgreSQL 18** | **DH** ⚠️ *gerekçesi bir kez düzeltildi* | ⚠️ **Gerekçe düzeltildi (2. inceleme turu).** Eski gerekçe ("expand-contract'ı NOT NULL için mümkün kılan tek sürüm") **olgu olarak yanlıştı:** PG12'den beri `ADD CONSTRAINT ... CHECK (col IS NOT NULL) NOT VALID` → `VALIDATE CONSTRAINT` (SHARE UPDATE EXCLUSIVE) → `SET NOT NULL` dizisi tam tablo taraması olmadan çalışır. **Geçerli gerekçeler:** (a) yerleşik `uuidv7()` — [ÖLÇÜM] insert 1,67x hızlı, indeks %26 küçük (§6 §4.2); (b) fast-path kilit düzeltmesi (commit `c4d5cb71d`) çok-partition'lı iş yükündeki kilit uçurumunu kaldırıyor (§18 §2.2); (c) PG18'in `SET NOT NULL NOT VALID`'i aynı deseni sadeleştirir. Karar ayakta, gerekçe değişti | [26-deployment-operations.md](26-deployment-operations.md) (§26) §4.1, §6 §4.2, §18 §2.2 |
 
 > **Bu yirmi yedi maddenin hepsi şemayı, crate sınırlarını, UI mimarisini, API yüzeyini veya dağıtım modelini etkiliyor. Hiçbiri "sonra bakarız" değil.**
 
 ### 1.1 Sonradan verilen kararlar
 
-Gün-1 tablosundan sonra verilen mimari kararlar burada, CLAUDE.md §8'in
-zorunlu alanlarıyla birlikte.
+Gün-1 tablosundan sonra verilen mimari kararlar burada, §10'da sayılan
+zorunlu karar kaydı alanlarıyla birlikte.
 
 ---
 
@@ -80,7 +80,7 @@ zorunlu alanlarıyla birlikte.
 | **Kabul testi** | `crates/argus-http/tests/theme_shell.rs`. İkisi de sabitlenmiş: şablonun verilmeyene ulaşamadığı, ve istek verisinin kabuğa hiç girmediği. Ayrıca: kutuyu yerleştirmeyen kabuk saklanmadan reddediliyor, bozuk kabuk derlenmiş olana düşüyor, `javascript:` bir logo alanından geçemiyor (kontrol söküldüğünde iki test düşüyor), ve CSP hiçbir script kaynağına izin vermiyor. |
 | **Hangi karşı örnek bu kararı geçersiz kılar** | Kiracıların giriş **kutusunun içini** — alan sırası, alan ekleme, adımlar arası içerik — dağıtım yapmadan değiştirmesinin ürün gereksinimi hâline gelmesi. Yalnızca kabuk yetmediğinde. Kabuğun yetmediği tek başına yeterli değildir; kabuk zaten Liquid'e açık. |
 | **Kalan risk ve kontrolü** | FreeMarker'ın RCE'si yok, ama iki risk kalıyor: **XSS** — kiracı kabuğuna script yazabilir, kontrolü CSP (`default-src 'none'`, hiçbir script kaynağı yok, satır içi stil yok); **kaynak tüketimi** — Liquid döngü kurabilir, kontrolü kabuk boyutu, render süresi ve çıktı boyutu sınırları. |
-| **Kaynak satır** | §23 §5.1 (üç ürünün yaklaşımı), §23 §5.2 (özelleştirmenin güvenlik maliyeti), §23 §8 #14/#16/#18/#19, §1 #19, §1 #20, §9.5 #1 |
+| **Kaynak** | §23 §5.1 (üç ürünün yaklaşımı), §23 §5.2 (özelleştirmenin güvenlik maliyeti), §23 §8 #14/#16/#18/#19, §1 #19, §1 #20, §9.5 #1 |
 
 **K29 — Tema verisi kayıt defterinde tutulur, istek başına veritabanına gidilmez**
 
@@ -93,7 +93,7 @@ zorunlu alanlarıyla birlikte.
 | **Granülerlik gerekçesi** | Keycloak realm ve client düzeyinde tema seçimine izin veriyor; aynı granülerlik veri modelinde yalnızca bir anahtar meselesi ve ek maliyeti yok. |
 | **Kabul testi** | Tema değişikliğinden sonra tazeleme ucu çağrılınca yeni tema sunuluyor; tazeleme çağrılmadan eski tema sunuluyor. |
 | **Hangi karşı örnek bu kararı geçersiz kılar** | Tema sayısının bellekte tutulamayacak kadar büyümesi — kiracı başına birden çok istemci temasının toplam boyutunun süreç bellek bütçesini zorlaması. O noktada doğru cevap veritabanına dönmek değil, sınırlı bir LRU. |
-| **Kaynak satır** | §23 §5.1, §18, §9.5 boyutlandırma |
+| **Kaynak** | §23 §5.1, §18, §9.5 boyutlandırma |
 
 ---
 
@@ -136,8 +136,8 @@ generativity = "1"           # branded lifetimes — kiracı izolasyonu
 
 | Yasak | Gerekçe |
 |---|---|
-| `jsonwebtoken` + `rust_crypto` özelliği | `rsa` crate'i Marvin saldırısına açık — 08-side-channels.md (§8) |
-| Dağıtık cache doğruluk kaynağı olarak (Redis/Infinispan) | Endüstri PostgreSQL'e yakınsadı: Keycloak Tem 2026, Zitadel Şub 2026, authentik 2025.8 — 19-high-availability.md (§19) |
+| `jsonwebtoken` + `rust_crypto` özelliği | `rsa` crate'i Marvin saldırısına açık — [08-side-channels.md](08-side-channels.md) (§8) |
+| Dağıtık cache doğruluk kaynağı olarak (Redis/Infinispan) | Endüstri PostgreSQL'e yakınsadı: Keycloak Tem 2026, Zitadel Şub 2026, authentik 2025.8 — [19-high-availability.md](19-high-availability.md) (§19) |
 | Postgres `LISTEN/NOTIFY` | PgBouncer transaction modunda çalışmıyor; kuyruk dolunca **yazmalar commit'te başarısız** |
 | Olay başına hash-chained audit log | Ölçüldü: 8 bağlantı = 1 bağlantı throughput'u — tek doğrusal zincirde ardışık zincir hash'leri arasında seri bağımlılık. ⚠️ Sayı ölçüme özgüdür, evrensel tavan değildir |
 | `gamlastan` (SAML domain modeli) | SAML iş mantığı dışarıdan gelmemeli; XSW savunması tam olarak orada yaşar |
@@ -215,7 +215,7 @@ Sonuç: DB tamamen düşse bile kaynak sunucular etkilenmez.
 
 **Epoch yayılımı:** transactional outbox + **100-250 ms polling** (Keycloak'ın deseni). `LISTEN/NOTIFY` değil.
 
-**⚠️ AÇIK KARAR — access token ömrü ve iptal sözleşmesi (bkz. §1 §10.1).** Bu satır önceden "uzun ömürlü access token + sinyal güdümlü iptal, kısa TTL değil" diye kesin bir karar bildiriyordu. Ancak §19 §7.2 degraded mode'u anlatırken şunu diyor: *"degraded mode'un gerçek güvenlik sınırı access token ömrüdür… **bu, kısa token ömrünün en güçlü tek gerekçesidir** ve degraded mode tasarımının önkoşuludur."* Yani özetin "en değerli farklılaştırıcı" diye sattığı özellik, mimari bölümünün ifadesiyle özetin reddettiği token politikasını önkoşul kabul ediyor. İkisi aynı anda savunulamaz → karar §10.1'de açık bırakıldı. Uzun ömür lehine kanıt — Microsoft'un kendi bulgusu (birebir): *"Microsoft experimented with the 'blunt object' approach of reduced token lifetimes but found they **degrade user experiences and reliability without eliminating risks**."* Entra CAE 28 saatlik token + ~15 dk yayılım kullanıyor.
+**⚠️ AÇIK KARAR — access token ömrü ve iptal sözleşmesi (bkz. §10.1).** Bu satır önceden "uzun ömürlü access token + sinyal güdümlü iptal, kısa TTL değil" diye kesin bir karar bildiriyordu. Ancak §19 §7.2 degraded mode'u anlatırken şunu diyor: *"degraded mode'un gerçek güvenlik sınırı access token ömrüdür… **bu, kısa token ömrünün en güçlü tek gerekçesidir** ve degraded mode tasarımının önkoşuludur."* Yani özetin "en değerli farklılaştırıcı" diye sattığı özellik, mimari bölümünün ifadesiyle özetin reddettiği token politikasını önkoşul kabul ediyor. İkisi aynı anda savunulamaz → karar §10.1'de açık bırakıldı. Uzun ömür lehine kanıt — Microsoft'un kendi bulgusu (birebir): *"Microsoft experimented with the 'blunt object' approach of reduced token lifetimes but found they **degrade user experiences and reliability without eliminating risks**."* Entra CAE 28 saatlik token + ~15 dk yayılım kullanıyor.
 
 **Bearer varsayılan değildir.** DPoP + mTLS-bound + JWT-SVID kabulü birinci sınıftır. WIMSE'nin yönü net: WIT spec'i *"MUST NOT be used as a bearer token"* diyor.
 
@@ -279,7 +279,7 @@ Sonuç: DB tamamen düşse bile kaynak sunucular etkilenmez.
 | Tarih | Ne | Etki |
 |---|---|---|
 | **11 Aralık 2027** | **EU Cyber Resilience Act — açık kaynak steward raporlaması** | ENISA'nın ayrımı: *"Open-source software stewards join the reporting obligations on **11 December 2027**."* (11 Eylül 2026 **manufacturer**'lar için Madde 14'ün yürürlük tarihidir.) Yapısal neden: steward'ları Madde 14'e bağlayan hüküm **Madde 24(3)** ve Madde 24 ancak 11 Ara 2027'de uygulanmaya başlıyor. Ayrıca **arkasında tüzel kişi yoksa steward yükümlülüğü hiç doğmaz** ve monetize edilmeyen FOSS zaten kapsam dışı |
-| **Şimdi** | **Android attestation kök rotasyonu** | Android key attestation doğrulaması yapan kod **şu anda kırılıyor olabilir** — 21-session-security.md (§21) §E.1 |
+| **Şimdi** | **Android attestation kök rotasyonu** | Android key attestation doğrulaması yapan kod **şu anda kırılıyor olabilir** — [21-session-security.md](21-session-security.md) (§21) §E.1 |
 | **Şimdi** | **Apple `private.icloud.com`** | Haziran 2026 öncesi kurulmuş e-posta allowlist'i **yeni Sign in with Apple kullanıcılarını sessizce reddediyor** |
 | **Aralık 2026** | OAuth 2.1 IESG'ye | MCP hâlâ `draft-13`'e referans veriyor; güncel **-16** |
 | **2 Aralık 2027** | EU AI Act yüksek risk (ertelendi, Reg. EU 2026/1744) | Dolaylı |
@@ -338,7 +338,7 @@ Bu liste, araştırmanın en değerli çıktısıdır: **hiçbir mevcut ürünü
 | **4 — Kurumsal** | SCIM → SAML → LDAP | 12-15 ay | **`scim2-tester`** RFC 7643/7644 geçiyor · Entra SCIM Validator (discover-schema) + Okta Runscope 13-adım yeşil · **"The Fragile Lock" 3 saldırı sınıfı + XSW1-8 regresyon corpus'u** geçiyor · LDAP: SSSD/JNDI/`ldap3` interop |
 | **5 — Farklılaşma** | OpenID Federation, delegation chain, Agent Card imzalama, federated vault | 6-9 ay | FAPI 2.0 Security Profile Final planı · OIDF federation planları (⚠️ OIDF: *"early stage"*) |
 
-**Toplam kaba tahmin: faz tablosunun toplamı ~37–51 geliştirici-ayı** (§2 §1'deki bağımsız tahmin: **46–73 geliştirici-ayı**) **+ %30-40 sürekli interop bakımı.**
+**Toplam kaba tahmin: faz tablosunun toplamı ~37–51 geliştirici-ayı** (§2.1'deki bağımsız tahmin: **46–73 geliştirici-ayı**) **+ %30-40 sürekli interop bakımı.**
 
 > ⚠️ **Düzeltme (2. inceleme turu).** Burada önceden "~1,8 mühendis-yılı çekirdek" (≈21,6 ay) yazıyordu. O rakam §3.2'de **yalnızca kurumsal protokol paketi** için hesaplanmıştı (95 hafta / 1 mühendis) ve sehven projenin tamamına genellenmişti; üç ayrı toplam (21,6 / 37–51 / 46–73) birbirini tutmuyordu. **Birim uyarısı:** yukarıdaki tabloda Faz 1 *geliştirici-ayı*, diğer fazlar *takvim ayı* cinsinden yazılmıştı; toplam geliştirici-ayına çevrildi. **Ad çakışması uyarısı:** "Faz 1/Faz 2" §16 ve §22'de **protokol içi zorunlu/opsiyonel katman** anlamında kullanılıyor, buradaki global faz numaralarıyla aynı şey değil — SCIM'in iki yerde birden görünmesinin sebebi budur.
 
@@ -358,7 +358,7 @@ Bu liste, araştırmanın en değerli çıktısıdır: **hiçbir mevcut ürünü
 
 **1. Read replica'dan yetkilendirme kararı vermek artık ölçülmüş bir risk.**
 Jepsen'in **Amazon RDS for PostgreSQL 17.4** analizi (29 Nisan 2025): **fault injection olmadan**, ~150 write/sn + 1600 read/sn gibi mütevazı yükte **Snapshot Isolation ihlalleri** (G-nonadjacent, Long Fork) *"every few minutes"* gerçekleşiyor. RDS muhtemelen standart SI yerine **Parallel Snapshot Isolation** sağlıyor ve Jepsen'in ifadesiyle *"this behavior should not occur in standard PostgreSQL."*
-→ 02-contradictions-and-resolutions.md §4 (§2)'teki "izin *kaldırma* ve `session_epoch` replica'dan okunmaz" kuralı **teorik bir ihtiyat değil, ölçülmüş bir gereklilik.**
+→ [02-contradictions-and-resolutions.md](02-contradictions-and-resolutions.md) §4 (§2)'teki "izin *kaldırma* ve `session_epoch` replica'dan okunmaz" kuralı **teorik bir ihtiyat değil, ölçülmüş bir gereklilik.**
 
 **2. HA konfigürasyonunun iki parametresi veri kaybının %80'ini belirliyor.**
 Coroot'un CloudNativePG 1.30.0 + PostgreSQL 18.4 üzerinde Chaos Mesh ile ürettiği split-brain (29 Tem 2026): primary izole edildi, isolation check ~34. saniyede doğru tetiklendi — **ama primary 177 saniye daha yazmaya devam etti** çünkü `smartShutdownTimeout` varsayılanı 180. Sonuç **~99 saniyelik çift-primary penceresi**: ACK'lenmiş 1.472 yazımdan **562'si başka client'lara reassign edildi, 291'i tamamen kayboldu** — sadece 619'u sağlam kaldı. **Cluster kendini mükemmel sağlıklı raporladı.**
@@ -451,7 +451,7 @@ başlanmaz** — crate iskeleti ve I/O içermeyen çekirdek bundan bağımsız i
 **Karar kaydı alanları — her karar satırı bunları taşır:**
 
 `kimlik · statü · gerekçe · geçerlilik koşulu · kabul testi · **hangi karşı örnek veya test
-sonucu bu kararı geçersiz kılar** · kaynak satır`
+sonucu bu kararı geçersiz kılar** · kaynak bölüm`
 
 Son alan bu turun ürünüdür: iki tarafın da yanıldığı yerler tam olarak bu alanın boş
 olduğu yerlerdi.
@@ -461,7 +461,7 @@ olduğu yerlerdi.
 
 ### 10.1 AÇIK — iptal / bayatlık sözleşmesi
 
-**Neden açık:** §1 §4.1 uzun ömürlü access token + sinyal güdümlü iptal seçiyordu; §19 §7.2
+**Neden açık:** §4.1 uzun ömürlü access token + sinyal güdümlü iptal seçiyordu; §19 §7.2
 ise degraded mode'un *"gerçek güvenlik sınırı access token ömrüdür"* diyerek kısa ömrü
 önkoşul yapıyor. İkisi aynı anda savunulamaz.
 
@@ -636,10 +636,10 @@ eski karar kullanılamaz"* garantisi yalnızca cache karşılaştırmasından ç
 
 ### 10.4 "Geri alınamaz" listesinin statü ayrımı
 
-§1 §1'deki 27 maddenin hepsi aynı sınıfta değil ve hepsine aynı kesinliği vermek, yanlış
+§1'deki 27 maddenin hepsi aynı sınıfta değil ve hepsine aynı kesinliği vermek, yanlış
 olduğu sonradan görülen bir tercihi değiştirmeyi zorlaştırıyor:
 
-**Dağılım (§1 §1 tablosuyla birebir sayılmıştır):** KŞS 8 · KKS 7 · MT 11 · DH 1 = 27.
+**Dağılım (§1 tablosuyla birebir sayılmıştır):** KŞS 8 · KKS 7 · MT 11 · DH 1 = 27.
 
 - **KŞS — kalıcı şema sözleşmesi (8)** — veritabanının içinde; değiştirmek çevrimdışı göç:
   `tenant_id` her PK'da (1), composite FK (2), RLS `FORCE` (3), kiracı-yerel kullanıcı
@@ -673,32 +673,38 @@ gerisini boşta bırakıyordu; şimdi hepsi sayılı.*
 
 ## 11. Doküman haritası
 
-| Dosya | Satır | İçerik |
-|---|---|---|
-| 01-architecture-decisions.md (§1) | bu dosya | **Karar** |
-| 02-contradictions-and-resolutions.md (§2) | 225 | Raporlar arası beş çelişkinin çözümü |
-| P0-kritik-bulgular.md (§3) | 376 | Acil ve öncelikli bulgular |
-| 05-rust-ecosystem.md (§5) | 391 | Rust fizibilitesi, crate envanteri, efor tahmini |
-| 14-mcp-authorization.md (§14) | 1.145 | MCP authorization tam referansı |
-| 15-agent-identity.md (§15) | 1.016 | AI ajan kimliği — IETF, MCP, endüstri, düzenleme |
-| 21-session-security.md (§21) | 1.229 | DBSC, SSF/CAEP, DPoP, AiTM, donanım attestation |
-| 17-future-standards.md (§17) | 1.597 | PQC, WebAuthn L3, CTAP 2.3, TLS |
-| 20-authorization-engine.md (§20) | 1.598 | Zanzibar, Cedar, OpenFGA, ReBAC |
-| 19-high-availability.md (§19) | 1.277 | HA topolojisi, epoch, PostgreSQL, kademeli bozulma |
-| 18-multi-tenancy.md (§18) | 1.299 | RLS, izolasyon, 14 gün-1 kararı |
-| 06-performance.md (§6) | 724 | Ölçümler, Argon2, audit log, darboğazlar |
-| 16-enterprise-protocols.md (§16) | 2.016 | SAML, SCIM, LDAP, Kerberos, OpenID Federation |
-| 22-account-lifecycle.md (§22) | 2.998 | Kurtarma, bağlama, impersonation, silme, kayıt, göç, B2B |
-| 23-login-flows.md (§23) | 632 | Identifier-first, passkey UX, MFA, hosted vs embedded, markalama, erişilebilirlik |
-| 27-test-strategy.md (§27) | 669 | Conformance süitleri, interop, yük, kaos/DST, güvenlik testi, CI bütçesi |
-| 24-admin-api.md (§24) | 664 | Admin API tasarımı, delege yönetim, ayrıcalık yükseltme CVE'leri, GitOps, bulk |
-| 25-observability.md (§25) | 787 | OCSF, tamper-evidence, katmanlama, Rust OTel yığını, SSF/CAEP yayını |
-| 26-deployment-operations.md (§26) | 773 | Kurulum, konteyner/K8s, şema göçü, yedekleme, boyutlandırma, lisans, CRA |
-| guvenlik-muhendisligi.md | dizin | Aşağıdaki altı dosyaya giriş |
-| 10-formal-verification.md (§10) | 1.371 | Kani, Verus, Cedar+Lean 4 |
-| 07-verified-cryptography.md (§7) | 874 | HACL*, fiat-crypto, s2n-bignum |
-| 08-side-channels.md (§8) | 799 | Sabit zaman, Marvin, timeless timing |
-| 12-supply-chain.md (§12) | 1.484 | cargo-vet/deny/audit, SBOM |
-| 11-runtime-hardening.md (§11) | 1.923 | Binary hardening, izolasyon, fuzzing |
-| 09-key-management.md (§9) | 1.293 | PKCS#11/HSM, KMS, rotasyon |
-| 13-security-process.md (§13) | 179 | Tehdit modelleme, VDP, CVE süreci |
+Dizinin tamamı ve taşıma kuralları: [`README.md`](README.md).
+
+| § | Dosya | Satır | İçerik |
+|---|---|---|---|
+| §1 | [01-architecture-decisions.md](01-architecture-decisions.md) | 704 | **Karar** — bu dosya |
+| §2 | [02-contradictions-and-resolutions.md](02-contradictions-and-resolutions.md) | 236 | Raporlar arası beş çelişkinin çözümü |
+| §3 | [03-p0-critical-findings.md](03-p0-critical-findings.md) | 387 | Acil ve öncelikli bulgular |
+| §4 | [04-identity-authentication-reference.md](04-identity-authentication-reference.md) | 1.597 | Kimlik ve kimlik doğrulama — alan referansı |
+| §5 | [05-rust-ecosystem.md](05-rust-ecosystem.md) | 394 | Rust fizibilitesi, crate envanteri, efor tahmini |
+| §6 | [06-performance.md](06-performance.md) | 732 | Ölçümler, Argon2, audit log, darboğazlar |
+| §7 | [07-verified-cryptography.md](07-verified-cryptography.md) | 879 | HACL*, fiat-crypto, s2n-bignum |
+| §8 | [08-side-channels.md](08-side-channels.md) | 804 | Sabit zaman, Marvin, timeless timing |
+| §9 | [09-key-management.md](09-key-management.md) | 1.297 | PKCS#11/HSM, KMS, rotasyon |
+| §10 | [10-formal-verification.md](10-formal-verification.md) | 1.375 | Kani, Verus, Cedar+Lean 4 |
+| §11 | [11-runtime-hardening.md](11-runtime-hardening.md) | 1.926 | Binary hardening, izolasyon, fuzzing |
+| §12 | [12-supply-chain.md](12-supply-chain.md) | 1.490 | cargo-vet/deny/audit, SBOM |
+| §13 | [13-security-process.md](13-security-process.md) | 192 | Tehdit modelleme, VDP, CVE süreci |
+| §14 | [14-mcp-authorization.md](14-mcp-authorization.md) | 1.148 | MCP authorization tam referansı |
+| §15 | [15-agent-identity.md](15-agent-identity.md) | 1.017 | AI ajan kimliği — IETF, MCP, endüstri, düzenleme |
+| §16 | [16-enterprise-protocols.md](16-enterprise-protocols.md) | 2.019 | SAML, SCIM, LDAP, Kerberos, OpenID Federation |
+| §17 | [17-future-standards.md](17-future-standards.md) | 1.607 | PQC, WebAuthn L3, CTAP 2.3, TLS |
+| §18 | [18-multi-tenancy.md](18-multi-tenancy.md) | 1.304 | RLS, izolasyon, 14 gün-1 kararı |
+| §19 | [19-high-availability.md](19-high-availability.md) | 1.304 | HA topolojisi, epoch, PostgreSQL, kademeli bozulma |
+| §20 | [20-authorization-engine.md](20-authorization-engine.md) | 1.603 | Zanzibar, Cedar, OpenFGA, ReBAC |
+| §21 | [21-session-security.md](21-session-security.md) | 1.242 | DBSC, SSF/CAEP, DPoP, AiTM, donanım attestation |
+| §22 | [22-account-lifecycle.md](22-account-lifecycle.md) | 3.031 | Kurtarma, bağlama, impersonation, silme, kayıt, göç, B2B |
+| §23 | [23-login-flows.md](23-login-flows.md) | 636 | Identifier-first, passkey UX, MFA, hosted vs embedded, markalama, erişilebilirlik |
+| §24 | [24-admin-api.md](24-admin-api.md) | 675 | Admin API tasarımı, delege yönetim, ayrıcalık yükseltme CVE'leri, GitOps, bulk |
+| §25 | [25-observability.md](25-observability.md) | 801 | OCSF, tamper-evidence, katmanlama, Rust OTel yığını, SSF/CAEP yayını |
+| §26 | [26-deployment-operations.md](26-deployment-operations.md) | 777 | Kurulum, konteyner/K8s, şema göçü, yedekleme, boyutlandırma, lisans, CRA |
+| §27 | [27-test-strategy.md](27-test-strategy.md) | 673 | Conformance süitleri, interop, yük, kaos/DST, güvenlik testi, CI bütçesi |
+
+§7–§13 birlikte **güvenlik mühendisliği** kümesini oluşturur: doğrulanmış kripto,
+yan kanal, anahtar yönetimi, formel doğrulama, sertleştirme, tedarik zinciri ve
+güvenlik süreci. Ayrı bir giriş dosyaları yoktur; sıra bu kümeyi izler.
