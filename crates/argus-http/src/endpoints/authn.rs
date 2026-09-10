@@ -4,7 +4,7 @@ use argus_core::id::{TenantId, UserId};
 use argus_core::pkce::Sha256;
 use argus_core::time::{Duration, Timestamp};
 use argus_crypto::blind_index::BlindIndexKey;
-use argus_crypto::password::{Verdict, hash as hash_password, verify as verify_password};
+use argus_crypto::password::{Verdict, hash as hash_password};
 use serde::{Deserialize, Serialize};
 
 use crate::store::{AuthnSession, AuthnStore, SessionStore, StoreError};
@@ -32,12 +32,16 @@ pub enum LoginOutcome {
     Established { subject: UserId, achieved: Aal },
     Refused,
     Unavailable,
+    // §9.5: hash kuyruğu dolu. Bekletmek yerine reddedilir; bekleyen bir
+    // istek hâlâ bellek ve bir bağlantı tutar.
+    Saturated,
 }
 
 pub async fn password_login<S>(
     store: &S,
     tenant: TenantId,
     form: &PasswordLoginForm,
+    work: &crate::hashing::PasswordWork,
     hasher: &impl Sha256,
     blind_index: &BlindIndexKey,
     now: Timestamp,
@@ -92,7 +96,16 @@ where
     );
 
     let phc = stored.unwrap_or_else(|| DUMMY_PHC.to_owned());
-    let verdict = verify_password(&form.password, &phc).unwrap_or(Verdict::Wrong);
+    // Doğrulama sınırlı eşzamanlılıkta ve bir blocking thread'inde koşar
+    // (§11 P0 #4). Kullanıcı bulunamadığında da koşar: kukla PHC'nin varlık
+    // sızıntısını kapatması, işin gerçekten yapılmasına bağlı.
+    let verdict = match work.verify(&form.password, &phc).await {
+        Ok(verdict) => verdict,
+        Err(crate::hashing::WorkRefusal::Saturated) => {
+            return (LoginOutcome::Saturated, None);
+        }
+        Err(_) => Verdict::Wrong,
+    };
 
     let attempt = advance(
         &attempt,
@@ -114,7 +127,7 @@ where
     };
 
     if verdict == Verdict::CorrectButNeedsRehash
-        && let Ok(fresh) = hash_password(&form.password)
+        && let Ok(fresh) = work.hash(&form.password).await
     {
         let _ = store.set_password(tenant, subject, &fresh).await;
     }

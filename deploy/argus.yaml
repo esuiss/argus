@@ -1,0 +1,191 @@
+# §11 D.4 ve P0 #5. Doğrudan dokümandaki referans manifest.
+#
+# Buradaki tek en önemli satır `readOnlyRootFilesystem: true`. Kubernetes'in
+# Pod Security Standards "restricted" politikası bunu İÇERMEZ — ne Baseline'da
+# ne Restricted'da. PSS'e uyduğunuz için yazılabilir bir kök dosya sistemiyle
+# koşuyor olabilirsiniz ve bunu size hiçbir şey söylemez.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argus
+  labels:
+    # PSS'i namespace düzeyinde ZORLA. `warn` ve `audit` de var, çünkü
+    # yalnızca `enforce` koyanlar ihlali üretimde öğreniyor.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argus
+  namespace: argus
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: argus
+  template:
+    metadata:
+      labels:
+        app: argus
+    spec:
+      # PSS'te yok ama önemli: Argus'un Kubernetes API'siyle işi yok.
+      automountServiceAccountToken: false
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          # Docker/containerd varsayılanı taban. Uygulama içi filtre (§11 B.2)
+          # bunun ÜSTÜNE gelir ve daha dardır; ikisi birleşiktir, en
+          # kısıtlayıcı olan kazanır.
+          type: RuntimeDefault
+
+      containers:
+      - name: argus
+        # §11 P1 #12: glibc + distroless. musl varsayılan allocator'ıyla
+        # çok-thread'li Rust'ta 7x-700x yavaşlama raporlandı.
+        image: argus:latest
+        imagePullPolicy: IfNotPresent
+
+        securityContext:
+          allowPrivilegeEscalation: false
+          privileged: false
+          # ← PSS'te YOK. Elle eklenir.
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+            # NET_BIND_SERVICE bile eklenmez: 1024 üstü port dinlenir ve
+            # Service ile 443'e eşlenir.
+
+        ports:
+        - name: https
+          containerPort: 8443
+        # §9.5 #2 ve §24 #34: yönetim yüzeyi ayrı adreste. Service bu portu
+        # dışarı AÇMAZ; yalnızca küme içinden erişilir.
+        - name: admin
+          containerPort: 8444
+
+        resources:
+          limits:
+            # §9.5: pod bellek limiti = baseline + (eşzamanlı hash × ~7 MB) +
+            # havuz + cache. Argon2 OOM'una karşı sert tavan.
+            memory: "2Gi"
+            cpu: "2"
+          requests:
+            memory: "1Gi"
+            cpu: "1"
+
+        env:
+        - name: ARGUS_ENV
+          value: production
+        - name: ARGUS_BIND
+          value: "0.0.0.0:8443"
+        - name: ARGUS_ADMIN_BIND
+          value: "0.0.0.0:8444"
+        - name: ARGUS_ISSUER
+          valueFrom:
+            configMapKeyRef:
+              name: argus
+              key: issuer
+        # §24 #24: sır deklaratif dokümana gömülmez, referansla gelir.
+        - name: ARGUS_DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: argus-database
+              key: url
+        - name: ARGUS_PLATFORM_DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: argus-database
+              key: control-plane-url
+        - name: ARGUS_BLIND_INDEX_KEY
+          valueFrom:
+            secretKeyRef:
+              name: argus-keys
+              key: blind-index
+        - name: ARGUS_VAULT_KEY
+          valueFrom:
+            secretKeyRef:
+              name: argus-keys
+              key: vault
+
+        volumeMounts:
+        # readOnlyRootFilesystem ile birlikte gereken tek yazılabilir yer.
+        - name: tmp
+          mountPath: /tmp
+        # §1 #25: imzalama anahtarları veritabanının DIŞINDA ve salt okunur.
+        - name: signing-keys
+          mountPath: /etc/argus/keys
+          readOnly: true
+        - name: tls
+          mountPath: /etc/argus/tls
+          readOnly: true
+
+        readinessProbe:
+          httpGet:
+            path: /.well-known/openid-configuration
+            port: https
+            scheme: HTTPS
+          initialDelaySeconds: 3
+          periodSeconds: 10
+
+      volumes:
+      - name: tmp
+        emptyDir:
+          medium: Memory
+          sizeLimit: 64Mi
+      - name: signing-keys
+        secret:
+          secretName: argus-signing-keys
+          defaultMode: 0400
+      - name: tls
+        secret:
+          secretName: argus-tls
+          defaultMode: 0400
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: argus
+  namespace: argus
+spec:
+  selector:
+    app: argus
+  ports:
+  # Yalnızca genel yüzey. Yönetim portu burada YOK; §24 #34 onu ayrı bir
+  # adreste tutuyor ve dışarı açmak o ayrımı süse çevirirdi.
+  - name: https
+    port: 443
+    targetPort: https
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: argus
+  namespace: argus
+spec:
+  podSelector:
+    matchLabels:
+      app: argus
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+  - ports:
+    - port: 8443
+  egress:
+  # Veritabanı ve DNS. CIMD ve federation dokümanları için dışarı HTTPS
+  # gerekiyorsa buraya AÇIKÇA eklenir; §14'ün SSRF korumaları uygulama
+  # içindedir ve ağ katmanı ikinci bir kapıdır.
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - port: 53
+      protocol: UDP
+  - ports:
+    - port: 5432

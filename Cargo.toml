@@ -21,6 +21,18 @@ license      = "AGPL-3.0-only"
 publish      = false
 repository   = "https://github.com/esuiss/argus"
 
+# §11 P0 #2: release profilinde taşma kontrolü AÇIK. Bir IdP'de sarmalanan bir
+# sayı yetki mantığı hatasıdır: bir sayaç, bir epoch, bir ömür. Maliyeti
+# ölçülebilir ama sessizce yanlış bir yetkilendirme kararının maliyeti değil.
+[profile.release]
+overflow-checks = true
+# Panik = abort: bir yetkilendirme yolunda panik yakalayıp devam etmek, yarım
+# uygulanmış bir karara devam etmek demektir.
+panic           = "abort"
+lto             = "thin"
+codegen-units   = 1
+strip           = "debuginfo"
+
 [workspace.lints.rust]
 unsafe_code                = "forbid"
 unreachable_pub            = "warn"

@@ -104,9 +104,74 @@ impl Config {
     }
 }
 
-#[tokio::main]
-async fn main() -> ExitCode {
+// §11 P1 #8: Landlock ANA THREAD'DE ve runtime BAŞLAMADAN önce uygulanmalı.
+// Bir tokio worker'ında uygulanırsa diğer worker'lar kısıtlamasız kalır ve
+// sandbox anlamsız olur (§11 C.4). Bu yüzden main async DEĞİL: önce süreç
+// kısıtlanır, sonra runtime kurulur.
+fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
+
+    // Yalnızca sunucu yolu kısıtlanır; keygen ve token kendi dosyalarını
+    // yazar ve kısa ömürlüdür.
+    let serves = !matches!(
+        args.first().map(String::as_str),
+        Some("keygen" | "token" | "ldap")
+    );
+    if serves {
+        apply_isolation();
+    }
+
+    let Ok(runtime) = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    else {
+        eprintln!("argus: cannot start the async runtime");
+        return ExitCode::FAILURE;
+    };
+
+    runtime.block_on(serve_main(args))
+}
+
+// §11: iddia etmeyin, ölçün. Rapor log'lanır, ve üretimde zorlanamıyorsa
+// süreç başlamaz.
+fn apply_isolation() {
+    let mut policy = argus_sandbox::Policy::new().writing(std::env::temp_dir());
+
+    for dir in [
+        env::var("ARGUS_SIGNING_KEY_DIR").ok(),
+        env::var("ARGUS_RSA_KEY_DIR").ok(),
+        env::var("ARGUS_FEDERATION_KEY_DIR").ok(),
+        env::var("ARGUS_AGENT_CARD_KEY_DIR").ok(),
+        env::var("ARGUS_SAML_SP_DIR").ok(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        policy = policy.reading(dir);
+    }
+
+    for file in [
+        env::var("ARGUS_TLS_CERT").ok(),
+        env::var("ARGUS_TLS_KEY").ok(),
+        env::var("ARGUS_SAML_CERT").ok(),
+        env::var("ARGUS_SAML_KEY").ok(),
+        env::var("ARGUS_LDAP_CERT").ok(),
+        env::var("ARGUS_LDAP_KEY").ok(),
+        env::var("ARGUS_EXTRA_CA").ok(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        policy = policy.reading(file);
+    }
+
+    match argus_sandbox::harden(&policy) {
+        Ok(report) => eprintln!("argus: process isolation {}", report.describe()),
+        Err(e) => eprintln!("argus: WARNING - process isolation not applied: {e}"),
+    }
+}
+
+async fn serve_main(args: Vec<String>) -> ExitCode {
     if args.first().map(String::as_str) == Some("keygen") {
         return keygen(args.get(1..).unwrap_or_default());
     }
@@ -183,6 +248,7 @@ async fn main() -> ExitCode {
 
     let state = Arc::new(AppState {
         tenants: Arc::new(registry),
+        password_work: Arc::new(argus_http::hashing::PasswordWork::default()),
         codes: MemoryCodeStore::default(),
         refresh: MemoryRefreshStore::default(),
         audit: MemoryAuditSink::default(),
@@ -718,14 +784,18 @@ async fn serve(app: axum::Router, config: &Config, store_kind: &str) -> ExitCode
         config.bind, config.issuer
     );
 
+    // §11 G.1: limitler açıkça set edilir ve log'lanır. Bir DoS soruşturmasında
+    // ilk sorulan şey sunucunun hangi limitlerle koştuğudur.
+    let limits = argus_http::limits::Limits::default();
+    eprintln!("argus: connection limits {}", limits.describe());
+
+    let app = app.layer(axum::extract::DefaultBodyLimit::max(limits.max_body_bytes));
+
     if let Some(tls) = tls {
-        return serve_tls(listener, app, tls).await;
+        return serve_tls(listener, app, tls, &limits).await;
     }
 
-    if let Err(e) = axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown())
-        .await
-    {
+    if let Err(e) = serve_plain(listener, app, &limits).await {
         eprintln!("argus: server error: {e}");
         return ExitCode::FAILURE;
     }
@@ -846,10 +916,43 @@ fn load_key(path: &str) -> Result<rustls::pki_types::PrivateKeyDer<'static>, Str
         .map_err(|_| format!("{path} is not a valid PEM private key"))
 }
 
+// Düz metin yolu da aynı yapıcıdan geçer. `axum::serve` hyper-util
+// varsayılanlarını kullanır ve §11 G.1 tam olarak onlara güvenmemeyi söylüyor;
+// iki ayrı yapılandırma yolu, birinin unutulduğu bir dağıtım demektir.
+async fn serve_plain(
+    listener: tokio::net::TcpListener,
+    app: axum::Router,
+    limits: &argus_http::limits::Limits,
+) -> Result<(), String> {
+    let mut stop = std::pin::pin!(shutdown());
+
+    loop {
+        let accepted = tokio::select! {
+            result = listener.accept() => result,
+            () = &mut stop => break,
+        };
+
+        let Ok((stream, _peer)) = accepted else {
+            continue;
+        };
+
+        let service = hyper_util::service::TowerToHyperService::new(app.clone());
+        let builder = limits.connection_builder();
+
+        tokio::spawn(async move {
+            let io = hyper_util::rt::TokioIo::new(stream);
+            let _ = builder.serve_connection_with_upgrades(io, service).await;
+        });
+    }
+
+    Ok(())
+}
+
 async fn serve_tls(
     listener: tokio::net::TcpListener,
     app: axum::Router,
     tls: Arc<rustls::ServerConfig>,
+    limits: &argus_http::limits::Limits,
 ) -> ExitCode {
     let acceptor = tokio_rustls::TlsAcceptor::from(tls);
     let mut stop = Box::pin(shutdown());
@@ -866,16 +969,14 @@ async fn serve_tls(
 
         let acceptor = acceptor.clone();
         let service = hyper_util::service::TowerToHyperService::new(app.clone());
+        let builder = limits.connection_builder();
 
         tokio::spawn(async move {
             let Ok(tls_stream) = acceptor.accept(stream).await else {
                 return;
             };
             let io = hyper_util::rt::TokioIo::new(tls_stream);
-            let _ =
-                hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
-                    .serve_connection(io, service)
-                    .await;
+            let _ = builder.serve_connection_with_upgrades(io, service).await;
         });
     }
 
@@ -1400,6 +1501,11 @@ async fn serve_with_postgres(
 
     let tenants = Arc::new(registry);
 
+    // §11 P0 #4 ve §9.5: eşzamanlılık bellek bütçesinden türer, o yüzden
+    // değeri log'lanır.
+    let password_work = Arc::new(argus_http::hashing::PasswordWork::default());
+    eprintln!("argus: {}", password_work.describe());
+
     let profile = if config.fapi_profile {
         argus_core::par::Profile::financial_grade()
     } else {
@@ -1433,6 +1539,7 @@ async fn serve_with_postgres(
 
     let state = Arc::new(AppState {
         tenants: Arc::clone(&tenants),
+        password_work: Arc::clone(&password_work),
         codes: store.clone(),
         refresh: store.clone(),
         audit: store.clone(),

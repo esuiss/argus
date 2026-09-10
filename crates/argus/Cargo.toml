@@ -9,6 +9,7 @@ repository.workspace   = true
 
 [dependencies]
 argus-core.path   = "../argus-core"
+argus-sandbox.path = "../argus-sandbox"
 argus-crypto.path = "../argus-crypto"
 aws-lc-rs.workspace = true
 argus-proto.path  = "../argus-proto"

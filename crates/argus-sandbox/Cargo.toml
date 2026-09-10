@@ -8,6 +8,15 @@ publish.workspace      = true
 repository.workspace   = true
 
 [dependencies]
+thiserror.workspace = true
+
+# §11 P1 #8-#10. Hepsi Linux çekirdek arayüzü; başka platformda crate hiçbir şey
+# yapmaz ve bunu SÖYLER. Sessizce başarılı olmak, sandbox'ı olduğunu sanan bir
+# dağıtım demektir.
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4"
+caps     = "0.5"
+nix      = { version = "0.30", features = ["process"] }
 
 [lints.rust]
 unsafe_code     = "deny"

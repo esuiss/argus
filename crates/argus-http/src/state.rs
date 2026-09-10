@@ -26,6 +26,9 @@ where
     // duruyor; taşınan her handler kayıt defterinden çözer.
     pub tenants: Arc<crate::tenancy::TenantRegistry>,
 
+    // §11 P0 #4: Argon2 sınırlı eşzamanlılıkta ve blocking thread'inde koşar.
+    pub password_work: Arc<crate::hashing::PasswordWork>,
+
     pub codes: C,
 
     pub refresh: R,

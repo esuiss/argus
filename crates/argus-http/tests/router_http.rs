@@ -145,6 +145,7 @@ async fn serve() -> String {
                 },
             },
         )),
+        password_work: Arc::new(argus_http::hashing::PasswordWork::default()),
         codes: Codes::default(),
         refresh: Refresh,
         audit: Audit,

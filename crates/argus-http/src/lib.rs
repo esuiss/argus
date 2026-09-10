@@ -7,6 +7,8 @@ pub mod differentiation;
 pub mod effects;
 pub mod endpoints;
 pub mod federation;
+pub mod hashing;
+pub mod limits;
 pub mod memstore;
 pub mod par;
 pub mod replay;

@@ -414,6 +414,7 @@ where
         &state.codes,
         tenant.id(),
         &form,
+        &state.password_work,
         &AwsLcSha256,
         &tenant.blind_index,
         at,
@@ -421,6 +422,19 @@ where
     .await;
 
     let mut response = match outcome {
+        LoginOutcome::Saturated => {
+            // §9.5: kuyruk dolunca 429 + Retry-After, bekletme yok.
+            let mut r = (
+                axum::http::StatusCode::TOO_MANY_REQUESTS,
+                Json(serde_json::json!({ "error": "slow_down" })),
+            )
+                .into_response();
+            if let Ok(value) = "1".parse() {
+                r.headers_mut()
+                    .insert(axum::http::header::RETRY_AFTER, value);
+            }
+            return r;
+        }
         LoginOutcome::Established { .. } => {
             let Some(secret) = secret else {
                 return oauth_response(&OAuthError::new(OAuthErrorCode::ServerError));
