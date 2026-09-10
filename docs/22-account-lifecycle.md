@@ -1917,7 +1917,7 @@ WWW-Authenticate: PrivateToken challenge=<base64url>, token-key=<base64url>
   - **Standard requests** (ucuz, gecikme dostu, *"delegating some protection against replayability and exfiltration to Google Play"*) vs **Classic requests** (*"more expensive… you are responsible for correctly implementing them"*).
   - Verdict'ler: **`appIntegrity`** (Google Play'in tanıdığı değiştirilmemiş binary) · **`deviceIntegrity`** (gerçek sertifikalı Android cihaz) · **`accountDetails`** (kullanıcı Play üzerinden kurdu/ödedi). Opt-in ekstralar: `MEETS_STRONG_INTEGRITY`, `appAccessRiskVerdict`, `playProtectVerdict`.
   - **Web çözümü DEĞİL** — yalnızca uygulama, yalnızca Google Play. **Root'lu/de-Google'lanmış/AOSP kullanıcıları başarısız olur** — açıkça karar vermen gereken gerçek bir erişilebilirlik ve kapsayıcılık maliyeti.
-- **DBSC** — farklı problem (oturum ele geçirme, kayıt değil) ama artık **sevk ediliyor:** **Windows'ta GA** (TPM destekli); Google Workspace duyurusu **28 Mayıs 2026**, kademeli dağıtım **25 Mayıs 2026'dan** itibaren, tam görünürlüğe 60 güne kadar, **varsayılan açık ve yönetici kapatma anahtarı yok.** macOS (Secure Enclave destekli) sonraki sürümde. Detay için bkz. oturum-guvenligi.md (§21) §1.
+- **DBSC** — farklı problem (oturum ele geçirme, kayıt değil) ama artık **sevk ediliyor:** **Windows'ta GA** (TPM destekli); Google Workspace duyurusu **28 Mayıs 2026**, kademeli dağıtım **25 Mayıs 2026'dan** itibaren, tam görünürlüğe 60 güne kadar, **varsayılan açık ve yönetici kapatma anahtarı yok.** macOS (Secure Enclave destekli) sonraki sürümde. Detay için bkz. 21-session-security.md (§21) §1.
 
 #### 32.7 WebAuthn/passkey kaydı bot savunması olarak
 
@@ -2073,7 +2073,7 @@ OWASP'ın Argon2id ayarları RFC 9106'nınkinden **belirgin şekilde düşüktü
 
 RFC 9106 (Eylül 2021, IRTF Informational) ise önce **t=1, p=4, m=2²¹ (2 GiB)**, sonra **t=3, p=4, m=2¹⁶ (64 MiB)** öneriyor. **RFC 9106'nın Security Considerations'ı yan kanalları kapsıyor ama hiçbir DoS/kaynak-tükenmesi analizi içermiyor** — boşluk gerçek ve OWASP onu dolduruyor.
 > Yaygın olarak alıntılanan "64 MiB × 3" tam olarak **RFC 9106'nın ikinci önerisidir** ve **OWASP'ın en bellek-aç ayarının ~3 katıdır.**
-> *(Argus'un seçtiği parametre ve gerekçesi için bkz. performans.md (§6) — ölçüm `m=7168, t=5`'in hem %16 ucuz hem daha iyi ölçeklendiğini gösterdi.)*
+> *(Argus'un seçtiği parametre ve gerekçesi için bkz. 06-performance.md (§6) — ölçüm `m=7168, t=5`'in hem %16 ucuz hem daha iyi ölçeklendiğini gösterdi.)*
 
 **(c) Zamanlama eşitlemesi zaten eksik.** Argon2 çalışma süresi parola uzunluğuna, GC/allocator davranışına ve cache durumuna göre değişir. Ve *sıfırlama* akışında baskın terim hash bile değildir — SMTP çağrısıdır.
 

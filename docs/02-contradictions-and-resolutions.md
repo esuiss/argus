@@ -12,8 +12,8 @@ Her madde şu formatta: **iddia A** / **iddia B** / **gerçekte ne oluyor** / **
 
 ## Çelişki 1 — İmza algoritması tanımlayıcısı: `ES256` mi `ESP256` mi?
 
-**İddia A** (cok-kiracilik.md (§18)): Kiracı başına ES256 anahtar; `alg: ES256` ile imzala.
-**İddia B** (gelecek-standartlari.md (§17) §HAT 1): **RFC 9864** (Ekim 2025, Standards Track), "Fully-Specified Algorithms for JOSE and COSE", `EdDSA`'yı deprecate ediyor ve fully-specified tanımlayıcılar getiriyor. §4.3 IANA talimatlarını güncelliyor: **artık yalnızca fully-specified algoritma tanımlayıcıları kaydedilebilir.**
+**İddia A** (18-multi-tenancy.md (§18)): Kiracı başına ES256 anahtar; `alg: ES256` ile imzala.
+**İddia B** (17-future-standards.md (§17) §HAT 1): **RFC 9864** (Ekim 2025, Standards Track), "Fully-Specified Algorithms for JOSE and COSE", `EdDSA`'yı deprecate ediyor ve fully-specified tanımlayıcılar getiriyor. §4.3 IANA talimatlarını güncelliyor: **artık yalnızca fully-specified algoritma tanımlayıcıları kaydedilebilir.**
 
 ### Gerçekte ne oluyor
 
@@ -39,14 +39,14 @@ FIDO Server Requirements v2.3 (26 Şubat 2026) `ESP256/384/512` ve `Ed25519`'u *
 > 2. **WebAuthn `pubKeyCredParams` listesine COSE tarafında `ESP256` ve `Ed25519` eklenir**, `ES256`/`EdDSA` geriye uyumluluk için listede kalır (sırada daha aşağıda).
 > 3. **Credential ve anahtar veri modelinde `algorithm` alanı ve bir rotasyon yolu bugünden bulunur.** WebAuthn L4'teki #2437 "Support Algorithm Migration" issue'su tam olarak bunu tartışıyor; ML-DSA geldiğinde şema değişikliği yapmak istemezsin.
 >
-> **Kiracı başına anahtar kararı da değişmiyor** — bkz. cok-kiracilik.md (§18). Çelişki, `ESP256`'nın COSE'a ait olduğunun görülmemesinden kaynaklanıyordu.
+> **Kiracı başına anahtar kararı da değişmiyor** — bkz. 18-multi-tenancy.md (§18). Çelişki, `ESP256`'nın COSE'a ait olduğunun görülmemesinden kaynaklanıyordu.
 
 ---
 
 ## Çelişki 2 — `#![forbid(unsafe_code)]` ile aws-lc-rs bir arada durabilir mi?
 
-**İddia A** (dogrulanmis-kripto.md (§7)): aws-lc-rs birincil kripto sağlayıcı olsun — FIPS modu, ML-DSA desteği, ve RSA/ECDSA tarafında **s2n-bignum'un HOL Light ile makine-kontrollü ispatları** var.
-**İddia B** (sertlestirme.md (§11) §E.1): `#![forbid(unsafe_code)]` hedeflensin.
+**İddia A** (07-verified-cryptography.md (§7)): aws-lc-rs birincil kripto sağlayıcı olsun — FIPS modu, ML-DSA desteği, ve RSA/ECDSA tarafında **s2n-bignum'un HOL Light ile makine-kontrollü ispatları** var.
+**İddia B** (11-runtime-hardening.md (§11) §E.1): `#![forbid(unsafe_code)]` hedeflensin.
 
 **Görünürdeki çelişki:** aws-lc-rs BoringSSL türevidir; **C ve assembly içerir.** `forbid(unsafe_code)` bir crate'te varsa o crate FFI yapamaz.
 
@@ -78,14 +78,14 @@ Yani `forbid(unsafe_code)` bir güvenlik hedefi değil, **bir sınırlama beyan�
 > 1. **`#![forbid(unsafe_code)]` her Argus crate'inde varsayılandır** — istisnalar `argus-crypto` (FFI) ve `argus-sandbox` (syscall) ile sınırlıdır ve her ikisi de **incelenmiş, gerekçesi yazılmış, satır sayısı sabit** olmalıdır.
 > 2. **`cargo geiger --forbid-only` CI'da bir gate'tir**, metrik değil. Bağımlılık ağacındaki toplam unsafe sayısını KPI yapma — yanıltıcıdır (tokio, hyper, h2 hepsi unsafe içerir ve içermek zorundadır).
 > 3. **Kripto sağlayıcı aws-lc-rs kalır.** Gerekçe (a) FIPS modu, (b) ML-DSA, (c) s2n-bignum'un makine-kontrollü ispatları — RustCrypto'nun saf Rust'ının **sağlamadığı** üç şey.
-> 4. **`rust_crypto` özelliği `jsonwebtoken`'da ASLA açılmaz** — bkz. yan-kanal.md (§8), `rsa` crate'i Marvin saldırısına açık.
+> 4. **`rust_crypto` özelliği `jsonwebtoken`'da ASLA açılmaz** — bkz. 08-side-channels.md (§8), `rsa` crate'i Marvin saldırısına açık.
 > 5. **Asıl DoS savunması `forbid(unsafe_code)` değil, parser derinlik sınırlarıdır.** Bkz. [§3 — P0 kritik bulgular](#3-p0-kritik-bulgular).
 
 ---
 
 ## Çelişki 3 — SAML: saf Rust mı, süreç izolasyonu mu?
 
-**İddia A** (kurumsal-protokoller.md (§16) §1.13.2): `bergshamra` XMLDSig/XMLEnc/C14N'i saf Rust'ta veriyor ve **xmlsec1'in kendi interop süitini 1148/1151 geçiyor** (Enc 701/0, DSig 447/0; atlanan 3'ü GOST). libxml/xmlsec/openssl-sys bağımlılığı **yok** — saf Rust zinciri doğrulandı.
+**İddia A** (16-enterprise-protocols.md (§16) §1.13.2): `bergshamra` XMLDSig/XMLEnc/C14N'i saf Rust'ta veriyor ve **xmlsec1'in kendi interop süitini 1148/1151 geçiyor** (Enc 701/0, DSig 447/0; atlanan 3'ü GOST). libxml/xmlsec/openssl-sys bağımlılığı **yok** — saf Rust zinciri doğrulandı.
 
 >  ⚠️ **`gamlastan`'ın SPID uyum iddiası kanıt olarak kullanılamaz.** İki nedenle: rakam kütüphanenin kendi README'sinden geliyor (süitin birincil kaynaklarındaki sayılar **300+ kontrol, 7 aile**, interaktif aile için 111), ve daha önemlisi **`italia/spid-saml-check` Service Provider'ları test eder, Identity Provider'ları değil** — araç bir test IdP'si gibi davranıp SP'yi sınar. Argus bir IdP'dir. IdP tarafı için ayrı repo var (`AgID/spid-saml-check-idp`) ama olgunluğu çok düşük: **4 star, 1 fork, 51 commit**, Docker yok, test aileleri dokümante değil.
 >
@@ -120,8 +120,8 @@ Yani `forbid(unsafe_code)` bir güvenlik hedefi değil, **bir sınırlama beyan�
 
 ## Çelişki 4 — `revocation_epoch` ile yetkilendirme karar cache'i nasıl etkileşiyor?
 
-**İddia A** (ha-dagitik-mimari.md (§19) §4.5): Kullanıcı başına monoton `revocation_epoch` sayacı + node-yerel cache. Bu "Argus'un omurgası olmalı." Değeri: **JWT doğrulaması DB gerektirmez** — public key bellekte, `exp`/`nbf` token'ın içinde, `revocation_epoch` node cache'inde. DB tamamen düşse bile kaynak sunucular etkilenmez.
-**İddia B** (yetkilendirme-motoru.md (§20)): İnce taneli yetkilendirme (ReBAC/Cedar) için karar cache'i — aynı `(subject, action, resource)` üçlüsü tekrar tekrar sorulur, cache olmadan performans hedefleri tutmaz.
+**İddia A** (19-high-availability.md (§19) §4.5): Kullanıcı başına monoton `revocation_epoch` sayacı + node-yerel cache. Bu "Argus'un omurgası olmalı." Değeri: **JWT doğrulaması DB gerektirmez** — public key bellekte, `exp`/`nbf` token'ın içinde, `revocation_epoch` node cache'inde. DB tamamen düşse bile kaynak sunucular etkilenmez.
+**İddia B** (20-authorization-engine.md (§20)): İnce taneli yetkilendirme (ReBAC/Cedar) için karar cache'i — aynı `(subject, action, resource)` üçlüsü tekrar tekrar sorulur, cache olmadan performans hedefleri tutmaz.
 
 **Uzlaştırılmamış soru:** Bir kullanıcının **izni** değiştiğinde (rol alındı, ilişki silindi) `revocation_epoch` artar mı? Artarsa her izin değişikliği tüm oturumları düşürür — kabul edilemez. Artmazsa karar cache'i bayat kalır — güvenlik açığı.
 
@@ -150,7 +150,7 @@ Yani `forbid(unsafe_code)` bir güvenlik hedefi değil, **bir sınırlama beyan�
 
 ### Zanzibar'ın zookie'siyle ilişkisi
 
-yetkilendirme-motoru.md (§20)'deki **new-enemy problem** bu tasarımla şöyle ilişkilenir: `authz_epoch` bir **monoton sayaçtır**, bir zookie değildir — nedensel tutarlılık garantisi vermez. İki farklı ilişki değişikliğinin sırası korunmaz. **Bu kabul edilebilir bir takastır** ve şu koşulla:
+20-authorization-engine.md (§20)'deki **new-enemy problem** bu tasarımla şöyle ilişkilenir: `authz_epoch` bir **monoton sayaçtır**, bir zookie değildir — nedensel tutarlılık garantisi vermez. İki farklı ilişki değişikliğinin sırası korunmaz. **Bu kabul edilebilir bir takastır** ve şu koşulla:
 
 > **Yetkilendirme kararı bir read replica'dan okunmuşsa `authz_epoch` yeterli değildir.** İzin *kaldırma* işlemleri (izin verme değil) **primary'den doğrulanmalıdır** — çünkü replikasyon gecikmesi tam olarak new-enemy penceresidir.
 
@@ -176,7 +176,7 @@ Bu, HA raporunun kendi tablosuyla tutarlı: **"Token iptali / `revocation_epoch`
 
 ## Çelişki 5 — Formel doğrulama: Argus tamamen async, araçlar async desteklemiyor
 
-**İddia A** (formel-dogrulama.md (§10)): Kani ve Verus ciddi güvence sağlıyor; Cedar'ın Lean 4 ile doğrulanması emsal.
+**İddia A** (10-formal-verification.md (§10)): Kani ve Verus ciddi güvence sağlıyor; Cedar'ın Lean 4 ile doğrulanması emsal.
 **İddia B** (aynı dosya, doğrulanmış kısıtlar):
 - **Kani:** *"Await ifadeleri / async → **Hayır**"*; "Concurrency out of scope"
 - **Verus:** **`async fn`/async bloklar/`await` DESTEKLENMİYOR**, ayrıca `Pin`, I/O, **`serde::Serialize`**, kullanıcı tanımlı `Drop`, **`Mutex`/`RwLock`**
@@ -214,7 +214,7 @@ Yani soru "async'i nasıl doğrularım" değil, **"neyin senkron ve saf olması 
 >
 > 1. **`argus-core` I/O yapmaz.** Fonksiyonlar `async` değildir, `Result<Decision, Error>` döner. Veri erişimi çağıran tarafından *önceden* yapılır ve struct olarak geçirilir. **Bu kural CI'da zorlanır:** `argus-core`'da `async fn`, `tokio::`, `sqlx::` veya `reqwest::` görünmesi build'i kırar.
 > 2. **Kani'nin hedefi dört şeydir:** OAuth durum makinesi geçişleri · delegasyon zinciri değişmezleri · epoch karşılaştırma · parser derinlik invariant'ları. Bunların hepsi saf ve sınırlı.
-> 3. **Verus denenmez.** `serde::Serialize` ve `Mutex` desteklememesi, IdP kod tabanının hiçbir gerçek parçasına uymamasını neredeyse garanti ediyor. Kani'nin `#[kani::proof]` ergonomisi aynı işi kabul edilebilir bir maliyetle yapıyor. *(Bu, formel-dogrulama.md'nin sunduğu seçeneklerden bir sapmadır ve gerekçesi ergonomidir, yetenek değil.)*
+> 3. **Verus denenmez.** `serde::Serialize` ve `Mutex` desteklememesi, IdP kod tabanının hiçbir gerçek parçasına uymamasını neredeyse garanti ediyor. Kani'nin `#[kani::proof]` ergonomisi aynı işi kabul edilebilir bir maliyetle yapıyor. *(Bu, 10-formal-verification.md'nin sunduğu seçeneklerden bir sapmadır ve gerekçesi ergonomidir, yetenek değil.)*
 > 4. **Async katman için formel doğrulama İDDİA EDİLMEZ.** Orada araç seti: `cargo-fuzz` (parser'lar ve protokol yüzeyleri), **Shuttle** (deterministik concurrency, tokio ile çalışır), property-based test (`proptest`), ve interop conformance süitleri.
 > 5. **Cedar embed edilir, yeniden yazılmaz.** Lean 4 ile doğrulanmış bir politika motorunu kendi yazdığınla değiştirmek, kazanılmış tek ücretsiz güvenceyi atmaktır.
 >

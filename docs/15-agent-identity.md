@@ -178,7 +178,7 @@ RFC 8693 + RFC 7523'ü birleştirerek trust domain'ler arası kimlik/yetki taş�
 
 ### 2.4 CIMD — `draft-ietf-oauth-client-id-metadata-document-02`
 
-Detaylar için bkz. mcp-yetkilendirme.md §5 (§14).
+Detaylar için bkz. 14-mcp-authorization.md §5 (§14).
 
 **Not:** CIMD-02 metninde **AI agent veya MCP'den hiç bahis yok** — genel amaçlı bir spec. Ajan ekosisteminin ona bağımlılığı MCP tarafından geliyor.
 
@@ -489,7 +489,7 @@ IETF 126 WIMSE oturumu: **AIMS**, "Heterogeneous Credential Verification", "PEDI
 
 ### 6.1 MCP Authorization — revizyon 2026-07-28
 
-Detaylar için bkz. mcp-yetkilendirme.md (§14).
+Detaylar için bkz. 14-mcp-authorization.md (§14).
 
 **🟢 TAMAMEN BUGÜN.** MCP-native olmak, bu IdP'nin pazara giriş kancası.
 
@@ -655,7 +655,7 @@ CAEP 1.0 Final **8 event type**. **Ajan-spesifik event tipi YOK** — bu bir bo�
 
 **Ekosistemin gerçek durumu (arXiv:2605.22333, 21 Mayıs 2026, Fudan):** 7.973 canlı uzak MCP sunucusu → **%40,55'i hiçbir auth olmadan tool açıyor**; OAuth'lu 119 sunucunun **%100'ünde en az bir kusur** (toplam 325); **%96,6 DCR kusuru**.
 
-**Yetkilendirme katmanının yapabildikleri (ölçülmüş)** — arXiv:2609.00267 (31 Ağu 2026): LangGraph/CrewAI/AutoGen/MCP değerlendirmesi: **üçü hiçbir yerleşik confinement sağlamıyor.** Yazarların **authorization broker**'ı 4 tehdidi de engelliyor ve ele geçirilmiş alt-ajanın erişimini **8.100 olası eylemden ortalama 1,5'e** düşürüyor. Makalede geçen "karar başına ~2,6 µs" rakamı **160 satırlık Python'da HMAC caveat doğrulamasıdır**, ReBAC graph çözümlemesi değil — Argus'un yetkilendirme hedefi olarak alınamaz (bkz. yetkilendirme-motoru.md (§20) §0). Doğru okuma: *yetki token'a gömülüyse doğrulama neredeyse bedavadır.*
+**Yetkilendirme katmanının yapabildikleri (ölçülmüş)** — arXiv:2609.00267 (31 Ağu 2026): LangGraph/CrewAI/AutoGen/MCP değerlendirmesi: **üçü hiçbir yerleşik confinement sağlamıyor.** Yazarların **authorization broker**'ı 4 tehdidi de engelliyor ve ele geçirilmiş alt-ajanın erişimini **8.100 olası eylemden ortalama 1,5'e** düşürüyor. Makalede geçen "karar başına ~2,6 µs" rakamı **160 satırlık Python'da HMAC caveat doğrulamasıdır**, ReBAC graph çözümlemesi değil — Argus'un yetkilendirme hedefi olarak alınamaz (bkz. 20-authorization-engine.md (§20) §0). Doğru okuma: *yetki token'a gömülüyse doğrulama neredeyse bedavadır.*
 
 > **Argus'un tez cümlesi: yetkilendirmeyi modelden çıkar, deterministik bir broker'a koy.**
 

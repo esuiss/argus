@@ -464,7 +464,7 @@ Doğrulanmış gerçekler:
 
 ### 5.3 IdP-özgü fuzz hedefleri
 
-(Genel fuzzing yöntemleri sertlestirme.md'de araştırıldı — burada yalnızca **IdP-özgü hedefler**:)
+(Genel fuzzing yöntemleri 11-runtime-hardening.md'de araştırıldı — burada yalnızca **IdP-özgü hedefler**:)
 
 | Hedef | Neden | Corpus kaynağı |
 |---|---|---|

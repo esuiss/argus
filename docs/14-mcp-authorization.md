@@ -917,7 +917,7 @@ Ayrıca: **Server Card Working Group** — *"so a server can be discovered and r
 > ### KARAR: DPoP ve RFC 8693 token exchange için mimaride **bugünden yer bırak.**
 > DPoP yol haritasında açıkça birinci sırada. `dpop_signing_alg_values_supported` alanını metadata şemasına şimdiden ekle.
 
-**Enterprise-Managed Authorization (EMA) — Stable:** MCP'nin kurumsal auth'u ID-JAG'ı profilliyor. Detaylar `docs/ajan-kimligi.md`'ye (yazılacak) ait; buradaki bağlantı noktası: **IdP AS rolü = Argus.**
+**Enterprise-Managed Authorization (EMA) — Stable:** MCP'nin kurumsal auth'u ID-JAG'ı profilliyor. Detaylar `docs/15-agent-identity.md`'ye (yazılacak) ait; buradaki bağlantı noktası: **IdP AS rolü = Argus.**
 
 ---
 

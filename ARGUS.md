@@ -29,7 +29,7 @@ Rakam, tarih veya URL uydurulmamıştır. Araştırma sırasında çürütülen 
 
 **KISIM I — KARARLAR**
 
-- [1. Mimari kararlar](docs/01-mimari-kararlar.md) — **ayrı dosya**
+- [1. Mimari kararlar](docs/01-architecture-decisions.md) — **ayrı dosya**
 - [2. Çelişkiler ve çözümleri](#2-çelişkiler-ve-çözümleri)
   - [Çelişki 1 — İmza algoritması tanımlayıcısı: `ES256` mi `ESP256` mi?](#çelişki-1--imza-algoritması-tanımlayıcısı-es256-mi-esp256-mi)
   - [Çelişki 2 — `#![forbid(unsafe_code)]` ile aws-lc-rs bir arada durabilir mi?](#çelişki-2--forbidunsafecode-ile-aws-lc-rs-bir-arada-durabilir-mi)
@@ -305,7 +305,7 @@ Rakam, tarih veya URL uydurulmamıştır. Araştırma sırasında çürütülen 
 *Argus'un ne yapacağına dair kararlar ve gerekçeleri. Geri kalan her kısım bu kararların dayanağıdır.*
 ## 1. Mimari kararlar
 
-**Bu bölüm [`docs/01-mimari-kararlar.md`](docs/01-mimari-kararlar.md) dosyasına taşındı.**
+**Bu bölüm [`docs/01-architecture-decisions.md`](docs/01-architecture-decisions.md) dosyasına taşındı.**
 
 27 gün-1 kararı, sonradan verilen kararlar (K28, K29), teknoloji yığını,
 crate topolojisi, protokol kapsamı, güvenlik mimarisi, faz planı ve
@@ -316,91 +316,91 @@ ilgili bölümünü gösterir; numaralandırma korundu.
 
 ## 2. Çelişkiler ve çözümleri
 
-**Bu bölüm [`docs/02-celiskiler-ve-kararlar.md`](docs/02-celiskiler-ve-kararlar.md) dosyasına taşındı.**
+**Bu bölüm [`docs/02-contradictions-and-resolutions.md`](docs/02-contradictions-and-resolutions.md) dosyasına taşındı.**
 
 ## 3. P0 kritik bulgular
 
-**Bu bölüm [`docs/03-p0-kritik-bulgular.md`](docs/03-p0-kritik-bulgular.md) dosyasına taşındı.**
+**Bu bölüm [`docs/03-p0-critical-findings.md`](docs/03-p0-critical-findings.md) dosyasına taşındı.**
 
 ## 4. Kimlik ve kimlik doğrulama — alan referansı
 
-**Bu bölüm [`docs/04-kimlik-dogrulama-referansi.md`](docs/04-kimlik-dogrulama-referansi.md) dosyasına taşındı.**
+**Bu bölüm [`docs/04-identity-authentication-reference.md`](docs/04-identity-authentication-reference.md) dosyasına taşındı.**
 
 ## 5. Rust ekosistemi fizibilitesi
 
-**Bu bölüm [`docs/05-rust-ekosistemi.md`](docs/05-rust-ekosistemi.md) dosyasına taşındı.**
+**Bu bölüm [`docs/05-rust-ecosystem.md`](docs/05-rust-ecosystem.md) dosyasına taşındı.**
 
 ## 6. Performans mühendisliği
 
-**Bu bölüm [`docs/06-performans.md`](docs/06-performans.md) dosyasına taşındı.**
+**Bu bölüm [`docs/06-performance.md`](docs/06-performance.md) dosyasına taşındı.**
 
 ## 7. Formel doğrulanmış kriptografi
 
-**Bu bölüm [`docs/07-dogrulanmis-kripto.md`](docs/07-dogrulanmis-kripto.md) dosyasına taşındı.**
+**Bu bölüm [`docs/07-verified-cryptography.md`](docs/07-verified-cryptography.md) dosyasına taşındı.**
 
 ## 8. Yan kanal ve zamanlama saldırıları
 
-**Bu bölüm [`docs/08-yan-kanal.md`](docs/08-yan-kanal.md) dosyasına taşındı.**
+**Bu bölüm [`docs/08-side-channels.md`](docs/08-side-channels.md) dosyasına taşındı.**
 
 ## 9. Anahtar ve sır yönetimi
 
-**Bu bölüm [`docs/09-anahtar-yonetimi.md`](docs/09-anahtar-yonetimi.md) dosyasına taşındı.**
+**Bu bölüm [`docs/09-key-management.md`](docs/09-key-management.md) dosyasına taşındı.**
 
 ## 10. Formel doğrulama ve model checking
 
-**Bu bölüm [`docs/10-formel-dogrulama.md`](docs/10-formel-dogrulama.md) dosyasına taşındı.**
+**Bu bölüm [`docs/10-formal-verification.md`](docs/10-formal-verification.md) dosyasına taşındı.**
 
 ## 11. Runtime/binary sertleştirme ve izolasyon
 
-**Bu bölüm [`docs/11-sertlestirme.md`](docs/11-sertlestirme.md) dosyasına taşındı.**
+**Bu bölüm [`docs/11-runtime-hardening.md`](docs/11-runtime-hardening.md) dosyasına taşındı.**
 
 ## 12. Yazılım tedarik zinciri güvenliği
 
-**Bu bölüm [`docs/12-tedarik-zinciri.md`](docs/12-tedarik-zinciri.md) dosyasına taşındı.**
+**Bu bölüm [`docs/12-supply-chain.md`](docs/12-supply-chain.md) dosyasına taşındı.**
 
 ## 13. Güvenlik süreci
 
-**Bu bölüm [`docs/13-guvenlik-sureci.md`](docs/13-guvenlik-sureci.md) dosyasına taşındı.**
+**Bu bölüm [`docs/13-security-process.md`](docs/13-security-process.md) dosyasına taşındı.**
 
 ## 14. MCP yetkilendirme
 
-**Bu bölüm [`docs/14-mcp-yetkilendirme.md`](docs/14-mcp-yetkilendirme.md) dosyasına taşındı.**
+**Bu bölüm [`docs/14-mcp-authorization.md`](docs/14-mcp-authorization.md) dosyasına taşındı.**
 
 ## 15. AI ajan kimliği
 
-**Bu bölüm [`docs/15-ajan-kimligi.md`](docs/15-ajan-kimligi.md) dosyasına taşındı.**
+**Bu bölüm [`docs/15-agent-identity.md`](docs/15-agent-identity.md) dosyasına taşındı.**
 
 ## 16. Kurumsal protokoller — SAML, SCIM, LDAP, Kerberos, Federation
 
-**Bu bölüm [`docs/16-kurumsal-protokoller.md`](docs/16-kurumsal-protokoller.md) dosyasına taşındı.**
+**Bu bölüm [`docs/16-enterprise-protocols.md`](docs/16-enterprise-protocols.md) dosyasına taşındı.**
 
 ## 17. Gelecek standartları — PQC, WebAuthn L3, CTAP, TLS
 
-**Bu bölüm [`docs/17-gelecek-standartlari.md`](docs/17-gelecek-standartlari.md) dosyasına taşındı.**
+**Bu bölüm [`docs/17-future-standards.md`](docs/17-future-standards.md) dosyasına taşındı.**
 
 ## 18. Çok kiracılık mimarisi
 
-**Bu bölüm [`docs/18-cok-kiracilik.md`](docs/18-cok-kiracilik.md) dosyasına taşındı.**
+**Bu bölüm [`docs/18-multi-tenancy.md`](docs/18-multi-tenancy.md) dosyasına taşındı.**
 
 ## 19. Yüksek erişilebilirlik ve dağıtık mimari
 
-**Bu bölüm [`docs/19-ha-dagitik-mimari.md`](docs/19-ha-dagitik-mimari.md) dosyasına taşındı.**
+**Bu bölüm [`docs/19-high-availability.md`](docs/19-high-availability.md) dosyasına taşındı.**
 
 ## 20. Yetkilendirme motoru
 
-**Bu bölüm [`docs/20-yetkilendirme-motoru.md`](docs/20-yetkilendirme-motoru.md) dosyasına taşındı.**
+**Bu bölüm [`docs/20-authorization-engine.md`](docs/20-authorization-engine.md) dosyasına taşındı.**
 
 ## 21. Oturum güvenliği ve hırsızlığa karşı savunmalar
 
-**Bu bölüm [`docs/21-oturum-guvenligi.md`](docs/21-oturum-guvenligi.md) dosyasına taşındı.**
+**Bu bölüm [`docs/21-session-security.md`](docs/21-session-security.md) dosyasına taşındı.**
 
 ## 22. Hesap yaşam döngüsü
 
-**Bu bölüm [`docs/22-hesap-yasam-dongusu.md`](docs/22-hesap-yasam-dongusu.md) dosyasına taşındı.**
+**Bu bölüm [`docs/22-account-lifecycle.md`](docs/22-account-lifecycle.md) dosyasına taşındı.**
 
 ## 23. Giriş akışları ve UX
 
-**Bu bölüm [`docs/23-giris-akislari.md`](docs/23-giris-akislari.md) dosyasına taşındı.**
+**Bu bölüm [`docs/23-login-flows.md`](docs/23-login-flows.md) dosyasına taşındı.**
 
 ## 24. Admin API ve delege yönetim
 
@@ -408,12 +408,12 @@ ilgili bölümünü gösterir; numaralandırma korundu.
 
 ## 25. Gözlemlenebilirlik ve ölçekte denetim
 
-**Bu bölüm [`docs/25-gozlemlenebilirlik.md`](docs/25-gozlemlenebilirlik.md) dosyasına taşındı.**
+**Bu bölüm [`docs/25-observability.md`](docs/25-observability.md) dosyasına taşındı.**
 
 ## 26. Dağıtım ve operatör deneyimi
 
-**Bu bölüm [`docs/26-dagitim-operasyon.md`](docs/26-dagitim-operasyon.md) dosyasına taşındı.**
+**Bu bölüm [`docs/26-deployment-operations.md`](docs/26-deployment-operations.md) dosyasına taşındı.**
 
 ## 27. Test stratejisi
 
-**Bu bölüm [`docs/27-test-stratejisi.md`](docs/27-test-stratejisi.md) dosyasına taşındı.**
+**Bu bölüm [`docs/27-test-strategy.md`](docs/27-test-strategy.md) dosyasına taşındı.**

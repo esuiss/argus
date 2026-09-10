@@ -1840,7 +1840,7 @@ Argus'ta bir `client_id` üç farklı anlama gelebilir. Bu, tasarımın en kriti
 3. **Çakışma çözümü — sıra sabit ve deterministik olmalı:** `client_id` bir HTTPS URL ise → önce Federation dene (entity configuration çekilebiliyor ve trust chain çözülüyorsa), sonra CIMD; URL değilse → yerel DCR kaydı. **URL biçimindeki bir `client_id`'nin yerel kayda düşmesine asla izin verme** (kayıt kaçırma/karıştırma saldırısı).
 4. **Kiracı başına hangi yolların açık olduğu yapılandırılabilir olmalı.** Çoğu kiracı yalnızca DCR isteyecek; federation'ı açan az sayıdaki kiracı için ekstra ağ trafiği ve gecikme kabul edilebilir olacak.
 5. **Önbellek ve tazelik ayrı ayrı yönetilmeli:** Federation'da TTL = trust chain'in min `exp`'i; CIMD'de HTTP cache başlıkları + kendi tavanın. Her ikisinde de **SSRF savunması zorunlu** (özel IP aralıklarını engelle, yönlendirme sayısını sınırla, boyut sınırı koy, DNS rebinding'e karşı bağlantı-zamanı IP kontrolü).
-6. Argus'un MCP dokümanındaki uyarıyla tutarlı ol: `docs/mcp-yetkilendirme.md` §5.2, MCP spec'inin CIMD **-00**'a atıf yaptığını ama **-02**'nin yeni normatif MUST'lar getirdiğini ve -02'nin uygulanması gerektiğini söylüyor. Aynı resolver bu farkı taşımalı.
+6. Argus'un MCP dokümanındaki uyarıyla tutarlı ol: `docs/14-mcp-authorization.md` §5.2, MCP spec'inin CIMD **-00**'a atıf yaptığını ama **-02**'nin yeni normatif MUST'lar getirdiğini ve -02'nin uygulanması gerektiğini söylüyor. Aynı resolver bu farkı taşımalı.
 
 ### 5.6 Kim implemente etti — ekosistem
 
