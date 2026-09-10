@@ -1,7 +1,7 @@
 pub const MAX_DEPTH: u32 = 16;
 pub const MAX_TOKENS: usize = 256;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompareOp {
     Eq,
     Ne,

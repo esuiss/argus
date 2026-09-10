@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod admin;
 pub mod cimd_client;
 pub mod cimd_fetch;
 pub mod differentiation;

@@ -134,7 +134,7 @@ fn present(value: &Value) -> bool {
     }
 }
 
-fn compare_one(actual: &Value, op: &CompareOp, expected: &FilterValue, case_exact: bool) -> bool {
+fn compare_one(actual: &Value, op: CompareOp, expected: &FilterValue, case_exact: bool) -> bool {
     match (actual, expected) {
         (Value::String(left), FilterValue::Str(right)) => {
             let (left, right) = if case_exact {
@@ -201,8 +201,8 @@ pub fn evaluate(resource: &Value, filter: &Filter) -> bool {
             found.iter().any(|actual| match actual {
                 Value::Array(items) => items
                     .iter()
-                    .any(|item| compare_one(item, op, value, case_exact)),
-                other => compare_one(other, op, value, case_exact),
+                    .any(|item| compare_one(item, *op, value, case_exact)),
+                other => compare_one(other, *op, value, case_exact),
             })
         }
 

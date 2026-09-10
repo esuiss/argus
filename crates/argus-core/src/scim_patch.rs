@@ -581,7 +581,7 @@ fn matches(item: &Value, filter: &Filter) -> bool {
         Filter::Present { path } => item.get(path).is_some_and(|v| !v.is_null()),
         Filter::Compare { path, op, value } => item
             .get(path)
-            .is_some_and(|actual| compare(actual, *op == CompareOp::Eq, op, value)),
+            .is_some_and(|actual| compare(actual, *op == CompareOp::Eq, *op, value)),
         Filter::And(a, b) => matches(item, a) && matches(item, b),
         Filter::Or(a, b) => matches(item, a) || matches(item, b),
         Filter::Not(inner) => !matches(item, inner),
@@ -589,7 +589,7 @@ fn matches(item: &Value, filter: &Filter) -> bool {
     }
 }
 
-fn compare(actual: &Value, _is_eq: bool, op: &CompareOp, expected: &FilterValue) -> bool {
+fn compare(actual: &Value, _is_eq: bool, op: CompareOp, expected: &FilterValue) -> bool {
     let (Some(left), FilterValue::Str(right)) = (actual.as_str(), expected) else {
         return match (actual, expected) {
             (Value::Bool(a), FilterValue::Bool(b)) => match op {
