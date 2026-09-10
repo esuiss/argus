@@ -7,6 +7,11 @@ use serde_json::{Map, Value, json};
 
 use super::guard::{Shared, admit};
 
+// §24 #8: şartname, router'ın üretildiği tablonun ta kendisinden üretilir,
+// dolayısıyla ayrışamaz. Keycloak v1'in spec'i kodun yanına yazılmıştı ve
+// kendi maintainer'ı onun istemci üretmeye yetmediğini söyledi. Keycloak
+// v2'nin diğer iyi fikri de burada: doküman çalışma zamanında sunulur, böylece
+// bir generator konuştuğu sunucuya uyum sağlar.
 pub(super) async fn document(State(state): State<Shared>, headers: HeaderMap) -> Response {
     let entry = argus_core::admin::requirement("GET", argus_core::admin::manifest::OPENAPI);
     if let Some(entry) = entry
@@ -44,6 +49,8 @@ pub(super) async fn document(State(state): State<Shared>, headers: HeaderMap) ->
                 json!({ "description": "the idempotency key was reused with another payload" }),
             );
         }
+        // §24 #15: izni olmayan bir çağırana kaynağın orada olmadığı söylenir,
+        // o yüzden doküman hiç gelmeyecek bir 403 ilan etmez.
         responses.insert(
             "404".to_owned(),
             json!({ "description": "no such resource, or not visible to this caller" }),

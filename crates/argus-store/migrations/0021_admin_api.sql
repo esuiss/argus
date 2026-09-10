@@ -1,3 +1,8 @@
+-- §24 #33 idempotency anahtarını değiştiren her uçta gün-1 özelliği yapıyor.
+-- §9.5 #3 volatile state'i süreçte değil veritabanında tutuyor, böylece bir
+-- yeniden başlatma uçuştaki bir anahtarı kaybedip bir retry'ın aynı isteği
+-- iki kez koşmasına izin vermez.
+
 
 CREATE TABLE admin_idempotency (
   tenant_id    uuid        NOT NULL,
@@ -22,12 +27,15 @@ CREATE TABLE admin_idempotency (
   CONSTRAINT admin_idempotency_fingerprint_is_a_digest CHECK (length(fingerprint) = 32),
   CONSTRAINT admin_idempotency_state_is_known
     CHECK (state IN ('in_flight', 'succeeded', 'failed')),
+  -- Saklanmış bir yanıt ancak bir yanıt varken anlamlıdır.
   CONSTRAINT admin_idempotency_terminal_carries_a_response
     CHECK (state = 'in_flight' OR status_code IS NOT NULL)
 );
 
 CREATE INDEX admin_idempotency_by_age ON admin_idempotency (tenant_id, stored_at);
 
+-- §24 #28: bulk SCIM /Bulk değil bir async job. İncelenen her satıcı /Bulk'u
+-- desteklemediğini bildirip bunu yazdı.
 CREATE TABLE admin_jobs (
   tenant_id   uuid        NOT NULL,
   job_id      uuid        NOT NULL DEFAULT uuidv7(),

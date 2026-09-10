@@ -25,6 +25,7 @@ use crate::traits::{
 #[derive(Debug, Clone)]
 pub struct PostgresStore {
     pool: PgPool,
+    // Yalnızca kontrol düzlemine hizmet eden bir süreçte doludur (§24 #21).
     platform_pool: Option<PgPool>,
 }
 
@@ -51,6 +52,9 @@ impl PostgresStore {
         Ok(self.scoped(tenant).await?)
     }
 
+    // §1 #1 ve #3: her sorgu kiracı kapsamlı bir transaction'da koşar.
+    // `SET LOCAL` GUC'u RLS politikalarının okuduğu şeydir; ayarlanmazsa
+    // argus_current_tenant() NULL döner ve her politika fail-closed olur.
     pub(crate) async fn scoped(
         &self,
         tenant: TenantId,
@@ -65,6 +69,13 @@ impl PostgresStore {
         Ok(tx)
     }
 
+    // Kontrol düzlemi rolündeki bir transaction. §24 #21: bu yalnızca kiracı
+    // kaydına ulaşır, migration 0022 bunu kendi sonunda doğrular.
+    //
+    // Kendi bağlantısında, kendi girişiyle koşar. Kiracı trafiğini taşıyan bir
+    // süreçle kontrol düzlemini taşıyan süreç farklı veritabanı asıllarıdır;
+    // §24 #19'un istediği ayrım böylece bir sözleşme değil bir SINIR olur:
+    // kiracı süreci, kendi kodu istese bile kayda ulaşamaz.
     pub(crate) async fn platform(&self) -> Result<Transaction<'_, Postgres>, StoreError> {
         let pool = self.platform_pool.as_ref().ok_or(StoreError::NotFound)?;
         let mut tx = pool.begin().await.map_err(|e| map_err(&e))?;

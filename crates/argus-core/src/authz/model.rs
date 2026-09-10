@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+// §20 §7.5 zorunlu kotalar tablosu: store başına 200 tip. Model karmaşıklığı
+// sınırı, hasar kontrolü amaçlı.
 pub const MAX_TYPES: usize = 200;
 pub const MAX_RELATIONS_PER_TYPE: usize = 64;
 pub const MAX_REWRITE_OPERANDS: usize = 16;
@@ -50,6 +52,9 @@ pub enum ModelError {
 }
 
 impl EntityRef {
+    // Tuple grameri (§20 §7.4) üç karakteri ayırıcı olarak kullanıyor:
+    // `tip:kimlik#ilişki@özne`. Bunlar tanımlayıcının içinde geçemez, yoksa
+    // ayrıştırılmış bir tuple başka bir tuple olarak okunabilir.
     fn check_identifier(value: &str) -> Result<(), ModelError> {
         if value.is_empty() {
             return Err(ModelError::Empty);
@@ -94,6 +99,9 @@ impl core::fmt::Display for EntityRef {
     }
 }
 
+// Özne ya bir varlıktır ya da bir varlık üzerinde bir ilişkiyi tutan herkes.
+// `group:eng#member` ikinci biçimdir ve modeli rol tabanlı değil ilişki
+// tabanlı yapan şey budur (§20 §7.4).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SubjectRef {
     entity: EntityRef,
@@ -166,6 +174,8 @@ impl core::fmt::Display for Tuple {
     }
 }
 
+// Bir ilişkinin nasıl hesaplandığı. Yalnızca `This` tuple okur; diğer her
+// biçim soruyu başka ilişkilere yeniden yazar (Zanzibar userset rewrite).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rewrite {
     This,
@@ -174,6 +184,9 @@ pub enum Rewrite {
         relation: String,
     },
 
+    // Bu nesneden `tupleset` üzerinden erişilen her nesne için o nesnede
+    // `computed` sorulur. İzinlerin kapsayıcı üzerinden kalıtılması budur:
+    // bir klasörün okuyucuları içindeki her belgeyi okur.
     TupleToUserset {
         tupleset: String,
         computed: String,
@@ -183,6 +196,8 @@ pub enum Rewrite {
 
     Intersection(Vec<Rewrite>),
 
+    // `base`'i verir ama `subtract`'i sağlayan öznelere vermez. Tek monoton
+    // olmayan biçim: tuple eklemek erişimi kaldırabilir.
     Exclusion {
         base: Box<Rewrite>,
         subtract: Box<Rewrite>,
@@ -217,6 +232,9 @@ impl Rewrite {
         }
     }
 
+    // Bu yeniden yazmanın, önce bir tuple okumadan AYNI nesnede ulaştığı
+    // ilişkiler. Kendi kümesinde görünen bir ilişki tek nesnenin içinde
+    // sonsuza kadar döner, o yüzden model bunu baştan reddeder.
     fn same_object_relations(&self, out: &mut BTreeSet<String>) {
         match self {
             Self::This | Self::TupleToUserset { .. } => {}
@@ -310,6 +328,8 @@ impl Model {
         self.types.keys().map(String::as_str)
     }
 
+    // Buradan geçemeyen bir model tek bir tuple yazılmadan reddedilir;
+    // böylece çözümleme karşılaştığı her ilişkinin var olduğunu varsayabilir.
     pub fn validate(&self) -> Result<(), ModelError> {
         if self.types.len() > MAX_TYPES {
             return Err(ModelError::TooManyTypes {

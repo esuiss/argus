@@ -14,6 +14,11 @@ pub enum MergePatchError {
     Unknown { field: String },
 }
 
+// RFC 7396. §24 #2 merge patch'i Keycloak'ın büyüttüğü gelişigüzel verb
+// semantiğine tercih etti (stianst'in kendi itirafı: "POST sometimes work as
+// a PUT, and sometimes as a PATCH"). Ayrıca explicit null sorusunu da çözer:
+// patch'teki null üyeyi kaldırır, böylece "set edilmedi" ile "null'a set
+// edildi" aynı tel biçimi olmaktan çıkar.
 pub fn apply(target: &Value, patch: &Value) -> Result<Value, MergePatchError> {
     apply_at(target, patch, 0)
 }
@@ -23,6 +28,7 @@ fn apply_at(target: &Value, patch: &Value, depth: u32) -> Result<Value, MergePat
         return Err(MergePatchError::TooDeep { allowed: MAX_DEPTH });
     }
 
+    // Nesne olmayan bir patch hedefi tamamen değiştirir, diziler dahil.
     let Some(members) = patch.as_object() else {
         return Ok(patch.clone());
     };
@@ -46,6 +52,9 @@ fn apply_at(target: &Value, patch: &Value, depth: u32) -> Result<Value, MergePat
 }
 
 #[must_use]
+// Patch'in dokunduğu alanlar, yalnızca üst seviye. Çağıran bunları kaynağın
+// izin verdikleriyle karşılaştırır ve reddedilen bir patch hiçbir şeyi
+// değiştirmemiş olur.
 pub fn touched(patch: &Value) -> Vec<String> {
     patch
         .as_object()
@@ -53,6 +62,9 @@ pub fn touched(patch: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
+// §24 #12: owner alanı yaratılışta sabitlenir. authentik CVE-2024-37905, user
+// kimliği patch'lenebilen bir API token'ıydı; kimliği doğrulanmış her
+// kullanıcı superuser olmaya tek istek uzaktaydı.
 pub fn check_patch(
     patch: &Value,
     known: &[&str],

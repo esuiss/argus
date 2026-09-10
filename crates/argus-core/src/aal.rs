@@ -1,6 +1,9 @@
 use core::cmp::Ordering;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+// NIST SP 800-63B kimlik doğrulama güvence seviyeleri. §1 §9 Faz 3'ün çıkış
+// kriteri `achieved_aal >= required_aal`'ın ŞEMADA zorlanmasıdır, uygulamada
+// değil; sıralama bu yüzden bir enum olarak sabittir.
 pub enum Aal {
     One,
     Two,

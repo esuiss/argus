@@ -2,6 +2,9 @@ use std::collections::HashSet;
 
 use uppsala::{Document, NodeId, NodeKind};
 
+// §16 §1.13: DOCTYPE ve ENTITY tümüyle reddedilir (XXE ve billion laughs),
+// boyut, derinlik ve element sayısı sınırlıdır, yinelenen ID reddedilir.
+// Ayrıştırıcı sınırları burada durur, imza doğrulamasında değil.
 pub const MAX_DOCUMENT_BYTES: usize = 512 * 1024;
 pub const MAX_DEPTH: usize = 64;
 pub const MAX_ELEMENTS: usize = 20_000;

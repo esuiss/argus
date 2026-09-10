@@ -65,6 +65,8 @@ pub fn all_event_uris() -> Vec<&'static str> {
     ])
 }
 
+// RFC 9967 güvenlik olayları dışarı gider. Bu alanlar olay gövdesinden
+// SIYRILIR; bir provisioning olayı bir sır sızdırma kanalı olmamalı (§25 K27).
 pub const NEVER_RETURNED: [&str; 3] = ["password", "phc", "secret"];
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

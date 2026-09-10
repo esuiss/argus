@@ -1,3 +1,6 @@
+// §24 #19 iki yönetim yüzeyini ayrı tutuyor: ayrı audience, ayrı scope
+// namespace'i, ayrı rate limit bütçesi. Auth0 bunu 21 Nis 2026'da sonradan
+// yapmak zorunda kaldı; burada baştan ayrı.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Surface {
     Platform,
@@ -22,6 +25,10 @@ impl Surface {
     }
 }
 
+// Bir route'un koşmadan önce gerektirdiği şey. §24 #10: Zitadel
+// CVE-2025-27507 (CVSS 9.0) bir servis tanımındaki tek yanlış dizgeyle 12
+// endpoint'i açtı, o yüzden gereksinim annotation değil VERİDİR ve router bu
+// tablodan üretilir. Burada kaydı olmayan bir route mount edilemez.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RouteRequirement {
     pub method: &'static str,
@@ -199,6 +206,8 @@ pub fn requirement(method: &str, path: &str) -> Option<&'static RouteRequirement
 }
 
 #[must_use]
+// Kiracı yüzeyinin kullandığı ilişkiler; yetkilendirme modelinin bildirmek
+// zorunda olduğu küme de budur, yoksa route erişilemez olur.
 pub fn tenant_relations() -> Vec<&'static str> {
     let mut out: Vec<&'static str> = MANIFEST
         .iter()

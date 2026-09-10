@@ -8,6 +8,9 @@ use sqlx::Row as _;
 use crate::postgres::PostgresStore;
 use crate::traits::StoreError;
 
+// Bir checkpoint en fazla bu kadar yeni olayı kapsar. §9.3'ün ölçümü olay
+// başına değil batch başına tek imza; batch yine de sınırlı olmalı ki tek bir
+// katlama sınırsız sayıda satır okumasın.
 pub const MAX_BATCH: i64 = 10_000;
 
 struct AuditEvent {
@@ -21,6 +24,9 @@ struct AuditEvent {
     target_id: Option<String>,
 }
 
+// Olayın hash'lendiği kanonik biçim. Saklanan satırı değil ANLAMINI temsil
+// eder: sonradan bir sütun eklemek daha önce verilmiş her kanıtı
+// geçersizleştirmemeli.
 fn canonical(event: &AuditEvent) -> Value {
     json!({
         "event_id": event.event_id.to_string(),
@@ -35,6 +41,8 @@ fn canonical(event: &AuditEvent) -> Value {
 }
 
 impl PostgresStore {
+    // Ağaçta olmayan her olayı katlar ve yeni bir checkpoint yayınlar.
+    // Katlanacak bir şey yoksa None döner.
     pub async fn checkpoint_audit<H: Sha256>(
         &self,
         tenant: TenantId,
@@ -42,6 +50,8 @@ impl PostgresStore {
     ) -> Result<Option<Checkpoint>, StoreError> {
         let mut tx = self.scoped(tenant).await?;
 
+        // Bir sonraki boş indeks. audit_leaves append-only olduğu için bu aynı
+        // zamanda mevcut ağaç boyutudur.
         let size: i64 = sqlx::query_scalar(
             "SELECT coalesce(max(leaf_index) + 1, 0) FROM audit_leaves WHERE tenant_id = $1",
         )
@@ -50,6 +60,9 @@ impl PostgresStore {
         .await
         .map_err(|_| StoreError::Unavailable)?;
 
+        // `checkpoint_at` DEĞİL: audit_events append-only ve argus_app'in onda
+        // UPDATE yetkisi yok (§25 K7), ki doğrusu budur. Bir olayın ağaçta olup
+        // olmadığı ağaç hakkında bir olgudur, o yüzden cevabı ağaç verir.
         let pending = sqlx::query(
             "SELECT e.event_id, e.occurred_at, e.event_type, e.outcome, e.actor_kind, \
                     e.actor_id, e.target_kind, e.target_id \
@@ -143,6 +156,8 @@ impl PostgresStore {
         }))
     }
 
+    // Tek bir olayın yayınlanmış ağaçta olduğunun kanıtı; henüz katlanmadıysa
+    // NotFound.
     pub async fn audit_proof<H: Sha256>(
         &self,
         tenant: TenantId,
@@ -198,6 +213,9 @@ impl PostgresStore {
         let wanted = usize::try_from(index).map_err(|_| StoreError::Unavailable)?;
         let covered = usize::try_from(tree_size).map_err(|_| StoreError::Unavailable)?;
 
+        // En yeni checkpoint'ten sonra eklenen bir yaprak henüz onun içinde
+        // değildir; doğrulanamayacak bir kanıt vermektense bunu söylemek
+        // daha iyidir.
         if wanted >= covered {
             return Err(StoreError::NotFound);
         }

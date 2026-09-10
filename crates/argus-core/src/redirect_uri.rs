@@ -77,6 +77,10 @@ impl RedirectUri {
     }
 
     #[must_use]
+    // §1 #24: eşleştirme YALNIZCA exact string. Regex ve wildcard implemente
+    // edilmez. Tek istisna loopback'te port'un yok sayılmasıdır (RFC 8252
+    // §7.3) ve o istisna aşağıda, exact karşılaştırma başarısız olduktan sonra
+    // başlar.
     pub fn match_presented(&self, presented: &str) -> Option<RedirectUriMatch> {
         if self.raw == presented {
             return Some(RedirectUriMatch::Exact);
@@ -86,6 +90,9 @@ impl RedirectUri {
             return None;
         }
 
+        // Port'u yok saymak için URL'yi ayrıştırmak zorunlu; elle ayrıştırma
+        // tam olarak authentik CVE-2024-52289'un sınıfıdır (Cargo.toml, url
+        // bağımlılığının gerekçesi).
         let other = Url::parse(presented).ok()?;
         if other.fragment().is_some() {
             return None;

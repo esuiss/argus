@@ -3,8 +3,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::index::TupleIndex;
 use super::model::{EntityRef, Model, ModelError, Rewrite, SubjectRef};
 
+// §20 §7.5: OpenFGA ile aynı tavan. Ziyaret kümesinden kaçan bir döngü bile
+// burada sonlanır (CVE-2023-43645 sınıfı).
 pub const MAX_DEPTH: u32 = 25;
 
+// §20 §7.5: fan-out patlaması koruması. Bundan geniş bir tupleset yürünmez,
+// reddedilir; tek bir ilişki bir check'i taramaya çeviremesin.
 pub const MAX_WIDTH: usize = 10;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -40,6 +44,8 @@ pub struct Decision {
     pub reason_admin: Option<String>,
 }
 
+// Yürüyüşün tek adımı. Karar yeniden türetilmeden açıklanabilsin diye
+// saklanır: §24 #10 her izin ve her retin denetlenebilir olmasını istiyor.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraceStep {
     pub depth: u32,
@@ -62,6 +68,9 @@ struct Resolver<'a> {
     trace: Option<DecisionTrace>,
 }
 
+// Uzunluk önekli, asla birleştirilmiş değil. §20 §7.5 CVE-2026-48096'yı
+// gösteriyor: dizgeleri uç uca ekleyerek kurulan bir anahtarda bir alan
+// diğerine taşar ve iki farklı soru aynı cache girdisini paylaşır.
 fn memo_key(object: &EntityRef, relation: &str, subject: &SubjectRef) -> (String, String, String) {
     let object = format!("{}:{}|{}", object.kind().len(), object.kind(), object.id());
     let relation = format!("{}|{relation}", relation.len());
@@ -115,6 +124,8 @@ impl<'a> Resolver<'a> {
             return Ok(*known);
         }
 
+        // Hâlâ çözümlenirken yeniden ulaşılan bir ilişki bir döngüdür.
+        // `false` demek fail-closed seçimdir (§20 §6.4) ve yürüyüşü bitirir.
         if !self.visiting.insert(key.clone()) {
             self.record(depth, object, relation, "cycle", false);
             return Ok(false);
@@ -147,6 +158,8 @@ impl<'a> Resolver<'a> {
                     return Ok(true);
                 }
 
+                // Userset özne, o ilişkiyi tutan herkesin yerine geçer;
+                // dolayısıyla her biri yeni bir sorudur.
                 let usersets: Vec<SubjectRef> = written
                     .into_iter()
                     .filter(|candidate| !candidate.is_direct())
@@ -216,6 +229,8 @@ impl<'a> Resolver<'a> {
             }
 
             Rewrite::Intersection(operands) => {
+                // Boş kesişim hiçbir şey vermez. Vacuous truth okuması
+                // erişim dağıtırdı; §20 §6.4 fail-closed diyor.
                 if operands.is_empty() {
                     self.record(depth, object, relation, "intersection", false);
                     return Ok(false);
@@ -243,6 +258,8 @@ impl<'a> Resolver<'a> {
     }
 }
 
+// Tek karar noktası. Motorun geri kalanı bunun çağıranıdır; §24 #9 tam olarak
+// tek bir tane olmasına dayanıyor.
 pub fn check(
     model: &Model,
     index: &TupleIndex,
@@ -282,6 +299,9 @@ pub enum BatchSemantics {
     PermitOnFirstPermit,
 }
 
+// AuthZEN /evaluations (§20 §7.6 madde 2). Üç semantik yalnızca döngünün ne
+// zaman durduğunda ayrışır; değerlendirilmeyen her istek reddedilmiş olarak
+// raporlanır, böylece kısa devre asla izin olarak okunamaz.
 pub fn batch_check(
     model: &Model,
     index: &TupleIndex,

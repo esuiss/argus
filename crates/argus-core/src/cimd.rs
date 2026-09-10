@@ -101,6 +101,9 @@ fn raw_path(raw: &str) -> &str {
 }
 
 #[must_use]
+// §14: CIMD, dinamik istemci kaydının (RFC 7591) yerini alır — client_id bir
+// URL'dir ve metadata oradan çekilir. OIDF conformance'ın DCR isteyen planı bu
+// yüzden geçilemiyor; mimari onu bilinçli olarak değiştirdi.
 pub fn looks_like_a_url(client_id: &str) -> bool {
     client_id.starts_with("https://") || client_id.starts_with("http://")
 }

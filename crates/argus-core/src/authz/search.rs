@@ -4,8 +4,14 @@ use super::check::{CheckError, CheckRequest, check};
 use super::index::TupleIndex;
 use super::model::{EntityRef, Model, SubjectRef};
 
+// §20 §7.5 aramayı 1000 sonuçla sınırlıyor ve sayfalamayı zorunlu kılıyor.
+// Daha fazlasını isteyen çağıran bu kadarını alır.
 pub const MAX_RESULTS: usize = 1000;
 
+// §20 §7.5'teki 1 saniyelik sert deadline çağırana aittir; argus-core saat
+// okumaz (§1 #15). Sınırlayabileceği şey iş miktarıdır, o yüzden arama bir
+// adım bütçesi taşır ve bütçe bittiğinde sessizce kesmek yerine dürüstçe
+// bildirir.
 pub const DEFAULT_STEP_BUDGET: u32 = 50_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,6 +28,8 @@ pub struct ResourceSearch {
 pub struct Page {
     pub objects: Vec<EntityRef>,
     pub next: Option<String>,
+    // Yürüyüş bitmeden bütçe tükendiğinde true. Sayfa o zaman kısmî bir
+    // cevaptır ve asla hepsi bu diye okunmamalıdır.
     pub exhausted: bool,
 }
 
@@ -34,6 +42,9 @@ pub enum SearchError {
     Check(#[from] CheckError),
 }
 
+// Aranan tipteki aday nesneler: öznenin yazılı olduğu her şey ve oradan
+// erişilen her şey. §20 §7.7'nin F0 aşaması bilinçli olarak naif yürüyüştür,
+// bu yüzden materialize indeks yerine önce sayar sonra kontrol eder.
 fn candidates(
     index: &TupleIndex,
     subject: &SubjectRef,
@@ -58,6 +69,8 @@ fn candidates(
             if object.kind() == kind {
                 found.insert(object.clone());
             }
+            // Nesnenin kendisi başka öznelerin yerine geçebilir; bir grubun
+            // üyesi olan bir grubun üyeliğine böyle ulaşılır.
             if let Ok(next) = SubjectRef::userset(object.clone(), &relation) {
                 frontier.push(next);
             }
@@ -124,6 +137,7 @@ pub fn search_resources(
         objects.push(object);
     }
 
+    // İmleç döndürülen son kimliktir; sonraki sayfa ondan sonra devam eder.
     if next.is_some() {
         next = objects.last().map(|last| last.id().to_owned());
     }

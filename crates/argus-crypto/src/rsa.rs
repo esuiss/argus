@@ -8,6 +8,9 @@ use crate::CryptoError;
 
 pub const MIN_MODULUS_BITS: usize = 2048;
 
+// §7: RS256 için formel doğrulanmış bir implementasyon yok ve `rsa` crate'i
+// Marvin'e (RUSTSEC-2023-0071) hâlâ açık. aws-lc-rs FIPS moduna hazır ve
+// s2n-bignum'un makine-kontrollü ispatlarını taşır (§1 §2.2 kripto kararı).
 pub struct RsaSigningKey {
     kid: String,
     key: KeyPair,

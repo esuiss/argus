@@ -86,6 +86,9 @@ fn combine_constraints(into: &mut Constraints, from: &Constraints) {
     clippy::too_many_lines,
     reason = "the chain checks read as one ordered list of what the specification requires"
 )]
+// OpenID Federation 1.1 §4: güven zinciri çözümlemesi. Yukarıdan aşağı
+// doğrulanır — çıpa kendi anahtarlarıyla, her bildiri bir üstünün
+// anahtarlarıyla, yaprak ise üstünün onayladığı anahtarlarla.
 pub fn resolve(
     chain: &[EntityStatement],
     trust_anchors: &[EntityIdentifier],
@@ -128,6 +131,9 @@ pub fn resolve(
     walked.push(leaf.subject.as_str());
 
     for statement in chain.get(1..chain.len().saturating_sub(1)).unwrap_or(&[]) {
+        // Döngü tespiti ÖZNELERİ değil OTORİTELERİ yürür. Aynı özne bir zincirde
+        // meşru olarak birden fazla kez görünebilir; kendini imzalayan bir
+        // otorite döngüsü göremezsin.
         let authority = statement.issuer.as_str();
         if walked.contains(&authority) {
             return Err(ChainFault::Cycle {

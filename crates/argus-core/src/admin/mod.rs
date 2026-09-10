@@ -1,3 +1,7 @@
+// Yönetim API'sinin karar mantığı. §24 beş satıcının admin API'sini
+// inceleyip 38 somut karara çeviriyor; bunlardan tesisat değil karar
+// olanlar burada durur, argus-http yalnızca tele taşır.
+
 pub mod idempotency;
 pub mod job;
 pub mod manifest;

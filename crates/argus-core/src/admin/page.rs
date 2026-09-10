@@ -15,6 +15,10 @@ pub enum PageError {
     EmptyLimit,
 }
 
+// §24 #6 offset sayfalamayı reddediyor. Keycloak'ın kendi kullanıcısı
+// (@Plasmadog, 17 Tem 2025) küme okuyucunun altında değişirken offset'in
+// kayıt KAÇIRDIĞINI gösterdi; Keycloak v2 buna rağmen offset seçti. Yolların
+// ayrıldığı yer burasıdır.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PageRequest {
     pub after: Option<String>,
@@ -64,6 +68,9 @@ pub fn decode_cursor(raw: &str) -> Result<String, PageError> {
 }
 
 #[must_use]
+// RFC 5988. §24 #6 ve Keycloak'ın kendi REST kılavuzu, sonraki sayfanın
+// istemcinin hesapladığı bir aritmetik değil izlediği bir bağlantı olmasını
+// istiyor.
 pub fn link_header(base: &str, next: Option<&str>, previous: Option<&str>) -> Option<String> {
     let mut parts = Vec::new();
 

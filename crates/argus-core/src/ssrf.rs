@@ -19,6 +19,9 @@ pub enum AddressVerdict {
 }
 
 #[must_use]
+// §14 MCP: CIMD dokümanı istemcinin verdiği bir URL'den çekiliyor, dolayısıyla
+// bu bir SSRF yüzeyidir. Sınıflandırma çözülen ADRESE bakar, ada değil; ad
+// üzerinden karar vermek DNS rebinding'e açıktır.
 pub fn classify(address: IpAddr) -> Option<AddressVerdict> {
     match address {
         IpAddr::V4(v4) => classify_v4(v4),

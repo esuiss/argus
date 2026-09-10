@@ -1,3 +1,8 @@
+-- §20 §7.4. MVCC sütunları bir consistency token'ı anlamlı kılan şeydir:
+-- R revizyonundaki bir okuma, R'de ya da öncesinde yaratılmış ve R'de henüz
+-- silinmemiş satırları görür, dolayısıyla bir karar sonradan yeniden
+-- üretilebilir.
+
 
 CREATE TABLE authz_models (
   tenant_id   uuid        NOT NULL,
@@ -21,6 +26,8 @@ CREATE UNIQUE INDEX authz_models_live
   ON authz_models (tenant_id)
   WHERE retired_at IS NULL;
 
+-- Kiracı başına bir sequence ideal olurdu ama sequence bir şema nesnesidir;
+-- sayaç satırı kiracı politikası altında aynı monotonluğu verir.
 CREATE TABLE authz_revisions (
   tenant_id   uuid        NOT NULL,
   revision    bigint      NOT NULL DEFAULT 0,
@@ -42,9 +49,13 @@ CREATE TABLE authz_tuples (
   relation         text   NOT NULL,
   subject_type     text   NOT NULL,
   subject_id       text   NOT NULL,
+  -- '' doğrudan özne demek; başka her şey bir userset.
   subject_relation text   NOT NULL DEFAULT '',
 
   created_rev      bigint NOT NULL,
+  -- Sentinel en büyük bigint: şu an canlı bir satır gelecekteki her
+  -- revizyonda canlıdır, dolayısıyla aralık yükleminin NULL ele alması
+  -- gerekmez.
   deleted_rev      bigint NOT NULL DEFAULT 9223372036854775807,
 
   CONSTRAINT authz_tuples_pkey PRIMARY KEY
@@ -65,17 +76,23 @@ CREATE TABLE authz_tuples (
     length(subject_relation) <= 256
   ),
 
+  -- Gramer ayırıcıları bir alanın içinde geçemez, yoksa render edilmiş bir
+  -- tuple başka bir tuple olarak geri okunabilir.
   CONSTRAINT authz_tuples_identifiers_are_unambiguous CHECK (
     object_type !~ '[:#@]' AND object_id !~ '[:#@]' AND relation !~ '[:#@]' AND
     subject_type !~ '[:#@]' AND subject_id !~ '[:#@]' AND subject_relation !~ '[:#@]'
   )
 );
 
+-- İleri: bir check "bu nesnede bu ilişkiyi kim tutuyor" diye sorar.
 CREATE INDEX authz_tuples_forward
   ON authz_tuples (tenant_id, object_type, object_id, relation)
   INCLUDE (subject_type, subject_id, subject_relation)
   WHERE deleted_rev = 9223372036854775807;
 
+-- Ters: bir search "bu özne neye bağlı" diye sorar. §20 §7.4 ikisini birden
+-- tutuyor çünkü tek bir sıralama ikisine de cevap veremez; bir aramanın bir
+-- check'ten pahalı olmasının depolama seviyesindeki sebebi de budur.
 CREATE INDEX authz_tuples_reverse
   ON authz_tuples (tenant_id, subject_type, subject_id, subject_relation, relation)
   INCLUDE (object_type, object_id)

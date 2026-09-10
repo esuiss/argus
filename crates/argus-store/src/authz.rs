@@ -7,6 +7,9 @@ use sqlx::Row as _;
 use crate::postgres::PostgresStore;
 use crate::traits::StoreError;
 
+// §20 §7.4 en büyük bigint'i "silinmemiş" olarak kullanıyor: şu an canlı bir
+// satır gelecekteki her revizyonda da canlıdır, dolayısıyla aralık
+// yükleminin NULL ele alması gerekmez.
 const NEVER_DELETED: i64 = i64::MAX;
 
 fn row_to_tuple(
@@ -30,6 +33,8 @@ fn row_to_tuple(
 }
 
 impl PostgresStore {
+    // Kiracının bulunduğu revizyon. Hiç tuple yazılmamış bir kiracı sıfırdadır
+    // ve sıfır okunabilir geçerli bir revizyondur.
     pub async fn authz_revision(&self, tenant: TenantId) -> Result<i64, StoreError> {
         let mut tx = self.scoped(tenant).await?;
 
@@ -46,6 +51,9 @@ impl PostgresStore {
             .unwrap_or(0))
     }
 
+    // `revision` anında canlı olan her tuple. §20 §7.7'nin F1 aşaması kiracının
+    // grafiğini yükleyip süreç içinde çözümler; materialize indeks sonraki bir
+    // aşamadır ve buna karşı diferansiyel test edilmek zorundadır.
     pub async fn authz_index_at(
         &self,
         tenant: TenantId,
@@ -87,6 +95,8 @@ impl PostgresStore {
                 return Err(StoreError::Unavailable);
             };
 
+            // Model katmanının temsil edemediği saklanmış bir satır bir şema
+            // ihlalidir, sessizce atlanacak bir tuple değil.
             let Some(tuple) = row_to_tuple(
                 &object_type,
                 &object_id,
@@ -111,11 +121,16 @@ impl PostgresStore {
         self.authz_index_at(tenant, revision).await
     }
 
+    // Bir toplu işlemi uygular ve ürettiği revizyonu döner. Revizyon artışı ve
+    // satırlar tek transaction'da iner, dolayısıyla R revizyonundaki bir okur
+    // asla yarım bir toplu işlem görmez.
     pub async fn authz_apply(
         &self,
         tenant: TenantId,
         ops: &[TupleOp],
     ) -> Result<i64, AuthzWriteError> {
+        // argus-core bunu zaten zorluyor; depo tekrar ediyor çünkü satırlar
+        // inmeden önceki son yer burası.
         if ops.len() > argus_core::authz::MAX_TUPLES_PER_WRITE {
             return Err(AuthzWriteError::TooManyTuples {
                 allowed: argus_core::authz::MAX_TUPLES_PER_WRITE,
@@ -125,6 +140,8 @@ impl PostgresStore {
 
         let mut tx = self.scoped(tenant).await.map_err(AuthzWriteError::Store)?;
 
+        // Satır kilidi bu kiracı için eşzamanlı toplu işlemleri sıraya sokar,
+        // böylece iki yazara aynı revizyon verilemez.
         let row = sqlx::query(
             "INSERT INTO authz_revisions (tenant_id, revision) VALUES ($1, 1) \
              ON CONFLICT (tenant_id) DO UPDATE \
@@ -169,6 +186,8 @@ impl PostgresStore {
                 }
 
                 TupleOp::Delete(_) => {
+                    // Mezar taşı, asla silme: daha eski bir revizyonda alınmış
+                    // bir karar yeniden üretilebilir kalmalı.
                     sqlx::query(
                         "UPDATE authz_tuples SET deleted_rev = $8 \
                           WHERE tenant_id = $1 AND object_type = $2 AND object_id = $3 \

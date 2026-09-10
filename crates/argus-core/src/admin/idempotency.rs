@@ -1,5 +1,7 @@
 pub const MAX_KEY_BYTES: usize = 255;
 
+// §24 #33 pencerenin okuyucuya bırakılmasını değil YAYINLANMASINI istiyor
+// (draft bunu API'ye bırakıyor). Stripe'ın 30 günü referans.
 pub const RETENTION_SECONDS: u64 = 30 * 24 * 60 * 60;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -18,6 +20,8 @@ pub enum KeyError {
 pub struct IdempotencyKey(String);
 
 impl core::fmt::Debug for IdempotencyKey {
+    // Draft anahtarda PII'yi yasaklıyor ve sunucu bunu zorlayamaz; o yüzden
+    // değer bu tip üzerinden asla bir log'a ulaşmaz (§25 K27 ile aynı ruh).
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str("IdempotencyKey(..)")
     }
@@ -64,11 +68,17 @@ pub struct Record {
 pub enum Outcome {
     Execute,
     Replay,
+    // Aynı anahtar, farklı gövde. §24 #33 bunun sıradan bir çakışmadan ayrı
+    // raporlanmasını istiyor ki istemci bir hatayı bir yarıştan ayırabilsin.
     PayloadMismatch,
+    // Aynı anahtar hâlâ uçuşta. Şimdi yeniden denemek etkiyi ikiye katlar.
     InFlight,
 }
 
 #[must_use]
+// §24 #33'ün benimsediği Stripe v2 kuralı: başarı kısa devre yapar, başarısız
+// olan yeniden koşabilir. Bir doğrulama hatası zaten hiç saklanmaz, böylece
+// gövdesini düzelten istemci kendi ilk denemesi yüzünden kilitlenmez.
 pub fn decide(existing: Option<&Record>, fingerprint: &[u8; 32], now: u64) -> Outcome {
     let Some(record) = existing else {
         return Outcome::Execute;

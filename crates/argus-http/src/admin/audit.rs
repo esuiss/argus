@@ -18,6 +18,9 @@ fn chain_uid(state: &Shared) -> String {
     )
 }
 
+// §9.3. Crosby & Wallach: 80 milyon olaylı bir logda tek olayın kanıtı burada
+// 3 KB, hash zincirinde 800 MB. Bu farktır bunu bir dipnot değil bir uç nokta
+// yapan şey.
 pub(super) async fn proof(
     State(state): State<Shared>,
     headers: HeaderMap,
@@ -49,6 +52,8 @@ pub(super) async fn proof(
             &path,
         ))
         .into_response(),
+        // En yeni checkpoint'in kapsamadığı bir olayın henüz kanıtı yoktur ve
+        // bunu söylemek, doğrulanamayacak bir kanıt vermekten iyidir.
         Err(argus_store::traits::StoreError::NotFound) => hidden(),
         Err(_) => problem(503, "unavailable", "the audit log is unreadable"),
     }

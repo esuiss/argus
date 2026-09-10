@@ -1,3 +1,15 @@
+-- §24 #21: bir kiracı yöneticisi kendi kiracısının issuer'ından çalışır,
+-- platform kontrol düzlemi ayrı ve dardır. Keycloak her realm'i master
+-- realm'den geçiriyor, ki bu master'ı hem tek arıza hem tek ele geçirme
+-- noktası yapıyor.
+--
+-- `tenants` üzerindeki kiracı politikası argus_current_tenant()'a kapsanmış
+-- durumda, dolayısıyla kiracı trafiğine hizmet eden hiçbir rol kiracıları
+-- listeleyemez. O politikayı gevşetmek ya da birine BYPASSRLS vermek yerine
+-- kontrol düzlemi tek açık politikalı kendi rolünü alır. §1 #3'e dokunulmadı:
+-- RLS açık ve FORCE'lu kalır, bu rol de diğer her rol gibi NOSUPERUSER
+-- NOBYPASSRLS'tir.
+
 
 DO $$
 BEGIN
@@ -7,6 +19,8 @@ BEGIN
 END
 $$;
 
+-- Yalnızca kiracı kaydı ve yalnızca bu rol üzerinden. Bu role geçerek şemada
+-- başka hiçbir şey görünür hâle gelmez.
 CREATE POLICY platform_control_plane ON tenants
   TO argus_platform
   USING (true)

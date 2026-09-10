@@ -1,3 +1,6 @@
+// §16 LDAP: GHSA-qcrp-p3rq-pffr, `lber`'daki yamalanmamış yığın tüketimi.
+// Derinlik AYRIŞTIRMA SIRASINDA zorlanır, ayrıştırma bittikten sonra değil;
+// sonradan bakmak yığını zaten tüketmiş olurdu.
 pub const MAX_DEPTH: u32 = 16;
 pub const MAX_ELEMENT_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_LENGTH_OCTETS: usize = 4;

@@ -6,6 +6,9 @@ use crate::effect::Effect;
 use crate::id::{ClientId, TenantId, UserId};
 use crate::time::{Duration, Timestamp};
 
+// OAuth 2.1 §4.14.2: refresh token rotasyonu ve yeniden kullanım tespiti.
+// Aile ömrü tek tek token'ların ömründen uzundur; yeniden kullanım görülürse
+// iptal edilen tek token değil TÜM ailedir.
 pub const DEFAULT_FAMILY_LIFETIME: Duration = Duration::from_seconds(30 * 24 * 60 * 60);
 
 pub const DEFAULT_TOKEN_LIFETIME: Duration = Duration::from_seconds(14 * 24 * 60 * 60);

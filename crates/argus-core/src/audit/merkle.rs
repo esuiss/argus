@@ -1,9 +1,14 @@
 use crate::pkce::Sha256;
 
+// RFC 6962'nin alan ayrımı. Bu önekler olmadan, baytları iki birleştirilmiş
+// hash'e benzeyen bir yaprak bir iç düğümün yerine geçebilir ve n yapraklı
+// ağacın ikinci ön-görüntüsü olur.
 const LEAF_PREFIX: u8 = 0x00;
 const NODE_PREFIX: u8 = 0x01;
 
 #[must_use]
+// §9.3: ağaç bir performans tercihi değil, kanıt uç noktasını bir ürün
+// yeteneği hâline getiren şeydir. Hash zinciri bunu hiç veremez.
 pub fn leaf_hash<H: Sha256>(hasher: &H, data: &[u8]) -> [u8; 32] {
     let mut input = Vec::with_capacity(data.len() + 1);
     input.push(LEAF_PREFIX);
@@ -26,6 +31,8 @@ pub fn node_hash<H: Sha256>(hasher: &H, left: &[u8; 32], right: &[u8; 32]) -> [u
     hasher.sha256(&input)
 }
 
+// n'den kesin küçük en büyük ikinin kuvveti. RFC 6962 her alt ağacı burada
+// böler ve kanıtların bütün şekli bundan çıkar.
 const fn split(n: usize) -> usize {
     if n < 2 {
         return 0;
@@ -51,6 +58,8 @@ pub fn root<H: Sha256>(hasher: &H, leaves: &[[u8; 32]]) -> [u8; 32] {
 }
 
 #[must_use]
+// `index`'in iddia ettiği yaprak olduğunu kanıtlayan kardeş hash'ler. Tek
+// yapraklı ağaçta boş, indeks ağaçta değilse None.
 pub fn inclusion_proof<H: Sha256>(
     hasher: &H,
     leaves: &[[u8; 32]],
@@ -82,6 +91,10 @@ pub fn inclusion_proof<H: Sha256>(
 }
 
 #[must_use]
+// RFC 6962 §2.1.1, adım adım. Kanıt en derin kardeşten dışarı doğru sıralıdır,
+// dolayısıyla doğrulama iner değil TIRMANIR; bu yönü yanlış yapmak dengeli
+// ağaçları yine de doğrular ve yalnızca tek sayılı boyutlarda düşer — bu hata
+// tam olarak böyle yakalandı.
 pub fn verify_inclusion<H: Sha256>(
     hasher: &H,
     leaf: &[u8; 32],
@@ -123,6 +136,10 @@ pub fn verify_inclusion<H: Sha256>(
 }
 
 #[must_use]
+// `old_size` yapraklı bir ağacın mevcut ağacın öneki olduğunu kanıtlar.
+// §9.3'ün üçüncü kararı buna muhtaç: yayınlanmış bir checkpoint, operatör
+// geçmişi yeniden yazıp taze bir kök yayınlayabiliyorsa hiçbir şey ifade
+// etmez.
 pub fn consistency_proof<H: Sha256>(
     hasher: &H,
     leaves: &[[u8; 32]],
@@ -135,6 +152,8 @@ pub fn consistency_proof<H: Sha256>(
 }
 
 fn subproof<H: Sha256>(hasher: &H, m: usize, leaves: &[[u8; 32]], complete: bool) -> Vec<[u8; 32]> {
+    // Eski ağaç tam olarak bu alt ağaçtır. Üstündeki düğümün tamamıysa
+    // doğrulayıcı kökünü zaten elinde tutar ve hiçbir şeye ihtiyacı yoktur.
     if m == leaves.len() {
         return if complete {
             Vec::new()
@@ -158,6 +177,7 @@ fn subproof<H: Sha256>(hasher: &H, m: usize, leaves: &[[u8; 32]], complete: bool
 }
 
 #[must_use]
+// RFC 6962 §2.1.2, adım adım.
 pub fn verify_consistency<H: Sha256>(
     hasher: &H,
     old_size: usize,
@@ -174,6 +194,8 @@ pub fn verify_consistency<H: Sha256>(
         return proof.is_empty() && old_root == new_root;
     }
 
+    // Bütün bir alt ağaç olan ilk ağaç kendi kökünü katkı verir, dolayısıyla
+    // kanıtlayan onu hiç göndermez.
     let mut path: Vec<[u8; 32]> = Vec::with_capacity(proof.len() + 1);
     if old_size.is_power_of_two() {
         path.push(*old_root);

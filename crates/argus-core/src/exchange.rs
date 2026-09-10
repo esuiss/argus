@@ -2,6 +2,9 @@ use crate::id::ClientId;
 use crate::resource::ResourceUri;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+// RFC 8693 token exchange + §15 ID-JAG. Bir uygulamanın başka bir uygulama
+// adına token alması, kayıtlı bir bağlantıya dayanır; kaynak ile hedef
+// arasındaki izin istekten değil bu kayıttan gelir.
 pub struct CrossAppConnection {
     pub requesting_client: ClientId,
     pub resource_as_issuer: String,

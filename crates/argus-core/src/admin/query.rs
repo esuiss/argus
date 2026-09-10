@@ -23,6 +23,9 @@ pub enum QueryError {
     Malformed(String),
 }
 
+// §24 #5 kendi lehçesini icat etmek yerine RFC 7644 §3.4.2.2'nin bir alt
+// kümesini benimsiyor ve sıralı karşılaştırmaları bilinçli olarak dışarıda
+// bırakıyor. Keycloak'ın v2 sorgu API'si aynı iki seçimi yaptı.
 const fn operator_name(op: CompareOp) -> &'static str {
     match op {
         CompareOp::Eq => "eq",
@@ -44,6 +47,9 @@ const fn is_supported(op: CompareOp) -> bool {
     )
 }
 
+// Filtredeki her yol bildirilmiş bir alanı adlandırmalı. §24 #5: SCIM
+// bilinmeyen bir özniteliği yok sayar, yok sayılan bir filtre ise her kaydı
+// döndürür — bu bir güvenlik hatasıdır, o yüzden burada reddedilir.
 pub fn check_filter(filter: &Filter, fields: &[&str]) -> Result<(), QueryError> {
     match filter {
         Filter::Present { path } => known(path, fields),
@@ -85,6 +91,9 @@ pub fn parse_filter(raw: &str, fields: &[&str]) -> Result<Filter, QueryError> {
     Ok(filter)
 }
 
+// `fields=a,b,c`. Bilinmeyen bir ad, bilinmeyen bir filtre yoluyla aynı
+// sebepten reddedilir: sessizce düşürmek bir istemci hatasını sorunsuz
+// görünen bir yanıtın arkasına saklar.
 pub fn projection(raw: &str, fields: &[&str]) -> Result<Vec<String>, QueryError> {
     let wanted: Vec<&str> = raw
         .split(',')

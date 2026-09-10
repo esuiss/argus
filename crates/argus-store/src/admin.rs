@@ -82,6 +82,9 @@ impl PostgresStore {
         )))
     }
 
+    // Anahtarı bu deneme için sahiplenir. §24 #33 kaydı ancak koşum
+    // BAŞLADIKTAN sonra saklar, böylece bir doğrulama hatası istemciyi
+    // düzeltilmiş bir gövdeyle yeniden denemekten kilitlemez.
     pub async fn idempotency_begin(
         &self,
         tenant: TenantId,
@@ -264,6 +267,9 @@ impl PostgresStore {
     }
 }
 
+// Bir client'ın yönetim görünümü. §24 #7 bir kaynağın tek istekte
+// yaratılabilmesini istiyor, o yüzden redirect URI'lar onunla birlikte
+// yolculuk eder; Keycloak'ta "client + roller = 2 çağrı" idi.
 pub struct AdminClient {
     pub client_id: String,
     pub client_type: String,
@@ -280,6 +286,8 @@ impl core::fmt::Debug for AdminClient {
 }
 
 impl PostgresStore {
+    // İstenenden bir fazla: çağıran, ikinci bir sorgu ya da bir count olmadan
+    // sonraki sayfanın var olup olmadığını anlayabilsin.
     pub async fn list_clients(
         &self,
         tenant: TenantId,
@@ -396,6 +404,8 @@ impl PostgresStore {
         }))
     }
 
+    // Client'ı ve redirect URI'larını tek transaction'da yaratır ya da
+    // değiştirir, böylece yarım yazılmış bir client asla erişilebilir olmaz.
     pub async fn upsert_client(
         &self,
         tenant: TenantId,

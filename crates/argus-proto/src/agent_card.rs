@@ -60,6 +60,9 @@ pub enum CardFault {
     NoSuchKey { kid: String },
 }
 
+// A2A Agent Card. Kart `implicit` veya `password` akışı ilan ediyorsa
+// reddedilir: OAuth 2.1 ikisini de kaldırdı ve imzalı bir kartın onları
+// meşrulaştırması en kötü sonuçtur.
 pub fn check(card: &Value) -> Result<(), CardFault> {
     let object = card.as_object().ok_or(CardFault::NotAnObject)?;
 
@@ -205,6 +208,8 @@ pub fn without_signature(card: &Value) -> Value {
     Value::Object(stripped)
 }
 
+// RFC 8785 JCS + detached JWS. Kanonik biçim üzerinden imzalanır, böylece
+// kartın yeniden serileştirilmesi imzayı bozmaz.
 pub fn payload(card: &Value) -> Result<String, CardFault> {
     let stripped = without_signature(card);
     let rendered = serde_json::to_string(&stripped).map_err(|_| CardFault::NotAnObject)?;

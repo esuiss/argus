@@ -1,9 +1,15 @@
 use serde_json::Value;
 
+// §24 #28: AIP-151 yaklaşık on saniyeden uzun her işlemi long running
+// operation sayıyor. İncelenen HER satıcı SCIM /Bulk'u desteklemediğini
+// bildirip kendi async job API'sini yazdı; bu yüzden bulk burada bu şekli
+// alır.
 pub const LONG_RUNNING_THRESHOLD_SECONDS: u64 = 10;
 
 pub const MAX_ITEMS: usize = 10_000;
 
+// §24 #29: Auth0 job sonuçlarını 24 saatte siliyor, ki ertesi sabah bulunan
+// kısmî bir hatayı incelemek için çok kısa.
 pub const RESULT_RETENTION_SECONDS: u64 = 7 * 24 * 60 * 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11,6 +17,9 @@ pub enum JobState {
     Pending,
     Running,
     Succeeded,
+    // Bazı kalemler uygulandı, bazıları uygulanmadı. AIP-151 bunu terminal
+    // yanıttan ayırıp metadata'da tutuyor, böylece çağıran kısmî bir koşumu
+    // temiz sanamaz.
     PartiallySucceeded,
     Failed,
 }
@@ -51,6 +60,9 @@ pub enum JobFault {
     },
 }
 
+// Tek bir kalemin sonucu. §24 #29 insan mesajının yanında makine kodu
+// istiyor, çünkü on bin kaydı yeniden deneyen bir çağıran düzyazı
+// ayrıştıramaz.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ItemResult {
     pub index: usize,
@@ -134,6 +146,8 @@ impl Job {
     }
 
     #[must_use]
+    // AIP-151 ilerlemeyi terminal sonuçtan ayırır. İlerleme job koşarken
+    // okunabilir; sonuç ancak iş bittiğinde vardır.
     pub fn metadata(&self) -> Value {
         serde_json::json!({
             "state": self.state.as_str(),

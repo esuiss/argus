@@ -15,10 +15,16 @@ use super::guard::{
     AdminState, Idempotency, Shared, admit, close_idempotency, hidden, open_idempotency, problem,
 };
 
+// Alt kuruluş kaynağının yayınladığı alanlar. §24 #5 ve #26: başka bir şey
+// adlandıran bir filtre ya da projeksiyon hatadır, ve bir GET kullanıcının
+// set etmediği bir alanı asla uydurmaz (stianst: "I create a client with a
+// couple fields, and get back a client with 50 fields").
 const SUBORDINATE_FIELDS: &[&str] = &["id", "jwks", "metadataPolicy", "constraints"];
 
 const CLIENT_FIELDS: &[&str] = &["clientId", "clientType", "authMethod", "redirectUris"];
 
+// Router manifestodan üretildiği için bu ıskalayamaz. Unwrap yerine
+// fail-closed dönmek, ileride ıskalayabilir hâle gelse bile bunu korur.
 fn requirement(method: &str, path: &str) -> &'static argus_core::admin::RouteRequirement {
     argus_core::admin::requirement(method, path).unwrap_or(&argus_core::admin::RouteRequirement {
         method: "NONE",
@@ -197,6 +203,7 @@ async fn write_subordinate(
         return problem(503, "unavailable", "the registry is unwritable");
     }
 
+    // §24 #3: tam temsil gövdede, Location header'ında bir kimlik değil.
     let view = subordinate_view(id, &record);
     let status = if created { 201 } else { 200 };
     close_idempotency(state, key.as_deref(), Surface::Tenant, status, &view).await;
@@ -244,6 +251,7 @@ pub(super) async fn create_subordinate(
     write_subordinate(&state, key.as_deref(), id, &body, true).await
 }
 
+// §24 #2: PUT bir upsert'tir ve hangisinin olduğunu status söyler.
 pub(super) async fn put_subordinate(
     State(state): State<Shared>,
     headers: HeaderMap,
@@ -303,6 +311,8 @@ fn client_from(body: &Value, id: &str) -> Result<AdminClient, Box<Response>> {
         .unwrap_or("public")
         .to_owned();
 
+    // Şema ikisini birbirine bağlıyor; kimlik bilgisi taşıyan bir public
+    // client bir tercih değil, bir çelişkidir.
     let auth_method = body
         .get("authMethod")
         .and_then(Value::as_str)
@@ -443,6 +453,10 @@ pub(super) async fn create_client(
         return *refusal;
     }
 
+    // Idempotency kapısı çakışma kontrolünden ÖNCE gelir, yoksa zaten başarılı
+    // olmuş bir isteğin tekrarına ilk denemesinin ürettiği şey yerine kaynağın
+    // var olduğu söylenirdi — §24 #33'ün var olma sebebi tam olarak bu durum.
+    // Bu sıra hatası testi yazarken bulundu.
     let key = match open_idempotency(&state, &headers, Surface::Tenant, &body).await {
         Ok(Idempotency::Replay(response)) => return response,
         Ok(Idempotency::Run(key)) => key,
@@ -490,6 +504,8 @@ pub(super) async fn put_client(
     save_client(&state, key.as_deref(), &id, &body).await
 }
 
+// §24 #2 ve #12: patch, uygulanmadan önce kaynağın kendi alan listesine karşı
+// kontrol edilir ve clientId yerinden oynayamaz.
 pub(super) async fn patch_client(
     State(state): State<Shared>,
     headers: HeaderMap,

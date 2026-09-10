@@ -3,6 +3,9 @@ use crate::id::UserId;
 use crate::time::{Duration, Timestamp};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// §22 hesap kurtarma. §1 #16: kimlik doğrulama akışı bir "flow"
+// konfigürasyonu değil, TİPLİ BİR DURUM MAKİNESİDİR. Kurtarma bir IdP'nin en
+// zayıf halkasıdır, o yüzden geçişler veriyle değil tiple taşınır.
 pub enum RecoveryState {
     Requested,
     EvidenceMet,

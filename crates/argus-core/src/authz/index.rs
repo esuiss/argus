@@ -4,6 +4,9 @@ use super::model::{EntityRef, SubjectRef, Tuple};
 
 pub const MAX_TUPLES_PER_WRITE: usize = 1000;
 
+// Çözümleyicinin yürüdüğü ileri ve ters görünümler. §20 §7.4 iki indeks
+// tutuyor: check ileri, search ters yürür ve tek bir sıralama ikisine de
+// hizmet edemez.
 #[derive(Debug, Clone, Default)]
 pub struct TupleIndex {
     forward: BTreeMap<(String, String, String), BTreeSet<SubjectRef>>,
@@ -69,6 +72,8 @@ impl TupleIndex {
     }
 
     #[must_use]
+    // Bu nesne ve ilişkiye doğrudan yazılmış özneler. Çözümleyicinin saklanan
+    // veriyi okuduğu tek yer burasıdır.
     pub fn subjects(&self, object: &EntityRef, relation: &str) -> Vec<SubjectRef> {
         self.forward
             .get(&forward_key(object, relation))

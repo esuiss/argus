@@ -4,6 +4,8 @@ use super::check::{CheckError, CheckRequest, check};
 use super::index::TupleIndex;
 use super::model::{EntityRef, Model, SubjectRef};
 
+// Modelin anladığı bir eylem. Uygulayanlar birim tiplerdir, böylece bir
+// handler'ın gerektirdiği eylem imzasının parçası olur.
 pub trait Action {
     const RELATION: &'static str;
 }
@@ -21,6 +23,11 @@ pub enum Denied {
     Check(#[from] CheckError),
 }
 
+// Bir check'in evet dediğinin kanıtı. Alan özeldir ve bu modül hiçbir yapıcı
+// yayınlamaz, dolayısıyla eldeki tek yol `authorize`'dan geçmiştir.
+// `Authorized<T, A>` alan bir handler onsuz çağrılamaz — §24 #9'un
+// "kontrol yapmayı unutma" hatası (IDOR'un birincil kaynağı) yapısal olarak
+// ortadan kalkar.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Authorized<R, A> {
     resource: R,
@@ -45,6 +52,9 @@ impl<R, A: Action> Authorized<R, A> {
     }
 }
 
+// `Authorized` üretmenin tek yolu. §24 #9: filtre burada durur, handler'da
+// değil; CVE-2026-17059 tam olarak ikinci bir yolun aynı filtreyi
+// uygulamamasından doğdu.
 pub fn authorize<R: Resource, A: Action>(
     model: &Model,
     index: &TupleIndex,

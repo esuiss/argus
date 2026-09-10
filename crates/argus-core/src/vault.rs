@@ -113,6 +113,8 @@ pub enum VaultFault {
     LeaseNotYours,
 }
 
+// §15 federated vault. Kiralama kararının tek giriş noktası: scope, güven
+// seviyesi, delegasyon daraltması ve sahiplik burada birlikte kontrol edilir.
 pub fn may_lease(
     secret: &SecretRecord,
     requester: &Requester,

@@ -25,8 +25,13 @@ pub struct AdminState {
 
 pub type Shared = Arc<AdminState>;
 
+// Kontrol düzlemi tek bir nesnedir. §24 #21 onu dar tutuyor ve tek nesne
+// olabileceği en dar hâldir.
 pub const PLATFORM_OBJECT: &str = "control-plane";
 
+// Kutulanmış, ki hata yolu her sonucu şişirmesin. Tel biçimi §24 #1'in
+// atıfta bulunduğu Keycloak kılavuzunun istediğidir: snake_case bir kod ve
+// opsiyonel bir cümle.
 pub type Refusal = Box<Response>;
 
 #[derive(Debug, Clone)]
@@ -44,6 +49,8 @@ pub(super) fn problem(status: u16, error: &str, description: &str) -> Response {
         .into_response()
 }
 
+// §24 #15. Çağırana kaynağın orada olmadığı söylenir; gerçekten orada
+// olmadığında aldığı cevabın aynısı. 403 bir varlık ifşasıdır.
 pub(super) fn hidden() -> Response {
     problem(404, "not_found", "no such resource")
 }
@@ -71,6 +78,8 @@ fn bearer(headers: &HeaderMap) -> Option<&str> {
     if token.is_empty() { None } else { Some(token) }
 }
 
+// §24 #19: iki yüzey audience paylaşmaz, dolayısıyla bir kiracı token'ı
+// platform kontrol düzlemine karşı tekrar oynatılamaz.
 fn audience_matches(claims: &AccessTokenClaims, issuer: &str, surface: Surface) -> bool {
     let expected = format!("{issuer}{}", surface.audience_suffix());
     claims.aud.contains(&expected)
@@ -121,6 +130,8 @@ fn verify(state: &AdminState, headers: &HeaderMap) -> Result<AccessTokenClaims, 
     Ok(claims)
 }
 
+// Kapının tamamı: token, yüzey, kiracı, izin. Bu modülde hiçbir şey buradan
+// geçmeden bir kaynağa ulaşmaz.
 pub(super) async fn admit(
     state: &AdminState,
     headers: &HeaderMap,
@@ -132,6 +143,10 @@ pub(super) async fn admit(
         return Err(Box::new(hidden()));
     }
 
+    // Kiracı yüzeyi bu kiracıya kapsanır; kontrol düzlemi kiracı başına bir
+    // tane değil TEK bir nesnedir, yoksa bir platform yöneticisine kiracı
+    // listesini görmek için aynı ilişkiyi kiracı başına bir kez vermek
+    // gerekirdi.
     let object_id = match requirement.surface {
         Surface::Tenant => state.tenant_id.as_uuid().to_string(),
         Surface::Platform => PLATFORM_OBJECT.to_owned(),
@@ -145,6 +160,9 @@ pub(super) async fn admit(
         ))
     })?;
 
+    // §24 #20: kiracı doğrulanmış token'dan alınır. Auth0'ın My Organization
+    // API'si IDOR sınıfını böyle yapısal olarak ortadan kaldırıyor, o yüzden
+    // ne gövde ne de path segmenti bunun için okunur.
     let subject = SubjectRef::direct(EntityRef::new("user", &claims.sub).map_err(|_| {
         Box::new(problem(
             401,
@@ -186,6 +204,8 @@ pub(super) async fn admit(
     })
 }
 
+// §24 #33. Değiştiren bir istek ya şimdi koşar, ya saklanmış bir sonucu
+// tekrar oynatır, ya da iki hata biçiminden hangisine çarptığı söylenir.
 pub(super) enum Idempotency {
     Run(Option<String>),
     Replay(Response),
@@ -256,6 +276,7 @@ pub(super) async fn open_idempotency(
         .await
         .map_err(|_| Box::new(problem(503, "unavailable", "the key store is unwritable")))?;
 
+    // Okuma ile yazma arasında başka bir istek anahtarı kaptı.
     if !claimed {
         return Err(Box::new(problem(
             409,
@@ -288,6 +309,9 @@ pub(super) async fn close_idempotency(
         .await;
 }
 
+// Kanonik biçim (RFC 8785), böylece aynı dokümanın iki kodlaması aynı parmak
+// izini paylaşır ve anahtar tekrarı boşluk üzerinden değil ANLAM üzerinden
+// yargılanır.
 fn fingerprint_of(body: &Value) -> [u8; 32] {
     use argus_core::pkce::Sha256 as _;
     let canonical = argus_proto::jcs::canonicalize(body).unwrap_or_default();

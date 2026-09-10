@@ -59,6 +59,10 @@ struct Config {
 
     platform_database_url: Option<String>,
 
+    // Issuer'ın seçilmiş mi yoksa varsayılan mı olduğu. §9.5 #2 tahmin edilmiş
+    // bir issuer'la üretimde başlamayı reddediyor: Keycloak'ın kendi uyarısı,
+    // URL'i yönlendirebilen bir saldırganın kendi seçtiği issuer'dan token
+    // alacağıdır.
     issuer_was_set: bool,
 
     admin_bind: Option<String>,
@@ -663,6 +667,9 @@ async fn serve(app: axum::Router, config: &Config, store_kind: &str) -> ExitCode
         }
     };
 
+    // §9.5 #2: güvensiz üretim konfigürasyonunda uyarmak yerine REDDET.
+    // Keycloak'ın kendi listesinde bunlar öneri olarak kalıyor ve tam da
+    // üstlerindeki her şeyi sessizce işe yaramaz hâle getirenler bunlar.
     if config.production {
         if !config.issuer_was_set {
             eprintln!(
@@ -1196,6 +1203,9 @@ async fn serve_with_postgres(
 
     let mut store = argus_store::PostgresStore::new(pool);
 
+    // §24 #21. Kontrol düzlemi ayrı bir veritabanı aslıdır, dolayısıyla onu
+    // yapılandırmayan bir dağıtım kiracı kaydına ulaşmayı reddetmekle kalmaz,
+    // hiç ULAŞAMAZ.
     if let Some(url) = config.platform_database_url.as_deref() {
         let Ok(control) = sqlx::postgres::PgPoolOptions::new()
             .max_connections(4)
@@ -1326,6 +1336,8 @@ async fn serve_with_postgres(
         .merge(argus_http::differentiation::build(differentiation))
         .merge(argus_http::par::build(Arc::clone(&pushed_requests)));
 
+    // §24. Router izin manifestosundan üretilir; mount etmek, tam olarak birinin
+    // izin bildirdiği route'ları mount etmek demektir.
     let admin = argus_http::admin::build(Arc::new(argus_http::admin::AdminState {
         tenant_id,
         issuer: config.issuer.clone(),
@@ -1335,6 +1347,10 @@ async fn serve_with_postgres(
         policy: argus_core::admin::policy(),
     }));
 
+    // §9.5 #2 ve §24 #34: verildiğinde kendi adresinde, böylece yönetim yüzeyi
+    // genel yüzeyin ulaşamadığı bir yerden erişilebilir. Keycloak bunu öneri
+    // olarak bırakıyor ve stored XSS bulgularının tamamı düşük yetkili bir
+    // yöneticinin daha yüksek yetkili birinin tarayıcısına ulaşmasıdır.
     if let Some(bind) = config.admin_bind.as_deref() {
         let Ok(listener) = tokio::net::TcpListener::bind(bind).await else {
             eprintln!("argus: cannot bind {bind}");

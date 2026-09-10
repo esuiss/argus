@@ -1,6 +1,8 @@
 use crate::id::ClientId;
 use crate::time::{Duration, Timestamp};
 
+// RFC 9126 §2.2. FAPI 2.0 Security Profile Final yetkilendirme isteklerinin
+// PAR'dan geçmesini şart koşuyor; §1 §9 Faz 5'in çıkış kriteri.
 pub const REQUEST_URI_PREFIX: &str = "urn:ietf:params:oauth:request_uri:";
 pub const MIN_LIFETIME: Duration = Duration::from_seconds(5);
 pub const MAX_LIFETIME: Duration = Duration::from_seconds(600);
@@ -95,6 +97,8 @@ pub fn lifetime(requested: Option<Duration>) -> Duration {
     }
 }
 
+// PAR ucu istemci kimlik doğrulaması ister. İlk hâlinde yoktu: herkes kayıtlı
+// herhangi bir istemci için istek push edebiliyordu. Yayına çıkmadan yakalandı.
 pub fn check_push(
     parameters: &[(String, String)],
     authenticated: &ClientId,

@@ -1,3 +1,8 @@
+-- §9.3. Checkpoint her olaya gömülmek yerine kendi attestation'ı olarak
+-- yayınlanır; insert yolunu düz bir append olarak tutan şey budur. Crosby &
+-- Wallach her commitment imzalandığında imzalamanın insert maliyetinin
+-- %83'ünü yediğini ölçtü; batch başına tek imza kazancın tamamıdır.
+
 
 CREATE TABLE audit_checkpoints (
   tenant_id    uuid        NOT NULL,
@@ -15,6 +20,10 @@ CREATE TABLE audit_checkpoints (
   CONSTRAINT audit_checkpoints_root_is_a_digest CHECK (length(root) = 32)
 );
 
+-- Ağacın şimdiye kadar taşıdığı her yaprak, böylece bir olayın kanıtı onu
+-- kapsayan checkpoint'ten çok sonra da yeniden hesaplanabilir. Parmak izi
+-- olayın kanonik biçiminin üzerinedir, saklanan satırının değil: aynı olayın
+-- iki kodlaması iki yaprak olmamalı.
 CREATE TABLE audit_leaves (
   tenant_id   uuid    NOT NULL,
   leaf_index  bigint  NOT NULL,
@@ -32,6 +41,9 @@ CREATE TABLE audit_leaves (
 
 CREATE INDEX audit_leaves_by_event ON audit_leaves (tenant_id, event_id);
 
+-- Bir yaprak yazıldıktan sonra ne ise odur. §25 K7'nin append-only argümanı
+-- burada iki kat geçerli: değiştirilebilir bir yaprak üzerindeki her kanıtı
+-- anlamsız kılar.
 CREATE OR REPLACE FUNCTION audit_leaves_are_append_only() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
@@ -43,6 +55,8 @@ CREATE TRIGGER audit_leaves_no_update
   BEFORE UPDATE OR DELETE ON audit_leaves
   FOR EACH ROW EXECUTE FUNCTION audit_leaves_are_append_only();
 
+-- Row trigger'lar TRUNCATE'te HİÇ ateşlenmez; §9.3 karar 2 bunu append-only
+-- iddiasındaki en yaygın sessiz delik olarak adlandırıyor.
 CREATE TRIGGER audit_leaves_no_truncate
   BEFORE TRUNCATE ON audit_leaves
   EXECUTE FUNCTION audit_leaves_are_append_only();

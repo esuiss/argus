@@ -26,6 +26,9 @@ pub trait PasswordCheck {
     fn verify(&self, dn: &str, password: &[u8]) -> bool;
 }
 
+// RFC 4513 §5.1.2: adı olup parolası boş bir bind unauthenticated bind'dır ve
+// yanlışlıkla başarılı okunur; §16 bunu reddettiriyor. Ve TLS olmadan parola
+// bind'ı CONFIDENTIALITY_REQUIRED alır.
 pub fn decide_bind(
     name: &str,
     password: &[u8],

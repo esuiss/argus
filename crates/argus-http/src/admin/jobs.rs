@@ -11,6 +11,9 @@ use super::guard::{
     Idempotency, Shared, admit, close_idempotency, hidden, open_idempotency, problem,
 };
 
+// §24 #28: bulk senkron bir batch değil, uzun süren bir işlemdir. İncelenen
+// her satıcı SCIM /Bulk'u desteklemediğini bildirip bunu yazdı, o yüzden şekil
+// alt isteklerden oluşan bir zarf değil budur.
 pub(super) async fn submit(
     State(state): State<Shared>,
     headers: HeaderMap,
@@ -82,6 +85,9 @@ pub(super) async fn submit(
     let _ = job.finish();
     let _ = state.store.save_job(state.tenant_id, &job).await;
 
+    // AIP-151 uyarınca 202 ve pollanacak bir job kaynağı. Terminal sonuç job'ın
+    // üzerindedir, asla buraya gömülmez; çağıran kabul edilmeyi tamamlanmayla
+    // karıştıramasın.
     let body = json!({
         "id": job.id,
         "metadata": job.metadata(),

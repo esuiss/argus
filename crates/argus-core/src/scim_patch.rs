@@ -89,6 +89,9 @@ pub const KNOWN_SCHEMAS: [&str; 3] = [
     "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
 ];
 
+// RFC 7644 §3.5.2: bir patch yolu URN nitelikli olabilir. Çekirdek şema URN'ü
+// KAYNAĞIN KENDİSİNİ adresler; uzantı URN'leri ise iç içe geçer. İkisini aynı
+// şekilde ele almak uzantı alanlarını üst seviyeye taşırdı.
 fn split_schema(raw: &str) -> Option<(&'static str, &str)> {
     if !raw.starts_with("urn:") {
         return None;

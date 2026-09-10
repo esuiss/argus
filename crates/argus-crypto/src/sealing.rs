@@ -12,6 +12,8 @@ pub struct SealingKey {
     key: LessSafeKey,
 }
 
+// §25 K27: sır taşıyan tipte türetilmiş Debug yok. Anahtar bir log satırına
+// ulaşamaz.
 impl core::fmt::Debug for SealingKey {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str("SealingKey(<redacted>)")

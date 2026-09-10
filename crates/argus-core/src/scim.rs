@@ -80,6 +80,9 @@ pub fn attribute_is_case_exact(path: &str) -> bool {
     )
 }
 
+// Ara adımlarda diziler düzleştirilir. Her adımda bir nesne şart koşmak
+// `emails.value` gibi bir filtrenin hiçbir zaman eşleşmemesine yol açıyordu:
+// `emails` bir dizidir ve `value` onun elemanlarındadır.
 fn resolve_all<'a>(resource: &'a Value, path: &str) -> Vec<&'a Value> {
     let bare = match path.rfind(':') {
         Some(index) => match path.get(index + 1..) {

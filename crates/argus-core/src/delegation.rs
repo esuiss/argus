@@ -3,7 +3,12 @@ use serde_json::{Map, Value};
 use crate::aal::Aal;
 use crate::time::Timestamp;
 
+// draft-liu-oauth-chain-delegation. Zincir uzunluğu sınırlı, yoksa doğrulama
+// maliyeti saldırganın kontrolündeki bir sayıyla ölçeklenir.
 pub const MAX_HOPS: usize = 5;
+// draft-mcguinness-oauth-actor-profile: bir uygulama en az 4 seviye `act`
+// yuvalaması desteklemeli. Kanonik aktör (iss, sub) çiftidir, tek başına sub
+// değil.
 pub const MIN_SUPPORTED_ACTOR_DEPTH: usize = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

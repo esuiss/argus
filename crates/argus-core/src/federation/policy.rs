@@ -324,6 +324,10 @@ fn merge_parameter(
     Ok(merged)
 }
 
+// OpenID Federation 1.1 §5.1.4: bir üstün politikasını bir alt kuruluşunkiyle
+// birleştirir. `one_of` ve `subset_of` KESİŞİR, `value` ve `default` çatışırsa
+// reddedilir, ve `essential` aşağıdan gevşetilemez — bir alt kuruluş üstünün
+// dayattığı bir zorunluluğu kaldıramaz.
 pub fn merge(
     superior: &MetadataPolicy,
     subordinate: &MetadataPolicy,

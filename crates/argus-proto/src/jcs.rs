@@ -149,6 +149,9 @@ fn number_form(number: &serde_json::Number) -> Result<String, JcsError> {
     clippy::indexing_slicing,
     reason = "every index is derived from the length of the digit string just computed"
 )]
+// RFC 8785 §3.2.2.3: sayılar ECMAScript Number::toString biçiminde yazılır.
+// Kanonikleştirmenin en ince yeri burasıdır; bir bit fark iki farklı imza
+// demektir.
 pub fn ecmascript_form(value: f64) -> String {
     if value == 0.0 {
         return "0".to_owned();
@@ -231,6 +234,10 @@ pub enum TextFault {
     TrailingBytes,
 }
 
+// Sayıları kaynak baytlardan okur. Sebep ölçüldü: serde_json
+// 333333333.33333329'u bir ULP aşağı yuvarlıyor (0x...5554, doğrusu
+// 0x...5555). Bir `Value`'dan geçen kanonikleştirme o farkı taşır; kaynak
+// metinden geçen taşımaz.
 pub fn canonicalize_text(raw: &str) -> Result<String, TextFault> {
     let bytes = raw.as_bytes();
     let mut cursor = Cursor {

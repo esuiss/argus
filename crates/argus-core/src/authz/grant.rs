@@ -40,6 +40,9 @@ pub enum GrantRefusal {
     Check(#[from] CheckError),
 }
 
+// Bir tipin tuple'larını değiştirme yetkisini hangi ilişkinin taşıdığı.
+// §24 #14: token'a claim yazabilen her mekanizma yetki-verendir ve aynı
+// değişmeze tabidir.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GrantPolicy {
     administrative: std::collections::BTreeMap<String, String>,
@@ -60,6 +63,9 @@ impl GrantPolicy {
     }
 
     #[must_use]
+    // İzin değil, içerme kenarı. §24 #11: bunu taşımak iki ucun ikisinde de
+    // yetki ister ve aktörden bunu tutması beklenmez, çünkü birinin ebeveyni
+    // olmak bir ayrıcalık değildir.
     pub fn structural(mut self, kind: &str, relation: &str) -> Self {
         self.structural
             .insert((kind.to_owned(), relation.to_owned()));
@@ -93,6 +99,8 @@ fn holds(
     Ok(check(model, index, &request)?.allowed)
 }
 
+// Toplu işlemin dokunduğu tiplerde bildirilen her ilişki; yükseltme kontrolü
+// öncesi ve sonrası tam olarak bu kümeyi karşılaştırır.
 fn touched_pairs(model: &Model, ops: &[TupleOp]) -> BTreeSet<(EntityRef, String)> {
     let mut out = BTreeSet::new();
 
@@ -121,6 +129,11 @@ fn apply(index: &TupleIndex, ops: &[TupleOp]) -> TupleIndex {
     next
 }
 
+// Her ilişki yazmasının geçtiği tek kapı. §24 #13: HRU safety problemi genel
+// halde karar verilemez (Harrison/Ruzzo/Ullman, CACM 19(8), 1976), o yüzden
+// yükseltme statik analizle değil çalışma zamanında kapatılır, ve her çağrı
+// yerinde değil burada kapatılır. Keycloak aynı prensibi beyan etti ama
+// kontrol her yolda uygulanmadığı için beş CVE aldı.
 pub fn may_apply(
     model: &Model,
     index: &TupleIndex,
@@ -138,6 +151,8 @@ pub fn may_apply(
     for op in ops {
         let tuple = op.tuple();
 
+        // Aktör değiştirdiği nesneyi yönetmeli. İlişkiyi tutmak yetmez:
+        // bir viewer, viewer ekleyebilmemeli.
         match policy.administrative_relation(tuple.object.kind()) {
             Some(relation) => {
                 if !holds(model, index, &tuple.object, relation, actor)? {
@@ -154,6 +169,9 @@ pub fn may_apply(
         }
 
         if policy.is_structural(tuple.object.kind(), &tuple.relation) {
+            // §24 #11: iki uç birden. Yalnızca çocuk üzerindeki yetki,
+            // CVE-2026-9099'da ayrıcalıklı grubu saldırganın altına
+            // taşımaya yeten şeydi.
             let target = tuple.subject.entity();
             match policy.administrative_relation(target.kind()) {
                 Some(relation) => {
@@ -170,6 +188,8 @@ pub fn may_apply(
                 }
             }
         } else if matches!(op, TupleOp::Write(_))
+            // Dağıtılan izne zaten sahip olunmalı. Bir izni kaldırmak verme
+            // işlemi değildir, o yüzden yalnızca yazmalar buna bağlıdır.
             && !holds(model, index, &tuple.object, &tuple.relation, actor)?
         {
             return Err(GrantRefusal::GrantsWhatItDoesNotHold {
@@ -179,6 +199,10 @@ pub fn may_apply(
         }
     }
 
+    // §24 #11: bir hiyerarşi taşıması iki sıradan tuple değişikliğidir ve her
+    // biri yukarıdaki kontrollerden geçer. Ek olarak yapmaması gereken şey,
+    // aktörü daha önce sahip olmadığı bir şeye sahip bırakmaktır.
+    // CVE-2026-9099 ve GitLab CVE-2026-35595 aynı sınıftır.
     let after = apply(index, ops);
 
     for (object, relation) in touched_pairs(model, ops) {

@@ -64,6 +64,10 @@ impl CodeChallenge {
         &self.digest
     }
 
+    // RFC 7636 §4.6. §8 §5254: RFC sabit zamanı ZORUNLU KILMIYOR, "ama maliyeti
+    // sıfır olduğundan yine de yapın". Elle yazılmış bir karşılaştırma derleyici
+    // tarafından kaldırılabilir; `subtle` tam olarak bunu engellemek için var
+    // (Cargo.toml, subtle gerekçesi).
     pub fn verify(&self, verifier: &str, hasher: &impl Sha256) -> Result<(), PkceError> {
         validate_verifier_syntax(verifier)?;
 

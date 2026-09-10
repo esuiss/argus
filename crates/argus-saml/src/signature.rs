@@ -84,6 +84,11 @@ pub trait XmlVerifier {
 pub struct BergshamraVerifier;
 
 #[must_use]
+// §16 §1.13 ve PortSwigger "The Fragile Lock" (10 Ara 2025): Void
+// Canonicalization sınıfı, canonicalization çözülemeyen bir göreli URI'yle
+// karşılaşınca güvenli şekilde fail etmek yerine BOŞ dizge döndürüp boş
+// içeriğin geçerli hash'ini üretmesidir. Bu yüzden `#fragment` olmayan hiçbir
+// referans kabul edilmez.
 pub fn is_same_document_reference(uri: &str) -> bool {
     let Some(fragment) = uri.strip_prefix('#') else {
         return false;
@@ -174,6 +179,11 @@ impl XmlVerifier for BergshamraVerifier {
                             return Err(SignatureFault::IncompleteCoverage);
                         };
 
+                        // XSW savunmasının mimari çekirdeği. XSW1, 2, 3, 4 ve 7
+                        // DOKÜMAN olarak başarıyla doğrulanır; onları yenen tek
+                        // şey düğüm izolasyonudur. Doğrulama, doğrulanan düğümün
+                        // exclusive c14n baytlarını döndürür, böylece çağıran
+                        // imzalananla okuduğunu ayrıştıramaz.
                         let set = NodeSet::tree_without_comments(node, &parsed);
                         let bytes = bergshamra::c14n::canonicalize_doc::<&str>(
                             &parsed,

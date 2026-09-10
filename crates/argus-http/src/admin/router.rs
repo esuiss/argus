@@ -6,6 +6,11 @@ use argus_core::admin::manifest::{self, MANIFEST, RouteRequirement, Surface};
 use super::guard::Shared;
 use super::{audit, jobs, openapi, resources};
 
+// §24 #10. Router izin manifestosundan üretilir: her kayıt burada bir
+// handler alır ve kaydı olmayan bir handler'ın mount edilecek yeri yoktur.
+// Zitadel CVE-2025-27507, bir servis tanımındaki tek yanlış dizgeyle açılan
+// 12 endpoint'ti; düzeltme sınıfı tam olarak budur: gereksinim veridir ve
+// tesisat onun yanına yazılmak yerine ondan TÜRETİLİR.
 fn handler(entry: &RouteRequirement) -> Option<MethodRouter<Shared>> {
     Some(match (entry.method, entry.path) {
         ("GET", manifest::CLIENTS) => get(resources::list_clients),
@@ -39,6 +44,9 @@ fn handler(entry: &RouteRequirement) -> Option<MethodRouter<Shared>> {
 pub fn build(state: Shared) -> Router {
     let mut router: Router<Shared> = Router::new();
 
+    // §24 #21: kontrol düzlemi route'ları yalnızca kontrol düzlemi bağlantısı
+    // tutan bir süreçte vardır. Kiracıya hizmet eden bir dağıtım onları
+    // reddetmekle kalmaz, TAŞIMAZ.
     let serves_control_plane = state.store.serves_control_plane();
 
     for entry in MANIFEST {
@@ -54,6 +62,9 @@ pub fn build(state: Shared) -> Router {
 }
 
 #[must_use]
+// Handler'ı olmayan manifesto kayıtları. Test süiti bunun boş olduğunu
+// doğrular; sabit değil fonksiyon, çünkü kontrol router'ın üretildiği tablonun
+// ta kendisine karşı koşmalı.
 pub fn unimplemented() -> Vec<(&'static str, &'static str)> {
     MANIFEST
         .iter()
