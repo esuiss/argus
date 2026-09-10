@@ -4,6 +4,7 @@ version.workspace      = true
 edition.workspace      = true
 rust-version.workspace = true
 license.workspace      = true
+publish.workspace      = true
 repository.workspace   = true
 
 [dependencies]
@@ -12,9 +13,9 @@ bergshamra.workspace      = true
 bergshamra-c14n.workspace = true
 bergshamra-xml.workspace  = true
 uppsala.workspace         = true
-quick-xml.workspace       = true
 thiserror.workspace       = true
 base64ct.workspace        = true
 
 [lints]
 workspace = true
+

@@ -47,7 +47,38 @@ CREATE ROLE argus_plane_login LOGIN PASSWORD '...' NOSUPERUSER NOBYPASSRLS IN RO
 kendi kodu istese bile kiracı kaydına ulaşamamalı. Aynı role hem uygulama hem
 kontrol düzlemi üyeliği verirsen bu sınır süse dönüşür.
 
-### 3. Başlatma
+### 3. Kiracılar
+
+Argus çok kiracılıdır ve bir isteğin hangi kiracıya ait olduğu **Host
+başlığından** çözülür (§1 #8: issuer stratejisi subdomain birincil).
+
+```sql
+SET ROLE argus_platform;
+INSERT INTO tenants (slug, issuer_host) VALUES ('acme', 'acme.example.com');
+```
+
+Kayıt defteri başlangıçta bu tablodan kurulur. Tanınmayan bir host **404
+alır** — bilinen bir kiracıya düşmek, A'nın verisini B'nin adresinde sunmak
+olurdu.
+
+`ARGUS_PLATFORM_DATABASE_URL` verilmezse dağıtım tek kiracılıdır: kayıt defteri
+`ARGUS_ISSUER`'dan tek girişle kurulur.
+
+**Kiracı başına imzalama anahtarı (§1 #4).** Anahtarlar
+`$ARGUS_SIGNING_KEY_DIR/<slug>/` altında aranır. Orada yoksa dağıtım anahtarına
+düşülür ve bu **uyarılır**: paylaşımlı anahtar, bir kiracının token'ının başka
+bir kiracının anahtarıyla doğrulanabilmesi demektir.
+
+```
+/etc/argus/keys/
+├── k1.pkcs8          # paylaşımlı, yalnızca yedek
+├── acme/k1.pkcs8     # acme'nin kendi anahtarı
+└── globex/k1.pkcs8
+```
+
+Her kiracının WebAuthn relying party kimliği de kendi host'udur (§1 #12).
+
+### 4. Başlatma
 
 ```bash
 ARGUS_ENV=production \
@@ -91,18 +122,18 @@ Ayrıca `ARGUS_CIMD_ALLOW_LOOPBACK` ve `ARGUS_FEDERATION_ALLOW_PRIVATE`
 | Değişken | Varsayılan | Ne yapar |
 |---|---|---|
 | `ARGUS_ENV` | `dev` | `production` ise yukarıdaki reddetmeler devreye girer. |
-| `ARGUS_ISSUER` | `http://localhost:8080` | Token'ların `iss` değeri ve discovery tabanı. |
+| `ARGUS_ISSUER` | `http://localhost:8080` | Tek kiracılı dağıtımın issuer'ı. Çok kiracılıda her kiracının issuer'ı `tenants.issuer_host`'tan gelir. |
 | `ARGUS_BIND` | `127.0.0.1:8080` | Genel dinleyici. |
 | `ARGUS_ADMIN_BIND` | yok | Verilirse yönetim API'si buraya taşınır ve genel dinleyicide **görünmez**. |
 | `ARGUS_DATABASE_URL` | yok | Verilmezse bellek içi depo ve DevAuthenticator. |
-| `ARGUS_PLATFORM_DATABASE_URL` | yok | Kontrol düzlemi girişi. Yoksa `/admin/platform` route'ları hiç mount edilmez. |
+| `ARGUS_PLATFORM_DATABASE_URL` | yok | Kontrol düzlemi girişi. Yoksa `/admin/platform` route'ları hiç mount edilmez **ve dağıtım tek kiracılı olur** (kiracı tablosu okunamaz). |
 | `ARGUS_TLS_CERT`, `ARGUS_TLS_KEY` | yok | İkisi birlikte verilir. |
 
 ### Anahtarlar
 
 | Değişken | Ne yapar |
 |---|---|
-| `ARGUS_SIGNING_KEY_DIR` | `*.pkcs8` ES256 anahtarları. Yoksa geçici bir anahtar üretilir ve uyarı basılır. |
+| `ARGUS_SIGNING_KEY_DIR` | `*.pkcs8` ES256 anahtarları. Kiracı başına alt dizin aranır (§1 #4). Yoksa geçici bir anahtar üretilir ve uyarı basılır. |
 | `ARGUS_ACTIVE_KID` | Yeni imzaların hangi anahtarla atılacağı. Diğerleri doğrulama için yayında kalır. |
 | `ARGUS_RSA_KEY_DIR` | RS256 anahtarları. Yalnızca RS256 isteyen federasyon karşı tarafları için. |
 | `ARGUS_BLIND_INDEX_KEY` | 32 bayt hex. Şifreli alanlarda eşitlik araması için. |
@@ -120,7 +151,7 @@ Ayrıca `ARGUS_CIMD_ALLOW_LOOPBACK` ve `ARGUS_FEDERATION_ALLOW_PRIVATE`
 | `ARGUS_FEDERATION_KEY_DIR` | Entity statement imzalama anahtarları. |
 | `ARGUS_FEDERATION_ROLE` | `trust_anchor` veya boş (leaf). |
 | `ARGUS_FEDERATION_TRUST_ANCHORS` | Virgülle ayrılmış güven çıpaları. |
-| `ARGUS_WEBAUTHN_RP_ID` | Verilmezse WebAuthn uçları 501 döner. |
+| `ARGUS_WEBAUTHN_RP_ID` | Tek kiracılı dağıtımda relying party kimliği. Çok kiracılıda her kiracı kendi host'unu alır (§1 #12). Verilmezse WebAuthn uçları 501 döner. |
 | `ARGUS_FAPI_PROFILE` | `1` ise: yetkilendirme istekleri PAR'dan geçmek zorunda, token'lar gönderen-bağlı olmak zorunda, public client reddedilir. |
 
 ### Yalnızca geliştirme
@@ -168,6 +199,21 @@ ARGUS_TEST_PLATFORM_DATABASE_URL=postgres://argus_platform_test:argus@localhost:
 `ARGUS_TEST_DATABASE_URL` verilmezse veritabanına dokunan testler sessizce
 atlanır. Test rolü `NOBYPASSRLS` olmalı, yoksa RLS testleri yanlış sebeple
 geçer.
+
+---
+
+## Üretim yapısı için bir not
+
+`bergshamra`'nın varsayılan arka ucu `rsa` crate'ini getiriyor ve o crate
+RUSTSEC-2023-0071 (Marvin) yüzünden `deny.toml`'da yasaklı. Argus hiç RSA şifre
+çözme yapmadığı için maruziyet yok, ama Linux'ta crate tamamen düşürülebilir:
+
+```toml
+bergshamra = { version = "0.9", default-features = false, features = ["aws-lc"] }
+```
+
+Bu bir cargo özelliği olarak sunulmuyor, çünkü o arka uç yalnızca Linux
+x86_64/aarch64'te derleniyor ve `--all-features` kapısını kırardı.
 
 ---
 

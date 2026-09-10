@@ -7,6 +7,26 @@ all-features = true
 version = 2
 yanked = "deny"
 
+# Tek istisna, ve gerekçesi ölçülmüş bir maruziyet:
+#
+# Marvin bir RSA ŞİFRE ÇÖZME yan kanalıdır. Argus hiç RSA şifre çözme yapmıyor —
+# bergshamra'dan yalnızca c14n, imza üretme/doğrulama ve anahtar yükleme
+# kullanılıyor, bergshamra-enc hiç çağrılmıyor. Saldırının ihtiyaç duyduğu
+# oracle bu üründe yok. Özel anahtar yalnızca SAML yanıtı imzalamada
+# kullanılıyor.
+#
+# Linux üretim yapısında crate ağaçtan tamamen düşürülebilir; Cargo.toml'da
+# bergshamra şöyle bildirilir:
+#
+#   bergshamra = { version = "0.9", default-features = false, features = ["aws-lc"] }
+#
+# Bu bir cargo özelliği olarak sunulmuyor, çünkü bergshamra'nın aws-lc arka ucu
+# macOS'ta derlenmiyor (kryptering 0.5.0 compile_error) ve `--all-features`
+# kapısını kırardı.
+ignore = [
+    { id = "RUSTSEC-2023-0071", reason = "Marvin bir sifre cozme yan kanali; Argus RSA ile sifre cozmuyor. Linux'ta argus-saml/aws-lc ile crate agactan dusuyor." },
+]
+
 [licenses]
 version = 2
 # GPL/AGPL bir IdP ürününde lisans bulaşması riskidir; allow listesinde YOK
@@ -21,18 +41,49 @@ allow = [
     "Unicode-3.0",
     "Zlib",
     "CC0-1.0",
+    # Zayıf copyleft, dosya bazlı; AGPL ile uyumlu. Cargo.toml zaten
+    # webpki-roots gerekçesinde bunu yazıyordu, allow listesine geçmemiş.
+    # webauthn-rs ailesi de MPL-2.0.
+    "MPL-2.0",
+    # webpki-roots 1.x kök sertifika VERİSİ için bu izinli veri lisansını
+    # kullanıyor. Kod lisansı değil, veri lisansı.
+    "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.93
+
+# Argus'un KENDİ crate'leri AGPL-3.0-only ve hiçbiri yayınlanmıyor
+# (`publish = false`). Yukarıdaki allow listesi BAĞIMLILIKLAR içindir; kendi
+# kodumuzu ona karşı denetlemek kapının projeyi reddetmesi demekti ve tam olarak
+# öyle oluyordu.
+private = { ignore = true }
 
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Workspace içi yol bağımlılıkları sürüm taşımaz ve taşımamalı; wildcard
+# yasağı yayınlanan bağımlılıklar içindir.
+allow-wildcard-paths = true
 
 [[bans.deny]]
 # §7: RS256 için doğrulanmış implementasyon yok; Marvin saldırısı hâlâ yamalı değil.
 name = "rsa"
 reason = "RUSTSEC-2023-0071 (Marvin) hala acik. Kripto icin aws-lc-rs kullanilir."
+# Yasak DURUYOR ve yalnızca tek bir yoldan geçilebiliyor: bergshamra'nın anahtar
+# katmanı. Ölçülen maruziyet:
+#
+#   - Argus HİÇ RSA şifre çözme yapmıyor. bergshamra'dan yalnızca c14n, imza
+#     üretme/doğrulama ve anahtar yükleme kullanılıyor; bergshamra-enc hiç
+#     çağrılmıyor. Marvin'in ihtiyaç duyduğu şifre çözme oracle'ı bu üründe yok.
+#   - Özel anahtar yalnızca SAML yanıtı imzalamada kullanılıyor.
+#   - Linux üretim yapısında bergshamra `default-features = false,
+#     features = ["aws-lc"]` ile bildirilerek crate ağaçtan tamamen düşürülür.
+#     macOS'ta o arka uç derlenmiyor, o yüzden burada bu istisna gerekiyor.
+#
+# Başka bir bağımlılık `rsa`'yı çekmeye kalkarsa bu kapı yine kırılır, ki
+# istenen tam olarak budur.
+wrappers = ["bergshamra-keys", "kryptering"]
 
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+

@@ -821,10 +821,18 @@ fn tls_config(config: &Config) -> Result<Option<Arc<rustls::ServerConfig>>, Stri
     Ok(Some(Arc::new(server_config)))
 }
 
+// RUSTSEC-2025-0134: rustls-pemfile bakımsız ve deposu Ağustos 2025'ten beri
+// arşivde. Son sürümü zaten rustls-pki-types'taki aynı kodun ince bir sarmalıydı,
+// o yüzden `PemObject` doğrudan kullanılıyor ve bağımlılık ağaçtan çıktı.
 fn load_certs(path: &str) -> Result<Vec<rustls::pki_types::CertificateDer<'static>>, String> {
-    let data = std::fs::read(path).map_err(|_| format!("cannot read {path}"))?;
-    let certs: Result<Vec<_>, _> = rustls_pemfile::certs(&mut data.as_slice()).collect();
-    let certs = certs.map_err(|_| format!("{path} is not a valid PEM certificate chain"))?;
+    use rustls::pki_types::pem::PemObject as _;
+
+    let certs: Vec<rustls::pki_types::CertificateDer<'static>> =
+        rustls::pki_types::CertificateDer::pem_file_iter(path)
+            .map_err(|_| format!("cannot read {path}"))?
+            .collect::<Result<_, _>>()
+            .map_err(|_| format!("{path} is not a valid PEM certificate chain"))?;
+
     if certs.is_empty() {
         return Err(format!("{path} contains no certificates"));
     }
@@ -832,10 +840,10 @@ fn load_certs(path: &str) -> Result<Vec<rustls::pki_types::CertificateDer<'stati
 }
 
 fn load_key(path: &str) -> Result<rustls::pki_types::PrivateKeyDer<'static>, String> {
-    let data = std::fs::read(path).map_err(|_| format!("cannot read {path}"))?;
-    rustls_pemfile::private_key(&mut data.as_slice())
-        .map_err(|_| format!("{path} is not a valid PEM private key"))?
-        .ok_or_else(|| format!("{path} contains no private key"))
+    use rustls::pki_types::pem::PemObject as _;
+
+    rustls::pki_types::PrivateKeyDer::from_pem_file(path)
+        .map_err(|_| format!("{path} is not a valid PEM private key"))
 }
 
 async fn serve_tls(
