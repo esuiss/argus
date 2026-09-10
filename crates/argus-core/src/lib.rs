@@ -34,6 +34,7 @@ pub mod scim;
 pub mod scim_event;
 pub mod scim_patch;
 pub mod ssrf;
+pub mod theme;
 pub mod time;
 pub mod vault;
 

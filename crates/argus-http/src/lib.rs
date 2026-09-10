@@ -10,6 +10,7 @@ pub mod federation;
 pub mod hashing;
 pub mod limits;
 pub mod memstore;
+pub mod pages;
 pub mod par;
 pub mod replay;
 pub mod router;

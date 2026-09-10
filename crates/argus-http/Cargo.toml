@@ -15,6 +15,7 @@ argus-proto.path     = "../argus-proto"
 argus-saml.path      = "../argus-saml"
 argus-store.path     = "../argus-store"
 hyper-util.workspace = true
+liquid.workspace     = true
 axum.workspace       = true
 tokio.workspace      = true
 serde.workspace      = true

@@ -92,6 +92,12 @@ criterion = { version = "0.5", default-features = false }
 # Yalnızca dev-dependency (§27 test stratejisi: "insta snapshot altyapısı").
 # Üretim binary'sine girmez. Lisans: Apache-2.0.
 insta = "1"
+# §23 §8 #18-19 ve §1 #19: kiracıya sunucuda kod çalıştıran şablon verilmez.
+# Liquid tam bunun için tasarlandı — Shopify onu güvenilmeyen mağaza sahipleri
+# yazsın diye yaptı. Fonksiyon çağırma sözdizimi YOK, nesne grafiğine erişim
+# YOK; şablon yalnızca host'un elden verdiği verilere ulaşır.
+# §1 §2.2 listesinde yoktu. Lisans: MIT (AGPL uyumlu).
+liquid          = "0.26"
 # §27 ve §10 §7284: property-based test. §1 §2.2 listesinde yoktu; yalnızca
 # dev-dependency, üretim binary'sine girmez. Lisans: MIT OR Apache-2.0.
 proptest        = "1"
