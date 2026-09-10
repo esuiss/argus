@@ -6,11 +6,20 @@ use serde::{Deserialize, Serialize};
 pub struct Jwk {
     pub kty: String,
 
-    pub crv: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crv: Option<String>,
 
-    pub x: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub x: Option<String>,
 
-    pub y: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub y: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub n: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub e: Option<String>,
 
     pub kid: String,
 
@@ -25,12 +34,29 @@ impl Jwk {
     pub fn from_components(c: &PublicKeyComponents) -> Self {
         Self {
             kty: "EC".to_owned(),
-            crv: c.curve().to_owned(),
-            x: Base64UrlUnpadded::encode_string(&c.x),
-            y: Base64UrlUnpadded::encode_string(&c.y),
+            crv: Some(c.curve().to_owned()),
+            x: Some(Base64UrlUnpadded::encode_string(&c.x)),
+            y: Some(Base64UrlUnpadded::encode_string(&c.y)),
+            n: None,
+            e: None,
             kid: c.kid.clone(),
             key_use: "sig".to_owned(),
             alg: c.algorithm().to_owned(),
+        }
+    }
+
+    #[must_use]
+    pub fn rsa(kid: &str, modulus: &[u8], exponent: &[u8]) -> Self {
+        Self {
+            kty: "RSA".to_owned(),
+            crv: None,
+            x: None,
+            y: None,
+            n: Some(Base64UrlUnpadded::encode_string(modulus)),
+            e: Some(Base64UrlUnpadded::encode_string(exponent)),
+            kid: kid.to_owned(),
+            key_use: "sig".to_owned(),
+            alg: "RS256".to_owned(),
         }
     }
 }

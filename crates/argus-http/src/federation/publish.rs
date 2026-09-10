@@ -69,7 +69,7 @@ impl FederationIdentity {
         metadata.insert(ENTITY_TYPE_FEDERATION.to_owned(), self.federation_entity());
         metadata.insert(
             ENTITY_TYPE_OPENID_PROVIDER.to_owned(),
-            provider_metadata.clone(),
+            with_federation_parameters(provider_metadata),
         );
 
         let mut claims = Map::new();
@@ -153,4 +153,26 @@ impl FederationIdentity {
 
         sign(&Value::Object(claims), key, ENTITY_STATEMENT_TYPE)
     }
+}
+
+pub const CLIENT_REGISTRATION_TYPES: [&str; 1] = ["automatic"];
+
+#[must_use]
+pub fn with_federation_parameters(provider_metadata: &Value) -> Value {
+    let mut body = provider_metadata
+        .as_object()
+        .cloned()
+        .unwrap_or_else(Map::new);
+
+    body.insert(
+        "client_registration_types_supported".to_owned(),
+        Value::Array(
+            CLIENT_REGISTRATION_TYPES
+                .iter()
+                .map(|name| Value::String((*name).to_owned()))
+                .collect(),
+        ),
+    );
+
+    Value::Object(body)
 }

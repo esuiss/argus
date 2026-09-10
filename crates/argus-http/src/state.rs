@@ -11,6 +11,7 @@ pub struct TenantContext {
     pub active_key: Arc<SigningKey>,
 
     pub published_keys: Vec<Arc<SigningKey>>,
+    pub rsa_keys: Vec<Arc<argus_crypto::rsa::RsaSigningKey>>,
     pub blind_index: argus_crypto::blind_index::BlindIndexKey,
     pub relying_party: Option<Arc<argus_proto::webauthn::RelyingParty>>,
 }

@@ -99,7 +99,7 @@ base64ct = { version = "1", default-features = false, features = ["alloc"] }
 # §1 §2.2 kararı: kripto sağlayıcı aws-lc-rs. §7: RS256 için doğrulanmış
 # implementasyon yok, `rsa` crate'i Marvin'e (RUSTSEC-2023-0071) hâlâ açık.
 # aws-lc-rs FIPS moduna hazır ve s2n-bignum'un makine-kontrollü ispatlarını taşır.
-aws-lc-rs = { version = "1", default-features = false, features = ["aws-lc-sys"] }
+aws-lc-rs = { version = "1", default-features = false, features = ["aws-lc-sys", "ring-io"] }
 
 # Tel formatı. `argus-proto` protokol tiplerini serde ile taşır; `argus-core`
 # bunlara bağımlı DEĞİLDİR (karar mantığı serde bilmez).

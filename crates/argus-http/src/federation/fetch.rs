@@ -105,21 +105,45 @@ pub fn target_of(url: &str) -> Result<Target, FetchFault> {
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Reach {
+    pub loopback: bool,
+    pub private: bool,
+}
+
+impl Reach {
+    #[must_use]
+    pub const fn public_only() -> Self {
+        Self {
+            loopback: false,
+            private: false,
+        }
+    }
+
+    #[must_use]
+    pub const fn permits(self, verdict: AddressVerdict) -> bool {
+        match verdict {
+            AddressVerdict::Loopback => self.loopback,
+            AddressVerdict::Private => self.private,
+            _ => false,
+        }
+    }
+}
+
 pub async fn fetch_statement(
     url: &str,
     resolver: &impl Resolver,
     tls: &Arc<rustls::ClientConfig>,
-    allow_loopback: bool,
+    reach: Reach,
 ) -> Result<String, FetchFault> {
     let target = target_of(url)?;
 
     let addresses = resolver.resolve(&target.host, target.port).await?;
 
     for address in &addresses {
-        if let Some(verdict) = classify(*address) {
-            if allow_loopback && verdict == AddressVerdict::Loopback {
-                continue;
-            }
+        if let Some(verdict) = classify(*address)
+            && !reach.permits(verdict)
+        {
             return Err(FetchFault::BlockedAddress(verdict));
         }
     }
@@ -135,9 +159,9 @@ pub async fn fetch_configuration(
     entity: &EntityIdentifier,
     resolver: &impl Resolver,
     tls: &Arc<rustls::ClientConfig>,
-    allow_loopback: bool,
+    reach: Reach,
 ) -> Result<String, FetchFault> {
-    fetch_statement(&entity.well_known(), resolver, tls, allow_loopback).await
+    fetch_statement(&entity.well_known(), resolver, tls, reach).await
 }
 
 pub async fn fetch_subordinate(
@@ -145,7 +169,7 @@ pub async fn fetch_subordinate(
     subject: &EntityIdentifier,
     resolver: &impl Resolver,
     tls: &Arc<rustls::ClientConfig>,
-    allow_loopback: bool,
+    reach: Reach,
 ) -> Result<String, FetchFault> {
     let separator = if fetch_endpoint.contains('?') {
         '&'
@@ -156,7 +180,7 @@ pub async fn fetch_subordinate(
         "{fetch_endpoint}{separator}sub={}",
         urlencode(subject.as_str())
     );
-    fetch_statement(&url, resolver, tls, allow_loopback).await
+    fetch_statement(&url, resolver, tls, reach).await
 }
 
 #[must_use]

@@ -411,3 +411,27 @@ fn an_empty_chain_and_an_over_long_chain_are_both_refused() {
         ResolveFault::Chain(argus_core::federation::chain::ChainFault::TooLong)
     ));
 }
+
+#[test]
+fn the_published_provider_metadata_declares_how_clients_may_register() {
+    let signing = key("fed-1");
+    let identity = identity(ANCHOR, Role::Leaf, &[ANCHOR], &signing);
+
+    let token = identity
+        .entity_configuration(
+            &json!({ "issuer": ANCHOR }),
+            NOW,
+            Duration::from_seconds(3_600),
+        )
+        .expect("configuration");
+
+    let body = verify(&token, &identity.jwks(), ENTITY_STATEMENT_TYPE).expect("verify");
+
+    assert_eq!(
+        body["metadata"]["openid_provider"]["client_registration_types_supported"],
+        json!(["automatic"]),
+        "the federation profile makes this parameter required; without it a relying party \
+         cannot tell whether it may register at all"
+    );
+    assert_eq!(body["metadata"]["openid_provider"]["issuer"], ANCHOR);
+}

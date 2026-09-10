@@ -134,6 +134,7 @@ async fn serve() -> String {
             metadata: AuthorizationServerMetadata::for_issuer("http://argus.test"),
             active_key: Arc::clone(&key),
             published_keys: vec![key],
+            rsa_keys: Vec::new(),
             blind_index: test_blind_index(),
             relying_party: None,
         },

@@ -12,6 +12,10 @@ pub fn jwks(tenant: &TenantContext) -> Result<JwkSet, argus_crypto::CryptoError>
     for key in &tenant.published_keys {
         keys.push(Jwk::from_components(&key.public_components()?));
     }
+    for key in &tenant.rsa_keys {
+        let components = key.public_components()?;
+        keys.push(Jwk::rsa(key.kid(), &components.n, &components.e));
+    }
     Ok(JwkSet::new(keys))
 }
 
@@ -36,6 +40,7 @@ mod tests {
             metadata: AuthorizationServerMetadata::for_issuer("https://acme.argus.test"),
             active_key: Arc::clone(&new),
             published_keys: vec![Arc::new(old), new],
+            rsa_keys: Vec::new(),
             blind_index: test_blind_index(),
             relying_party: None,
         }

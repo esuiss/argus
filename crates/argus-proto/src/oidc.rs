@@ -56,6 +56,61 @@ pub fn sign_id_token(claims: &IdTokenClaims, key: &SigningKey) -> Result<String,
     ))
 }
 
+pub fn sign_id_token_rs256(
+    claims: &IdTokenClaims,
+    key: &argus_crypto::rsa::RsaSigningKey,
+) -> Result<String, JwtError> {
+    let header = format!(
+        r#"{{"alg":"RS256","kid":"{}","typ":"JWT"}}"#,
+        key.kid().replace('"', "")
+    );
+    let payload = serde_json::to_vec(claims).map_err(|_| JwtError::Serialisation)?;
+
+    let signing_input = format!(
+        "{}.{}",
+        Base64UrlUnpadded::encode_string(header.as_bytes()),
+        Base64UrlUnpadded::encode_string(&payload)
+    );
+
+    let signature = key
+        .sign(signing_input.as_bytes())
+        .map_err(|_| JwtError::Signing)?;
+
+    Ok(format!(
+        "{signing_input}.{}",
+        Base64UrlUnpadded::encode_string(&signature)
+    ))
+}
+
+pub fn verify_id_token_rs256(
+    token: &str,
+    key: &argus_crypto::rsa::RsaVerifyingKey,
+) -> Result<IdTokenClaims, JwtError> {
+    let mut parts = token.split('.');
+    let (Some(header), Some(body), Some(signature), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return Err(JwtError::Malformed);
+    };
+
+    let header_bytes = Base64UrlUnpadded::decode_vec(header).map_err(|_| JwtError::Malformed)?;
+    let declared: serde_json::Value =
+        serde_json::from_slice(&header_bytes).map_err(|_| JwtError::Malformed)?;
+
+    if declared.get("alg").and_then(serde_json::Value::as_str) != Some("RS256") {
+        return Err(JwtError::DisallowedAlgorithm);
+    }
+
+    let raw = Base64UrlUnpadded::decode_vec(signature).map_err(|_| JwtError::Malformed)?;
+    let signing_input = format!("{header}.{body}");
+
+    key.verify(signing_input.as_bytes(), &raw)
+        .map_err(|_| JwtError::BadSignature)?;
+
+    let claims = Base64UrlUnpadded::decode_vec(body).map_err(|_| JwtError::Malformed)?;
+    serde_json::from_slice(&claims).map_err(|_| JwtError::Malformed)
+}
+
 pub fn verify_id_token(token: &str, key: &VerifyingKey) -> Result<IdTokenClaims, JwtError> {
     let mut parts = token.split('.');
     let (Some(header_b64), Some(claims_b64), Some(sig_b64), None) =

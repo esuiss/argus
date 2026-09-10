@@ -642,3 +642,33 @@ fn an_authority_must_publish_both_endpoints_it_is_required_to_serve() {
 fn a_leaf_publishing_no_authority_endpoints_passes_its_role_check() {
     check_role(&configuration(LEAF, &rp_metadata()), Role::Leaf).expect("leaf");
 }
+
+#[test]
+fn a_trust_anchor_resolving_itself_is_a_chain_of_one() {
+    let chain = [configuration(
+        ANCHOR,
+        &json!({ "metadata": { "openid_provider": { "issuer": ANCHOR } } }),
+    )];
+
+    let resolved = resolve(&chain, &anchors(), "openid_provider", NOW)
+        .expect("an anchor vouches for itself and needs nobody above it");
+
+    assert_eq!(resolved.subject.as_str(), ANCHOR);
+    assert_eq!(resolved.trust_anchor.as_str(), ANCHOR);
+    assert_eq!(resolved.path_length, 0);
+    assert_eq!(resolved.metadata["issuer"], ANCHOR);
+}
+
+#[test]
+fn an_entity_that_is_not_a_configured_anchor_cannot_resolve_itself() {
+    let chain = [configuration(
+        LEAF,
+        &json!({ "metadata": { "openid_provider": { "issuer": LEAF } } }),
+    )];
+
+    assert_eq!(
+        resolve(&chain, &anchors(), "openid_provider", NOW).unwrap_err(),
+        ChainFault::NoTrustAnchor,
+        "otherwise any entity could declare itself trusted by presenting only its own statement"
+    );
+}

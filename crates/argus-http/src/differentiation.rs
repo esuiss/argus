@@ -3,6 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use argus_core::client_resolution::TrustLevel;
 use argus_core::delegation::parse_chain;
+use argus_core::federation::statement::ENTITY_TYPE_OPENID_PROVIDER;
 use argus_core::id::{TenantId, UserId};
 use argus_core::time::{Duration, Timestamp};
 use argus_core::vault::{
@@ -12,7 +13,7 @@ use argus_core::vault::{
 use argus_crypto::sealing::SealingKey;
 use argus_crypto::{SigningKey, VerifyingKey};
 use argus_proto::agent_card::{CardFault, PublishedKey, sign as sign_card};
-use argus_proto::federation::ENTITY_STATEMENT_TYPE;
+use argus_proto::federation::{ENTITY_STATEMENT_TYPE, RESOLVE_RESPONSE_TYPE};
 use argus_proto::jwt::AccessTokenClaims;
 use argus_store::PostgresStore;
 use axum::extract::State;
@@ -28,12 +29,47 @@ pub const AGENT_CARD_SCOPE: &str = "urn:argus:agent-card:sign";
 
 pub struct DifferentiationState {
     pub tenant_id: TenantId,
+    pub store: Option<PostgresStore>,
     pub issuer: String,
     pub published_keys: Vec<Arc<SigningKey>>,
     pub federation: Option<FederationIdentity>,
     pub provider_metadata: Value,
     pub agent_card_key: Option<Arc<SigningKey>>,
     pub vault: Option<VaultRuntime>,
+    pub resolver: Option<ResolverRuntime>,
+}
+
+pub struct ResolverRuntime {
+    federation: crate::federation::resolver::Federation<crate::federation::fetch::SystemResolver>,
+}
+
+impl core::fmt::Debug for ResolverRuntime {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("ResolverRuntime")
+    }
+}
+
+impl ResolverRuntime {
+    #[must_use]
+    pub const fn new(
+        federation: crate::federation::resolver::Federation<
+            crate::federation::fetch::SystemResolver,
+        >,
+    ) -> Self {
+        Self { federation }
+    }
+
+    #[must_use]
+    pub fn trust_anchors(&self) -> &[argus_core::federation::statement::EntityIdentifier] {
+        &self.federation.trust_anchors
+    }
+
+    #[must_use]
+    pub const fn federation(
+        &self,
+    ) -> &crate::federation::resolver::Federation<crate::federation::fetch::SystemResolver> {
+        &self.federation
+    }
 }
 
 pub struct VaultRuntime {
@@ -55,6 +91,19 @@ fn now() -> Timestamp {
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
     Timestamp::from_unix_seconds(seconds)
+}
+
+fn federation_error(status: u16, code: &str, detail: &str) -> Response {
+    let status = StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_REQUEST);
+    (
+        status,
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "application/json".to_owned(),
+        )],
+        Json(json!({ "error": code, "error_description": detail })),
+    )
+        .into_response()
 }
 
 fn problem(status: u16, detail: &str) -> Response {
@@ -121,7 +170,7 @@ fn holds(claims: &AccessTokenClaims, scope: &str) -> bool {
 
 async fn entity_configuration(State(state): State<Shared>) -> Response {
     let Some(identity) = state.federation.as_ref() else {
-        return problem(404, "this server is not configured as a federation entity");
+        return federation_error(404, "not_found", "this server is not a federation entity");
     };
 
     match identity.entity_configuration(
@@ -137,13 +186,225 @@ async fn entity_configuration(State(state): State<Shared>) -> Response {
             token,
         )
             .into_response(),
+        Err(e) => federation_error(500, "server_error", &e.to_string()),
+    }
+}
+
+async fn federation_list(State(state): State<Shared>) -> Response {
+    let Some(identity) = state.federation.as_ref() else {
+        return federation_error(404, "not_found", "this server is not a federation entity");
+    };
+
+    if !identity.role.serves_subordinates() {
+        return federation_error(404, "not_found", "this entity serves no subordinates");
+    }
+
+    let Some(store) = state.store.as_ref() else {
+        return federation_error(
+            503,
+            "temporarily_unavailable",
+            "the register is unavailable",
+        );
+    };
+
+    match store.list_subordinates(state.tenant_id).await {
+        Ok(subjects) => Json(subjects).into_response(),
+        Err(_) => federation_error(
+            503,
+            "temporarily_unavailable",
+            "the register is unavailable",
+        ),
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct FetchQuery {
+    pub sub: String,
+    #[serde(default)]
+    pub iss: Option<String>,
+}
+
+async fn federation_fetch(
+    State(state): State<Shared>,
+    axum::extract::Query(query): axum::extract::Query<FetchQuery>,
+) -> Response {
+    let Some(identity) = state.federation.as_ref() else {
+        return federation_error(404, "not_found", "this server is not a federation entity");
+    };
+
+    if !identity.role.serves_subordinates() {
+        return federation_error(
+            404,
+            "not_found",
+            "this entity issues no subordinate statements",
+        );
+    }
+
+    if let Some(issuer) = query.iss.as_deref()
+        && issuer != identity.entity.as_str()
+    {
+        return federation_error(
+            400,
+            "invalid_request",
+            "this entity is not the issuer the request names",
+        );
+    }
+
+    if query.sub == identity.entity.as_str() {
+        return federation_error(
+            400,
+            "invalid_request",
+            "an entity does not issue a subordinate statement about itself",
+        );
+    }
+
+    let Some(store) = state.store.as_ref() else {
+        return federation_error(
+            503,
+            "temporarily_unavailable",
+            "the register is unavailable",
+        );
+    };
+
+    let Ok(subordinate) = store.find_subordinate(state.tenant_id, &query.sub).await else {
+        return federation_error(404, "not_found", "this entity has no such subordinate");
+    };
+
+    let Ok(subject) =
+        argus_core::federation::statement::EntityIdentifier::parse(&subordinate.subject)
+    else {
+        return federation_error(
+            500,
+            "server_error",
+            "the registered subject is not an entity identifier",
+        );
+    };
+
+    match identity.subordinate_statement(
+        &subject,
+        &subordinate.jwks,
+        subordinate.metadata_policy.as_ref(),
+        subordinate.constraints.as_ref(),
+        now(),
+        crate::federation::publish::DEFAULT_SUBORDINATE_LIFETIME,
+    ) {
+        Ok(token) => (
+            [(
+                axum::http::header::CONTENT_TYPE,
+                format!("application/{ENTITY_STATEMENT_TYPE}"),
+            )],
+            token,
+        )
+            .into_response(),
         Err(e) => problem(500, &e.to_string()),
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct ResolveQuery {
+    pub sub: String,
+    pub trust_anchor: String,
+    #[serde(default)]
+    pub entity_type: Option<String>,
+}
+
+async fn federation_resolve(
+    State(state): State<Shared>,
+    axum::extract::Query(query): axum::extract::Query<ResolveQuery>,
+) -> Response {
+    let Some(identity) = state.federation.as_ref() else {
+        return federation_error(404, "not_found", "this server resolves no entities");
+    };
+
+    let Ok(subject) = argus_core::federation::statement::EntityIdentifier::parse(&query.sub) else {
+        return federation_error(400, "invalid_request", "sub is not an entity identifier");
+    };
+
+    let Ok(anchor) =
+        argus_core::federation::statement::EntityIdentifier::parse(&query.trust_anchor)
+    else {
+        return federation_error(
+            400,
+            "invalid_request",
+            "trust_anchor is not an entity identifier",
+        );
+    };
+
+    let Some(resolver) = state.resolver.as_ref() else {
+        return federation_error(
+            404,
+            "not_found",
+            "this server was not configured to resolve trust chains",
+        );
+    };
+
+    if !resolver
+        .trust_anchors()
+        .iter()
+        .any(|known| known == &anchor)
+    {
+        return federation_error(
+            400,
+            "invalid_trust_anchor",
+            "this server is not configured with that trust anchor",
+        );
+    }
+
+    let entity_type = query
+        .entity_type
+        .clone()
+        .unwrap_or_else(|| ENTITY_TYPE_OPENID_PROVIDER.to_owned());
+
+    let at = now();
+
+    let walk = match resolver.federation().walk(&subject, at).await {
+        Ok(walk) => walk,
+        Err(e) => {
+            return federation_error(404, "not_found", &e.to_string());
+        }
+    };
+
+    let outcome = argus_core::federation::chain::resolve(
+        &walk.statements,
+        resolver.trust_anchors(),
+        &entity_type,
+        at,
+    );
+
+    let Ok(entity) = outcome else {
+        let detail = outcome.err().map(|e| e.to_string()).unwrap_or_default();
+        return federation_error(404, "not_found", &detail);
+    };
+
+    let Some(key) = identity.signing_keys.first() else {
+        return federation_error(503, "temporarily_unavailable", "no signing key is loaded");
+    };
+
+    let claims = json!({
+        "iss": identity.entity.as_str(),
+        "sub": subject.as_str(),
+        "iat": at.as_unix_seconds(),
+        "exp": entity.expires_at.as_unix_seconds(),
+        "metadata": { entity_type: entity.metadata },
+        "trust_chain": walk.tokens
+    });
+
+    match argus_proto::federation::sign(&claims, key, RESOLVE_RESPONSE_TYPE) {
+        Ok(token) => (
+            [(
+                axum::http::header::CONTENT_TYPE,
+                format!("application/{RESOLVE_RESPONSE_TYPE}"),
+            )],
+            token,
+        )
+            .into_response(),
+        Err(e) => federation_error(500, "server_error", &e.to_string()),
     }
 }
 
 async fn federation_keys(State(state): State<Shared>) -> Response {
     let Some(identity) = state.federation.as_ref() else {
-        return problem(404, "this server is not configured as a federation entity");
+        return federation_error(404, "not_found", "this server is not a federation entity");
     };
 
     Json(identity.jwks()).into_response()
@@ -398,6 +659,9 @@ pub fn build(state: Shared) -> Router {
     Router::new()
         .route("/.well-known/openid-federation", get(entity_configuration))
         .route("/federation/jwks", get(federation_keys))
+        .route("/federation/list", get(federation_list))
+        .route("/federation/fetch", get(federation_fetch))
+        .route("/federation/resolve", get(federation_resolve))
         .route("/agent-cards/sign", post(sign_agent_card))
         .route("/agent-cards/jwks", get(agent_card_keys))
         .route("/vault/lease", post(take_lease))

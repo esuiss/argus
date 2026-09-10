@@ -7,7 +7,7 @@ use argus_core::federation::statement::{
 use argus_core::time::Timestamp;
 use argus_proto::federation::{ENTITY_STATEMENT_TYPE, StatementJwtError, verify};
 
-use super::fetch::{FetchFault, Resolver, fetch_configuration, fetch_subordinate};
+use super::fetch::{FetchFault, Reach, Resolver, fetch_configuration, fetch_subordinate};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ResolveFault {
@@ -42,7 +42,7 @@ pub struct Federation<R> {
     pub resolver: R,
     pub tls: Arc<rustls::ClientConfig>,
     pub trust_anchors: Vec<EntityIdentifier>,
-    pub allow_loopback: bool,
+    pub reach: Reach,
 }
 
 impl<R: Resolver> Federation<R> {
@@ -51,8 +51,7 @@ impl<R: Resolver> Federation<R> {
         entity: &EntityIdentifier,
         now: Timestamp,
     ) -> Result<(EntityStatement, String), ResolveFault> {
-        let token =
-            fetch_configuration(entity, &self.resolver, &self.tls, self.allow_loopback).await?;
+        let token = fetch_configuration(entity, &self.resolver, &self.tls, self.reach).await?;
 
         let statement = self.self_verified(&token, entity, now)?;
         Ok((statement, token))
@@ -91,6 +90,13 @@ impl<R: Resolver> Federation<R> {
         now: Timestamp,
     ) -> Result<Walk, ResolveFault> {
         let (leaf, leaf_token) = self.configuration(subject, now).await?;
+
+        if self.trust_anchors.iter().any(|known| known == subject) {
+            return Ok(Walk {
+                statements: vec![leaf],
+                tokens: vec![leaf_token],
+            });
+        }
 
         if leaf.authority_hints.is_empty() {
             return Err(ResolveFault::NoAuthorityHints);
@@ -138,7 +144,7 @@ impl<R: Resolver> Federation<R> {
             subject,
             &self.resolver,
             &self.tls,
-            self.allow_loopback,
+            self.reach,
         )
         .await?;
 

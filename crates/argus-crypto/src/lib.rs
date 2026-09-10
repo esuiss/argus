@@ -1,5 +1,6 @@
 pub mod blind_index;
 pub mod password;
+pub mod rsa;
 pub mod sealing;
 
 use aws_lc_rs::digest;

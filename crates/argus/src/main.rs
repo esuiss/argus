@@ -53,6 +53,8 @@ struct Config {
     agent_card_key_dir: Option<String>,
     vault_key: Option<String>,
     fapi_profile: bool,
+    federation_role_anchor: bool,
+    rsa_key_dir: Option<String>,
 }
 
 impl Config {
@@ -81,6 +83,9 @@ impl Config {
             agent_card_key_dir: env::var("ARGUS_AGENT_CARD_KEY_DIR").ok(),
             vault_key: env::var("ARGUS_VAULT_KEY").ok(),
             fapi_profile: env::var("ARGUS_FAPI_PROFILE").is_ok_and(|v| v == "1"),
+            federation_role_anchor: env::var("ARGUS_FEDERATION_ROLE")
+                .is_ok_and(|v| v == "trust_anchor"),
+            rsa_key_dir: env::var("ARGUS_RSA_KEY_DIR").ok(),
         }
     }
 }
@@ -150,6 +155,7 @@ async fn main() -> ExitCode {
             metadata: AuthorizationServerMetadata::for_issuer(&config.issuer),
             active_key: Arc::clone(&keys.active),
             published_keys: keys.published.clone(),
+            rsa_keys: Vec::new(),
             blind_index: blind_index.clone(),
             relying_party: relying_party(&config),
         },
@@ -359,6 +365,62 @@ async fn serve_ldap() -> ExitCode {
     }
 }
 
+fn keygen_rsa(args: &[String]) -> ExitCode {
+    let (Some(kid), Some(dir)) = (args.first(), args.get(1)) else {
+        eprintln!("usage: argus keygen --rsa <kid> <directory>");
+        return ExitCode::FAILURE;
+    };
+
+    if kid.is_empty() || kid.contains(['/', '\\', '.']) {
+        eprintln!("argus: kid must not be empty or contain path separators or dots");
+        return ExitCode::FAILURE;
+    }
+
+    let path = Path::new(dir).join(format!("{kid}.pkcs8"));
+    if path.exists() {
+        eprintln!("argus: {} already exists", path.display());
+        return ExitCode::FAILURE;
+    }
+
+    let Ok(pair) = aws_lc_rs::rsa::KeyPair::generate(aws_lc_rs::rsa::KeySize::Rsa2048) else {
+        eprintln!("argus: could not generate an RSA key");
+        return ExitCode::FAILURE;
+    };
+
+    let document: aws_lc_rs::encoding::Pkcs8V1Der<'static> = {
+        use aws_lc_rs::encoding::AsDer as _;
+        let Ok(document) = pair.as_der() else {
+            eprintln!("argus: could not serialise the RSA key");
+            return ExitCode::FAILURE;
+        };
+        document
+    };
+
+    match OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)
+    {
+        Ok(mut file) => {
+            if file.write_all(document.as_ref()).is_err() {
+                eprintln!("argus: could not write {}", path.display());
+                return ExitCode::FAILURE;
+            }
+            println!("{}", path.display());
+            eprintln!(
+                "argus: RS256 is offered for compatibility only; identity tokens are signed \
+                 with ES256 unless a client asks for RS256"
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("argus: could not create {}: {e}", path.display());
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn mint_token(args: &[String]) -> ExitCode {
     let Some(scope) = args.first() else {
         eprintln!("usage: argus token <scope> [lifetime-seconds]");
@@ -422,8 +484,13 @@ fn mint_token(args: &[String]) -> ExitCode {
 }
 
 fn keygen(args: &[String]) -> ExitCode {
+    if args.first().map(String::as_str) == Some("--rsa") {
+        return keygen_rsa(args.get(1..).unwrap_or_default());
+    }
+
     let (Some(kid), Some(dir)) = (args.first(), args.get(1)) else {
         eprintln!("usage: argus keygen <kid> <directory>");
+        eprintln!("       argus keygen --rsa <kid> <directory>");
         return ExitCode::FAILURE;
     };
 
@@ -616,6 +683,23 @@ fn tls_client_config() -> Arc<rustls::ClientConfig> {
     let mut roots = rustls::RootCertStore::empty();
     roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 
+    if let Ok(path) = env::var("ARGUS_EXTRA_CA") {
+        match load_certs(&path) {
+            Ok(extra) => {
+                let mut added = 0_usize;
+                for certificate in extra {
+                    if roots.add(certificate).is_ok() {
+                        added = added.saturating_add(1);
+                    }
+                }
+                eprintln!(
+                    "argus: {added} extra certificate authority root(s) trusted for outbound calls"
+                );
+            }
+            Err(message) => eprintln!("argus: {message}"),
+        }
+    }
+
     Arc::new(
         rustls::ClientConfig::builder()
             .with_root_certificates(roots)
@@ -741,6 +825,36 @@ async fn shutdown() {
     eprintln!("argus: shutting down");
 }
 
+fn load_rsa_key_dir(dir: &str) -> Vec<Arc<argus_crypto::rsa::RsaSigningKey>> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+
+    let mut keys = Vec::new();
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(OsStr::to_str) != Some("pkcs8") {
+            continue;
+        }
+
+        let (Some(kid), Ok(material)) = (
+            path.file_stem().and_then(OsStr::to_str),
+            std::fs::read(&path),
+        ) else {
+            continue;
+        };
+
+        match argus_crypto::rsa::RsaSigningKey::from_pkcs8(kid, &material) {
+            Ok(key) => keys.push(Arc::new(key)),
+            Err(e) => eprintln!("argus: skipping {}: {e}", path.display()),
+        }
+    }
+
+    keys.sort_by(|left, right| left.kid().cmp(right.kid()));
+    keys
+}
+
 fn load_key_dir(dir: &str) -> Vec<Arc<argus_crypto::SigningKey>> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
@@ -785,11 +899,23 @@ fn federation_identity(
         return None;
     }
 
+    let role = if config.federation_role_anchor {
+        argus_core::federation::statement::Role::TrustAnchor
+    } else {
+        argus_core::federation::statement::Role::Leaf
+    };
+
+    let authority_hints = if role == argus_core::federation::statement::Role::TrustAnchor {
+        Vec::new()
+    } else {
+        trust_anchors(config)
+    };
+
     Some(argus_http::federation::publish::FederationIdentity {
         entity,
-        role: argus_core::federation::statement::Role::Leaf,
+        role,
         signing_keys: keys,
-        authority_hints: trust_anchors(config),
+        authority_hints,
         organization_name: None,
         trust_marks: Vec::new(),
     })
@@ -805,6 +931,45 @@ fn trust_anchors(config: &Config) -> Vec<argus_core::federation::statement::Enti
         .filter(|raw| !raw.is_empty())
         .filter_map(|raw| argus_core::federation::statement::EntityIdentifier::parse(raw).ok())
         .collect()
+}
+
+fn federation_reach(config: &Config) -> argus_http::federation::fetch::Reach {
+    if config.production {
+        return argus_http::federation::fetch::Reach::public_only();
+    }
+
+    let private = env::var("ARGUS_FEDERATION_ALLOW_PRIVATE").is_ok_and(|value| value == "1");
+
+    if private {
+        eprintln!(
+            "argus: WARNING - federation peers may be fetched from private address ranges; \
+             this exception is refused under ARGUS_ENV=production"
+        );
+    }
+
+    argus_http::federation::fetch::Reach {
+        loopback: true,
+        private,
+    }
+}
+
+fn federation_resolver_runtime(
+    config: &Config,
+) -> Option<argus_http::differentiation::ResolverRuntime> {
+    let anchors = trust_anchors(config);
+
+    if anchors.is_empty() {
+        return None;
+    }
+
+    Some(argus_http::differentiation::ResolverRuntime::new(
+        argus_http::federation::resolver::Federation {
+            resolver: argus_http::federation::fetch::SystemResolver,
+            tls: tls_client_config(),
+            trust_anchors: anchors,
+            reach: federation_reach(config),
+        },
+    ))
 }
 
 fn federation_runtime(
@@ -826,7 +991,7 @@ fn federation_runtime(
             resolver: argus_http::federation::fetch::SystemResolver,
             tls,
             trust_anchors: anchors,
-            allow_loopback: !config.production,
+            reach: federation_reach(config),
         },
     ))
 }
@@ -1001,6 +1166,30 @@ async fn serve_with_postgres(
 
     let tenant_id = TenantId::from_uuid(Uuid::nil());
 
+    let rsa_keys = config
+        .rsa_key_dir
+        .as_deref()
+        .map(load_rsa_key_dir)
+        .unwrap_or_default();
+
+    if !rsa_keys.is_empty() {
+        eprintln!(
+            "argus: RS256 available for identity tokens with {} key(s)",
+            rsa_keys.len()
+        );
+    }
+
+    let published_metadata = {
+        let mut metadata = AuthorizationServerMetadata::for_issuer(&config.issuer);
+        metadata.require_pushed_authorization_requests = config.fapi_profile;
+        if !rsa_keys.is_empty() {
+            metadata
+                .id_token_signing_alg_values_supported
+                .push("RS256".to_owned());
+        }
+        metadata
+    };
+
     let profile = if config.fapi_profile {
         argus_core::par::Profile::financial_grade()
     } else {
@@ -1032,13 +1221,10 @@ async fn serve_with_postgres(
 
     let state = Arc::new(AppState {
         tenant: TenantContext {
-            metadata: {
-                let mut metadata = AuthorizationServerMetadata::for_issuer(&config.issuer);
-                metadata.require_pushed_authorization_requests = config.fapi_profile;
-                metadata
-            },
+            metadata: published_metadata.clone(),
             active_key: Arc::clone(&keys.active),
             published_keys: keys.published.clone(),
+            rsa_keys: rsa_keys.clone(),
             blind_index: blind_index.clone(),
             relying_party: relying_party(config),
         },
@@ -1066,17 +1252,17 @@ async fn serve_with_postgres(
 
     let differentiation = Arc::new(argus_http::differentiation::DifferentiationState {
         tenant_id,
+        store: Some(store.clone()),
         issuer: config.issuer.clone(),
         published_keys: keys.published.clone(),
         federation: federation_identity(config),
-        provider_metadata: argus_http::differentiation::metadata_value(
-            &AuthorizationServerMetadata::for_issuer(&config.issuer),
-        ),
+        provider_metadata: argus_http::differentiation::metadata_value(&published_metadata),
         agent_card_key: config
             .agent_card_key_dir
             .as_deref()
             .and_then(|dir| load_key_dir(dir).into_iter().next()),
         vault: vault_runtime(config, &store),
+        resolver: federation_resolver_runtime(config),
     });
 
     if differentiation.federation.is_some() {

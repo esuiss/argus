@@ -40,6 +40,7 @@ fn tenant() -> (TenantContext, Arc<SigningKey>) {
             metadata: AuthorizationServerMetadata::for_issuer(ISSUER),
             active_key: Arc::clone(&key),
             published_keys: vec![Arc::clone(&key)],
+            rsa_keys: Vec::new(),
             blind_index: test_blind_index(),
             relying_party: None,
         },
@@ -201,6 +202,7 @@ fn a_token_signed_by_a_retired_but_published_key_still_verifies() {
         metadata: AuthorizationServerMetadata::for_issuer(ISSUER),
         active_key: Arc::clone(&new),
         published_keys: vec![Arc::clone(&old), new],
+        rsa_keys: Vec::new(),
         blind_index: test_blind_index(),
         relying_party: None,
     };

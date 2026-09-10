@@ -5,6 +5,7 @@ pub mod par;
 pub mod postgres;
 pub mod schema;
 pub mod scim;
+pub mod subordinates;
 pub mod traits;
 pub mod vault;
 

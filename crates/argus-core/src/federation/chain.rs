@@ -82,6 +82,10 @@ fn combine_constraints(into: &mut Constraints, from: &Constraints) {
     };
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "the chain checks read as one ordered list of what the specification requires"
+)]
 pub fn resolve(
     chain: &[EntityStatement],
     trust_anchors: &[EntityIdentifier],
@@ -94,6 +98,30 @@ pub fn resolve(
 
     if chain.len() > MAX_CHAIN_LENGTH {
         return Err(ChainFault::TooLong);
+    }
+
+    if chain.len() == 1 {
+        check_configuration(leaf, &leaf.subject)?;
+        check_freshness(leaf, now)?;
+
+        if !trust_anchors.iter().any(|known| known == &leaf.subject) {
+            return Err(ChainFault::NoTrustAnchor);
+        }
+
+        let published =
+            leaf.entity_type(entity_type)
+                .ok_or_else(|| ChainFault::NoSuchEntityType {
+                    entity_type: entity_type.to_owned(),
+                })?;
+
+        return Ok(ResolvedEntity {
+            subject: leaf.subject.clone(),
+            trust_anchor: leaf.subject.clone(),
+            entity_type: entity_type.to_owned(),
+            metadata: published.clone(),
+            expires_at: leaf.expires_at,
+            path_length: 0,
+        });
     }
 
     let mut walked: Vec<&str> = Vec::with_capacity(chain.len());
