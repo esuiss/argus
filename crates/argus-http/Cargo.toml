@@ -11,6 +11,7 @@ argus-parse.path    = "../argus-parse"
 argus-core.path      = "../argus-core"
 argus-crypto.path    = "../argus-crypto"
 argus-proto.path     = "../argus-proto"
+argus-saml.path      = "../argus-saml"
 argus-store.path     = "../argus-store"
 axum.workspace       = true
 tokio.workspace      = true

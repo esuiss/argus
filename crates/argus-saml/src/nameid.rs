@@ -58,7 +58,7 @@ pub fn issue(
     user: UserId,
     verified_email: Option<&str>,
     transient_handle: &str,
-    pairwise: &impl PairwiseIdentifier,
+    pairwise: &(impl PairwiseIdentifier + ?Sized),
 ) -> Result<NameId, NameIdFault> {
     let format = match requested {
         None => NameIdFormat::Persistent,

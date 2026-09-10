@@ -36,6 +36,11 @@ struct Config {
     active_kid: Option<String>,
 
     scim_event_audience: Option<String>,
+
+    saml_key: Option<String>,
+    saml_cert: Option<String>,
+    saml_entity_id: Option<String>,
+    saml_sp_dir: Option<String>,
 }
 
 impl Config {
@@ -50,6 +55,10 @@ impl Config {
             tls_key: env::var("ARGUS_TLS_KEY").ok(),
             production: env::var("ARGUS_ENV").is_ok_and(|v| v == "production"),
             scim_event_audience: env::var("ARGUS_SCIM_EVENT_AUDIENCE").ok(),
+            saml_key: env::var("ARGUS_SAML_KEY").ok(),
+            saml_cert: env::var("ARGUS_SAML_CERT").ok(),
+            saml_entity_id: env::var("ARGUS_SAML_ENTITY_ID").ok(),
+            saml_sp_dir: env::var("ARGUS_SAML_SP_DIR").ok(),
         }
     }
 }
@@ -444,6 +453,109 @@ async fn shutdown() {
     eprintln!("argus: shutting down");
 }
 
+struct MetadataRegistry {
+    providers: Vec<argus_saml::metadata::ServiceProvider>,
+}
+
+impl argus_http::saml::ServiceProviderRegistry for MetadataRegistry {
+    fn find(&self, entity_id: &str) -> Option<argus_saml::metadata::ServiceProvider> {
+        self.providers
+            .iter()
+            .find(|provider| provider.entity_id == entity_id)
+            .cloned()
+    }
+}
+
+struct NoSamlSubject;
+
+impl argus_http::saml::Subject for NoSamlSubject {
+    fn resolve(
+        &self,
+        _session: Option<&str>,
+    ) -> Option<(argus_core::id::UserId, Option<String>, bool)> {
+        None
+    }
+}
+
+struct HmacPairwise {
+    key: argus_crypto::blind_index::BlindIndexKey,
+}
+
+impl argus_saml::nameid::PairwiseIdentifier for HmacPairwise {
+    fn pairwise(&self, tenant: TenantId, audience: &str, user: argus_core::id::UserId) -> String {
+        let digest = self.key.compute(&format!(
+            "saml-pairwise:{}:{}:{}",
+            tenant.as_uuid().simple(),
+            audience,
+            user.as_uuid().simple()
+        ));
+
+        argus_core::hex::encode(&digest)
+    }
+}
+
+fn saml_router(
+    config: &Config,
+    blind_index: &argus_crypto::blind_index::BlindIndexKey,
+    tenant_id: TenantId,
+) -> Option<axum::Router> {
+    let key_path = config.saml_key.as_ref()?;
+    let cert_path = config.saml_cert.as_ref()?;
+
+    let key = std::fs::read(key_path).ok()?;
+    let certificate_pem = std::fs::read_to_string(cert_path).ok()?;
+
+    let certificate_base64: String = certificate_pem
+        .lines()
+        .filter(|line| !line.starts_with("-----"))
+        .collect();
+
+    let signer = argus_saml::signature::BergshamraSigner::from_rsa_private_pem(&key).ok()?;
+
+    let mut providers = Vec::new();
+    if let Some(dir) = config.saml_sp_dir.as_ref()
+        && let Ok(entries) = std::fs::read_dir(dir)
+    {
+        for entry in entries.flatten() {
+            let Ok(document) = std::fs::read_to_string(entry.path()) else {
+                continue;
+            };
+            match argus_saml::metadata::parse_service_provider(&document) {
+                Ok(provider) => {
+                    eprintln!("argus: saml peer {}", provider.entity_id);
+                    providers.push(provider);
+                }
+                Err(e) => eprintln!("argus: skipping {}: {e}", entry.path().display()),
+            }
+        }
+    }
+
+    if providers.is_empty() {
+        eprintln!("argus: WARNING - SAML is configured but no service provider metadata loaded");
+    }
+
+    let entity_id = config
+        .saml_entity_id
+        .clone()
+        .unwrap_or_else(|| config.issuer.clone());
+
+    Some(argus_http::saml::build(Arc::new(
+        argus_http::saml::SamlState {
+            signer,
+            registry: MetadataRegistry { providers },
+            subjects: NoSamlSubject,
+            tenant_id,
+            entity_id,
+            sso_location: format!("{}/saml/sso", config.issuer),
+            certificate_base64,
+            pairwise: Box::new(HmacPairwise {
+                key: blind_index.clone(),
+            }),
+            session_lifetime: argus_core::time::Duration::from_seconds(28_800),
+        },
+    )))
+}
+
 struct StderrEventSink;
 
 impl argus_http::scim::EventSink for StderrEventSink {
@@ -512,7 +624,12 @@ async fn serve_with_postgres(
         cimd: Some(cimd_runtime(config)),
     });
 
-    let app = argus_http::build(state).merge(argus_http::scim::routes::build(scim));
+    let mut app = argus_http::build(state).merge(argus_http::scim::routes::build(scim));
+
+    if let Some(saml) = saml_router(config, blind_index, tenant_id) {
+        app = app.merge(saml);
+        eprintln!("argus: SAML identity provider at /saml/metadata and /saml/sso");
+    }
 
     eprintln!("argus: WARNING - DevAuthenticator active, development only");
     warn_if_keys_are_ephemeral(config);

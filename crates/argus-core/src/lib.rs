@@ -12,6 +12,7 @@ pub mod effect;
 pub mod epoch;
 pub mod error;
 pub mod exchange;
+pub mod hex;
 pub mod id;
 pub mod jag_consume;
 pub mod password_policy;

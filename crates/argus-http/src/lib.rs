@@ -7,6 +7,7 @@ pub mod endpoints;
 pub mod memstore;
 pub mod replay;
 pub mod router;
+pub mod saml;
 pub mod scim;
 pub mod state;
 pub use argus_store::traits as store;
