@@ -7,6 +7,7 @@ license.workspace      = true
 repository.workspace   = true
 
 [dependencies]
+argus-parse.path    = "../argus-parse"
 argus-core.path      = "../argus-core"
 argus-crypto.path    = "../argus-crypto"
 argus-proto.path     = "../argus-proto"
@@ -27,6 +28,7 @@ webpki-roots.workspace = true
 base64ct = { workspace = true, features = ["alloc"] }
 serde_json.workspace = true
 tokio = { workspace = true, features = ["rt", "macros"] }
+sqlx.workspace         = true
 
 [lints]
 workspace = true

@@ -16,6 +16,7 @@ pub const EXPECTED_MIGRATIONS: &[&str] = &[
     "0013_trusted_issuers",
     "0014_authentication",
     "0015_sessions_and_ceremonies",
+    "0016_scim",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

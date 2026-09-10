@@ -49,11 +49,19 @@ async fn seed(tenant: TenantId) {
         .expect("pool");
 
     let slug = format!("t{}", &tenant.as_uuid().simple().to_string()[..8]);
+    let mut tx = pool.begin().await.expect("begin");
+
+    sqlx::query("SELECT set_config('argus.tenant_id', $1, true)")
+        .bind(tenant.as_uuid().to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("scope");
+
     sqlx::query("INSERT INTO tenants (tenant_id, slug, issuer_host) VALUES ($1, $2, $3)")
         .bind(tenant.as_uuid())
         .bind(&slug)
         .bind(format!("{slug}.test"))
-        .execute(&pool)
+        .execute(&mut *tx)
         .await
         .expect("tenant");
 
@@ -63,14 +71,14 @@ async fn seed(tenant: TenantId) {
     )
     .bind(tenant.as_uuid())
     .bind(user().as_uuid())
-    .execute(&pool)
+    .execute(&mut *tx)
     .await
     .expect("user key");
 
     sqlx::query("INSERT INTO users (tenant_id, user_id) VALUES ($1, $2)")
         .bind(tenant.as_uuid())
         .bind(user().as_uuid())
-        .execute(&pool)
+        .execute(&mut *tx)
         .await
         .expect("user");
 
@@ -79,7 +87,7 @@ async fn seed(tenant: TenantId) {
     )
     .bind(tenant.as_uuid())
     .bind(client_of(tenant).as_str())
-    .execute(&pool)
+    .execute(&mut *tx)
     .await
     .expect("client");
 
@@ -89,9 +97,11 @@ async fn seed(tenant: TenantId) {
     )
     .bind(tenant.as_uuid())
     .bind(client_of(tenant).as_str())
-    .execute(&pool)
+    .execute(&mut *tx)
     .await
     .expect("redirect uri");
+
+    tx.commit().await.expect("commit");
 }
 
 fn stored_code(tenant: TenantId) -> StoredCode {
@@ -370,13 +380,21 @@ async fn a_confidential_client_carries_its_method_and_keys() {
         .await
         .expect("pool");
 
+    let mut tx = pool.begin().await.expect("begin");
+
+    sqlx::query("SELECT set_config('argus.tenant_id', $1, true)")
+        .bind(t.as_uuid().to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("scope");
+
     sqlx::query(
         "UPDATE clients SET client_type = 'confidential', auth_method = 'private_key_jwt' \
          WHERE tenant_id = $1 AND client_id = $2",
     )
     .bind(t.as_uuid())
     .bind(client_of(t).as_str())
-    .execute(&pool)
+    .execute(&mut *tx)
     .await
     .expect("promote client");
 
@@ -389,10 +407,12 @@ async fn a_confidential_client_carries_its_method_and_keys() {
         .bind(kid)
         .bind(vec![fill; 32])
         .bind(vec![fill.wrapping_add(1); 32])
-        .execute(&pool)
+        .execute(&mut *tx)
         .await
         .expect("key");
     }
+
+    tx.commit().await.expect("commit");
 
     let found = s
         .find(t, &client_of(t))

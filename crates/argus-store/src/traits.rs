@@ -10,6 +10,7 @@ use argus_core::jag_consume::TrustedIssuer;
 use argus_core::recovery::RecoveryAttempt;
 use argus_core::refresh::{FamilyId, RefreshToken};
 use argus_core::resource::ResourceUri;
+use argus_core::scim::ScimRecord;
 use core::future::Future;
 
 use argus_core::time::Timestamp;
@@ -364,4 +365,102 @@ pub trait AuditSink {
         event_type: &str,
         at: Timestamp,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScimConflict {
+    UserNameTaken,
+    ExternalIdTaken,
+    UnknownMember(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ScimStoreError {
+    #[error("record not found")]
+    NotFound,
+
+    #[error("storage backend unavailable")]
+    Unavailable,
+
+    #[error("the resource conflicts with one that already exists")]
+    Conflict(ScimConflict),
+}
+
+impl From<StoreError> for ScimStoreError {
+    fn from(error: StoreError) -> Self {
+        match error {
+            StoreError::NotFound => Self::NotFound,
+            StoreError::Unavailable => Self::Unavailable,
+        }
+    }
+}
+
+pub trait ScimStore {
+    fn create_user(
+        &self,
+        tenant: TenantId,
+        payload: &serde_json::Value,
+        now: Timestamp,
+    ) -> impl Future<Output = Result<ScimRecord, ScimStoreError>> + Send;
+
+    fn get_user(
+        &self,
+        tenant: TenantId,
+        id: &str,
+    ) -> impl Future<Output = Result<ScimRecord, ScimStoreError>> + Send;
+
+    fn replace_user(
+        &self,
+        tenant: TenantId,
+        id: &str,
+        payload: &serde_json::Value,
+        now: Timestamp,
+    ) -> impl Future<Output = Result<ScimRecord, ScimStoreError>> + Send;
+
+    fn delete_user(
+        &self,
+        tenant: TenantId,
+        id: &str,
+    ) -> impl Future<Output = Result<(), ScimStoreError>> + Send;
+
+    fn scan_users(
+        &self,
+        tenant: TenantId,
+        after: Option<u64>,
+        limit: usize,
+    ) -> impl Future<Output = Result<Vec<ScimRecord>, ScimStoreError>> + Send;
+
+    fn create_group(
+        &self,
+        tenant: TenantId,
+        payload: &serde_json::Value,
+        now: Timestamp,
+    ) -> impl Future<Output = Result<ScimRecord, ScimStoreError>> + Send;
+
+    fn get_group(
+        &self,
+        tenant: TenantId,
+        id: &str,
+    ) -> impl Future<Output = Result<ScimRecord, ScimStoreError>> + Send;
+
+    fn replace_group(
+        &self,
+        tenant: TenantId,
+        id: &str,
+        payload: &serde_json::Value,
+        now: Timestamp,
+    ) -> impl Future<Output = Result<ScimRecord, ScimStoreError>> + Send;
+
+    fn delete_group(
+        &self,
+        tenant: TenantId,
+        id: &str,
+    ) -> impl Future<Output = Result<(), ScimStoreError>> + Send;
+
+    fn scan_groups(
+        &self,
+        tenant: TenantId,
+        after: Option<u64>,
+        limit: usize,
+    ) -> impl Future<Output = Result<Vec<ScimRecord>, ScimStoreError>> + Send;
 }

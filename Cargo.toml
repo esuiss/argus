@@ -141,5 +141,5 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal
 # canlı bir `DATABASE_URL` olmadan derlenemez ve derlemeyi ortama bağımlı kılar.
 # Sorgular çalışma zamanında bağlanıyor; doğrulamayı gerçek veritabanına karşı
 # koşan testler yapıyor.
-sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls-aws-lc-rs", "uuid", "chrono", "macros"] }
+sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls-aws-lc-rs", "uuid", "chrono", "json", "macros"] }
 chrono = { version = "0.4", default-features = false, features = ["std"] }

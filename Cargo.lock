@@ -104,6 +104,7 @@ version = "0.0.0"
 dependencies = [
  "argus-core",
  "argus-crypto",
+ "argus-parse",
  "argus-proto",
  "argus-store",
  "axum",
@@ -111,6 +112,7 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "sqlx",
  "thiserror 2.0.20",
  "tokio",
  "tokio-rustls",
@@ -157,6 +159,7 @@ dependencies = [
  "argus-crypto",
  "base64ct",
  "chrono",
+ "serde_json",
  "sqlx",
  "thiserror 2.0.20",
  "tokio",

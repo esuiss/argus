@@ -34,6 +34,8 @@ struct Config {
     production: bool,
 
     active_kid: Option<String>,
+
+    scim_event_audience: Option<String>,
 }
 
 impl Config {
@@ -47,6 +49,7 @@ impl Config {
             tls_cert: env::var("ARGUS_TLS_CERT").ok(),
             tls_key: env::var("ARGUS_TLS_KEY").ok(),
             production: env::var("ARGUS_ENV").is_ok_and(|v| v == "production"),
+            scim_event_audience: env::var("ARGUS_SCIM_EVENT_AUDIENCE").ok(),
         }
     }
 }
@@ -441,6 +444,14 @@ async fn shutdown() {
     eprintln!("argus: shutting down");
 }
 
+struct StderrEventSink;
+
+impl argus_http::scim::EventSink for StderrEventSink {
+    fn publish(&self, token: &str) {
+        eprintln!("argus: scim.event {token}");
+    }
+}
+
 async fn serve_with_postgres(
     config: &Config,
     url: &str,
@@ -464,6 +475,23 @@ async fn serve_with_postgres(
 
     let store = argus_store::PostgresStore::new(pool);
 
+    let tenant_id = TenantId::from_uuid(Uuid::nil());
+
+    let scim = Arc::new(argus_http::scim::ScimState {
+        store: store.clone(),
+        tenant_id,
+        issuer: config.issuer.clone(),
+        base: config.issuer.clone(),
+        published_keys: keys.published.clone(),
+        events: config.scim_event_audience.as_ref().map(|audience| {
+            argus_http::scim::EventPublisher {
+                key: Arc::clone(&keys.active),
+                audience: audience.clone(),
+                sink: Arc::new(StderrEventSink),
+            }
+        }),
+    });
+
     let state = Arc::new(AppState {
         tenant: TenantContext {
             metadata: AuthorizationServerMetadata::for_issuer(&config.issuer),
@@ -475,7 +503,7 @@ async fn serve_with_postgres(
         codes: store.clone(),
         refresh: store.clone(),
         audit: store.clone(),
-        tenant_id: TenantId::from_uuid(Uuid::nil()),
+        tenant_id,
         clients: store.clone(),
 
         authenticator: (),
@@ -484,7 +512,7 @@ async fn serve_with_postgres(
         cimd: Some(cimd_runtime(config)),
     });
 
-    let app = argus_http::build(state);
+    let app = argus_http::build(state).merge(argus_http::scim::routes::build(scim));
 
     eprintln!("argus: WARNING - DevAuthenticator active, development only");
     warn_if_keys_are_ephemeral(config);

@@ -116,6 +116,35 @@ pub fn sign(claims: &AccessTokenClaims, key: &SigningKey) -> Result<String, JwtE
     ))
 }
 
+pub fn sign_security_event(
+    claims: &serde_json::Value,
+    key: &SigningKey,
+) -> Result<String, JwtError> {
+    let header = JwsHeader {
+        alg: "ES256".to_owned(),
+        kid: key.kid().to_owned(),
+        typ: "secevent+jwt".to_owned(),
+    };
+
+    let h = serde_json::to_vec(&header).map_err(|_| JwtError::Serialisation)?;
+    let c = serde_json::to_vec(claims).map_err(|_| JwtError::Serialisation)?;
+
+    let signing_input = format!(
+        "{}.{}",
+        Base64UrlUnpadded::encode_string(&h),
+        Base64UrlUnpadded::encode_string(&c)
+    );
+
+    let sig = key
+        .sign(signing_input.as_bytes())
+        .map_err(|_: CryptoError| JwtError::Signing)?;
+
+    Ok(format!(
+        "{signing_input}.{}",
+        Base64UrlUnpadded::encode_string(&sig)
+    ))
+}
+
 pub fn verify(token: &str, key: &VerifyingKey) -> Result<AccessTokenClaims, JwtError> {
     let mut parts = token.split('.');
     let (Some(h), Some(c), Some(s), None) =

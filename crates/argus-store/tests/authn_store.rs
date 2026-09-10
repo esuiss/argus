@@ -38,13 +38,23 @@ async fn seed_tenant(tenant: TenantId) {
         .expect("pool");
 
     let slug = format!("t{}", &tenant.as_uuid().simple().to_string()[..8]);
+    let mut tx = pool.begin().await.expect("begin");
+
+    sqlx::query("SELECT set_config('argus.tenant_id', $1, true)")
+        .bind(tenant.as_uuid().to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("scope");
+
     sqlx::query("INSERT INTO tenants (tenant_id, slug, issuer_host) VALUES ($1, $2, $3)")
         .bind(tenant.as_uuid())
         .bind(&slug)
         .bind(format!("{slug}.test"))
-        .execute(&pool)
+        .execute(&mut *tx)
         .await
         .expect("tenant");
+
+    tx.commit().await.expect("commit");
 }
 
 #[tokio::test]

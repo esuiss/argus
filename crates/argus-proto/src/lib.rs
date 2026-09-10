@@ -10,6 +10,7 @@ pub mod jwks;
 pub mod jwt;
 pub mod oidc;
 pub mod prm;
+pub mod scim;
 pub mod token;
 pub mod webauthn;
 

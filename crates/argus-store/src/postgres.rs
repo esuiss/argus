@@ -40,6 +40,13 @@ impl PostgresStore {
         Self { pool }
     }
 
+    pub(crate) async fn scim_scoped(
+        &self,
+        tenant: TenantId,
+    ) -> Result<Transaction<'_, Postgres>, crate::traits::ScimStoreError> {
+        Ok(self.scoped(tenant).await?)
+    }
+
     async fn scoped(&self, tenant: TenantId) -> Result<Transaction<'_, Postgres>, StoreError> {
         let mut tx = self.pool.begin().await.map_err(|e| map_err(&e))?;
 
