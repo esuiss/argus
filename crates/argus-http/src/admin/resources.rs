@@ -134,7 +134,7 @@ pub(super) async fn list_subordinates(
         Err(response) => return *response,
     };
 
-    let Ok(subjects) = state.store.list_subordinates(state.tenant_id).await else {
+    let Ok(subjects) = state.store.list_subordinates(permit.tenant()).await else {
         return problem(503, "unavailable", "the registry is unreadable");
     };
 
@@ -150,7 +150,7 @@ pub(super) async fn list_subordinates(
         }
         let Ok(record) = state
             .store
-            .find_subordinate(state.tenant_id, &subject)
+            .find_subordinate(permit.tenant(), &subject)
             .await
         else {
             continue;
@@ -187,7 +187,15 @@ async fn write_subordinate(
 
     let Some(jwks) = body.get("jwks").filter(|v| v.is_object()).cloned() else {
         let response = problem(400, "invalid_request", "jwks must be a JSON object");
-        close_idempotency(state, key.as_deref(), Surface::Tenant, 400, &Value::Null).await;
+        close_idempotency(
+            state,
+            permit,
+            key.as_deref(),
+            Surface::Tenant,
+            400,
+            &Value::Null,
+        )
+        .await;
         return response;
     };
 
@@ -203,18 +211,34 @@ async fn write_subordinate(
 
     if state
         .store
-        .enrol_subordinate(state.tenant_id, &record)
+        .enrol_subordinate(permit.tenant(), &record)
         .await
         .is_err()
     {
-        close_idempotency(state, key.as_deref(), Surface::Tenant, 503, &Value::Null).await;
+        close_idempotency(
+            state,
+            permit,
+            key.as_deref(),
+            Surface::Tenant,
+            503,
+            &Value::Null,
+        )
+        .await;
         return problem(503, "unavailable", "the registry is unwritable");
     }
 
     // §24 #3: tam temsil gövdede, Location header'ında bir kimlik değil.
     let view = subordinate_view(permit, id, &record);
     let status = if created { 201 } else { 200 };
-    close_idempotency(state, key.as_deref(), Surface::Tenant, status, &view).await;
+    close_idempotency(
+        state,
+        permit,
+        key.as_deref(),
+        Surface::Tenant,
+        status,
+        &view,
+    )
+    .await;
 
     let code = StatusCode::from_u16(status).unwrap_or(StatusCode::OK);
     (code, Json(view)).into_response()
@@ -231,20 +255,28 @@ pub(super) async fn create_subordinate(
         Err(refusal) => return *refusal,
     };
 
-    let key = match open_idempotency(&state, &headers, Surface::Tenant, &body).await {
+    let key = match open_idempotency(&state, &permit, &headers, Surface::Tenant, &body).await {
         Ok(Idempotency::Replay(response)) => return response,
         Ok(Idempotency::Run(key)) => key,
         Err(refusal) => return *refusal,
     };
 
     let Some(id) = body.get("id").and_then(Value::as_str) else {
-        close_idempotency(&state, key.as_deref(), Surface::Tenant, 400, &Value::Null).await;
+        close_idempotency(
+            &state,
+            &permit,
+            key.as_deref(),
+            Surface::Tenant,
+            400,
+            &Value::Null,
+        )
+        .await;
         return problem(400, "invalid_request", "id is required");
     };
 
     if state
         .store
-        .find_subordinate(state.tenant_id, id)
+        .find_subordinate(permit.tenant(), id)
         .await
         .is_ok()
     {
@@ -253,7 +285,15 @@ pub(super) async fn create_subordinate(
             "already_exists",
             "this subordinate is already enrolled",
         );
-        close_idempotency(&state, key.as_deref(), Surface::Tenant, 409, &Value::Null).await;
+        close_idempotency(
+            &state,
+            &permit,
+            key.as_deref(),
+            Surface::Tenant,
+            409,
+            &Value::Null,
+        )
+        .await;
         return response;
     }
 
@@ -273,7 +313,7 @@ pub(super) async fn put_subordinate(
         Err(refusal) => return *refusal,
     };
 
-    let key = match open_idempotency(&state, &headers, Surface::Tenant, &body).await {
+    let key = match open_idempotency(&state, &permit, &headers, Surface::Tenant, &body).await {
         Ok(Idempotency::Replay(response)) => return response,
         Ok(Idempotency::Run(key)) => key,
         Err(refusal) => return *refusal,
@@ -281,7 +321,7 @@ pub(super) async fn put_subordinate(
 
     let existed = state
         .store
-        .find_subordinate(state.tenant_id, &id)
+        .find_subordinate(permit.tenant(), &id)
         .await
         .is_ok();
 
@@ -294,14 +334,12 @@ pub(super) async fn delete_subordinate(
     Path(id): Path<String>,
 ) -> Response {
     let entry = requirement("DELETE", argus_core::admin::manifest::SUBORDINATE);
-    // 204 gövdesizdir; hiçbir şey serileştirilmediği için bir kanıt
-    // token'ının tüketicisi de yok. Kapı yine de geçildi.
-    let _permit = match admit(&state, &headers, entry).await {
+    let permit = match admit(&state, &headers, entry).await {
         Ok(permit) => permit,
         Err(refusal) => return *refusal,
     };
 
-    match state.store.withdraw_subordinate(state.tenant_id, &id).await {
+    match state.store.withdraw_subordinate(permit.tenant(), &id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(argus_store::traits::StoreError::NotFound) => hidden(),
         Err(_) => problem(503, "unavailable", "the registry is unwritable"),
@@ -387,7 +425,7 @@ pub(super) async fn list_clients(
 
     let Ok(clients) = state
         .store
-        .list_clients(state.tenant_id, page.after.as_deref(), page.limit + 1)
+        .list_clients(permit.tenant(), page.after.as_deref(), page.limit + 1)
         .await
     else {
         return problem(503, "unavailable", "the client registry is unreadable");
@@ -423,7 +461,7 @@ pub(super) async fn get_client(
         Err(refusal) => return *refusal,
     };
 
-    match state.store.describe_client(state.tenant_id, &id).await {
+    match state.store.describe_client(permit.tenant(), &id).await {
         Ok(Some(client)) => Json(client_view(&permit, &client)).into_response(),
         Ok(None) => hidden(),
         Err(_) => problem(503, "unavailable", "the client registry is unreadable"),
@@ -442,21 +480,45 @@ async fn save_client(
     let client = match client_from(body, id) {
         Ok(client) => client,
         Err(response) => {
-            close_idempotency(state, key.as_deref(), Surface::Tenant, 400, &Value::Null).await;
+            close_idempotency(
+                state,
+                permit,
+                key.as_deref(),
+                Surface::Tenant,
+                400,
+                &Value::Null,
+            )
+            .await;
             return *response;
         }
     };
 
-    match state.store.upsert_client(state.tenant_id, &client).await {
+    match state.store.upsert_client(permit.tenant(), &client).await {
         Ok(created) => {
             let view = client_view(permit, &client);
             let status = if created { 201 } else { 200 };
-            close_idempotency(state, key.as_deref(), Surface::Tenant, status, &view).await;
+            close_idempotency(
+                state,
+                permit,
+                key.as_deref(),
+                Surface::Tenant,
+                status,
+                &view,
+            )
+            .await;
             let code = StatusCode::from_u16(status).unwrap_or(StatusCode::OK);
             (code, Json(view)).into_response()
         }
         Err(argus_store::traits::StoreError::NotFound) => {
-            close_idempotency(state, key.as_deref(), Surface::Tenant, 400, &Value::Null).await;
+            close_idempotency(
+                state,
+                permit,
+                key.as_deref(),
+                Surface::Tenant,
+                400,
+                &Value::Null,
+            )
+            .await;
             problem(
                 400,
                 "invalid_request",
@@ -464,7 +526,15 @@ async fn save_client(
             )
         }
         Err(_) => {
-            close_idempotency(state, key.as_deref(), Surface::Tenant, 503, &Value::Null).await;
+            close_idempotency(
+                state,
+                permit,
+                key.as_deref(),
+                Surface::Tenant,
+                503,
+                &Value::Null,
+            )
+            .await;
             problem(503, "unavailable", "the client registry is unwritable")
         }
     }
@@ -485,27 +555,43 @@ pub(super) async fn create_client(
     // olmuş bir isteğin tekrarına ilk denemesinin ürettiği şey yerine kaynağın
     // var olduğu söylenirdi — §24 #33'ün var olma sebebi tam olarak bu durum.
     // Bu sıra hatası testi yazarken bulundu.
-    let key = match open_idempotency(&state, &headers, Surface::Tenant, &body).await {
+    let key = match open_idempotency(&state, &permit, &headers, Surface::Tenant, &body).await {
         Ok(Idempotency::Replay(response)) => return response,
         Ok(Idempotency::Run(key)) => key,
         Err(refusal) => return *refusal,
     };
 
     let Some(id) = body.get("clientId").and_then(Value::as_str) else {
-        close_idempotency(&state, key.as_deref(), Surface::Tenant, 400, &Value::Null).await;
+        close_idempotency(
+            &state,
+            &permit,
+            key.as_deref(),
+            Surface::Tenant,
+            400,
+            &Value::Null,
+        )
+        .await;
         return problem(400, "invalid_request", "clientId is required");
     };
 
     if state
         .store
-        .describe_client(state.tenant_id, id)
+        .describe_client(permit.tenant(), id)
         .await
         .ok()
         .flatten()
         .is_some()
     {
         let response = problem(409, "already_exists", "this client is already registered");
-        close_idempotency(&state, key.as_deref(), Surface::Tenant, 409, &Value::Null).await;
+        close_idempotency(
+            &state,
+            &permit,
+            key.as_deref(),
+            Surface::Tenant,
+            409,
+            &Value::Null,
+        )
+        .await;
         return response;
     }
 
@@ -524,7 +610,7 @@ pub(super) async fn put_client(
         Err(refusal) => return *refusal,
     };
 
-    let key = match open_idempotency(&state, &headers, Surface::Tenant, &body).await {
+    let key = match open_idempotency(&state, &permit, &headers, Surface::Tenant, &body).await {
         Ok(Idempotency::Replay(response)) => return response,
         Ok(Idempotency::Run(key)) => key,
         Err(refusal) => return *refusal,
@@ -551,7 +637,7 @@ pub(super) async fn patch_client(
         return problem(400, "invalid_request", &e.to_string());
     }
 
-    let Ok(Some(current)) = state.store.describe_client(state.tenant_id, &id).await else {
+    let Ok(Some(current)) = state.store.describe_client(permit.tenant(), &id).await else {
         return hidden();
     };
 
@@ -560,7 +646,7 @@ pub(super) async fn patch_client(
         Err(e) => return problem(400, "invalid_request", &e.to_string()),
     };
 
-    let key = match open_idempotency(&state, &headers, Surface::Tenant, &patch).await {
+    let key = match open_idempotency(&state, &permit, &headers, Surface::Tenant, &patch).await {
         Ok(Idempotency::Replay(response)) => return response,
         Ok(Idempotency::Run(key)) => key,
         Err(refusal) => return *refusal,
@@ -575,14 +661,12 @@ pub(super) async fn delete_client(
     Path(id): Path<String>,
 ) -> Response {
     let entry = requirement("DELETE", argus_core::admin::manifest::CLIENT);
-    // 204 gövdesizdir; hiçbir şey serileştirilmediği için bir kanıt
-    // token'ının tüketicisi de yok. Kapı yine de geçildi.
-    let _permit = match admit(&state, &headers, entry).await {
+    let permit = match admit(&state, &headers, entry).await {
         Ok(permit) => permit,
         Err(refusal) => return *refusal,
     };
 
-    match state.store.delete_client(state.tenant_id, &id).await {
+    match state.store.delete_client(permit.tenant(), &id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(argus_store::traits::StoreError::NotFound) => hidden(),
         Err(_) => problem(503, "unavailable", "the client registry is unwritable"),
@@ -671,7 +755,7 @@ pub(super) async fn create_tenant(
         Err(refusal) => return *refusal,
     };
 
-    let key = match open_idempotency(&state, &headers, Surface::Platform, &body).await {
+    let key = match open_idempotency(&state, &permit, &headers, Surface::Platform, &body).await {
         Ok(Idempotency::Replay(response)) => return response,
         Ok(Idempotency::Run(key)) => key,
         Err(refusal) => return *refusal,
@@ -681,16 +765,40 @@ pub(super) async fn create_tenant(
         body.get("slug").and_then(Value::as_str),
         body.get("issuerHost").and_then(Value::as_str),
     ) else {
-        close_idempotency(&state, key.as_deref(), Surface::Platform, 400, &Value::Null).await;
+        close_idempotency(
+            &state,
+            &permit,
+            key.as_deref(),
+            Surface::Platform,
+            400,
+            &Value::Null,
+        )
+        .await;
         return problem(400, "invalid_request", "slug and issuerHost are required");
     };
 
     let Ok(record) = state.store.create_tenant(slug, host).await else {
-        close_idempotency(&state, key.as_deref(), Surface::Platform, 409, &Value::Null).await;
+        close_idempotency(
+            &state,
+            &permit,
+            key.as_deref(),
+            Surface::Platform,
+            409,
+            &Value::Null,
+        )
+        .await;
         return problem(409, "already_exists", "the slug or issuer host is taken");
     };
 
     let view = tenant_view(&permit, &record);
-    close_idempotency(&state, key.as_deref(), Surface::Platform, 201, &view).await;
+    close_idempotency(
+        &state,
+        &permit,
+        key.as_deref(),
+        Surface::Platform,
+        201,
+        &view,
+    )
+    .await;
     (StatusCode::CREATED, Json(view)).into_response()
 }

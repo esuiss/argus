@@ -7,14 +7,14 @@ use axum::response::{IntoResponse, Response};
 use serde_json::{Value, json};
 
 use super::guard::{
-    Idempotency, Shared, admit, close_idempotency, hidden, open_idempotency, problem,
+    Caller, Idempotency, Shared, admit, close_idempotency, hidden, open_idempotency, problem,
 };
 
-fn chain_uid(state: &Shared) -> String {
+fn chain_uid(permit: &Caller) -> String {
     format!(
         "{}{}",
         argus_core::audit::CHAIN_UID_PREFIX,
-        state.tenant_id.as_uuid()
+        permit.tenant().as_uuid()
     )
 }
 
@@ -31,7 +31,7 @@ pub(super) async fn proof(
     else {
         return hidden();
     };
-    let _permit = match admit(&state, &headers, entry).await {
+    let permit = match admit(&state, &headers, entry).await {
         Ok(permit) => permit,
         Err(refusal) => return *refusal,
     };
@@ -42,11 +42,11 @@ pub(super) async fn proof(
 
     match state
         .store
-        .audit_proof(state.tenant_id, &event_id, &argus_crypto::AwsLcSha256)
+        .audit_proof(permit.tenant(), &event_id, &argus_crypto::AwsLcSha256)
         .await
     {
         Ok((index, leaf, checkpoint, path)) => Json(inclusion_document(
-            &chain_uid(&state),
+            &chain_uid(&permit),
             &leaf,
             index,
             &checkpoint,
@@ -70,13 +70,13 @@ pub(super) async fn checkpoint(
     else {
         return hidden();
     };
-    let _permit = match admit(&state, &headers, entry).await {
+    let permit = match admit(&state, &headers, entry).await {
         Ok(permit) => permit,
         Err(refusal) => return *refusal,
     };
 
     let payload = body.map_or(Value::Null, |Json(value)| value);
-    let key = match open_idempotency(&state, &headers, Surface::Tenant, &payload).await {
+    let key = match open_idempotency(&state, &permit, &headers, Surface::Tenant, &payload).await {
         Ok(Idempotency::Replay(response)) => return response,
         Ok(Idempotency::Run(key)) => key,
         Err(refusal) => return *refusal,
@@ -84,26 +84,34 @@ pub(super) async fn checkpoint(
 
     match state
         .store
-        .checkpoint_audit(state.tenant_id, &argus_crypto::AwsLcSha256)
+        .checkpoint_audit(permit.tenant(), &argus_crypto::AwsLcSha256)
         .await
     {
         Ok(Some(checkpoint)) => {
-            let view = view_of(&state, &checkpoint);
-            close_idempotency(&state, key.as_deref(), Surface::Tenant, 201, &view).await;
+            let view = view_of(&permit, &checkpoint);
+            close_idempotency(&state, &permit, key.as_deref(), Surface::Tenant, 201, &view).await;
             (StatusCode::CREATED, Json(view)).into_response()
         }
         Ok(None) => {
             let view = json!({ "folded": 0 });
-            close_idempotency(&state, key.as_deref(), Surface::Tenant, 200, &view).await;
+            close_idempotency(&state, &permit, key.as_deref(), Surface::Tenant, 200, &view).await;
             Json(view).into_response()
         }
         Err(_) => {
-            close_idempotency(&state, key.as_deref(), Surface::Tenant, 503, &Value::Null).await;
+            close_idempotency(
+                &state,
+                &permit,
+                key.as_deref(),
+                Surface::Tenant,
+                503,
+                &Value::Null,
+            )
+            .await;
             problem(503, "unavailable", "the audit log is unwritable")
         }
     }
 }
 
-fn view_of(state: &Shared, checkpoint: &Checkpoint) -> Value {
-    argus_core::audit::record::checkpoint_document(&chain_uid(state), checkpoint)
+fn view_of(permit: &Caller, checkpoint: &Checkpoint) -> Value {
+    argus_core::audit::record::checkpoint_document(&chain_uid(permit), checkpoint)
 }

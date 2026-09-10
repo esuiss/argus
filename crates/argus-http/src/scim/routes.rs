@@ -92,15 +92,19 @@ fn from_patch(error: PatchError) -> Response {
     fault(400, Some(error.scim_type()), &detail)
 }
 
-fn guard<S>(state: &ScimState<S>, headers: &HeaderMap) -> Result<(), Failure> {
+// Yetkilendirme ve kiracı çözümlemesi aynı kapıdan geçer (§18). İkisini ayırmak,
+// birinin uygulanıp diğerinin atlandığı bir yol bırakır.
+fn guard<S>(state: &ScimState<S>, headers: &HeaderMap) -> Result<crate::tenancy::Tenant, Failure> {
     let authorization = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok());
 
     state
         .authorize(authorization, now())
-        .map(|_| ())
-        .map_err(|failure| Box::new(from_auth(failure)))
+        .map_err(|failure| Box::new(from_auth(failure)))?;
+
+    crate::tenancy::resolve(&state.tenants, headers)
+        .map_err(|_| Box::new(fault(404, None, "no such issuer")))
 }
 
 struct ListQuery {
@@ -424,15 +428,16 @@ macro_rules! resource_routes {
             headers: HeaderMap,
             Query(params): Query<Params>,
         ) -> Response {
-            if let Err(response) = guard(&state, &headers) {
-                return *response;
-            }
+            let tenant = match guard(&state, &headers) {
+                Ok(tenant) => tenant,
+                Err(response) => return *response,
+            };
             let query = match read_list_query(&params) {
                 Ok(query) => query,
                 Err(response) => return *response,
             };
             match collect::<_, _>(&query, $kind, &state.base, |after, limit| {
-                state.store.$scan(state.tenant_id, after, limit)
+                state.store.$scan(tenant.id(), after, limit)
             })
             .await
             {
@@ -446,15 +451,16 @@ macro_rules! resource_routes {
             headers: HeaderMap,
             Json(request): Json<Value>,
         ) -> Response {
-            if let Err(response) = guard(&state, &headers) {
-                return *response;
-            }
+            let tenant = match guard(&state, &headers) {
+                Ok(tenant) => tenant,
+                Err(response) => return *response,
+            };
             let query = match read_search_body(&request) {
                 Ok(query) => query,
                 Err(response) => return *response,
             };
             match collect::<_, _>(&query, $kind, &state.base, |after, limit| {
-                state.store.$scan(state.tenant_id, after, limit)
+                state.store.$scan(tenant.id(), after, limit)
             })
             .await
             {
@@ -468,14 +474,15 @@ macro_rules! resource_routes {
             headers: HeaderMap,
             Json(request): Json<Value>,
         ) -> Response {
-            if let Err(response) = guard(&state, &headers) {
-                return *response;
-            }
+            let tenant = match guard(&state, &headers) {
+                Ok(tenant) => tenant,
+                Err(response) => return *response,
+            };
             let accepted = match validate(&request, $kind, true) {
                 Ok(accepted) => accepted,
                 Err(f) => return from_scim_fault(&f),
             };
-            match state.store.$create(state.tenant_id, &accepted, now()).await {
+            match state.store.$create(tenant.id(), &accepted, now()).await {
                 Ok(record) => {
                     announce(
                         &state,
@@ -497,10 +504,11 @@ macro_rules! resource_routes {
             Path(id): Path<String>,
             Query(params): Query<Params>,
         ) -> Response {
-            if let Err(response) = guard(&state, &headers) {
-                return *response;
-            }
-            match state.store.$read(state.tenant_id, &id).await {
+            let tenant = match guard(&state, &headers) {
+                Ok(tenant) => tenant,
+                Err(response) => return *response,
+            };
+            match state.store.$read(tenant.id(), &id).await {
                 Ok(record) => body(
                     StatusCode::OK,
                     argus_proto::scim::project(
@@ -519,21 +527,22 @@ macro_rules! resource_routes {
             Path(id): Path<String>,
             Json(request): Json<Value>,
         ) -> Response {
-            if let Err(response) = guard(&state, &headers) {
-                return *response;
-            }
+            let tenant = match guard(&state, &headers) {
+                Ok(tenant) => tenant,
+                Err(response) => return *response,
+            };
             let accepted = match validate(&request, $kind, false) {
                 Ok(accepted) => accepted,
                 Err(f) => return from_scim_fault(&f),
             };
-            let before = match state.store.$read(state.tenant_id, &id).await {
+            let before = match state.store.$read(tenant.id(), &id).await {
                 Ok(record) => record.payload,
                 Err(error) => return from_store(&error),
             };
 
             match state
                 .store
-                .$replace(state.tenant_id, &id, &accepted, now())
+                .$replace(tenant.id(), &id, &accepted, now())
                 .await
             {
                 Ok(record) => {
@@ -565,16 +574,17 @@ macro_rules! resource_routes {
             Path(id): Path<String>,
             Json(request): Json<Value>,
         ) -> Response {
-            if let Err(response) = guard(&state, &headers) {
-                return *response;
-            }
+            let tenant = match guard(&state, &headers) {
+                Ok(tenant) => tenant,
+                Err(response) => return *response,
+            };
 
             let operations = match patch_operations(&request) {
                 Ok(operations) => operations,
                 Err(response) => return *response,
             };
 
-            let current = match state.store.$read(state.tenant_id, &id).await {
+            let current = match state.store.$read(tenant.id(), &id).await {
                 Ok(record) => record,
                 Err(error) => return from_store(&error),
             };
@@ -597,7 +607,7 @@ macro_rules! resource_routes {
 
             match state
                 .store
-                .$replace(state.tenant_id, &id, &accepted, now())
+                .$replace(tenant.id(), &id, &accepted, now())
                 .await
             {
                 Ok(record) => {
@@ -628,10 +638,11 @@ macro_rules! resource_routes {
             headers: HeaderMap,
             Path(id): Path<String>,
         ) -> Response {
-            if let Err(response) = guard(&state, &headers) {
-                return *response;
-            }
-            match state.store.$delete(state.tenant_id, &id).await {
+            let tenant = match guard(&state, &headers) {
+                Ok(tenant) => tenant,
+                Err(response) => return *response,
+            };
+            match state.store.$delete(tenant.id(), &id).await {
                 Ok(()) => {
                     announce(&state, EventKind::Delete, $kind, &id, None, Vec::new());
                     StatusCode::NO_CONTENT.into_response()
@@ -679,9 +690,10 @@ async fn everything_search<S: ScimStore + Send + Sync + 'static>(
     headers: HeaderMap,
     Json(request): Json<Value>,
 ) -> Response {
-    if let Err(response) = guard(&state, &headers) {
-        return *response;
-    }
+    let tenant = match guard(&state, &headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
 
     let query = match read_search_body(&request) {
         Ok(query) => query,
@@ -689,12 +701,12 @@ async fn everything_search<S: ScimStore + Send + Sync + 'static>(
     };
 
     let users = collect::<_, _>(&query, ResourceType::User, &state.base, |after, limit| {
-        state.store.scan_users(state.tenant_id, after, limit)
+        state.store.scan_users(tenant.id(), after, limit)
     })
     .await;
 
     let groups = collect::<_, _>(&query, ResourceType::Group, &state.base, |after, limit| {
-        state.store.scan_groups(state.tenant_id, after, limit)
+        state.store.scan_groups(tenant.id(), after, limit)
     })
     .await;
 

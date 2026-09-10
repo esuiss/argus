@@ -23,24 +23,40 @@ pub(super) async fn submit(
     else {
         return hidden();
     };
-    let _permit = match admit(&state, &headers, entry).await {
+    let permit = match admit(&state, &headers, entry).await {
         Ok(permit) => permit,
         Err(refusal) => return *refusal,
     };
 
-    let key = match open_idempotency(&state, &headers, Surface::Tenant, &body).await {
+    let key = match open_idempotency(&state, &permit, &headers, Surface::Tenant, &body).await {
         Ok(Idempotency::Replay(response)) => return response,
         Ok(Idempotency::Run(key)) => key,
         Err(refusal) => return *refusal,
     };
 
     let Some(items) = body.get("clients").and_then(Value::as_array) else {
-        close_idempotency(&state, key.as_deref(), Surface::Tenant, 400, &Value::Null).await;
+        close_idempotency(
+            &state,
+            &permit,
+            key.as_deref(),
+            Surface::Tenant,
+            400,
+            &Value::Null,
+        )
+        .await;
         return problem(400, "invalid_request", "clients must be an array");
     };
 
     if items.is_empty() || items.len() > argus_core::admin::job::MAX_ITEMS {
-        close_idempotency(&state, key.as_deref(), Surface::Tenant, 400, &Value::Null).await;
+        close_idempotency(
+            &state,
+            &permit,
+            key.as_deref(),
+            Surface::Tenant,
+            400,
+            &Value::Null,
+        )
+        .await;
         return problem(
             400,
             "invalid_request",
@@ -50,17 +66,33 @@ pub(super) async fn submit(
 
     let Ok(id) = state
         .store
-        .create_job(state.tenant_id, "clients", items.len())
+        .create_job(permit.tenant(), "clients", items.len())
         .await
     else {
-        close_idempotency(&state, key.as_deref(), Surface::Tenant, 503, &Value::Null).await;
+        close_idempotency(
+            &state,
+            &permit,
+            key.as_deref(),
+            Surface::Tenant,
+            503,
+            &Value::Null,
+        )
+        .await;
         return problem(503, "unavailable", "the job registry is unwritable");
     };
 
     let mut job = match Job::new(&id, items.len(), 0) {
         Ok(job) => job,
         Err(e) => {
-            close_idempotency(&state, key.as_deref(), Surface::Tenant, 400, &Value::Null).await;
+            close_idempotency(
+                &state,
+                &permit,
+                key.as_deref(),
+                Surface::Tenant,
+                400,
+                &Value::Null,
+            )
+            .await;
             return problem(400, "invalid_request", &e.to_string());
         }
     };
@@ -70,7 +102,7 @@ pub(super) async fn submit(
     }
 
     for (index, item) in items.iter().enumerate() {
-        let outcome = apply_one(&state, item)
+        let outcome = apply_one(&state, &permit, item)
             .await
             .err()
             .map(|(code, message)| ItemResult {
@@ -84,7 +116,7 @@ pub(super) async fn submit(
     }
 
     let _ = job.finish();
-    let _ = state.store.save_job(state.tenant_id, &job).await;
+    let _ = state.store.save_job(permit.tenant(), &job).await;
 
     // AIP-151 uyarınca 202 ve pollanacak bir job kaynağı. Terminal sonuç job'ın
     // üzerindedir, asla buraya gömülmez; çağıran kabul edilmeyi tamamlanmayla
@@ -94,12 +126,16 @@ pub(super) async fn submit(
         "metadata": job.metadata(),
         "self": format!("{}/admin/api/jobs/v1/{}", state.issuer, job.id),
     });
-    close_idempotency(&state, key.as_deref(), Surface::Tenant, 202, &body).await;
+    close_idempotency(&state, &permit, key.as_deref(), Surface::Tenant, 202, &body).await;
 
     (StatusCode::ACCEPTED, Json(body)).into_response()
 }
 
-async fn apply_one(state: &super::guard::AdminState, item: &Value) -> Result<(), (String, String)> {
+async fn apply_one(
+    state: &super::guard::AdminState,
+    permit: &super::guard::Caller,
+    item: &Value,
+) -> Result<(), (String, String)> {
     let Some(client_id) = item.get("clientId").and_then(Value::as_str) else {
         return Err((
             "missing_client_id".to_owned(),
@@ -135,7 +171,7 @@ async fn apply_one(state: &super::guard::AdminState, item: &Value) -> Result<(),
     state
         .store
         .upsert_client(
-            state.tenant_id,
+            permit.tenant(),
             &AdminClient {
                 client_id: client_id.to_owned(),
                 client_type,
@@ -162,12 +198,12 @@ pub(super) async fn status(
     else {
         return hidden();
     };
-    let _permit = match admit(&state, &headers, entry).await {
+    let permit = match admit(&state, &headers, entry).await {
         Ok(permit) => permit,
         Err(refusal) => return *refusal,
     };
 
-    match state.store.load_job(state.tenant_id, &id).await {
+    match state.store.load_job(permit.tenant(), &id).await {
         Ok(job) => Json(json!({
             "id": job.id,
             "metadata": job.metadata(),

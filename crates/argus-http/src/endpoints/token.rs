@@ -88,6 +88,7 @@ const fn store_error_to_oauth(e: &StoreError) -> OAuthError {
 
 pub async fn handle<C, R, A, S, U, P, X, H>(
     state: &AppState<C, R, A, S, U, P, X>,
+    tenant: &crate::tenancy::Tenant,
     form: &TokenForm,
     now: Timestamp,
     hasher: &H,
@@ -102,21 +103,21 @@ where
     X: ConnectionStore + ResourceStore + IssuerStore + Send + Sync,
     H: Sha256,
 {
-    let client = authenticate_client(state, form, now, hasher).await?;
+    let client = authenticate_client(state, tenant, form, now, hasher).await?;
 
     match form.grant_type.as_str() {
         "authorization_code" => {
-            authorization_code(state, form, &client, now, hasher, binding).await
+            authorization_code(state, tenant, form, &client, now, hasher, binding).await
         }
-        "refresh_token" => refresh_token(state, form, &client, now, hasher, binding).await,
+        "refresh_token" => refresh_token(state, tenant, form, &client, now, hasher, binding).await,
         argus_proto::idjag::GRANT_TYPE_TOKEN_EXCHANGE => {
-            token_exchange(state, form, &client, now).await
+            token_exchange(state, tenant, form, &client, now).await
         }
         argus_core::ciba::GRANT_TYPE => {
-            backchannel(state, form, &client, now, hasher, binding).await
+            backchannel(state, tenant, form, &client, now, hasher, binding).await
         }
         argus_core::jag_consume::GRANT_TYPE => {
-            jwt_bearer(state, form, &client, now, hasher, binding).await
+            jwt_bearer(state, tenant, form, &client, now, hasher, binding).await
         }
 
         _ => Err(OAuthError::with_description(
@@ -128,6 +129,7 @@ where
 
 async fn authenticate_client<C, R, A, S, U, P, X, H>(
     state: &AppState<C, R, A, S, U, P, X>,
+    tenant: &crate::tenancy::Tenant,
     form: &TokenForm,
     now: Timestamp,
     hasher: &H,
@@ -140,7 +142,7 @@ where
     P: ReplayStore + Send + Sync,
     H: Sha256,
 {
-    let tenant = state.tenant_id();
+    let tenant_id = tenant.id();
 
     let claimed = match form.client_assertion.as_deref() {
         Some(raw) => {
@@ -182,7 +184,7 @@ where
     } else {
         state
             .clients
-            .find(tenant, &client)
+            .find(tenant_id, &client)
             .await
             .map_err(|e| store_error_to_oauth(&e))?
             .ok_or_else(|| OAuthError::new(OAuthErrorCode::InvalidClient))?
@@ -195,7 +197,7 @@ where
 
             let replay = consume(
                 &state.replay,
-                tenant,
+                tenant_id,
                 JtiPurpose::ClientAssertion,
                 &claims.jti,
                 now,
@@ -208,8 +210,8 @@ where
                 &claims,
                 &client,
                 &[
-                    state.tenant.metadata.issuer.as_str(),
-                    state.tenant.metadata.token_endpoint.as_str(),
+                    tenant.metadata.issuer.as_str(),
+                    tenant.metadata.token_endpoint.as_str(),
                 ],
                 now,
                 &replay,
@@ -237,6 +239,7 @@ where
 
 async fn authorization_code<C, R, A, S, U, P, X, H>(
     state: &AppState<C, R, A, S, U, P, X>,
+    tenant: &crate::tenancy::Tenant,
     form: &TokenForm,
     client: &ClientId,
     now: Timestamp,
@@ -262,12 +265,12 @@ where
         .clone()
         .ok_or_else(|| OAuthError::new(OAuthErrorCode::InvalidRequest))?;
 
-    let tenant = state.tenant_id();
+    let tenant_id = tenant.id();
     let code_hash = hash(hasher, code);
 
     let stored = state
         .codes
-        .load(tenant, &code_hash)
+        .load(tenant_id, &code_hash)
         .await
         .map_err(|e| store_error_to_oauth(&e))?;
     let record = AuthorizationCode::from_stored(stored);
@@ -278,7 +281,7 @@ where
             client: client.clone(),
             redirect_uri,
             code_verifier,
-            tenant,
+            tenant: tenant_id,
         },
         now,
         hasher,
@@ -287,7 +290,7 @@ where
     let (grant, effects) = match decision {
         Decision::Grant { grant, effects } => (grant, effects),
         Decision::Deny { reason, effects } => {
-            apply_effects(state, &effects, &code_hash, None, now).await?;
+            apply_effects(state, tenant, &effects, &code_hash, None, now).await?;
             return Err(OAuthError::new(match reason.oauth_error_code() {
                 "invalid_grant" => OAuthErrorCode::InvalidGrant,
                 _ => OAuthErrorCode::InvalidRequest,
@@ -295,9 +298,9 @@ where
         }
     };
 
-    apply_effects(state, &effects, &code_hash, None, now).await?;
+    apply_effects(state, tenant, &effects, &code_hash, None, now).await?;
     issue(
-        state,
+        tenant,
         &IssueRequest {
             subject: &grant.subject,
             client: &grant.client,
@@ -315,6 +318,7 @@ where
 
 async fn refresh_token<C, R, A, S, U, P, X, H>(
     state: &AppState<C, R, A, S, U, P, X>,
+    tenant: &crate::tenancy::Tenant,
     form: &TokenForm,
     client: &ClientId,
     now: Timestamp,
@@ -332,12 +336,12 @@ where
         .as_deref()
         .ok_or_else(|| OAuthError::new(OAuthErrorCode::InvalidRequest))?;
 
-    let tenant = state.tenant_id();
+    let tenant_id = tenant.id();
     let old_hash = hash(hasher, presented);
 
     let stored = state
         .refresh
-        .load(tenant, &old_hash)
+        .load(tenant_id, &old_hash)
         .await
         .map_err(|e| store_error_to_oauth(&e))?;
 
@@ -345,7 +349,7 @@ where
         &stored,
         &RefreshRequest {
             client: client.clone(),
-            tenant,
+            tenant: tenant_id,
         },
         now,
         DEFAULT_FAMILY_LIFETIME,
@@ -359,7 +363,7 @@ where
                 new_token: &stored,
                 family: stored.family,
             };
-            apply_effects(state, &effects, &old_hash, Some(rotation), now).await?;
+            apply_effects(state, tenant, &effects, &old_hash, Some(rotation), now).await?;
             let _ = reason;
             Err(OAuthError::new(OAuthErrorCode::InvalidGrant))
         }
@@ -383,10 +387,10 @@ where
                 new_token: &new_token,
                 family: grant.family,
             };
-            apply_effects(state, &effects, &old_hash, Some(rotation), now).await?;
+            apply_effects(state, tenant, &effects, &old_hash, Some(rotation), now).await?;
 
             issue(
-                state,
+                tenant,
                 &IssueRequest {
                     subject: &grant.subject,
                     client: &grant.client,
@@ -405,6 +409,7 @@ where
 
 async fn jwt_bearer<C, R, A, S, U, P, X, H>(
     state: &AppState<C, R, A, S, U, P, X>,
+    tenant: &crate::tenancy::Tenant,
     form: &TokenForm,
     client: &ClientId,
     now: Timestamp,
@@ -424,11 +429,11 @@ where
         .as_deref()
         .ok_or_else(|| OAuthError::new(OAuthErrorCode::InvalidRequest))?;
 
-    let tenant = state.tenant_id();
+    let tenant_id = tenant.id();
 
     let trusted = state
         .resources
-        .trusted_issuers(tenant)
+        .trusted_issuers(tenant_id)
         .await
         .map_err(|e| store_error_to_oauth(&e))?;
 
@@ -441,12 +446,12 @@ where
         .map(|t| t.keys.clone())
         .unwrap_or_default();
 
-    let claims = verify_against(state, raw, &unverified.iss, &issuer_keys)
+    let claims = verify_against(tenant, raw, &unverified.iss, &issuer_keys)
         .ok_or_else(|| OAuthError::new(OAuthErrorCode::InvalidGrant))?;
 
     let replay = consume(
         &state.replay,
-        tenant,
+        tenant_id,
         JtiPurpose::ClientAssertion,
         &claims.jti,
         now,
@@ -457,7 +462,7 @@ where
 
     let known: Vec<String> = state
         .resources
-        .list_resources(tenant)
+        .list_resources(tenant_id)
         .await
         .map_err(|e| store_error_to_oauth(&e))?
         .into_iter()
@@ -479,7 +484,7 @@ where
     validate_grant(
         &presented,
         client,
-        &state.tenant.metadata.issuer,
+        &tenant.metadata.issuer,
         &trusted,
         &known,
         now,
@@ -506,7 +511,7 @@ where
     };
 
     issue(
-        state,
+        tenant,
         &IssueRequest {
             subject: &subject,
             client,
@@ -521,19 +526,14 @@ where
     )
 }
 
-fn verify_against<C, R, A, S, U, P, X>(
-    state: &AppState<C, R, A, S, U, P, X>,
+fn verify_against(
+    tenant: &crate::tenancy::Tenant,
     raw: &str,
     issuer: &str,
     keys: &[argus_core::client_auth::ClientKey],
-) -> Option<argus_proto::IdJagClaims>
-where
-    C: CodeStore + Send + Sync,
-    R: RefreshStore + Send + Sync,
-    A: AuditSink + Send + Sync,
-{
-    if issuer == state.tenant.metadata.issuer {
-        for key in &state.tenant.published_keys {
+) -> Option<argus_proto::IdJagClaims> {
+    if issuer == tenant.metadata.issuer {
+        for key in &tenant.published_keys {
             if let Ok(claims) = argus_proto::idjag::verify_id_jag(raw, &key.verifying_key()) {
                 return Some(claims);
             }
@@ -552,6 +552,7 @@ where
 
 async fn backchannel<C, R, A, S, U, P, X, H>(
     state: &AppState<C, R, A, S, U, P, X>,
+    tenant: &crate::tenancy::Tenant,
     form: &TokenForm,
     client: &ClientId,
     now: Timestamp,
@@ -573,7 +574,7 @@ where
 
     let record = state
         .codes
-        .load_backchannel(state.tenant_id(), &hash)
+        .load_backchannel(tenant.id(), &hash)
         .await
         .map_err(|e| store_error_to_oauth(&e))?;
 
@@ -581,7 +582,7 @@ where
 
     state
         .codes
-        .record_backchannel_poll(state.tenant_id(), &hash, now)
+        .record_backchannel_poll(tenant.id(), &hash, now)
         .await
         .map_err(|e| store_error_to_oauth(&e))?;
 
@@ -596,7 +597,7 @@ where
 
     let consumed = state
         .codes
-        .consume_backchannel(state.tenant_id(), &hash, now)
+        .consume_backchannel(tenant.id(), &hash, now)
         .await
         .map_err(|e| store_error_to_oauth(&e))?;
 
@@ -605,7 +606,7 @@ where
     }
 
     issue(
-        state,
+        tenant,
         &IssueRequest {
             subject: &subject,
             client,
@@ -632,6 +633,7 @@ fn backchannel_error(outcome: &PollOutcome) -> OAuthError {
 
 async fn token_exchange<C, R, A, S, U, P, X>(
     state: &AppState<C, R, A, S, U, P, X>,
+    tenant: &crate::tenancy::Tenant,
     form: &TokenForm,
     client: &ClientId,
     now: Timestamp,
@@ -659,11 +661,11 @@ where
         .clone()
         .ok_or_else(|| OAuthError::new(OAuthErrorCode::InvalidRequest))?;
 
-    let subject = subject_of(state, subject_token, now)?;
+    let subject = subject_of(tenant, subject_token, now)?;
 
     let connection = state
         .resources
-        .find_connection(state.tenant_id(), client, &audience)
+        .find_connection(tenant.id(), client, &audience)
         .await
         .map_err(|e| store_error_to_oauth(&e))?;
 
@@ -685,7 +687,7 @@ where
     })?;
 
     let claims = IdJagClaims {
-        iss: state.tenant.metadata.issuer.clone(),
+        iss: tenant.metadata.issuer.clone(),
         sub: subject,
         aud: grant.resource_as_issuer,
         client_id: client.as_str().to_owned(),
@@ -701,7 +703,7 @@ where
         email: None,
     };
 
-    let assertion = argus_proto::idjag::sign_id_jag(&claims, &state.tenant.active_key)
+    let assertion = argus_proto::idjag::sign_id_jag(&claims, &tenant.active_key)
         .map_err(|_| OAuthError::new(OAuthErrorCode::ServerError))?;
 
     Ok(TokenResponse {
@@ -715,28 +717,23 @@ where
     })
 }
 
-fn subject_of<C, R, A, S, U, P, X>(
-    state: &AppState<C, R, A, S, U, P, X>,
+fn subject_of(
+    tenant: &crate::tenancy::Tenant,
     subject_token: &str,
     now: Timestamp,
-) -> Result<String, OAuthError>
-where
-    C: CodeStore + Send + Sync,
-    R: RefreshStore + Send + Sync,
-    A: AuditSink + Send + Sync,
-{
-    for key in &state.tenant.published_keys {
+) -> Result<String, OAuthError> {
+    for key in &tenant.published_keys {
         let verifying = key.verifying_key();
 
         if let Ok(claims) = argus_proto::oidc::verify_id_token(subject_token, &verifying)
-            && claims.iss == state.tenant.metadata.issuer
+            && claims.iss == tenant.metadata.issuer
             && claims.exp > now.as_unix_seconds()
         {
             return Ok(claims.sub);
         }
 
         if let Ok(claims) = argus_proto::jwt::verify(subject_token, &verifying)
-            && claims.iss == state.tenant.metadata.issuer
+            && claims.iss == tenant.metadata.issuer
             && claims.exp > now.as_unix_seconds()
         {
             return Ok(claims.sub);
@@ -751,6 +748,7 @@ where
 
 async fn apply_effects<C, R, A, S, U, P, X>(
     state: &AppState<C, R, A, S, U, P, X>,
+    tenant: &crate::tenancy::Tenant,
     effects: &[Effect],
     code_hash: &[u8; 32],
     rotation: Option<Rotation<'_>>,
@@ -762,7 +760,7 @@ where
     A: AuditSink + Send + Sync,
 {
     let ctx = EffectContext {
-        tenant: state.tenant_id(),
+        tenant: tenant.id(),
         code_hash: Some(code_hash),
         rotation,
         now,
@@ -792,23 +790,17 @@ struct IssueRequest<'a> {
     resources: &'a [argus_core::resource::ResourceUri],
 }
 
-fn issue<C, R, A, S, U, P, X, H>(
-    state: &AppState<C, R, A, S, U, P, X>,
+fn issue<H: Sha256>(
+    tenant: &crate::tenancy::Tenant,
     request: &IssueRequest<'_>,
     now: Timestamp,
     hasher: &H,
-) -> Result<TokenResponse, OAuthError>
-where
-    C: CodeStore + Send + Sync,
-    R: RefreshStore + Send + Sync,
-    A: AuditSink + Send + Sync,
-    H: Sha256,
-{
+) -> Result<TokenResponse, OAuthError> {
     let subject = request.subject.as_uuid().simple().to_string();
     let exp = now.saturating_add(PLACEHOLDER_ACCESS_TOKEN_LIFETIME);
 
     let audience = if request.resources.is_empty() {
-        Audience::One(state.tenant.metadata.issuer.clone())
+        Audience::One(tenant.metadata.issuer.clone())
     } else {
         Audience::of(
             &request
@@ -820,7 +812,7 @@ where
     };
 
     let claims = AccessTokenClaims {
-        iss: state.tenant.metadata.issuer.clone(),
+        iss: tenant.metadata.issuer.clone(),
         sub: subject.clone(),
         aud: audience,
         exp: exp.as_unix_seconds(),
@@ -834,12 +826,12 @@ where
 
     let bound = claims.cnf.is_some();
 
-    let access_token = sign(&claims, &state.tenant.active_key)
+    let access_token = sign(&claims, &tenant.active_key)
         .map_err(|_| OAuthError::new(OAuthErrorCode::ServerError))?;
 
     let id_token = if wants_openid(request.scope) {
         let id_claims = IdTokenClaims {
-            iss: state.tenant.metadata.issuer.clone(),
+            iss: tenant.metadata.issuer.clone(),
             sub: subject,
 
             aud: request.client.as_str().to_owned(),
@@ -852,7 +844,7 @@ where
             at_hash: Some(at_hash(&access_token, hasher)),
         };
         Some(
-            sign_id_token(&id_claims, &state.tenant.active_key)
+            sign_id_token(&id_claims, &tenant.active_key)
                 .map_err(|_| OAuthError::new(OAuthErrorCode::ServerError))?,
         )
     } else {

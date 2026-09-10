@@ -106,10 +106,27 @@ async fn seed(tenant: TenantId, confidential: bool, key: Option<&SigningKey>) {
     tx.commit().await.expect("commit");
 }
 
+fn registry(tenant: TenantId) -> Arc<argus_http::tenancy::TenantRegistry> {
+    Arc::new(argus_http::tenancy::TenantRegistry::single(
+        "as.test",
+        argus_http::tenancy::TenantEntry {
+            id: tenant,
+            issuer: ISSUER.to_owned(),
+            context: test_context(),
+        },
+    ))
+}
+
+fn resolved(tenant: TenantId) -> argus_http::tenancy::Tenant {
+    registry(tenant)
+        .resolve("as.test")
+        .expect("the registry has this host")
+}
+
 fn state(store: PostgresStore, tenant: TenantId, profile: Profile) -> Arc<ParState> {
     Arc::new(ParState {
         store,
-        tenant_id: tenant,
+        tenants: registry(tenant),
         profile,
         issuer: ISSUER.to_owned(),
         endpoint: endpoint(),
@@ -183,6 +200,7 @@ async fn a_pushed_request_is_redeemed_once_and_carries_its_parameters() {
 
     let (request_uri, window) = push(
         &state,
+        &resolved(tenant),
         &parameters(tenant, &[("resource", "https://a.test")]),
         &client(tenant),
         None,
@@ -193,7 +211,7 @@ async fn a_pushed_request_is_redeemed_once_and_carries_its_parameters() {
     assert!(request_uri.starts_with("urn:ietf:params:oauth:request_uri:"));
     assert_eq!(window, Duration::from_seconds(90));
 
-    let redeemed = redeem(&state, &request_uri, &client(tenant))
+    let redeemed = redeem(&state, &resolved(tenant), &request_uri, &client(tenant))
         .await
         .expect("redeem");
 
@@ -205,7 +223,7 @@ async fn a_pushed_request_is_redeemed_once_and_carries_its_parameters() {
     assert_eq!(redeemed.all("resource"), ["https://a.test"]);
 
     assert_eq!(
-        redeem(&state, &request_uri, &client(tenant))
+        redeem(&state, &resolved(tenant), &request_uri, &client(tenant))
             .await
             .unwrap_err(),
         ParFault::UnknownRequestUri,
@@ -223,14 +241,22 @@ async fn a_request_uri_cannot_be_presented_by_another_client() {
 
     let state = state(PostgresStore::new(pool), tenant, Profile::financial_grade());
 
-    let (request_uri, _) = push(&state, &parameters(tenant, &[]), &client(tenant), None)
-        .await
-        .expect("push");
+    let (request_uri, _) = push(
+        &state,
+        &resolved(tenant),
+        &parameters(tenant, &[]),
+        &client(tenant),
+        None,
+    )
+    .await
+    .expect("push");
 
     let stranger = ClientId::new("someone-else").expect("client");
 
     assert_eq!(
-        redeem(&state, &request_uri, &stranger).await.unwrap_err(),
+        redeem(&state, &resolved(tenant), &request_uri, &stranger)
+            .await
+            .unwrap_err(),
         ParFault::NotYours,
         "handing a request_uri to another client would let it borrow this one's registration"
     );
@@ -252,7 +278,7 @@ async fn a_request_uri_this_server_never_issued_is_refused() {
         "urn:ietf:params:oauth:request_uri:",
     ] {
         assert_eq!(
-            redeem(&state, candidate, &client(tenant))
+            redeem(&state, &resolved(tenant), candidate, &client(tenant))
                 .await
                 .unwrap_err(),
             ParFault::UnknownRequestUri,
@@ -275,7 +301,9 @@ async fn a_push_that_declares_another_client_is_refused() {
     body[0] = ("client_id".to_owned(), "someone-else".to_owned());
 
     assert!(
-        push(&state, &body, &client(tenant), None).await.is_err(),
+        push(&state, &resolved(tenant), &body, &client(tenant), None)
+            .await
+            .is_err(),
         "the authenticated client is the only one that may push on its own behalf"
     );
 }
@@ -305,7 +333,7 @@ async fn a_confidential_client_authenticates_with_its_assertion() {
         ],
     );
 
-    let authenticated = authenticate_pusher(&state, &body)
+    let authenticated = authenticate_pusher(&state, &resolved(tenant), &body)
         .await
         .expect("the client presented a valid assertion");
 
@@ -324,7 +352,7 @@ async fn a_confidential_client_that_presents_no_assertion_is_refused() {
     let state = state(PostgresStore::new(pool), tenant, Profile::financial_grade());
 
     assert!(
-        authenticate_pusher(&state, &parameters(tenant, &[]))
+        authenticate_pusher(&state, &resolved(tenant), &parameters(tenant, &[]))
             .await
             .is_err(),
         "anyone able to push without authenticating can craft an authorization request for any client"
@@ -351,7 +379,11 @@ async fn an_assertion_signed_by_a_key_the_client_never_registered_is_refused() {
         )],
     );
 
-    assert!(authenticate_pusher(&state, &body).await.is_err());
+    assert!(
+        authenticate_pusher(&state, &resolved(tenant), &body)
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]
@@ -379,7 +411,9 @@ async fn an_assertion_minted_for_another_audience_is_refused() {
     );
 
     assert!(
-        authenticate_pusher(&state, &body).await.is_err(),
+        authenticate_pusher(&state, &resolved(tenant), &body)
+            .await
+            .is_err(),
         "an assertion accepted for any audience is one that can be relayed to this server"
     );
 }
@@ -403,10 +437,14 @@ async fn an_assertion_is_refused_the_second_time_it_is_presented() {
         )],
     );
 
-    authenticate_pusher(&state, &body).await.expect("first use");
+    authenticate_pusher(&state, &resolved(tenant), &body)
+        .await
+        .expect("first use");
 
     assert!(
-        authenticate_pusher(&state, &body).await.is_err(),
+        authenticate_pusher(&state, &resolved(tenant), &body)
+            .await
+            .is_err(),
         "a replayable assertion is a bearer credential wearing a signature"
     );
 }
@@ -422,7 +460,7 @@ async fn the_financial_grade_profile_refuses_a_public_client() {
     let state = state(PostgresStore::new(pool), tenant, Profile::financial_grade());
 
     assert!(
-        authenticate_pusher(&state, &parameters(tenant, &[]))
+        authenticate_pusher(&state, &resolved(tenant), &parameters(tenant, &[]))
             .await
             .is_err(),
         "the profile is for third party access and says confidential clients only"
@@ -439,7 +477,7 @@ async fn the_permissive_profile_still_accepts_a_public_client() {
 
     let state = state(PostgresStore::new(pool), tenant, Profile::permissive());
 
-    authenticate_pusher(&state, &parameters(tenant, &[]))
+    authenticate_pusher(&state, &resolved(tenant), &parameters(tenant, &[]))
         .await
         .expect("ordinary deployments still work");
 }
@@ -458,12 +496,18 @@ async fn a_request_pushed_by_one_tenant_is_invisible_to_another() {
     let one = state(store.clone(), first, Profile::financial_grade());
     let other = state(store, second, Profile::financial_grade());
 
-    let (request_uri, _) = push(&one, &parameters(first, &[]), &client(first), None)
-        .await
-        .expect("push");
+    let (request_uri, _) = push(
+        &one,
+        &resolved(first),
+        &parameters(first, &[]),
+        &client(first),
+        None,
+    )
+    .await
+    .expect("push");
 
     assert_eq!(
-        redeem(&other, &request_uri, &client(first))
+        redeem(&other, &resolved(second), &request_uri, &client(first))
             .await
             .unwrap_err(),
         ParFault::UnknownRequestUri
@@ -485,4 +529,18 @@ fn a_form_body_is_read_with_repeated_parameters_intact() {
 fn a_plus_in_a_form_body_decodes_to_a_space() {
     let parsed = parse_form("scope=openid+profile");
     assert_eq!(parsed[0].1, "openid profile");
+}
+
+fn test_context() -> argus_http::state::TenantContext {
+    let (key, _) = SigningKey::generate("t1".to_owned()).expect("key");
+    let key = Arc::new(key);
+    argus_http::state::TenantContext {
+        metadata: argus_proto::AuthorizationServerMetadata::for_issuer(ISSUER),
+        active_key: Arc::clone(&key),
+        published_keys: vec![key],
+        rsa_keys: Vec::new(),
+        blind_index: argus_crypto::blind_index::BlindIndexKey::new(&[7_u8; 32])
+            .expect("blind index"),
+        relying_party: None,
+    }
 }

@@ -2,7 +2,8 @@
     clippy::expect_used,
     clippy::unwrap_used,
     clippy::panic,
-    clippy::unused_async_trait_impl
+    clippy::unused_async_trait_impl,
+    clippy::too_many_lines
 )]
 
 use std::sync::{Arc, Mutex};
@@ -166,25 +167,32 @@ async fn token(
     form: &TokenForm,
     binding: Option<String>,
 ) -> Result<argus_proto::TokenResponse, argus_proto::OAuthError> {
-    handle(s, form, NOW, &AwsLcSha256, binding).await
+    let tenant = s.tenants.resolve("acme.argus.test").expect("registered");
+    handle(s, &tenant, form, NOW, &AwsLcSha256, binding).await
 }
 
 fn state() -> TestState {
     let (key, _) = SigningKey::generate("k1").expect("key");
     let key = Arc::new(key);
     AppState {
-        tenant: TenantContext {
-            metadata: AuthorizationServerMetadata::for_issuer("https://acme.argus.test"),
-            active_key: Arc::clone(&key),
-            published_keys: vec![key],
-            rsa_keys: Vec::new(),
-            blind_index: test_blind_index(),
-            relying_party: None,
-        },
+        tenants: Arc::new(argus_http::tenancy::TenantRegistry::single(
+            "acme.argus.test",
+            argus_http::tenancy::TenantEntry {
+                id: tenant(),
+                issuer: "https://acme.argus.test".to_owned(),
+                context: TenantContext {
+                    metadata: AuthorizationServerMetadata::for_issuer("https://acme.argus.test"),
+                    active_key: Arc::clone(&key),
+                    published_keys: vec![key],
+                    rsa_keys: Vec::new(),
+                    blind_index: test_blind_index(),
+                    relying_party: None,
+                },
+            },
+        )),
         codes: MemCodes::default(),
         refresh: MemRefresh::default(),
         audit: MemAudit::default(),
-        tenant_id: tenant(),
         clients: Clients::default(),
         authenticator: (),
         replay: MemoryReplayStore::default(),
@@ -240,8 +248,15 @@ async fn authorization_code_yields_a_verifiable_access_token() {
 
     let resp = token(&s, &code_form(), None).await.expect("token issued");
 
-    let claims = argus_proto::jwt::verify(&resp.access_token, &s.tenant.active_key.verifying_key())
-        .expect("token verifies against the published key");
+    let claims = argus_proto::jwt::verify(
+        &resp.access_token,
+        &s.tenants
+            .resolve("acme.argus.test")
+            .expect("registered")
+            .active_key
+            .verifying_key(),
+    )
+    .expect("token verifies against the published key");
 
     assert_eq!(claims.iss, "https://acme.argus.test");
     assert!(claims.aud.contains("https://acme.argus.test"));
@@ -466,18 +481,24 @@ async fn storage_outage_returns_503_not_invalid_grant() {
     let (key, _) = SigningKey::generate("k1").expect("key");
     let key = Arc::new(key);
     let s = AppState {
-        tenant: TenantContext {
-            metadata: AuthorizationServerMetadata::for_issuer("https://acme.argus.test"),
-            active_key: Arc::clone(&key),
-            published_keys: vec![key],
-            rsa_keys: Vec::new(),
-            blind_index: test_blind_index(),
-            relying_party: None,
-        },
+        tenants: Arc::new(argus_http::tenancy::TenantRegistry::single(
+            "acme.argus.test",
+            argus_http::tenancy::TenantEntry {
+                id: tenant(),
+                issuer: "https://acme.argus.test".to_owned(),
+                context: TenantContext {
+                    metadata: AuthorizationServerMetadata::for_issuer("https://acme.argus.test"),
+                    active_key: Arc::clone(&key),
+                    published_keys: vec![key],
+                    rsa_keys: Vec::new(),
+                    blind_index: test_blind_index(),
+                    relying_party: None,
+                },
+            },
+        )),
         codes: DeadCodes,
         refresh: MemRefresh::default(),
         audit: MemAudit::default(),
-        tenant_id: tenant(),
         clients: Clients::default(),
         authenticator: (),
         replay: MemoryReplayStore::default(),
@@ -488,7 +509,8 @@ async fn storage_outage_returns_503_not_invalid_grant() {
         pushed_requests: None,
     };
 
-    let err = handle(&s, &code_form(), NOW, &AwsLcSha256, None)
+    let tenant = s.tenants.resolve("acme.argus.test").expect("registered");
+    let err = handle(&s, &tenant, &code_form(), NOW, &AwsLcSha256, None)
         .await
         .expect_err("outage");
     assert_eq!(err.error, OAuthErrorCode::TemporarilyUnavailable);
@@ -513,8 +535,15 @@ async fn dpop_binding_changes_the_token_type_and_adds_cnf() {
 
     assert_eq!(resp.token_type, "DPoP");
 
-    let claims = argus_proto::jwt::verify(&resp.access_token, &s.tenant.active_key.verifying_key())
-        .expect("verify");
+    let claims = argus_proto::jwt::verify(
+        &resp.access_token,
+        &s.tenants
+            .resolve("acme.argus.test")
+            .expect("registered")
+            .active_key
+            .verifying_key(),
+    )
+    .expect("verify");
     assert_eq!(
         claims.cnf.expect("cnf must be present").jkt,
         "thumbprint-abc"
@@ -529,8 +558,15 @@ async fn without_dpop_the_token_stays_bearer() {
     let resp = token(&s, &code_form(), None).await.expect("token issued");
 
     assert_eq!(resp.token_type, "Bearer");
-    let claims = argus_proto::jwt::verify(&resp.access_token, &s.tenant.active_key.verifying_key())
-        .expect("verify");
+    let claims = argus_proto::jwt::verify(
+        &resp.access_token,
+        &s.tenants
+            .resolve("acme.argus.test")
+            .expect("registered")
+            .active_key
+            .verifying_key(),
+    )
+    .expect("verify");
     assert!(claims.cnf.is_none());
 }
 
@@ -550,8 +586,15 @@ async fn openid_scope_produces_a_verifiable_id_token() {
     let resp = token(&s, &code_form(), None).await.expect("token issued");
 
     let raw = resp.id_token.as_deref().expect("id_token must be present");
-    let claims = argus_proto::oidc::verify_id_token(raw, &s.tenant.active_key.verifying_key())
-        .expect("id_token verifies against the published key");
+    let claims = argus_proto::oidc::verify_id_token(
+        raw,
+        &s.tenants
+            .resolve("acme.argus.test")
+            .expect("registered")
+            .active_key
+            .verifying_key(),
+    )
+    .expect("id_token verifies against the published key");
 
     assert_eq!(claims.iss, "https://acme.argus.test");
 
@@ -568,7 +611,11 @@ async fn the_nonce_is_echoed_byte_for_byte() {
 
     let claims = argus_proto::oidc::verify_id_token(
         resp.id_token.as_deref().expect("id_token"),
-        &s.tenant.active_key.verifying_key(),
+        &s.tenants
+            .resolve("acme.argus.test")
+            .expect("registered")
+            .active_key
+            .verifying_key(),
     )
     .expect("verify");
 
@@ -584,7 +631,11 @@ async fn at_hash_binds_the_id_token_to_this_access_token() {
 
     let claims = argus_proto::oidc::verify_id_token(
         resp.id_token.as_deref().expect("id_token"),
-        &s.tenant.active_key.verifying_key(),
+        &s.tenants
+            .resolve("acme.argus.test")
+            .expect("registered")
+            .active_key
+            .verifying_key(),
     )
     .expect("verify");
 
@@ -623,7 +674,11 @@ async fn openid_without_a_nonce_still_succeeds() {
 
     let claims = argus_proto::oidc::verify_id_token(
         resp.id_token.as_deref().expect("id_token"),
-        &s.tenant.active_key.verifying_key(),
+        &s.tenants
+            .resolve("acme.argus.test")
+            .expect("registered")
+            .active_key
+            .verifying_key(),
     )
     .expect("verify");
 
@@ -1005,9 +1060,15 @@ async fn an_authorised_exchange_mints_an_id_jag() {
     );
     assert!(resp.refresh_token.is_none());
 
-    let claims =
-        argus_proto::idjag::verify_id_jag(&resp.access_token, &s.tenant.active_key.verifying_key())
-            .expect("verify");
+    let claims = argus_proto::idjag::verify_id_jag(
+        &resp.access_token,
+        &s.tenants
+            .resolve("acme.argus.test")
+            .expect("registered")
+            .active_key
+            .verifying_key(),
+    )
+    .expect("verify");
 
     assert_eq!(claims.iss, "https://acme.argus.test");
     assert_eq!(claims.aud, RESOURCE_AS);
@@ -1128,9 +1189,15 @@ async fn the_client_id_in_the_grant_is_the_authenticated_client() {
     let resp = token(&s, &exchange_form(&subject, RESOURCE_AS, None, None), None)
         .await
         .expect("exchange");
-    let claims =
-        argus_proto::idjag::verify_id_jag(&resp.access_token, &s.tenant.active_key.verifying_key())
-            .expect("verify");
+    let claims = argus_proto::idjag::verify_id_jag(
+        &resp.access_token,
+        &s.tenants
+            .resolve("acme.argus.test")
+            .expect("registered")
+            .active_key
+            .verifying_key(),
+    )
+    .expect("verify");
 
     assert_eq!(claims.client_id, client().as_str());
 }
@@ -1441,8 +1508,15 @@ async fn a_grant_from_a_trusted_issuer_becomes_an_audience_restricted_token() {
         .await
         .expect("token issued");
 
-    let claims = argus_proto::jwt::verify(&resp.access_token, &s.tenant.active_key.verifying_key())
-        .expect("verify");
+    let claims = argus_proto::jwt::verify(
+        &resp.access_token,
+        &s.tenants
+            .resolve("acme.argus.test")
+            .expect("registered")
+            .active_key
+            .verifying_key(),
+    )
+    .expect("verify");
     assert!(claims.aud.contains(MCP_SERVER));
     assert_eq!(claims.scope.as_deref(), Some("chat.read"));
 }

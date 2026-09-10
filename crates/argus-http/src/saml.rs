@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use argus_core::id::{TenantId, UserId};
+use argus_core::id::UserId;
 use argus_core::time::{Duration, Timestamp};
 use argus_saml::binding::{
     BINDING_POST, BindingFault, check_relay_state, decode_post, encode_post,
@@ -20,6 +20,7 @@ use argus_saml::signature::{SignatureFault, XmlSigner};
 use axum::Form;
 use axum::Router;
 use axum::extract::State;
+use axum::http::HeaderMap;
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
@@ -37,7 +38,8 @@ pub struct SamlState<S, R, U> {
     pub signer: S,
     pub registry: R,
     pub subjects: U,
-    pub tenant_id: TenantId,
+    // §18: kiracı istekten çözülür.
+    pub tenants: std::sync::Arc<crate::tenancy::TenantRegistry>,
     pub entity_id: String,
     pub sso_location: String,
     pub certificate_base64: String,
@@ -121,6 +123,7 @@ pub struct SsoRequest<'a> {
     reason = "the single sign-on decision reads as one sequence and splitting it hides the order"
 )]
 pub fn handle<S, R, U>(
+    tenant: &crate::tenancy::Tenant,
     state: &SamlState<S, R, U>,
     request: &SsoRequest<'_>,
 ) -> Result<SsoOutcome, SsoFault>
@@ -180,7 +183,7 @@ where
 
     let issued = issue(
         authn.name_id_format.as_deref(),
-        state.tenant_id,
+        tenant.id(),
         &provider.entity_id,
         user,
         email.as_deref(),
@@ -275,12 +278,19 @@ pub fn post_form(destination: &str, saml_response: &str, relay_state: Option<&st
     )
 }
 
-async fn metadata_handler<S, R, U>(State(state): State<Shared<S, R, U>>) -> Response
+async fn metadata_handler<S, R, U>(
+    State(state): State<Shared<S, R, U>>,
+    headers: HeaderMap,
+) -> Response
 where
     S: XmlSigner + Send + Sync + 'static,
     R: ServiceProviderRegistry + 'static,
     U: Subject + 'static,
 {
+    if crate::tenancy::resolve(&state.tenants, &headers).is_err() {
+        return (axum::http::StatusCode::NOT_FOUND, "unknown issuer").into_response();
+    }
+
     let document = identity_provider(&IdentityProvider {
         entity_id: &state.entity_id,
         sso_post_location: &state.sso_location,
@@ -293,6 +303,7 @@ where
 
 async fn sso_handler<S, R, U>(
     State(state): State<Shared<S, R, U>>,
+    headers: HeaderMap,
     Form(form): Form<SsoForm>,
 ) -> Response
 where
@@ -300,6 +311,11 @@ where
     R: ServiceProviderRegistry + 'static,
     U: Subject + 'static,
 {
+    let tenant = match crate::tenancy::resolve(&state.tenants, &headers) {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
+
     let subject = state.subjects.resolve(form.session.as_deref());
 
     let response_id = format!("_r{}", uuid::Uuid::new_v4().simple());
@@ -317,7 +333,7 @@ where
         transient_handle: &transient_handle,
     };
 
-    match handle(&state, &request) {
+    match handle(&tenant, &state, &request) {
         Ok(SsoOutcome::Post {
             destination,
             saml_response,

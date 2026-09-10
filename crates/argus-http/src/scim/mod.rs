@@ -3,7 +3,6 @@ pub mod routes;
 
 use std::sync::Arc;
 
-use argus_core::id::TenantId;
 use argus_core::time::Timestamp;
 use argus_crypto::{SigningKey, VerifyingKey};
 use argus_proto::jwt::AccessTokenClaims;
@@ -44,7 +43,8 @@ impl EventPublisher {
 
 pub struct ScimState<S> {
     pub store: S,
-    pub tenant_id: TenantId,
+    // §18: kiracı istekten çözülür.
+    pub tenants: std::sync::Arc<crate::tenancy::TenantRegistry>,
     pub issuer: String,
     pub base: String,
     pub published_keys: Vec<Arc<SigningKey>>,

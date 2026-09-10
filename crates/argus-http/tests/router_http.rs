@@ -130,18 +130,24 @@ async fn serve() -> String {
     let key = Arc::new(key);
 
     let state = Arc::new(AppState {
-        tenant: TenantContext {
-            metadata: AuthorizationServerMetadata::for_issuer("http://argus.test"),
-            active_key: Arc::clone(&key),
-            published_keys: vec![key],
-            rsa_keys: Vec::new(),
-            blind_index: test_blind_index(),
-            relying_party: None,
-        },
+        tenants: Arc::new(argus_http::tenancy::TenantRegistry::single(
+            "argus.test",
+            argus_http::tenancy::TenantEntry {
+                id: TenantId::from_uuid(Uuid::nil()),
+                issuer: "http://argus.test".to_owned(),
+                context: TenantContext {
+                    metadata: AuthorizationServerMetadata::for_issuer("http://argus.test"),
+                    active_key: Arc::clone(&key),
+                    published_keys: vec![key],
+                    rsa_keys: Vec::new(),
+                    blind_index: test_blind_index(),
+                    relying_party: None,
+                },
+            },
+        )),
         codes: Codes::default(),
         refresh: Refresh,
         audit: Audit,
-        tenant_id: TenantId::from_uuid(Uuid::nil()),
         clients: Clients,
         authenticator: (),
         replay: MemoryReplayStore::default(),
