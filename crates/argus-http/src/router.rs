@@ -1147,6 +1147,34 @@ where
     query.resource =
         crate::endpoints::authorize::repeated_query_values(raw_query.as_deref(), "resource");
 
+    let request_uri =
+        crate::endpoints::authorize::repeated_query_values(raw_query.as_deref(), "request_uri")
+            .into_iter()
+            .next();
+
+    if let Some(par) = state.pushed_requests.as_ref() {
+        if let Err(fault) = crate::par::entry_check(par, request_uri.as_deref()) {
+            return (StatusCode::BAD_REQUEST, fault.to_string()).into_response();
+        }
+
+        if let Some(request_uri) = request_uri.as_deref() {
+            let Ok(client) = argus_core::id::ClientId::new(query.client_id.clone()) else {
+                return oauth_response(&OAuthError::new(OAuthErrorCode::InvalidRequest));
+            };
+
+            match crate::par::redeem(par, request_uri, &client).await {
+                Err(fault) => {
+                    return (StatusCode::BAD_REQUEST, fault.to_string()).into_response();
+                }
+                Ok(pushed) => {
+                    query = crate::par::query_from(&pushed, &query);
+                }
+            }
+        }
+    } else if request_uri.is_some() {
+        return oauth_response(&OAuthError::new(OAuthErrorCode::InvalidRequest));
+    }
+
     let code = uuid::Uuid::new_v4().simple().to_string();
     let registered_resources = match state.resources.list_resources(state.tenant_id()).await {
         Ok(list) => list.into_iter().map(|r| r.uri).collect::<Vec<_>>(),

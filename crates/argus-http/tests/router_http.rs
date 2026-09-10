@@ -148,6 +148,7 @@ async fn serve() -> String {
         cimd: None,
         federation: None,
         federation_identity: None,
+        pushed_requests: None,
     });
 
     {

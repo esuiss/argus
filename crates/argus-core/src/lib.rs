@@ -19,6 +19,7 @@ pub mod hex;
 pub mod id;
 pub mod jag_consume;
 pub mod ldap;
+pub mod par;
 pub mod password_policy;
 pub mod pkce;
 pub mod recovery;

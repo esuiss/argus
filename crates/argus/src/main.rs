@@ -52,6 +52,7 @@ struct Config {
     federation_trust_anchors: Option<String>,
     agent_card_key_dir: Option<String>,
     vault_key: Option<String>,
+    fapi_profile: bool,
 }
 
 impl Config {
@@ -79,6 +80,7 @@ impl Config {
             federation_trust_anchors: env::var("ARGUS_FEDERATION_TRUST_ANCHORS").ok(),
             agent_card_key_dir: env::var("ARGUS_AGENT_CARD_KEY_DIR").ok(),
             vault_key: env::var("ARGUS_VAULT_KEY").ok(),
+            fapi_profile: env::var("ARGUS_FAPI_PROFILE").is_ok_and(|v| v == "1"),
         }
     }
 }
@@ -163,6 +165,7 @@ async fn main() -> ExitCode {
         cimd: Some(cimd_runtime(&config)),
         federation: None,
         federation_identity: None,
+        pushed_requests: None,
     });
 
     let app = argus_http::build(state);
@@ -969,6 +972,10 @@ impl argus_http::scim::EventSink for StderrEventSink {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "the start-up sequence reads as one ordered list of what the server offers"
+)]
 async fn serve_with_postgres(
     config: &Config,
     url: &str,
@@ -994,6 +1001,20 @@ async fn serve_with_postgres(
 
     let tenant_id = TenantId::from_uuid(Uuid::nil());
 
+    let profile = if config.fapi_profile {
+        argus_core::par::Profile::financial_grade()
+    } else {
+        argus_core::par::Profile::permissive()
+    };
+
+    let pushed_requests = Arc::new(argus_http::par::ParState {
+        store: store.clone(),
+        tenant_id,
+        profile,
+        issuer: config.issuer.clone(),
+        endpoint: format!("{}/par", config.issuer),
+    });
+
     let scim = Arc::new(argus_http::scim::ScimState {
         store: store.clone(),
         tenant_id,
@@ -1011,7 +1032,11 @@ async fn serve_with_postgres(
 
     let state = Arc::new(AppState {
         tenant: TenantContext {
-            metadata: AuthorizationServerMetadata::for_issuer(&config.issuer),
+            metadata: {
+                let mut metadata = AuthorizationServerMetadata::for_issuer(&config.issuer);
+                metadata.require_pushed_authorization_requests = config.fapi_profile;
+                metadata
+            },
             active_key: Arc::clone(&keys.active),
             published_keys: keys.published.clone(),
             blind_index: blind_index.clone(),
@@ -1029,6 +1054,7 @@ async fn serve_with_postgres(
         cimd: Some(cimd_runtime(config)),
         federation: federation_runtime(config, tls_client_config()),
         federation_identity: federation_identity(config),
+        pushed_requests: Some(Arc::clone(&pushed_requests)),
     });
 
     let mut app = argus_http::build(state).merge(argus_http::scim::routes::build(scim));
@@ -1063,7 +1089,16 @@ async fn serve_with_postgres(
         eprintln!("argus: credential vault at /vault/lease and /vault/redeem");
     }
 
-    app = app.merge(argus_http::differentiation::build(differentiation));
+    app = app
+        .merge(argus_http::differentiation::build(differentiation))
+        .merge(argus_http::par::build(Arc::clone(&pushed_requests)));
+
+    if config.fapi_profile {
+        eprintln!(
+            "argus: financial grade profile: authorization requests must be pushed, \
+             tokens must be sender constrained, public clients are refused"
+        );
+    }
 
     eprintln!("argus: WARNING - DevAuthenticator active, development only");
     warn_if_keys_are_ephemeral(config);

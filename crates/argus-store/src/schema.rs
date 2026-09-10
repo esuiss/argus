@@ -18,6 +18,7 @@ pub const EXPECTED_MIGRATIONS: &[&str] = &[
     "0015_sessions_and_ceremonies",
     "0016_scim",
     "0017_vault",
+    "0018_pushed_requests",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

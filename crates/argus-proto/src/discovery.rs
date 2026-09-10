@@ -1,6 +1,10 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "discovery metadata is a wire format and every flag is one the specifications name"
+)]
 pub struct AuthorizationServerMetadata {
     pub issuer: String,
 
@@ -9,6 +13,12 @@ pub struct AuthorizationServerMetadata {
     pub token_endpoint: String,
 
     pub jwks_uri: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pushed_authorization_request_endpoint: Option<String>,
+
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub require_pushed_authorization_requests: bool,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backchannel_authentication_endpoint: Option<String>,
@@ -68,6 +78,8 @@ impl AuthorizationServerMetadata {
             authorization_endpoint: format!("{issuer}/authorize"),
             token_endpoint: format!("{issuer}/token"),
             jwks_uri: format!("{issuer}/.well-known/jwks.json"),
+            pushed_authorization_request_endpoint: Some(format!("{issuer}/par")),
+            require_pushed_authorization_requests: false,
             backchannel_authentication_endpoint: Some(format!("{issuer}/bc-authorize")),
             backchannel_token_delivery_modes_supported: Some(vec!["poll".to_owned()]),
             backchannel_user_code_parameter_supported: false,

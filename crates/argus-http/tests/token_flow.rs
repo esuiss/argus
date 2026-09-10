@@ -191,6 +191,7 @@ fn state() -> TestState {
         cimd: None,
         federation: None,
         federation_identity: None,
+        pushed_requests: None,
     }
 }
 
@@ -482,6 +483,7 @@ async fn storage_outage_returns_503_not_invalid_grant() {
         cimd: None,
         federation: None,
         federation_identity: None,
+        pushed_requests: None,
     };
 
     let err = handle(&s, &code_form(), NOW, &AwsLcSha256, None)

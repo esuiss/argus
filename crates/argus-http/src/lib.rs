@@ -7,6 +7,7 @@ pub mod effects;
 pub mod endpoints;
 pub mod federation;
 pub mod memstore;
+pub mod par;
 pub mod replay;
 pub mod router;
 pub mod saml;

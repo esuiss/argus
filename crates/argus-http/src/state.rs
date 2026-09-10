@@ -41,6 +41,7 @@ where
         crate::federation::client::FederationRuntime<crate::federation::fetch::SystemResolver>,
     >,
     pub federation_identity: Option<crate::federation::publish::FederationIdentity>,
+    pub pushed_requests: Option<Arc<crate::par::ParState>>,
 }
 
 impl<C, R, A, S, U, P, X> AppState<C, R, A, S, U, P, X>
