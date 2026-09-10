@@ -5,6 +5,7 @@ pub mod client_assertion;
 pub mod discovery;
 pub mod dpop;
 pub mod error;
+pub mod federation;
 pub mod idjag;
 pub mod jwks;
 pub mod jwt;

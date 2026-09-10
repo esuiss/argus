@@ -4,6 +4,7 @@ pub mod cimd_client;
 pub mod cimd_fetch;
 pub mod effects;
 pub mod endpoints;
+pub mod federation;
 pub mod memstore;
 pub mod replay;
 pub mod router;
