@@ -7,6 +7,14 @@ license.workspace      = true
 repository.workspace   = true
 
 [dependencies]
+argus-core.path      = "../argus-core"
+bergshamra.workspace      = true
+bergshamra-c14n.workspace = true
+bergshamra-xml.workspace  = true
+uppsala.workspace         = true
+quick-xml.workspace       = true
+thiserror.workspace       = true
+base64ct.workspace        = true
 
 [lints]
 workspace = true

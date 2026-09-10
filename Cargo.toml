@@ -44,6 +44,20 @@ missing_panics_doc         = "allow"
 [workspace.dependencies]
 thiserror = "2"
 
+# §1 §2.2 listesinde yoktu — gerekçe (CLAUDE.md §6 kuralı):
+# §16 §1.13.4 seçenek (B): exc-c14n + XMLDSig'in zor ve tehlikeli kısmı devredilir,
+# SAML alan modeli (Response/Assertion/NameID/attribute release) kendimiz yazılır.
+# Sıfırdan c14n yazmak §16'da açıkça yasaklandı: document-subset/node-set
+# semantiğindeki bir hata doğrudan XSW'ye açık bir doğrulayıcı üretir.
+# Saf Rust, C bağımlılığı yok. Lisans: BSD-2-Clause (AGPL uyumlu).
+# İmzalama/doğrulama tek bir trait arkasında; crate beklentiyi karşılamazsa
+# değişiklik tek modülle sınırlı kalır.
+bergshamra      = "0.9"
+bergshamra-c14n = "0.9"
+bergshamra-xml  = "0.9"
+quick-xml       = { version = "0.38", default-features = false }
+uppsala         = "0.10"
+
 # §1 §2.2'deki listede yoktu — gerekçe (CLAUDE.md §6 kuralı):
 # Kimlik tipleri için zorunlu. Birincil anahtarlar UUIDv7 (§1 §2, PG18 yerleşik
 # `uuidv7()`), dolayısıyla Rust tarafında yalnızca TAŞIMA ve AYRIŞTIRMA gerekiyor —
