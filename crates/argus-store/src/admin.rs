@@ -272,6 +272,9 @@ impl PostgresStore {
 // yolculuk eder; Keycloak'ta "client + roller = 2 çağrı" idi.
 pub struct AdminClient {
     pub client_id: String,
+    // §1 karar 30: insanın gördüğü ad burada ve kiracıya yereldir. `client_id`
+    // bir etiket değil, üretilen bir kimliktir.
+    pub display_name: Option<String>,
     pub client_type: String,
     pub auth_method: String,
     pub redirect_uris: Vec<String>,
@@ -297,7 +300,7 @@ impl PostgresStore {
         let mut tx = self.scoped(tenant).await?;
 
         let rows = sqlx::query(
-            "SELECT client_id, client_type, auth_method \
+            "SELECT client_id, display_name, client_type, auth_method \
                FROM clients \
               WHERE tenant_id = $1 AND ($2::text IS NULL OR client_id > $2) \
               ORDER BY client_id \
@@ -326,6 +329,7 @@ impl PostgresStore {
             .map_err(|_| StoreError::Unavailable)?;
 
             out.push(AdminClient {
+                display_name: row.try_get("display_name").ok().flatten(),
                 client_type: row
                     .try_get("client_type")
                     .map_err(|_| StoreError::Unavailable)?,
@@ -361,7 +365,7 @@ impl PostgresStore {
         let mut tx = self.scoped(tenant).await?;
 
         let row = sqlx::query(
-            "SELECT client_id, client_type, auth_method FROM clients \
+            "SELECT client_id, display_name, client_type, auth_method FROM clients \
               WHERE tenant_id = $1 AND client_id = $2",
         )
         .bind(tenant.as_uuid())
@@ -391,6 +395,7 @@ impl PostgresStore {
             client_id: row
                 .try_get("client_id")
                 .map_err(|_| StoreError::Unavailable)?,
+            display_name: row.try_get("display_name").ok().flatten(),
             client_type: row
                 .try_get("client_type")
                 .map_err(|_| StoreError::Unavailable)?,
@@ -422,15 +427,17 @@ impl PostgresStore {
             .is_some();
 
         sqlx::query(
-            "INSERT INTO clients (tenant_id, client_id, client_type, auth_method) \
-             VALUES ($1, $2, $3, $4) \
+            "INSERT INTO clients (tenant_id, client_id, display_name, client_type, auth_method) \
+             VALUES ($1, $2, $3, $4, $5) \
              ON CONFLICT (tenant_id, client_id) DO UPDATE SET \
+               display_name = EXCLUDED.display_name, \
                client_type = EXCLUDED.client_type, \
                auth_method = EXCLUDED.auth_method, \
                updated_at = now()",
         )
         .bind(tenant.as_uuid())
         .bind(&client.client_id)
+        .bind(&client.display_name)
         .bind(&client.client_type)
         .bind(&client.auth_method)
         .execute(&mut *tx)

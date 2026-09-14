@@ -142,19 +142,6 @@ async fn make_admin(harness: &Harness, subject: &str, kind: &str, id: &str) {
         .expect("apply");
 }
 
-fn named(harness: &Harness, name: &str) -> String {
-    format!(
-        "{name}-{}",
-        harness
-            .tenant
-            .as_uuid()
-            .simple()
-            .to_string()
-            .get(..8)
-            .unwrap_or("x")
-    )
-}
-
 async fn raw(addr: &str, request: &str) -> String {
     let mut stream = TcpStream::connect(addr).await.expect("connect");
     stream.write_all(request.as_bytes()).await.expect("write");
@@ -454,7 +441,7 @@ async fn an_administrator_can_enrol_a_federation_subordinate() {
 }
 
 #[tokio::test]
-async fn creating_a_client_returns_the_whole_resource_and_put_upserts_it() {
+async fn creating_a_client_returns_the_whole_resource_and_the_server_names_it() {
     let Some(harness) = harness().await else {
         return;
     };
@@ -468,7 +455,7 @@ async fn creating_a_client_returns_the_whole_resource_and_put_upserts_it() {
         "/admin/api/clients/v1",
         Some(&token),
         Some(json!({
-            "clientId": named(&harness, "app-one"),
+            "displayName": "App One",
             "clientType": "public",
             "redirectUris": ["https://app.test/cb"]
         })),
@@ -476,19 +463,31 @@ async fn creating_a_client_returns_the_whole_resource_and_put_upserts_it() {
     .await;
 
     assert_eq!(status_of(&response), 201);
+    let created = body_of(&response);
     assert_eq!(
-        body_of(&response)
+        created
             .get("redirectUris")
             .and_then(Value::as_array)
             .map(Vec::len),
         Some(1),
         "§24 #7: one request has to be enough to create the whole resource"
     );
+    assert_eq!(
+        created.get("displayName").and_then(Value::as_str),
+        Some("App One"),
+        "the label the caller chose comes back"
+    );
+    let issued = created
+        .get("clientId")
+        .and_then(Value::as_str)
+        .expect("§1 karar 30: the server issues the identifier")
+        .to_owned();
+    assert_ne!(issued, "App One", "the label is not the identifier");
 
     let response = call(
         &harness,
         "PUT",
-        &format!("/admin/api/clients/v1/{}", named(&harness, "app-one")),
+        &format!("/admin/api/clients/v1/{issued}"),
         Some(&token),
         Some(json!({ "clientType": "public", "redirectUris": [] })),
     )
@@ -498,12 +497,83 @@ async fn creating_a_client_returns_the_whole_resource_and_put_upserts_it() {
     let response = call(
         &harness,
         "PUT",
-        &format!("/admin/api/clients/v1/{}", named(&harness, "app-two")),
+        "/admin/api/clients/v1/one-the-caller-made-up",
         Some(&token),
         Some(json!({ "clientType": "public" })),
     )
     .await;
-    assert_eq!(status_of(&response), 201);
+    assert_eq!(
+        status_of(&response),
+        404,
+        "§1 karar 30: PUT cannot mint a resource under an identifier the caller chose"
+    );
+}
+
+// §1 karar 30: karar 5 `client_id`'yi küresel benzersiz yapıyor. Seçilebilir
+// kaldığı sürece ilk gelen adı alıyor ve ikinci kiracı bir benzersizlik
+// ihlaline çarpıyordu. Sessizce yok saymak değil, reddetmek gerekiyor.
+#[tokio::test]
+async fn a_caller_cannot_name_the_client_it_creates() {
+    let Some(harness) = harness().await else {
+        return;
+    };
+    let subject = harness.tenant.as_uuid().to_string();
+    make_admin(&harness, "root", "tenant", &subject).await;
+    let token = token(&harness, "root", Surface::Tenant);
+
+    let response = call(
+        &harness,
+        "POST",
+        "/admin/api/clients/v1",
+        Some(&token),
+        Some(json!({ "clientId": "webapp", "clientType": "public" })),
+    )
+    .await;
+
+    assert_eq!(status_of(&response), 400);
+    assert_eq!(
+        body_of(&response).get("error").and_then(Value::as_str),
+        Some("invalid_request")
+    );
+}
+
+// İki kiracı aynı etiketi kullanabilmeli; çakışan tek şey kimlik olurdu ve onu
+// artık kimse seçmiyor.
+#[tokio::test]
+async fn two_tenants_can_use_the_same_label() {
+    let Some(harness) = harness().await else {
+        return;
+    };
+    let subject = harness.tenant.as_uuid().to_string();
+    make_admin(&harness, "root", "tenant", &subject).await;
+    let token = token(&harness, "root", Surface::Tenant);
+
+    let body = json!({ "displayName": "webapp", "clientType": "public" });
+
+    let first = call(
+        &harness,
+        "POST",
+        "/admin/api/clients/v1",
+        Some(&token),
+        Some(body.clone()),
+    )
+    .await;
+    let second = call(
+        &harness,
+        "POST",
+        "/admin/api/clients/v1",
+        Some(&token),
+        Some(body),
+    )
+    .await;
+
+    assert_eq!(status_of(&first), 201);
+    assert_eq!(status_of(&second), 201, "a label is not an identifier");
+    assert_ne!(
+        body_of(&first).get("clientId"),
+        body_of(&second).get("clientId"),
+        "each one still gets its own identifier"
+    );
 }
 
 #[tokio::test]
@@ -515,19 +585,24 @@ async fn a_patch_cannot_move_the_client_id() {
     make_admin(&harness, "root", "tenant", &subject).await;
     let token = token(&harness, "root", Surface::Tenant);
 
-    call(
+    let created = call(
         &harness,
         "POST",
         "/admin/api/clients/v1",
         Some(&token),
-        Some(json!({ "clientId": named(&harness, "fixed").as_str(), "clientType": "public" })),
+        Some(json!({ "displayName": "Fixed", "clientType": "public" })),
     )
     .await;
+    let id = body_of(&created)
+        .get("clientId")
+        .and_then(Value::as_str)
+        .expect("issued identifier")
+        .to_owned();
 
     let response = call(
         &harness,
         "PATCH",
-        &format!("/admin/api/clients/v1/{}", named(&harness, "fixed")),
+        &format!("/admin/api/clients/v1/{id}"),
         Some(&token),
         Some(json!({ "clientId": "moved" })),
     )
@@ -580,9 +655,7 @@ async fn a_listing_names_its_next_page_in_a_link_header() {
             "POST",
             "/admin/api/clients/v1",
             Some(&token),
-            Some(
-                json!({ "clientId": named(&harness, &format!("c{i:02}")), "clientType": "public" }),
-            ),
+            Some(json!({ "displayName": format!("c{i:02}"), "clientType": "public" })),
         )
         .await;
     }
@@ -631,23 +704,17 @@ async fn the_same_idempotency_key_with_a_different_payload_is_refused() {
         .await
     };
 
-    let first =
-        post(json!({ "clientId": named(&harness, "idem-one").as_str(), "clientType": "public" }))
-            .await;
+    let first = post(json!({ "displayName": "idem-one", "clientType": "public" })).await;
     assert_eq!(status_of(&first), 201, "{first}");
 
-    let replay =
-        post(json!({ "clientId": named(&harness, "idem-one").as_str(), "clientType": "public" }))
-            .await;
+    let replay = post(json!({ "displayName": "idem-one", "clientType": "public" })).await;
     assert_eq!(
         status_of(&replay),
         201,
         "the same payload replays its stored result"
     );
 
-    let different =
-        post(json!({ "clientId": named(&harness, "idem-two").as_str(), "clientType": "public" }))
-            .await;
+    let different = post(json!({ "displayName": "idem-two", "clientType": "public" })).await;
     assert_eq!(
         status_of(&different),
         422,
@@ -671,8 +738,8 @@ async fn a_bulk_job_is_accepted_and_reports_its_own_partial_failure() {
         Some(&token),
         Some(json!({
             "clients": [
-                { "clientId": named(&harness, "bulk-one").as_str(), "clientType": "public" },
-                { "clientType": "public" }
+                { "displayName": "bulk-one", "clientType": "public" },
+                { "clientId": "bulk-two", "clientType": "public" }
             ]
         })),
     )
@@ -698,7 +765,7 @@ async fn a_bulk_job_is_accepted_and_reports_its_own_partial_failure() {
             .and_then(|m| m.get("state"))
             .and_then(Value::as_str),
         Some("partially_succeeded"),
-        "one item carried no clientId"
+        "one item tried to name itself"
     );
 }
 

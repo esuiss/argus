@@ -309,7 +309,7 @@ Rakam, tarih veya URL uydurulmamıştır. Araştırma sırasında çürütülen 
 
 **Bu bölüm [`docs/01-architecture-decisions.md`](docs/01-architecture-decisions.md) dosyasına taşındı.**
 
-29 gün-1 kararı ve statüleri, karar kayıtları, teknoloji yığını,
+30 gün-1 kararı, karar kayıtları, teknoloji yığını,
 crate topolojisi, protokol kapsamı, güvenlik mimarisi ve
 bölüm 9'daki açık kararlar orada.
 

@@ -47,14 +47,15 @@ Bu bölümdeki kararların gün-1'de verilmesi zorunludur. Sonradan değiştirme
 | 27 | Minimum PostgreSQL 18 | Yerleşik `uuidv7()` insert'te 1,67× hız ve %26 daha küçük indeks veriyor (§6 §4.2); fast-path kilit düzeltmesi (commit `c4d5cb71d`) çok partition'lı iş yükündeki kilit uçurumunu kaldırıyor (§18 §2.2); `SET NOT NULL NOT VALID` expand-contract desenini sadeleştiriyor. Expand-contract'ın kendisi PG12'den beri mümkündür, PG18 gerekçesi değildir | §26 §4.1, §6 §4.2, §18 §2.2 |
 | 28 | Kiracı giriş sayfasının kabuğu script çalıştırmayan bir şablonla yazılır; giriş kutusu derlenmiş kodda kalır ve kiracı onu yalnızca konumlandırır | Yönetim yüzeyini ele geçiren aktör birinci taraf değildir; sunucuda kod çalıştıran bir şablon motoru tenant-admin yetkisini RCE'ye çevirir. Kazanç ihmal edilebilir: §26 tek binary modelini belirlediğinden her değişiklikte zaten dağıtım yapılır. Tam kayıt bölüm 2'dedir | §23 §5.1, §23 §5.2, karar 19, karar 20, §26 |
 | 29 | Tema verisi `(kiracı, istemci)` ile anahtarlanır ve başlangıçta kiracı kayıt defterine yüklenir | Kiracı logosu yıllık mertebede değişir ve istek başına okunmayı gerektirmez; render başına yapılan iş bir map aramasıdır, sorgu değil. Tam kayıt bölüm 2'dedir | §23 §5.1, §18, §26 |
+| 30 | `client_id` yönetici tarafından seçilmez; yerel kayıtta Argus üretir, CIMD yolunda istemcinin kendi URL'idir. İnsanın gördüğü ad ayrı bir `display_name` alanındadır ve kiracıya yereldir | Karar 5 `client_id`'yi küresel benzersiz yapıyor. Değer seçilebilir kaldığı sürece ilk gelen `webapp` adını alıyor ve ikinci kiracı bir benzersizlik ihlaline çarpıyor; yani karar 5 bir ürün hatasına dönüşüyor. Kimliği üretilen bir değer yapmak çakışmayı kaynağında bitiriyor. Sonradan geçiş mevcut istemci kimliklerinin yeniden adlandırılması, yani her RP konfigürasyonunun kırılması demektir. Tam kayıt bölüm 2'dedir | karar 5, §24, §14 |
 
-Yirmi dokuz maddenin tamamı şemayı, crate sınırlarını, UI mimarisini, API yüzeyini veya dağıtım modelini belirler. Hiçbiri implementasyon sonrasına ertelenebilir nitelikte değildir.
+Otuz maddenin tamamı şemayı, crate sınırlarını, UI mimarisini, API yüzeyini veya dağıtım modelini belirler. Hiçbiri implementasyon sonrasına ertelenebilir nitelikte değildir.
 
 ---
 
 ## 2. Karar kayıtları
 
-28 ve 29 numaralı kararlar, bölüm 9'da tanımlanan zorunlu karar kaydı alanlarının tamamıyla aşağıda kayıtlıdır.
+28, 29 ve 30 numaralı kararlar, bölüm 9'da tanımlanan zorunlu karar kaydı alanlarının tamamıyla aşağıda kayıtlıdır.
 
 ### Karar 28 — Kiracı giriş sayfası: script çalıştırmayan şablon, derlenmiş giriş kutusu
 
@@ -81,6 +82,19 @@ Yirmi dokuz maddenin tamamı şemayı, crate sınırlarını, UI mimarisini, API
 | Kabul testi | Tema değişikliğinden sonra tazeleme ucu çağrıldığında yeni tema sunulur; tazeleme çağrılmadan eski tema sunulur. |
 | Geçersiz kılacak karşı örnek | Toplam tema hacminin süreç bellek bütçesini zorlaması; kiracı başına birden çok istemci temasının bellekte tutulamaz hâle gelmesi. Bu noktada doğru cevap veritabanına dönmek değil, sınırlı bir LRU uygulamaktır. |
 | Kaynak | §23 §5.1, §18, §26 |
+
+### Karar 30 — `client_id` üretilir, insanın gördüğü ad ayrı bir alandır
+
+| Alan | İçerik |
+|---|---|
+| Kimlik | 30 |
+| Karar | `POST /admin/api/clients/v1` gövdede `clientId` kabul etmez; gönderilirse 400 döner. Kimliği sunucu üretir ve yanıtta bildirir. `PUT /admin/api/clients/v1/{id}` kaynak yaratamaz, yalnızca günceller; olmayan bir kimlikte 404 döner. Toplu iş yolu aynı kurala tabidir. İnsanın gördüğü ad `display_name` kolonundadır, kiracıya yereldir ve üzerinde benzersizlik kısıtı yoktur. CIMD yolundan gelen istemcilerde kimlik istemcinin kendi URL'idir ve adını metadata dokümanından alır. |
+| Gerekçe | Karar 5 `client_id`'yi küresel benzersiz yapmaktadır ve gerekçesi sağlamdır: RFC 6749 §2.2 kiracılar arası çakışmaya izin verir, çakışma da karar 4'ün kestiği saldırı zincirinin `aud` halkasını yeniden açar. Ancak değer seçilebilir kaldığı sürece bu güvenlik kararı doğrudan kullanıcının gördüğü isme çarpar: ilk gelen `webapp` adını alır, ikinci kiracı bir benzersizlik ihlali görür ve söyleyecek bir şey yoktur, çünkü istemcinin başka bir adı yoktur. Sektörün cevabı üretilen kimliktir; Auth0, Okta, Entra ve Google'ın dördü de `client_id`'yi üretir, seçtiren tek ürün Keycloak'tır. |
+| Geçerlilik koşulu | `client_id`'nin insan tarafından okunabilir olmasının bir ürün gereksinimi olmaması. Kimliğin göründüğü yerler yetkilendirme adresi, token istekleri ile günlüklerdir; üçünde de okunabilirlik gerekmez. |
+| Kabul testi | `crates/argus-http/tests/admin_api.rs`. Sabitlenen davranışlar: gövdede `clientId` gönderen istek 400 alır; yaratma yanıtı üretilmiş bir `clientId` taşır ve bu değer etiketten farklıdır; aynı etiketle açılan iki istemci farklı kimlik alır ve ikisi de 201 döner; uydurulmuş bir kimliğe yapılan `PUT` 404 alır; toplu iş içinde `clientId` taşıyan öğe reddedilir. |
+| Geçersiz kılacak karşı örnek | Bir müşterinin, istemci kimliğini kendi kurumsal envanterindeki bir değere eşitlemesinin sözleşme gereği olması. Bu durumda doğru cevap seçilebilir `client_id` değil, kimliğe eşlik eden ve kiracıya yerel bir dış referans alanıdır. |
+| Kalan risk ve kontrolü | Üretilen kimlik UUIDv4'tür ve günlükte okunması zordur; kontrolü `display_name`'in listeleme yanıtlarında bulunmasıdır. Sürümün v7 değil v4 olması bilinçlidir: §1 §2'nin UUIDv7 kuralı birincil anahtarlar içindir ve gerekçesi indeks yerelliğidir. `client_id` ise yetkilendirme adresinde görünen açık bir tanımlayıcıdır; v7'nin gömdüğü zaman damgası istemcinin ne zaman yaratıldığını sızdırır ve kimlikleri sıralanabilir kılar. Aynı gerekçe §18'in `kid` değerinin opak olması kuralındadır. Ayrıca `clients` tablosunda karar 5 gereği tek kolonlu bir benzersizlik vardır, yani karar 2'nin uyardığı kaçış kapısı bu tabloda açıktır; bugün ona bakan yedi yabancı anahtarın hepsi bileşiktir ancak bunu şema değil disiplin sağlamaktadır. §18 §5.3'ün yapısal taraması bu yüzden gereklidir. |
+| Kaynak | karar 5, karar 2, §24 §2.7, §14, `crates/argus-store/migrations/0025_client_display_name.sql` |
 
 ---
 

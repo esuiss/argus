@@ -136,11 +136,29 @@ async fn apply_one(
     permit: &super::guard::Caller,
     item: &Value,
 ) -> Result<(), (String, String)> {
-    let Some(client_id) = item.get("clientId").and_then(Value::as_str) else {
+    // §1 karar 30: toplu yolda da kimliği çağıran koymaz. Tek tek yaratmada
+    // reddedilen bir şeyin yığın içinde kabul edilmesi, kuralın etrafından
+    // dolaşmanın en kolay yolu olurdu.
+    if item.get("clientId").is_some() {
         return Err((
-            "missing_client_id".to_owned(),
-            "clientId is required".to_owned(),
+            "client_id_not_accepted".to_owned(),
+            "clientId is issued by the server; send displayName for the label".to_owned(),
         ));
+    }
+
+    let client_id = uuid::Uuid::new_v4().to_string();
+
+    let display_name = match item.get("displayName") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(name)) if !name.is_empty() && name.chars().count() <= 255 => {
+            Some(name.clone())
+        }
+        Some(_) => {
+            return Err((
+                "invalid_display_name".to_owned(),
+                "displayName must be a string of 1 to 255 characters".to_owned(),
+            ));
+        }
     };
 
     let client_type = item
@@ -173,7 +191,8 @@ async fn apply_one(
         .upsert_client(
             permit.tenant(),
             &AdminClient {
-                client_id: client_id.to_owned(),
+                client_id,
+                display_name,
                 client_type,
                 auth_method,
                 redirect_uris,
