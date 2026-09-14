@@ -1,201 +1,189 @@
-# 17. Gelecek standartları — PQC, WebAuthn L3, CTAP, TLS
+# §17 — Gelecek standartları: PQC, WebAuthn L3, CTAP ve TLS
 
-> `ARGUS.md` §17'den taşındı. Numaralandırma korundu; bu dosyanın
-> içindeki `§17 §X` referansları aynı anlamda.
+Bu bölüm önceden ARGUS.md içindeydi; numaralandırma korunmuştur ve dosya içindeki §X referansları aynı anlamdadır.
 
+**Soru.** Beş ile on yıl yaşayacak bir IdP mimarisinde, bugün ucuz olan ancak sonradan çok pahalıya patlayacak kararlar hangileridir.
 
-**Soru:** 5-10 yıl yaşayacak bir IdP mimarisinde, bugün ucuz olan ama sonradan çok pahalıya patlayacak kararlar hangileri?
-
-Bu dosya dört ayrı araştırma hattının ham raporlarını birleştirir. Sentez ve karar tablosu için bkz. [§3 — P0 kritik bulgular](#3-p0-kritik-bulgular).
-
+Bu dosya dört ayrı araştırma hattının ham raporlarını birleştirir. Sentez ile karar tablosu için §3'e bakınız.
 
 ---
 
-## HAT 1 — Post-Quantum Kriptografi ve Kimlik
+## Hat 1 — Post kuantum kriptografi ve kimlik
 
-## Post-Quantum Kriptografi Durum Raporu — 8 Eylül 2026
-#### Rust ile Identity Provider geliştiren ekip için
+Bu, 8 Eylül 2026 tarihli bir post kuantum kriptografi durum raporudur ve Rust ile kimlik sağlayıcı geliştiren bir ekip içindir.
 
-**Yöntem notu:** Bulgular birincil kaynaklardan (csrc.nist.gov, datatracker.ietf.org, rfc-editor.org, iana.org, w3.org, fidoalliance.org, cabforum.org, crates.io/docs.rs, whitehouse.gov) doğrudan çekildi. Erişilemeyen kaynaklar ve doğrulanamayan noktalar açıkça işaretlendi.
+**Yöntem notu.** Bulgular birincil kaynaklardan doğrudan çekilmiştir: csrc.nist.gov, datatracker.ietf.org, rfc-editor.org, iana.org, w3.org, fidoalliance.org, cabforum.org, crates.io ile docs.rs ve whitehouse.gov. Erişilemeyen kaynaklar ile doğrulanamayan noktalar açıkça işaretlenmiştir.
 
----
+### 0. Yönetici özeti, bir IdP için tek cümlelik durum
 
-### 0. Yönetici Özeti — Bir IdP için tek cümlelik durum
-
-**İmza tarafı (JWS/JWT) hazır, şifreleme tarafı (JWE) hazır değil, sertifika tarafı public trust'ta hâlâ kapalı, FIDO donanımı yok, Rust'ta RFC 9964 implementasyonu yok.**
+İmza tarafı, yani JWS ile JWT, hazırdır; şifreleme tarafı, yani JWE, hazır değildir; sertifika tarafı kamuya açık güvende hâlâ kapalıdır; FIDO donanımı yoktur ve Rust'ta RFC 9964 implementasyonu yoktur.
 
 | Katman | Durum | Aksiyon |
 |---|---|---|
-| TLS anahtar değişimi | ✅ Üretimde, RFC oldu, trafiğin ~2/3'ü | Bugün aç |
-| JWS imza (ML-DSA) | ✅ RFC 9964 (Mayıs 2026) | Spec hazır, Rust kütüphanesi yok |
-| JWE şifreleme (ML-KEM) | ❌ Sadece taslak, JOSE için yok | Bekle |
-| X.509 sertifika (private PKI) | ✅ RFC 9881/9935 | Kullanılabilir |
-| X.509 sertifika (public trust) | ❌ CA/B Forum oylaması geçmedi | 2027+ |
-| FIDO2/WebAuthn PQC | ❌ Spec'te bile yok, donanım yok | 2028+ |
-| FIPS 140-3 validasyonlu PQC | ❌ Kuyrukta | Bekle |
+| TLS anahtar değişimi | Üretimdedir, RFC olmuştur ve trafiğin yaklaşık üçte ikisini kapsamaktadır | Bugün açılır |
+| JWS imzası, ML-DSA | RFC 9964 ile hazırdır, Mayıs 2026 | Spesifikasyon hazırdır ancak Rust kütüphanesi yoktur |
+| JWE şifrelemesi, ML-KEM | Yalnızca taslaktır ve JOSE için yoktur | Beklenir |
+| X.509 sertifikası, özel PKI | RFC 9881 ile 9935 hazırdır | Kullanılabilir |
+| X.509 sertifikası, kamuya açık güven | CA ile tarayıcı forumu oylaması geçmemiştir | 2027 ve sonrası |
+| FIDO2 ile WebAuthn PQC | Spesifikasyonda bile yoktur ve donanım yoktur | 2028 ve sonrası |
+| FIPS 140-3 validasyonlu PQC | Kuyruktadır | Beklenir |
 
----
+### 1. NIST PQC standartları
 
-### 1. NIST PQC Standartları
-
-#### 1.1 Yayınlanmış FIPS'ler — hepsi 13 Ağustos 2024
+#### 1.1 Yayımlanmış FIPS'ler, hepsi 13 Ağustos 2024
 
 | Standart | Tam ad | Durum | Not |
 |---|---|---|---|
-| **FIPS 203** | Module-Lattice-Based Key-Encapsulation Mechanism Standard (ML-KEM) | Final, 13.08.2024 | Errata notu **17.11.2025**: "gelecek bir güncellemede düzeltilecek bir sorun" |
-| **FIPS 204** | Module-Lattice-Based Digital Signature Standard (ML-DSA) | Final, 13.08.2024 | Errata notu **31.07.2026**: "birkaç küçük sorun gelecek revizyonda düzeltilecek" |
-| **FIPS 205** | Stateless Hash-Based Digital Signature Standard (SLH-DSA) | Final, 13.08.2024 | Sayfada errata notu yok |
+| FIPS 203 | Module-Lattice-Based Key-Encapsulation Mechanism Standard, yani ML-KEM | Final, 13 Ağustos 2024 | 17 Kasım 2025 tarihli errata notu gelecek bir güncellemede düzeltilecek bir sorundan söz etmektedir |
+| FIPS 204 | Module-Lattice-Based Digital Signature Standard, yani ML-DSA | Final, 13 Ağustos 2024 | 31 Temmuz 2026 tarihli errata notu birkaç küçük sorunun gelecek revizyonda düzeltileceğini söylemektedir |
+| FIPS 205 | Stateless Hash-Based Digital Signature Standard, yani SLH-DSA | Final, 13 Ağustos 2024 | Sayfada errata notu yoktur |
 
-Hiçbirinin **Rev 1'i yok**; ikisinde errata elektronik tablosu var, revizyon tarihi ilan edilmemiş (**belirsiz**).
+Hiçbirinin birinci revizyonu yoktur; ikisinde bir errata elektronik tablosu vardır ve revizyon tarihi ilan edilmemiştir, yani belirsizdir.
 
-- https://csrc.nist.gov/pubs/fips/203/final
-- https://csrc.nist.gov/pubs/fips/204/final
-- https://csrc.nist.gov/pubs/fips/205/final
+Kaynakları csrc.nist.gov/pubs/fips/203/final, /204/final ile /205/final'dir.
 
-#### 1.2 FIPS 206 (FN-DSA / Falcon) — **8 Eylül 2026 itibarıyla YAYINLANMADI**
+#### 1.2 FIPS 206, yani FN-DSA veya Falcon, 8 Eylül 2026 itibarıyla yayımlanmamıştır
 
-- NIST PQC standardizasyon sayfasında hâlâ yalnızca **"FIPS 206 (in development)"** yazıyor; tarih verilmiyor.
-- **NIST'in "drafts open for comment" listesinde FIPS 206 YOK** — yani initial public draft bile çıkmamış. Doğrudan doğruladım (08.09.2026 listesi: SP 800-73-6, SP 800-78-6, SP 800-209r1, SP 800-239, IR 8613, SP 1353, SP 800-213A r1, SP 800-38E r1).
-- IETF tarafındaki `draft-ietf-cose-falcon-04` abstract'ı **"expected to be published in late 2026 early 2027"** diyor — bu şu an en güvenilir kamuya açık beklenti.
-- İkincil kaynaklar "NIST taslağı 28 Ağustos 2025'te onaya gönderdi" diyor — **birincil kaynakta doğrulayamadım, belirsiz.**
+NIST PQC standardizasyon sayfasında hâlâ yalnızca geliştirme aşamasında olduğu yazmakta ve tarih verilmemektedir.
 
-https://csrc.nist.gov/projects/post-quantum-cryptography/post-quantum-cryptography-standardization
+NIST'in yoruma açık taslaklar listesinde FIPS 206 yoktur, yani ilk kamuya açık taslak bile çıkmamıştır. Bu doğrudan doğrulanmıştır; 8 Eylül 2026 listesi SP 800-73-6, SP 800-78-6, SP 800-209r1, SP 800-239, IR 8613, SP 1353, SP 800-213A r1 ile SP 800-38E r1'den oluşmaktadır.
 
-#### 1.3 HQC — seçildi, taslak gecikti
+IETF tarafındaki `draft-ietf-cose-falcon-04` özeti "expected to be published in late 2026 early 2027" demektedir ve bu şu an en güvenilir kamuya açık beklentidir.
 
-- **Seçim: 11 Mart 2025.** Gerekçe belgesi: **NIST IR 8545**, "Status Report on the Fourth Round of the NIST PQC Standardization Process", Mart 2025. Metin: *"The only key-establishment algorithm that will be standardized is HQC."*
-- **FIPS numarası atanmadı.** Ne IR 8545'te ne de proje sayfasında bir numara var. (Yaygın olarak dolaşan "FIPS 207" iddiasını **hiçbir NIST kaynağında bulamadım — uydurma saymak gerekir.**)
-- **NIST'in ilan ettiği takvim** (nist.gov haber bülteni, Mart 2025): *"NIST plans to release a draft standard built around HQC for public comment in about a year"* + *"finalize the standard for release in 2027."*
-- **Gerçekleşme:** "yaklaşık bir yıl" ≈ Mart 2026 idi. **8 Eylül 2026 itibarıyla HQC taslağı yayınlanmadı** (drafts-open-for-comment listesinde yok). Yani **takvimin ~6 ay gerisinde.** 2027 finali bu gidişle riskli görünüyor (**yorum, belirsiz**).
+İkincil kaynaklar NIST'in taslağı 28 Ağustos 2025'te onaya gönderdiğini söylemektedir; bu birincil kaynakta doğrulanamamıştır ve belirsizdir.
 
-- https://csrc.nist.gov/pubs/ir/8545/final
-- https://www.nist.gov/news-events/news/2025/03/nist-selects-hqc-fifth-algorithm-post-quantum-encryption
+Kaynağı csrc.nist.gov'un post kuantum kriptografi standardizasyon sayfasıdır.
+
+#### 1.3 HQC seçilmiştir ancak taslak gecikmiştir
+
+Seçim 11 Mart 2025'te yapılmıştır. Gerekçe belgesi NIST IR 8545'tir, yani "Status Report on the Fourth Round of the NIST PQC Standardization Process", Mart 2025. Metni şöyledir: "The only key-establishment algorithm that will be standardized is HQC."
+
+FIPS numarası atanmamıştır. Ne IR 8545'te ne proje sayfasında bir numara vardır. Yaygın olarak dolaşan FIPS 207 iddiası hiçbir NIST kaynağında bulunamamıştır ve uydurma saymak gerekir.
+
+NIST'in ilan ettiği takvim, Mart 2025 tarihli nist.gov haber bülteninde şöyledir: "NIST plans to release a draft standard built around HQC for public comment in about a year" ve "finalize the standard for release in 2027."
+
+Gerçekleşmeye bakıldığında yaklaşık bir yıl Mart 2026 demekti. 8 Eylül 2026 itibarıyla HQC taslağı yayımlanmamıştır; yoruma açık taslaklar listesinde yoktur. Yani takvimin yaklaşık altı ay gerisindedir. 2027 finali bu gidişle riskli görünmektedir; bu bir yorumdur ve belirsizdir.
+
+Kaynakları csrc.nist.gov/pubs/ir/8545/final ile nist.gov'un Mart 2025 haber sayfasıdır.
 
 #### 1.4 Yan gelişmeler
 
-- **NIST IR 8610** (Final, **Mayıs 2026**) — "Status Report on the Second Round of the Additional Digital Signature Schemes". Üçüncü tura kalan 9 aday: **FAEST, HAWK, MAYO, MQOM, QR-UOV, SDitH, SNOVA, SQIsign, UOV.** Standardizasyon takvimi verilmemiş.
-- **SP 800-227** (Final, **Eylül 2025**) — "Recommendations for Key-Encapsulation Mechanisms". KEM'lerin doğru kullanımı; ML-KEM entegrasyonu için başvuru dokümanı.
-- **SP 800-230 ipd** (**13 Nisan 2026**, yorum süresi 12 Haziran 2026'da kapandı) — "Additional SLH-DSA Parameter Sets for Limited Signature Use Cases". Seviye 1/3/5 için **6 ek "SLHsig" parametre seti**; daha küçük imza + hızlı doğrulama, ama **anahtar başına 2²⁴ imza sınırı** ve *"not approved for general-purpose use"*.
+NIST IR 8610, final, Mayıs 2026: "Status Report on the Second Round of the Additional Digital Signature Schemes". Üçüncü tura kalan dokuz aday FAEST, HAWK, MAYO, MQOM, QR-UOV, SDitH, SNOVA, SQIsign ile UOV'dur. Standardizasyon takvimi verilmemiştir.
 
----
+SP 800-227, final, Eylül 2025: "Recommendations for Key-Encapsulation Mechanisms". Anahtar kapsülleme mekanizmalarının doğru kullanımını anlatır ve ML-KEM entegrasyonu için başvuru dokümanıdır.
 
-### 2. NIST SP 800-208 — Stateful Hash-Based İmzalar (LMS/XMSS)
+SP 800-230'un ilk kamuya açık taslağı 13 Nisan 2026 tarihlidir ve yorum süresi 12 Haziran 2026'da kapanmıştır: "Additional SLH-DSA Parameter Sets for Limited Signature Use Cases". Birinci, üçüncü ile beşinci seviye için altı ek parametre seti getirir; daha küçük imza ile hızlı doğrulama sağlar, ancak anahtar başına iki üzeri yirmi dört imza sınırı vardır ve "not approved for general-purpose use" denmektedir.
 
-- **Tam ad:** "Recommendation for Stateful Hash-Based Signature Schemes"
-- **Durum:** **Final, Ekim 2020** (kesinleşme 29.10.2020). Geri çekilme/supersede notu **yok**; hâlâ yürürlükte.
-- **Kapsam:** LMS, HSS (LMS çok-ağaçlı), XMSS, XMSS^MT.
-- **IdP açısından:** Bu şemalar **durum (state) tutar** — aynı OTS anahtarı iki kez kullanılırsa imza sahteciliği mümkün olur. Bu yüzden yalnızca **firmware/yazılım imzalama** gibi merkezi, düşük hacimli, HSM destekli senaryolar için uygundur. **Token imzalama için kesinlikle uygun değildir** (yüksek hacim + yatay ölçekleme + state senkronizasyonu = felaket).
-- **CNSA 2.0 yazılım/firmware imzalama için bunları zorunlu kılıyor** (aşağıda).
-- IETF tarafı: **draft-ietf-pquip-hbs-state-04**, "Hash-based Signatures: State and Backup Management" — RFC Editor kuyruğunda. Durum yönetimi ve yedekleme tuzaklarını anlatıyor; LMS/XMSS'e girecekseniz okunması şart.
+### 2. NIST SP 800-208, durumlu hash tabanlı imzalar, LMS ile XMSS
 
-- https://csrc.nist.gov/pubs/sp/800/208/final
-- COSE tarafında HSS-LMS zaten kayıtlı: **alg = -46** (RFC 8778, RFC 9053), **kty = 5**.
+Tam adı "Recommendation for Stateful Hash-Based Signature Schemes"tir. Durumu finaldir ve Ekim 2020 tarihlidir; kesinleşmesi 29 Ekim 2020'dir. Geri çekilme veya yerine geçme notu yoktur ve hâlâ yürürlüktedir. Kapsamı LMS, çok ağaçlı LMS olan HSS, XMSS ile XMSS^MT'dir.
 
----
+IdP açısından bu şemalar durum tutar: aynı tek kullanımlık imza anahtarı iki kez kullanılırsa imza sahteciliği mümkün olur. Bu yüzden yalnızca donanım güvenlik modülü destekli, merkezî ve düşük hacimli senaryolar, örneğin ürün yazılımı veya yazılım imzalama, için uygundur. Token imzalama için kesinlikle uygun değildir, çünkü yüksek hacim, yatay ölçekleme ile durum senkronizasyonu birleşimi bir felakettir.
 
-### 3. Geçiş Takvimleri: IR 8547, EO 14412, CNSA 2.0
+CNSA 2.0 yazılım ile ürün yazılımı imzalama için bunları zorunlu kılmaktadır; aşağıya bakınız.
 
-#### 3.1 NIST IR 8547 — **HÂLÂ TASLAK, FİNAL DEĞİL** ⚠️
+IETF tarafında `draft-ietf-pquip-hbs-state-04`, yani "Hash-based Signatures: State and Backup Management", RFC Editor kuyruğundadır. Durum yönetimi ile yedekleme tuzaklarını anlatır ve LMS ya da XMSS'e girilecekse okunması şarttır.
 
-Bu, raporun en çok yanlış bilinen maddesi. İnternette dolaşan "2025'te final oldu" iddiası **yanlış**.
+Kaynağı csrc.nist.gov/pubs/sp/800/208/final'dir. COSE tarafında HSS ile LMS zaten kayıtlıdır: algoritma değeri eksi 46'dır, RFC 8778 ile RFC 9053'te tanımlıdır, anahtar tipi beştir.
 
-- **Tam ad:** "Transition to Post-Quantum Cryptography Standards"
-- **Durum: Initial Public Draft (ipd)** — 12 Kasım 2024 yayınlandı, yorumlar 10 Ocak 2025'te kapandı, gelen yorumlar 21 Ocak 2025'te yayınlandı.
-- **8 Eylül 2026 itibarıyla final sürüm YOK, ikinci taslak da YOK.** Bunu üç ayrı yerden doğruladım: (a) `csrc.nist.gov/pubs/ir/8547/final` → **HTTP 404**; (b) `csrc.nist.gov/pubs/ir/8547/ipd` sayfasında final/güncelleme notu yok; (c) NIST PQC haber akışında IR 8547 ile ilgili son kayıt 12.11.2024 tarihli taslak duyurusu.
-- **Taslaktaki hedefler:** kuantuma açık açık anahtarlı algoritmalar (RSA, ECDSA, ECDH, sonlu cisim DH) **2030'dan sonra deprecated**, **2035'ten sonra disallowed**.
-- **Pratik sonuç:** 2030/2035 tarihleri yaygın olarak alıntılansa da **hâlâ resmî olarak taslak statüsünde**. Bağlayıcı olan şey artık IR 8547 değil, aşağıdaki EO.
+### 3. Geçiş takvimleri: IR 8547, EO 14412 ile CNSA 2.0
 
-https://csrc.nist.gov/pubs/ir/8547/ipd
+#### 3.1 NIST IR 8547 hâlâ taslaktır, final değildir
 
-**İlgili:** **SP 800-131A Rev. 3** de hâlâ **Initial Public Draft** (21 Ekim 2024). Yani NIST'in resmî algoritma geçiş rehberliğinin **ikisi de taslak**.
-https://csrc.nist.gov/pubs/sp/800/131/a/r3/ipd
+Bu, raporun en çok yanlış bilinen maddesidir. İnternette dolaşan 2025'te final olduğu iddiası yanlıştır.
 
-#### 3.2 ⭐ Executive Order 14412 — asıl bağlayıcı belge (YENİ)
+Tam adı "Transition to Post-Quantum Cryptography Standards"tır. Durumu ilk kamuya açık taslaktır; 12 Kasım 2024'te yayımlanmış, yorumlar 10 Ocak 2025'te kapanmış ve gelen yorumlar 21 Ocak 2025'te yayımlanmıştır.
 
-Bu, ekibinizin takvimini belirleyen belgedir. whitehouse.gov'dan doğrudan doğrulandı.
+8 Eylül 2026 itibarıyla final sürüm yoktur, ikinci taslak da yoktur. Bu üç ayrı yerden doğrulanmıştır: `csrc.nist.gov/pubs/ir/8547/final` adresi HTTP 404 dönmektedir; `csrc.nist.gov/pubs/ir/8547/ipd` sayfasında final veya güncelleme notu yoktur; NIST PQC haber akışında IR 8547 ile ilgili son kayıt 12 Kasım 2024 tarihli taslak duyurusudur.
 
-- **Tam ad:** Executive Order 14412, **"Securing the Nation Against Advanced Cryptographic Attacks"**
-- **İmza tarihi: 22 Haziran 2026**
+Taslaktaki hedefler şunlardır: kuantuma açık açık anahtarlı algoritmalar, yani RSA, ECDSA, ECDH ile sonlu cisim Diffie-Hellman, 2030'dan sonra kullanımdan kaldırılmış, 2035'ten sonra ise yasaklanmış sayılacaktır.
+
+Pratik sonuç şudur: 2030 ile 2035 tarihleri yaygın olarak alıntılansa da hâlâ resmî olarak taslak statüsündedir. Bağlayıcı olan şey artık IR 8547 değil aşağıdaki başkanlık kararnamesidir.
+
+İlgili olarak SP 800-131A Revision 3 de hâlâ ilk kamuya açık taslaktır, 21 Ekim 2024 tarihlidir. Yani NIST'in resmî algoritma geçiş rehberliğinin ikisi de taslaktır. Kaynakları csrc.nist.gov/pubs/ir/8547/ipd ile csrc.nist.gov/pubs/sp/800/131/a/r3/ipd'dir.
+
+#### 3.2 Executive Order 14412, asıl bağlayıcı belge
+
+Bu, ekibin takvimini belirleyen belgedir ve whitehouse.gov'dan doğrudan doğrulanmıştır.
+
+Tam adı Executive Order 14412, "Securing the Nation Against Advanced Cryptographic Attacks"tır ve imza tarihi 22 Haziran 2026'dır.
 
 | Tarih | Yükümlülük |
 |---|---|
-| +30 gün (Tem 2026) | Kurumlar PQC geçiş sorumlusunu OMB ve Ulusal Siber Direktör'e bildirir |
-| +90 gün (Eyl 2026) | OMB rehberliği yayınlar; kurumlar HVA/yüksek etkili sistemleri gözden geçirip geçiş planı hazırlar |
-| +180 gün | NIST PQC pilot projesi başlatır (bitiş 2027 sonu); CISA **cryptographic bill of materials (CBOM)** rehberliği yayınlar; FAR Council sözleşme kuralı önerir |
-| +270 gün | FAR Council zafiyet açıklama gereksinimlerini önerir |
-| **31 Aralık 2030** | HVA/yüksek etkili sistemler **anahtar tesisi (key establishment)** için PQC'ye geçer; **yükleniciler** NIST PQC FIPS'lerine uyar |
-| **31 Aralık 2031** | HVA/yüksek etkili sistemler **dijital imza / kimlik doğrulama** için PQC'ye geçer |
+| Otuz gün, yani Temmuz 2026 | Kurumlar PQC geçiş sorumlusunu OMB ile Ulusal Siber Direktör'e bildirir |
+| Doksan gün, yani Eylül 2026 | OMB rehberlik yayımlar; kurumlar yüksek değerli ile yüksek etkili sistemleri gözden geçirip geçiş planı hazırlar |
+| Yüz seksen gün | NIST bir PQC pilot projesi başlatır, bitişi 2027 sonudur; CISA kriptografik malzeme listesi rehberliği yayımlar; Federal Satın Alma Yönetmeliği Konseyi bir sözleşme kuralı önerir |
+| İki yüz yetmiş gün | Aynı konsey zafiyet açıklama gereksinimlerini önerir |
+| 31 Aralık 2030 | Yüksek değerli ile yüksek etkili sistemler anahtar tesisi için PQC'ye geçer; yükleniciler NIST PQC FIPS'lerine uyar |
+| 31 Aralık 2031 | Yüksek değerli ile yüksek etkili sistemler dijital imza ile kimlik doğrulama için PQC'ye geçer |
 
-> **IdP ekibi için kritik:** EO, **anahtar tesisi (2030)** ile **imza/kimlik doğrulama (2031)** arasında bir yıl fark koyuyor. Bir IdP'nin ürettiği JWT imzaları ve mTLS/FIDO kimlik doğrulaması **2031 kovasına** düşer; TLS anahtar değişimi **2030 kovasına**. ABD federal müşteriniz veya federal yükleniciniz varsa bu tarihler sözleşmesel hale gelir.
+> **IdP ekibi için kritik nokta.** Kararname anahtar tesisi ile imza ve kimlik doğrulama arasına bir yıl fark koymaktadır: birincisi 2030, ikincisi 2031'dir. Bir IdP'nin ürettiği JWT imzaları ile mTLS ve FIDO kimlik doğrulaması 2031 kovasına düşer; TLS anahtar değişimi 2030 kovasına düşer. ABD federal bir müşteri veya federal bir yüklenici varsa bu tarihler sözleşmesel hâle gelir.
 
-https://www.whitehouse.gov/presidential-actions/2026/06/securing-the-nation-against-advanced-cryptographic-attacks/
+Kaynağı whitehouse.gov'un 2026/06 tarihli başkanlık eylemleri sayfasıdır.
 
-#### 3.3 CNSA 2.0 (NSA) — ⚠️ ikincil kaynak
+#### 3.3 CNSA 2.0, NSA, ikincil kaynak uyarısıyla
 
-**Uyarı:** `media.defense.gov` (CSA_CNSA_2.0_ALGORITHMS_.PDF) ve `nsa.gov/Cybersecurity/Post-Quantum-Cybersecurity-Resources/` **HTTP 403** döndü — birincil PDF'e erişemedim. Aşağıdaki tablo ikincil kaynaktan; **doğrulanması gerekir.**
+Uyarı şudur: `media.defense.gov` üzerindeki CNSA 2.0 algoritmaları PDF'i ile nsa.gov'un post kuantum siber güvenlik kaynakları sayfası HTTP 403 döndürmüştür; birincil PDF'e erişilememiştir. Aşağıdaki tablo ikincil kaynaktandır ve doğrulanması gerekir.
 
-**Algoritma paketi** (Wikipedia + Encryption Consulting, uyumlu):
+Algoritma paketi, Wikipedia ile Encryption Consulting kaynaklarının uyumlu verdiği hâliyle şöyledir.
+
 | Amaç | Algoritma | Standart |
 |---|---|---|
-| Anahtar tesisi | **ML-KEM-1024** (yalnızca Kategori 5) | FIPS 203 |
-| Dijital imza (genel) | **ML-DSA-87** (yalnızca Kategori 5) | FIPS 204 |
-| Yazılım/firmware imzalama | **LMS veya XMSS** (SHA-256/192 asgari) | SP 800-208 |
+| Anahtar tesisi | ML-KEM-1024, yalnızca beşinci kategori | FIPS 203 |
+| Genel dijital imza | ML-DSA-87, yalnızca beşinci kategori | FIPS 204 |
+| Yazılım ile ürün yazılımı imzalama | LMS veya XMSS, asgari SHA-256 ile 192 | SP 800-208 |
 | Simetrik | AES-256 | FIPS 197 |
-| Özet | SHA-384 / SHA-512 | FIPS 180-4 |
-| Secure boot özeti | SHA3-384 / SHA3-512 | FIPS 202 |
+| Özet | SHA-384 ile SHA-512 | FIPS 180-4 |
+| Güvenli açılış özeti | SHA3-384 ile SHA3-512 | FIPS 202 |
 
-**Geçiş takvimi (ikincil, belirsiz):**
-| Kategori | Destekle/Tercih et | Yalnızca CNSA 2.0 |
+Geçiş takvimi ikincildir ve belirsizdir.
+
+| Kategori | Destekle veya tercih et | Yalnızca CNSA 2.0 |
 |---|---|---|
-| Yazılım ve firmware imzalama | 2025 | 2030 |
-| Geleneksel ağ ekipmanı (VPN, router) | 2026 | 2030 |
-| Web tarayıcı/sunucu, bulut servisleri | 2025 | **2033** |
+| Yazılım ile ürün yazılımı imzalama | 2025 | 2030 |
+| Geleneksel ağ ekipmanı, yani VPN ile yönlendirici | 2026 | 2030 |
+| Web tarayıcısı ile sunucusu ve bulut servisleri | 2025 | 2033 |
 | İşletim sistemleri | 2027 | 2033 |
 
-Ayrıca: **1 Ocak 2027'den itibaren yeni NSS alımları varsayılan olarak CNSA 2.0 uyumlu olmalı.**
+Ayrıca 1 Ocak 2027'den itibaren yeni ulusal güvenlik sistemi alımlarının varsayılan olarak CNSA 2.0 uyumlu olması gerekmektedir. NSA'nın 2025 veya 2026'da takvimi revize edip etmediği doğrulanamamıştır ve belirsizdir.
 
-**2025/2026'da NSA'nın takvimi revize edip etmediğini doğrulayamadım — belirsiz.**
+> **Dikkat.** CNSA 2.0 yalnızca beşinci kategori parametrelerine izin verir, yani ML-DSA-87 ile ML-KEM-1024'e. Bu, aşağıda görülecek web ile IETF ekosisteminin varsayılanı olan ML-DSA-44 ile ML-KEM-768'le çelişmektedir. Ulusal güvenlik sistemi müşterisi varsa iki ayrı profil desteklenmesi gerekir.
 
-> Dikkat: CNSA 2.0 **yalnızca Kategori 5** parametrelerine izin verir (ML-DSA-87, ML-KEM-1024). Bu, aşağıda göreceğiniz web/IETF ekosisteminin varsayılanı olan ML-DSA-44 ve ML-KEM-768 ile **çelişir**. NSS müşteriniz varsa iki ayrı profil desteklemeniz gerekir.
+### 4. IETF JOSE ile COSE PQC, IdP'nin kalbi
 
----
+#### 4.1 RFC 9964, JOSE ile COSE için ML-DSA, yayımlanmıştır
 
-### 4. IETF JOSE/COSE PQC — IdP'nin kalbi
+Bu, ekip için en önemli tek belgedir.
 
-#### 4.1 ⭐ RFC 9964 — ML-DSA for JOSE and COSE (YAYINLANDI)
+Tam adı "ML-DSA for JSON Object Signing and Encryption (JOSE) and CBOR Object Signing and Encryption (COSE)"tır. Durumu RFC 9964, Standards Track, Mayıs 2026'dır ve öncülü `draft-ietf-cose-dilithium`'dur. Kaynağı rfc-editor.org/rfc/rfc9964.html'dir.
 
-**Bu, ekibiniz için en önemli tek belge.**
-
-- **Tam ad:** "ML-DSA for JSON Object Signing and Encryption (JOSE) and CBOR Object Signing and Encryption (COSE)"
-- **Durum: RFC 9964, Standards Track, Mayıs 2026.** (Öncülü `draft-ietf-cose-dilithium`.)
-- https://www.rfc-editor.org/rfc/rfc9964.html
-
-**JWS `alg` değerleri** (IANA "JSON Web Signature and Encryption Algorithms" registry'de **kayıtlı**, Implementation Requirements: **Optional**):
+JWS `alg` değerleri IANA'nın JSON Web Signature and Encryption Algorithms kaydında kayıtlıdır ve implementasyon gereksinimleri opsiyoneldir.
 
 | `alg` | Açıklama | Referans |
 |---|---|---|
-| `ML-DSA-44` | ML-DSA-44 as described in US NIST FIPS 204 | RFC 9964, FIPS-204 |
-| `ML-DSA-65` | ML-DSA-65 as described in US NIST FIPS 204 | RFC 9964, FIPS-204 |
-| `ML-DSA-87` | ML-DSA-87 as described in US NIST FIPS 204 | RFC 9964, FIPS-204 |
+| `ML-DSA-44` | ML-DSA-44 as described in US NIST FIPS 204 | RFC 9964, FIPS 204 |
+| `ML-DSA-65` | ML-DSA-65 as described in US NIST FIPS 204 | RFC 9964, FIPS 204 |
+| `ML-DSA-87` | ML-DSA-87 as described in US NIST FIPS 204 | RFC 9964, FIPS 204 |
 
-**COSE algoritma ID'leri** (IANA "COSE Algorithms" registry'de **kayıtlı**):
+COSE algoritma kimlikleri IANA'nın COSE Algorithms kaydında kayıtlıdır.
 
 | Değer | İsim | Referans |
 |---|---|---|
-| **-48** | ML-DSA-44 | RFC 9964 |
-| **-49** | ML-DSA-65 | RFC 9964 |
-| **-50** | ML-DSA-87 | RFC 9964 |
+| Eksi 48 | ML-DSA-44 | RFC 9964 |
+| Eksi 49 | ML-DSA-65 | RFC 9964 |
+| Eksi 50 | ML-DSA-87 | RFC 9964 |
 
-**Yeni anahtar tipi: `AKP` (Algorithm Key Pair)**
+Yeni anahtar tipi `AKP`'dir, yani algoritma anahtar çifti.
 
 | Katman | Değer |
 |---|---|
-| JWK `kty` | `"AKP"` (RFC 9964) |
-| COSE `kty` | **7** ("COSE Key Type for Algorithm Key Pairs", RFC 9964) |
-| Public key param | JWK `pub` (base64url) / COSE label **-1** (bstr) |
-| Private key param | JWK `priv` (base64url) / COSE label **-2** (bstr) |
+| JWK `kty` | `"AKP"`, RFC 9964 |
+| COSE `kty` | 7, "COSE Key Type for Algorithm Key Pairs", RFC 9964 |
+| Açık anahtar parametresi | JWK'da base64url kodlu `pub`, COSE'da bayt dizisi olarak eksi 1 etiketi |
+| Özel anahtar parametresi | JWK'da base64url kodlu `priv`, COSE'da bayt dizisi olarak eksi 2 etiketi |
 
-Örnek JWK:
+Örnek bir JWK şöyledir:
+
 ```json
 {
   "kid": "T4xl70S7MT6Zeq6r9V9fPJGVn76wfnXJ21-gyo0Gu6o",
@@ -206,554 +194,518 @@ Ayrıca: **1 Ocak 2027'den itibaren yeni NSS alımları varsayılan olarak CNSA 
 }
 ```
 
-**İki kritik tasarım kararı — implementasyonda tuzak:**
+İmplementasyonda tuzak olan üç kritik tasarım kararı vardır.
 
-1. **`priv` MUTLAKA 32 baytlık seed olmalıdır.** RFC metni: *"the `priv` parameter MUST be the seed and MUST have a length of 32 bytes."* Genişletilmiş (expanded) private key formatı JOSE/COSE'de **yasak**. Bu, JOSE ile COSE arasında tutarlılık için seçilmiş.
-2. **HashML-DSA (pre-hash) desteklenmiyor.** RFC metni: *"This document does not specify algorithms for use with HashML-DSA as described in Section 5.4 of FIPS-204."* Yalnızca pure ML-DSA.
-3. `alg` parametresi tüm AKP anahtarlarında **zorunlu** (anahtar tipi tek başına algoritmayı belirlemiyor).
+1. `priv` mutlaka 32 baytlık bir tohum olmalıdır. RFC metni şöyledir: "the `priv` parameter MUST be the seed and MUST have a length of 32 bytes." Genişletilmiş özel anahtar biçimi JOSE ile COSE'de yasaktır ve bu, ikisi arasında tutarlılık için seçilmiştir.
+2. Ön özetli ML-DSA, yani HashML-DSA, desteklenmemektedir. RFC metni şöyledir: "This document does not specify algorithms for use with HashML-DSA as described in Section 5.4 of FIPS-204." Yalnızca saf ML-DSA vardır.
+3. `alg` parametresi tüm AKP anahtarlarında zorunludur, çünkü anahtar tipi tek başına algoritmayı belirlememektedir.
 
-> ⚠️ **X.509 ile interop tuzağı:** RFC 9881 (X.509) private key için **seed / expanded / both** üçünü de kabul ediyor. RFC 9964 (JOSE/COSE) **yalnızca seed** kabul ediyor. HSM'iniz veya PKI aracınız yalnızca expanded key veriyorsa JWK'ya doğrudan aktaramazsınız — seed'i saklamanız şart. Bunu anahtar üretim akışında baştan kurgulayın.
+> **X.509 ile interop tuzağı.** RFC 9881, yani X.509 tarafı, özel anahtar için tohum, genişletilmiş ile her ikisi seçeneklerinin üçünü de kabul etmektedir. RFC 9964, yani JOSE ile COSE tarafı, yalnızca tohumu kabul etmektedir. Donanım güvenlik modülünüz veya PKI aracınız yalnızca genişletilmiş anahtar veriyorsa JWK'ya doğrudan aktaramazsınız; tohumu saklamanız şarttır. Bu, anahtar üretim akışında baştan kurgulanmalıdır.
 
-#### 4.2 SLH-DSA for JOSE and COSE — IESG'de
+#### 4.2 JOSE ile COSE için SLH-DSA, IESG'dedir
 
-- **`draft-ietf-cose-sphincs-plus-10`**, revizyon tarihi **28 Temmuz 2026** (datatracker güncelleme 23.08.2026)
-- **Durum: "Submitted to IESG for Publication"**, hedef Proposed Standard. Sorumlu AD: Christopher Inacio. (Öncülü `draft-ietf-cose-post-quantum-signatures`.)
-- **Yalnızca İKİ parametre seti** talep ediyor (FIPS 205'teki 12'nin değil):
+`draft-ietf-cose-sphincs-plus-10`, revizyon tarihi 28 Temmuz 2026, Datatracker güncellemesi 23 Ağustos 2026'dır. Durumu yayın için IESG'ye sunulmuştur ve hedefi Proposed Standard'dır; sorumlu alan direktörü Christopher Inacio'dur. Öncülü `draft-ietf-cose-post-quantum-signatures`'tır.
+
+FIPS 205'teki on ikisinin değil yalnızca iki parametre setinin kaydını talep etmektedir.
 
 | İsim | COSE değeri | Durum |
 |---|---|---|
-| `SLH-DSA-SHA2-128s` | **TBD1 (-51 isteniyor)** | ❌ IANA'da HENÜZ KAYITLI DEĞİL |
-| `SLH-DSA-SHAKE-128s` | **TBD2 (-52 isteniyor)** | ❌ IANA'da HENÜZ KAYITLI DEĞİL |
+| `SLH-DSA-SHA2-128s` | Belirlenecek, eksi 51 istenmektedir | IANA'da henüz kayıtlı değildir |
+| `SLH-DSA-SHAKE-128s` | Belirlenecek, eksi 52 istenmektedir | IANA'da henüz kayıtlı değildir |
 
-IANA COSE registry'sinde bugün **SLH-DSA girdisi yok** — doğrudan doğrulandı. JOSE registry'sinde de yok.
+IANA COSE kaydında bugün SLH-DSA girdisi yoktur ve bu doğrudan doğrulanmıştır. JOSE kaydında da yoktur. Kaynağı datatracker.ietf.org'daki taslak sayfasıdır.
 
-https://datatracker.ietf.org/doc/draft-ietf-cose-sphincs-plus/
+#### 4.3 JOSE ile COSE için FN-DSA, FIPS 206'ya bağımlıdır ve süresi dolmaktadır
 
-#### 4.3 FN-DSA for JOSE and COSE — FIPS 206'ya bağımlı, süresi doluyor
+`draft-ietf-cose-falcon-04`, 15 Mart 2026 tarihlidir ve süresi 16 Eylül 2026'da dolacaktır, yani sekiz gün içinde.
 
-- **`draft-ietf-cose-falcon-04`**, **15 Mart 2026**, **süre sonu 16 Eylül 2026** (yani 8 gün içinde expire olacak)
-- İstenen: `FN-DSA-512` (**TBD1, -54**), `FN-DSA-1024` (**TBD2, -55**)
-- **FIPS 206 yayınlanmadan ilerleyemez.**
-- ⚠️ **Olası codepoint çakışması:** `draft-ietf-jose-pq-composite-sigs-03` de **-54..-59** aralığını istiyor. İkisi de TBD olduğu için IANA tahsis sırasında çözülecek; **hangisinin alacağı belirsiz.** Kodunuzda bu değerleri sabit yazmayın.
+İstenen değerler `FN-DSA-512` için eksi 54 ile `FN-DSA-1024` için eksi 55'tir; ikisi de belirlenecek durumdadır. FIPS 206 yayımlanmadan ilerleyemez.
 
-#### 4.4 ML-KEM for JOSE/COSE — ⚠️ JOSE için YOK
+> **Olası kod noktası çakışması.** `draft-ietf-jose-pq-composite-sigs-03` de eksi 54 ile eksi 59 arasını istemektedir. İkisi de belirlenecek durumda olduğu için IANA tahsis sırasında çözülecektir ve hangisinin alacağı belirsizdir. Bu değerler koda sabit yazılmamalıdır.
 
-Bu, IdP'ler için en büyük boşluk.
+#### 4.4 JOSE ile COSE için ML-KEM, JOSE için yoktur
 
-- **`draft-ietf-jose-pqc-kem-06`**, **6 Temmuz 2026**, aktif I-D (JOSE WG)
-- **Başlık:** "Post-Quantum Key Encapsulation Mechanisms (PQ KEMs) for **COSE**"
-- ⚠️ **Dosya adında "jose" geçmesine rağmen kapsam yalnızca COSE'dir.** Metin açıkça JOSE ile hibrit yaklaşımları *"outside the scope of this document"* diyor.
-- Tanımlanan 6 algoritma: `ML-KEM-512/768/1024` (Direct Key Agreement) ve `ML-KEM-512+A128KW`, `ML-KEM-768+A192KW`, `ML-KEM-1024+A256KW`
-- **Codepoint'ler TBD1–TBD6 — IANA'da hiçbiri kayıtlı değil.**
+Bu, IdP'ler için en büyük boşluktur.
 
-**Sonuç: JWE için standartlaşmış post-quantum şifreleme 8 Eylül 2026 itibarıyla YOKTUR.** Şifreli ID token / şifreli userinfo / JARM kullanıyorsanız kuantum-güvenli seçenek mevcut değil.
+`draft-ietf-jose-pqc-kem-06`, 6 Temmuz 2026 tarihli, JOSE çalışma grubunun aktif bir internet taslağıdır. Başlığı "Post-Quantum Key Encapsulation Mechanisms (PQ KEMs) for COSE"dur.
 
-https://datatracker.ietf.org/doc/draft-ietf-jose-pqc-kem/
+Dosya adında JOSE geçmesine rağmen kapsamı yalnızca COSE'dur. Metin açıkça JOSE ile hibrit yaklaşımları "outside the scope of this document" olarak nitelemektedir.
 
-#### 4.5 HPKE — JOSE ve COSE
+Tanımlanan altı algoritma doğrudan anahtar anlaşması için `ML-KEM-512`, `ML-KEM-768` ile `ML-KEM-1024` ve anahtar sarmalamalı `ML-KEM-512+A128KW`, `ML-KEM-768+A192KW` ile `ML-KEM-1024+A256KW`'dir. Kod noktalarının hepsi belirlenecek durumdadır ve IANA'da hiçbiri kayıtlı değildir.
 
-| Taslak | Rev | Tarih | Durum | PQ? |
+Sonuç şudur: JWE için standartlaşmış post kuantum şifreleme 8 Eylül 2026 itibarıyla yoktur. Şifreli kimlik token'ı, şifreli kullanıcı bilgisi veya JARM kullanılıyorsa kuantuma dayanıklı bir seçenek mevcut değildir.
+
+#### 4.5 HPKE, JOSE ile COSE
+
+| Taslak | Revizyon | Tarih | Durum | Post kuantum var mı |
 |---|---|---|---|---|
-| `draft-ietf-jose-hpke-encrypt` | **22** | 06.07.2026 | **Waiting for AD Go-Ahead** (Proposed Std) | ❌ Yalnızca DHKEM(P-256/X25519), ML-KEM **yok** |
-| `draft-ietf-cose-hpke` | **26** | 04.07.2026 | **AD Evaluation::AD Followup** | ❌ |
-| `draft-ietf-jose-hpke-pq-pqt` | **01** | 06.07.2026 | I-D Exists (WG doc) | ✅ PQ kayıtları burada |
-| `draft-ietf-cose-hpke-pq-pqt` | **01** | 2026 | I-D Exists (WG doc) | ✅ |
+| `draft-ietf-jose-hpke-encrypt` | 22 | 6 Temmuz 2026 | Alan direktörü onayı beklemektedir, hedefi Proposed Standard'dır | Yoktur; yalnızca P-256 ile X25519 tabanlı DHKEM vardır, ML-KEM yoktur |
+| `draft-ietf-cose-hpke` | 26 | 4 Temmuz 2026 | Alan direktörü değerlendirmesi ile takibindedir | Yoktur |
+| `draft-ietf-jose-hpke-pq-pqt` | 01 | 6 Temmuz 2026 | Çalışma grubu dokümanı olarak mevcuttur | Vardır; post kuantum kayıtları buradadır |
+| `draft-ietf-cose-hpke-pq-pqt` | 01 | 2026 | Çalışma grubu dokümanı olarak mevcuttur | Vardır |
 
-**`draft-ietf-jose-hpke-pq-pqt-01`** kaydettiği algoritmalar (hepsi SHAKE256 KDF + AES-256-GCM AEAD):
-- **PQ/T hibrit:** `HPKE-8` (ML-KEM-768 + P-256), `HPKE-9` (ML-KEM-768 + X25519), `HPKE-10` (ML-KEM-1024 + P-384)
-- **Saf PQ:** `HPKE-12` (ML-KEM-768), `HPKE-13` (ML-KEM-1024)
-- Her birinin `-KE` (key encryption) varyantı da var.
+`draft-ietf-jose-hpke-pq-pqt-01` şunları kaydetmektedir ve hepsi SHAKE256 anahtar türetme fonksiyonu ile AES-256-GCM kullanır. Post kuantum ile geleneksel hibritler `HPKE-8` (ML-KEM-768 ile P-256), `HPKE-9` (ML-KEM-768 ile X25519) ve `HPKE-10`'dur (ML-KEM-1024 ile P-384). Saf post kuantum olanlar `HPKE-12` (ML-KEM-768) ile `HPKE-13`'tür (ML-KEM-1024). Her birinin anahtar şifreleme varyantı da vardır.
 
-**HPKE for JOSE henüz RFC DEĞİL.** IANA JOSE registry'sinde HPKE girdisi bulunamadı.
+JOSE için HPKE henüz RFC değildir ve IANA JOSE kaydında HPKE girdisi bulunamamıştır.
 
-#### 4.6 Hibrit / Composite imzalar
+#### 4.6 Hibrit ile bileşik imzalar
 
-**`draft-ietf-jose-pq-composite-sigs-03`**, **20 Temmuz 2026**, aktif I-D (JOSE WG). 6 kombinasyon:
+`draft-ietf-jose-pq-composite-sigs-03`, 20 Temmuz 2026 tarihli, JOSE çalışma grubunun aktif bir taslağıdır ve altı kombinasyon tanımlar.
 
-| JOSE `alg` | COSE (TBD) |
+| JOSE `alg` | COSE, belirlenecek |
 |---|---|
-| `ML-DSA-44-ES256` | -54 |
-| `ML-DSA-65-ES256` | -55 |
-| `ML-DSA-87-ES384` | -56 |
-| `ML-DSA-44-Ed25519` | -57 |
-| `ML-DSA-65-Ed25519` | -58 |
-| `ML-DSA-87-Ed448` | -59 |
+| `ML-DSA-44-ES256` | Eksi 54 |
+| `ML-DSA-65-ES256` | Eksi 55 |
+| `ML-DSA-87-ES384` | Eksi 56 |
+| `ML-DSA-44-Ed25519` | Eksi 57 |
+| `ML-DSA-65-Ed25519` | Eksi 58 |
+| `ML-DSA-87-Ed448` | Eksi 59 |
 
-`draft-ietf-lamps-pq-composite-sigs`'e serileştirme için bağımlı, ama **kritik bir sapma var:** ECDSA imzası/anahtarı X.509'un ASN.1 yapıları (`Ecdsa-Sig-Value`, `ECPrivateKey`) yerine **JOSE/COSE'nin ham sabit uzunluklu kodlamasını** kullanmak ZORUNDA. Yani composite imzalar X.509 ile bit-uyumlu değil.
+Serileştirme için `draft-ietf-lamps-pq-composite-sigs` belgesine bağımlıdır, ancak kritik bir sapma vardır: ECDSA imzası ile anahtarı, X.509'un ASN.1 yapıları olan `Ecdsa-Sig-Value` ile `ECPrivateKey` yerine JOSE ile COSE'nin ham sabit uzunluklu kodlamasını kullanmak zorundadır. Yani bileşik imzalar X.509 ile bit uyumlu değildir.
 
-**`draft-ietf-lamps-pq-composite-sigs-19`** (X.509 tarafı), **21 Nisan 2026**, **RFC Editor kuyruğunda ("In Progress — First Edit")**, RFC numarası henüz atanmadı. 18 kombinasyon (ML-DSA × RSA-PSS/PKCS#1v1.5/ECDSA/Ed25519/Ed448, brainpool dahil).
+`draft-ietf-lamps-pq-composite-sigs-19`, yani X.509 tarafı, 21 Nisan 2026 tarihlidir ve RFC Editor kuyruğunda ilk düzenleme aşamasındadır; RFC numarası henüz atanmamıştır. On sekiz kombinasyon tanımlar: ML-DSA ile RSA-PSS, PKCS#1 v1.5, ECDSA, Ed25519 ile Ed448 çarpımı, brainpool eğrileri dahil.
 
-**`draft-ietf-lamps-pq-composite-kem-21`**, **1 Eylül 2026**, **IESG Evaluation — "Revised I-D Needed", 2 DISCUSS var.** 12 kombinasyon (ML-KEM-768/1024 × RSA-OAEP/X25519/X448/ECDH), hepsi SHA3-256 KDF.
+`draft-ietf-lamps-pq-composite-kem-21`, 1 Eylül 2026 tarihlidir ve IESG değerlendirmesindedir; revize edilmiş bir taslak gerekmektedir ve iki tartışma kaydı vardır. On iki kombinasyon tanımlar: ML-KEM-768 ile 1024'ün RSA-OAEP, X25519, X448 ile ECDH çarpımı, hepsi SHA3-256 anahtar türetme fonksiyonuyla.
 
-**Referans dokümanlar (okunması önerilir):**
-- **RFC 9794** (Haziran 2025) — "Terminology for Post-Quantum Traditional Hybrid Schemes"
-- **RFC 9955** (Temmuz 2026) — "Hybrid Signature Spectrums". Kritik uyarı: **geriye dönük uyumluluk ile Strong Non-Separability karşılıklı olarak dışlayıcıdır.** Yani "eski istemciler tek bileşeni doğrulayabilsin" isterseniz imza-soyma (stripping) saldırısına açık kalırsınız.
-- **RFC 9958** (Haziran 2026) — "Post-Quantum Cryptography for Engineers", Informational, 42 sayfa. Ekibin başlangıç okuması.
+Okunması önerilen referans dokümanlar şunlardır. RFC 9794, Haziran 2025, "Terminology for Post-Quantum Traditional Hybrid Schemes". RFC 9955, Temmuz 2026, "Hybrid Signature Spectrums"; kritik uyarısı şudur: geriye dönük uyumluluk ile güçlü ayrılamazlık karşılıklı olarak dışlayıcıdır, yani eski istemcilerin tek bileşeni doğrulayabilmesi istenirse imza soyma saldırısına açık kalınır. RFC 9958, Haziran 2026, "Post-Quantum Cryptography for Engineers", bilgilendirici, 42 sayfa; ekibin başlangıç okumasıdır.
 
-#### 4.7 IANA registry özeti — 8 Eylül 2026 kesin durum
+#### 4.7 IANA kayıt özeti, 8 Eylül 2026 kesin durumu
 
-**JOSE (JSON Web Signature and Encryption Algorithms):**
-| Girdi | Durum |
-|---|---|
-| `ML-DSA-44` / `ML-DSA-65` / `ML-DSA-87` | ✅ Kayıtlı (RFC 9964, Optional) |
-| SLH-DSA | ❌ Yok |
-| ML-KEM | ❌ Yok |
-| FN-DSA / Falcon | ❌ Yok |
-| HPKE | ❌ Yok |
+JSON Web Signature and Encryption Algorithms kaydında `ML-DSA-44`, `ML-DSA-65` ile `ML-DSA-87` kayıtlıdır, RFC 9964 ile opsiyonel olarak. SLH-DSA, ML-KEM, FN-DSA ile HPKE yoktur.
 
-**JOSE (JSON Web Key Types):** `AKP` = "Algorithm Key Pair" ✅ (RFC 9964, Optional)
+JSON Web Key Types kaydında `AKP`, yani algoritma anahtar çifti, kayıtlıdır; RFC 9964 ile opsiyoneldir.
 
-**COSE Algorithms:**
+COSE Algorithms kaydında şunlar vardır.
+
 | Değer | İsim | Referans |
 |---|---|---|
-| **-46** | HSS-LMS | RFC 8778, RFC 9053 |
-| **-48** | ML-DSA-44 | RFC 9964 |
-| **-49** | ML-DSA-65 | RFC 9964 |
-| **-50** | ML-DSA-87 | RFC 9964 |
+| Eksi 46 | HSS-LMS | RFC 8778, RFC 9053 |
+| Eksi 48 | ML-DSA-44 | RFC 9964 |
+| Eksi 49 | ML-DSA-65 | RFC 9964 |
+| Eksi 50 | ML-DSA-87 | RFC 9964 |
 
-SLH-DSA, ML-KEM, FN-DSA: ❌ hiçbiri kayıtlı değil.
+SLH-DSA, ML-KEM ile FN-DSA'nın hiçbiri kayıtlı değildir.
 
-**COSE Key Types:** `AKP` = **7** ✅ (RFC 9964); `HSS-LMS` = 5; `WalnutDSA` = 6.
+COSE Key Types kaydında `AKP` 7'dir, RFC 9964; `HSS-LMS` 5, `WalnutDSA` 6'dır.
 
-#### 4.8 JOSE'de ilgili diğer değişiklikler
+#### 4.8 JOSE'deki diğer ilgili değişiklikler
 
-- **RFC 9864** (Ekim 2025, Standards Track) — "Fully-Specified Algorithms for JOSE and COSE". **`EdDSA`'yı deprecate ediyor**, yerine `Ed25519` / `Ed448` geliyor; COSE'de `ESP256/ESP384/ESP512`. §4.3 IANA talimatlarını güncelliyor: **artık yalnızca fully-specified algoritma tanımlayıcıları kaydedilebilir.** ML-DSA-44/65/87'nin baştan parametreli isimlendirilmesinin sebebi bu.
-- **`draft-ietf-jose-deprecate-none-rsa15-05`** (23 Haziran 2026) — "Publication Requested", Proposed Standard. `none` ve `RSA1_5` deprecate ediliyor.
-- **`draft-ietf-oauth-rfc8725bis-10`** (21 Ağustos 2026) — JWT BCP güncellemesi, RFC Editor kuyruğunda, **"blocked: Reference Not Received"** (yukarıdaki deprecate taslağını bekliyor). ⚠️ **Bu güncelleme post-quantum'dan, ML-DSA'dan veya RFC 9964'ten hiç bahsetmiyor.** OAuth WG'de PQC ile ilgili **hiçbir çalışma yok** — doğrudan doğrulandı.
+RFC 9864, Ekim 2025, Standards Track: "Fully-Specified Algorithms for JOSE and COSE". `EdDSA` değerini kullanımdan kaldırmakta ve yerine `Ed25519` ile `Ed448` getirmektedir; COSE'da `ESP256`, `ESP384` ile `ESP512` kullanılır. §4.3 IANA talimatlarını güncellemektedir: artık yalnızca tam belirtilmiş algoritma tanımlayıcıları kaydedilebilir. ML-DSA-44, 65 ile 87'nin baştan parametreli isimlendirilmesinin sebebi budur.
 
----
+`draft-ietf-jose-deprecate-none-rsa15-05`, 23 Haziran 2026: yayın talep edilmiştir ve hedefi Proposed Standard'dır. `none` ile `RSA1_5` kullanımdan kaldırılmaktadır.
 
-### 5. X.509 / PKI
+`draft-ietf-oauth-rfc8725bis-10`, 21 Ağustos 2026: JWT en iyi uygulama güncellemesidir, RFC Editor kuyruğundadır ve referans alınamadığı için bloke durumdadır, yukarıdaki kullanımdan kaldırma taslağını beklemektedir. Bu güncelleme post kuantumdan, ML-DSA'dan veya RFC 9964'ten hiç bahsetmemektedir. OAuth çalışma grubunda PQC ile ilgili hiçbir çalışma yoktur ve bu doğrudan doğrulanmıştır.
 
-#### 5.1 Yayınlanmış RFC'ler ✅
+### 5. X.509 ile PKI
+
+#### 5.1 Yayımlanmış RFC'ler
 
 | RFC | Tarih | Konu |
 |---|---|---|
-| **RFC 9881** | Ekim 2025 | **ML-DSA için X.509 algoritma tanımlayıcıları** (← `draft-ietf-lamps-dilithium-certificates`) |
-| **RFC 9882** | Ekim 2025 | ML-DSA in CMS |
-| **RFC 9814** | Temmuz 2025 | SLH-DSA in CMS |
-| **RFC 9909** | Aralık 2025 | SLH-DSA için X.509 algoritma tanımlayıcıları |
-| **RFC 9935** | Mart 2026 | **ML-KEM için X.509 algoritma tanımlayıcıları** |
-| **RFC 9936** | Mart 2026 | ML-KEM in CMS |
+| RFC 9881 | Ekim 2025 | ML-DSA için X.509 algoritma tanımlayıcıları; öncülü `draft-ietf-lamps-dilithium-certificates` |
+| RFC 9882 | Ekim 2025 | CMS içinde ML-DSA |
+| RFC 9814 | Temmuz 2025 | CMS içinde SLH-DSA |
+| RFC 9909 | Aralık 2025 | SLH-DSA için X.509 algoritma tanımlayıcıları |
+| RFC 9935 | Mart 2026 | ML-KEM için X.509 algoritma tanımlayıcıları |
+| RFC 9936 | Mart 2026 | CMS içinde ML-KEM |
 
-**RFC 9881 — ML-DSA OID'leri** (`2.16.840.1.101.3.4.3.x`):
-| Algoritma | OID | Public key | İmza | Expanded private key |
+RFC 9881'deki ML-DSA nesne tanımlayıcıları `2.16.840.1.101.3.4.3.x` altındadır.
+
+| Algoritma | OID | Açık anahtar | İmza | Genişletilmiş özel anahtar |
 |---|---|---|---|---|
-| ML-DSA-44 | ...sigAlgs **17** | 1.312 B | **2.420 B** | 2.560 B |
-| ML-DSA-65 | ...sigAlgs **18** | 1.952 B | **3.309 B** | 4.032 B |
-| ML-DSA-87 | ...sigAlgs **19** | 2.592 B | **4.627 B** | 4.896 B |
+| ML-DSA-44 | sigAlgs 17 | 1.312 bayt | 2.420 bayt | 2.560 bayt |
+| ML-DSA-65 | sigAlgs 18 | 1.952 bayt | 3.309 bayt | 4.032 bayt |
+| ML-DSA-87 | sigAlgs 19 | 2.592 bayt | 4.627 bayt | 4.896 bayt |
 
-Public key `SubjectPublicKeyInfo` içinde **ham byte string** olarak (ASN.1 sarmalama yok). Private key `OneAsymmetricKey` içinde üç seçenek: **seed (32 B, `[0]` tagged, RECOMMENDED)**, expanded, veya **both** (SEQUENCE). "both" seçeneği tam da interop kaygısı yüzünden eklenmiş: *"some may want to use and retain the seed and others may only support expanded private keys."*
+Açık anahtar `SubjectPublicKeyInfo` içinde ham bayt dizisi olarak taşınır ve ASN.1 sarmalaması yoktur. Özel anahtar `OneAsymmetricKey` içinde üç seçenekle taşınır: önerilen olan 32 baytlık tohum (`[0]` etiketli), genişletilmiş biçim, veya bir SEQUENCE içinde her ikisi. Her ikisi seçeneği tam da interop kaygısı yüzünden eklenmiştir: "some may want to use and retain the seed and others may only support expanded private keys."
 
-**RFC 9909 — SLH-DSA:** 24 OID (12 Pure `sigAlgs 20–31`, 12 HashSLH-DSA `sigAlgs 35–46`). İmza boyutları **7.856 – 49.856 bayt** (!). Public key 32/48/64 B. RFC uyarısı: *"The entire certificate or CRL needs to be held in memory during SLH-DSA signature verification"*, ve büyük CRL'ler HSM sınırlarını aşabilir.
+RFC 9909, yani SLH-DSA, 24 nesne tanımlayıcısı içerir: 12 saf biçim `sigAlgs 20` ile `31` arasında, 12 ön özetli biçim `sigAlgs 35` ile `46` arasındadır. İmza boyutları 7.856 ile 49.856 bayt arasındadır. Açık anahtar 32, 48 veya 64 bayttır. RFC'nin uyarısı şudur: "The entire certificate or CRL needs to be held in memory during SLH-DSA signature verification"; ayrıca büyük iptal listeleri donanım güvenlik modülü sınırlarını aşabilir.
 
-**RFC 9935 — ML-KEM OID'leri:** `id-alg-ml-kem-512` = 2.16.840.1.101.3.4.4.1, `-768` = ...4.2, `-1024` = ...4.3.
+RFC 9935'teki ML-KEM nesne tanımlayıcıları `id-alg-ml-kem-512` için 2.16.840.1.101.3.4.4.1, 768 için ...4.2 ile 1024 için ...4.3'tür.
 
-**`draft-ietf-lamps-fn-dsa-certificates-00`** (20 Mayıs 2026) — WG dokümanı, FIPS 206 bekliyor.
+`draft-ietf-lamps-fn-dsa-certificates-00`, 20 Mayıs 2026, bir çalışma grubu dokümanıdır ve FIPS 206'yı beklemektedir.
 
-#### 5.2 ⚠️ CA/Browser Forum — PQC sertifikaları public trust'ta HENÜZ İZİNLİ DEĞİL
+#### 5.2 CA ile tarayıcı forumu: PQC sertifikaları kamuya açık güvende henüz izinli değildir
 
-- **Geçmiş bir ballot YOK.** Baseline Requirements'ta ML-DSA veya SLH-DSA'ya izin veren onaylanmış hiçbir oylama bulunamadı.
-- **Devam eden çalışma:** `cabforum/servercert` reposunda:
-  - **PR #679 — "SC-106: Enable Post-Quantum Cryptography (PQ) Key Pairs in TLS Server Certificates"**, açılış **26 Ağustos 2026**, **hâlâ Draft/Open**
-  - PR #662 — "SC-XXX: Permit ML-DSA public keys and signatures in certificates" — **kapatıldı** 11.08.2026
-  - PR #624 — "Draft SC-XX: Add MLDSA-87" (CBonnell) — **kapatıldı** 29.06.2026
-- **13 Ağustos 2026 SCWG tutanakları:** Stephen Davidson ve Gurleen Grewal birleşik ballot üzerinde çalışıyor, *"getting close to completion"*. **Yürürlük tarihi önerilmemiş.**
+Geçmiş bir oylama yoktur. Temel gereksinimlerde ML-DSA veya SLH-DSA'ya izin veren onaylanmış hiçbir oylama bulunamamıştır.
 
-**SC-106'nın içeriği:** ML-DSA-44/65/87'ye izin; **"pure post-quantum chain"** zorunluluğu (ML-DSA public key yalnızca ML-DSA imzasıyla sertifikalanabilir); CRL/OCSP'ye muafiyet.
+Devam eden çalışma `cabforum/servercert` deposundadır. PR #679, yani "SC-106: Enable Post-Quantum Cryptography (PQ) Key Pairs in TLS Server Certificates", 26 Ağustos 2026'da açılmıştır ve hâlâ taslak ile açık durumdadır. PR #662, yani "SC-XXX: Permit ML-DSA public keys and signatures in certificates", 11 Ağustos 2026'da kapatılmıştır. PR #624, yani CBonnell'in ML-DSA-87 ekleme taslağı, 29 Haziran 2026'da kapatılmıştır.
 
-**Tartışma noktaları (henüz çözülmedi):** Mozilla ve Chrome temsilcileri geçiş ve cross-signing için **karışık zincirlere izin verilmesini** savunuyor; Chrome tarayıcı dışı PKI kullanım senaryolarının SCWG kapsamında olup olmadığını sorguluyor; CT log'larına ML-DSA sertifika boyutunun getireceği yük tartışılıyor.
+13 Ağustos 2026 tarihli sunucu sertifikası çalışma grubu tutanaklarına göre Stephen Davidson ile Gurleen Grewal birleşik bir oylama üzerinde çalışmaktadır ve tamamlanmaya yaklaşmaktadır. Yürürlük tarihi önerilmemiştir.
 
-- https://github.com/cabforum/servercert/pull/679
-- https://cabforum.org/2026/08/13/2026-08-13-minutes-of-the-server-certificate-working-group/
+SC-106'nın içeriği şudur: ML-DSA-44, 65 ile 87'ye izin verilir; saf post kuantum zincir zorunluluğu getirilir, yani bir ML-DSA açık anahtarı yalnızca bir ML-DSA imzasıyla sertifikalanabilir; iptal listeleri ile OCSP'ye muafiyet tanınır.
 
-#### 5.3 ⭐ Chrome Quantum-resistant Root Program (CQRP) — X.509 PQC'yi REDDEDİYOR
+Henüz çözülmemiş tartışma noktaları şunlardır: Mozilla ile Chrome temsilcileri geçiş ve çapraz imzalama için karışık zincirlere izin verilmesini savunmaktadır; Chrome, tarayıcı dışı PKI kullanım senaryolarının çalışma grubu kapsamında olup olmadığını sorgulamaktadır; sertifika şeffaflığı günlüklerine ML-DSA sertifika boyutunun getireceği yük tartışılmaktadır.
 
-Bu, planlama açısından çok önemli ve az bilinen bir gelişme.
+Kaynakları github.com/cabforum/servercert/pull/679 ile cabforum.org'un 13 Ağustos 2026 tutanaklarıdır.
 
-- Chrome, standart Chrome Root Program'ın yanına **ayrı bir "Chrome Quantum-resistant Root Program"** kurdu.
-- **Draft Policy v0.3.0, son güncelleme 14 Ağustos 2026** (birçok bölüm hâlâ `[TODO]`, v1.0.0 beklenen spec'lere bağlı)
-- **Politika metni: Chrome, post-quantum içeren geleneksel X.509 sertifikalarını Chrome Root Store'a EKLEMEYECEK.** Yerine **Merkle Tree Certificates (MTC)** kullanılacak.
-- **Gerekçe (CQRP FAQ):** *"sending heavy, serialized chains of post-quantum signatures and Certificate Transparency proofs during every TLS handshake creates severe bandwidth penalties and increases connection latency."* MTC'de CA milyonlarca sertifikayı temsil eden tek bir "Tree Head" imzalıyor; sunucu tam zincir yerine kompakt bir kanıt gönderiyor ve CT ek yükü ortadan kalkıyor.
-- **Algoritma zorunlulukları:** CA Cosigner ve Mirroring Cosigner anahtarları **yalnızca ML-DSA-44**; abone sertifikaları ML-DSA-44/65/87. **HashML-DSA yasak.** ML-DSA anahtarlarında `parameters` alanı **absent** olmalı. **FIPS 140-3 Level 3 HSM zorunlu.** CA Cosigner anahtarı için azami 6 yıl güven süresi.
-- **Takvim (CQRP FAQ):**
-  - **Faz 1 (şu an):** Cloudflare ile fizibilite çalışması, X.509 yedekli MTC bağlantı testleri
-  - **Faz 2 — hedef Q1 2027:** ilk kamusal MTC bootstrapping; kriterleri karşılayan CT log operatörleri davet edilecek (uygunluk için **1 Şubat 2026'dan önce** çalışan CT log işletiyor olmak gerekiyor)
-  - **Faz 3 — hedef Q3 2027:** Chrome Quantum-resistant Root Store'un açılışı ve CA kayıtları
-- **Chrome 150+ zaten özel/kurumsal ortamlarda MTC olmayan post-quantum X.509 sertifikalarını destekliyor** — yani private PKI'da bugün test edebilirsiniz.
+#### 5.3 Chrome Quantum-resistant Root Program, X.509 PQC'yi reddetmektedir
 
-- https://googlechrome.github.io/chromerootprogram/cqrp/draft-policy
-- https://googlechrome.github.io/chromerootprogram/cqrp/faq
-- https://www.chromium.org/Home/chromium-security/post-quantum-auth-roadmap/ (27.02.2026, 4 aşama, **tarih verilmemiş**)
+Bu, planlama açısından çok önemli ve az bilinen bir gelişmedir.
 
-**Mozilla:** blog.mozilla.org/security üzerinde PQC / ML-DSA / root store ile ilgili **hiçbir gönderi bulunamadı**. Mozilla'nın PQC root politikası **belirsiz**.
+Chrome, standart kök programının yanına ayrı bir kuantuma dayanıklı kök programı kurmuştur. Taslak politikası v0.3.0'dır ve son güncellemesi 14 Ağustos 2026'dır; birçok bölüm hâlâ yapılacak durumdadır ve v1.0.0 beklenen spesifikasyonlara bağlıdır.
 
-**Cloudflare'in beklentisi:** WebPKI'da ML-DSA sertifikaları **2027 başı**; MTC tabanlı PQ kimlik doğrulama **2027 ortası**; tam PQ **2029**.
+Politika metnine göre Chrome, post kuantum içeren geleneksel X.509 sertifikalarını kök deposuna eklemeyecektir. Yerine Merkle ağacı sertifikaları kullanılacaktır.
 
----
+Gerekçesi sıkça sorulan sorular sayfasında şöyledir: "sending heavy, serialized chains of post-quantum signatures and Certificate Transparency proofs during every TLS handshake creates severe bandwidth penalties and increases connection latency." Merkle ağacı sertifikalarında sertifika otoritesi milyonlarca sertifikayı temsil eden tek bir ağaç başlığı imzalamakta, sunucu tam zincir yerine kompakt bir kanıt göndermekte ve sertifika şeffaflığı ek yükü ortadan kalkmaktadır.
+
+Algoritma zorunlulukları şunlardır: sertifika otoritesi ile aynalama ortak imzalayıcı anahtarları yalnızca ML-DSA-44 olabilir; abone sertifikaları ML-DSA-44, 65 veya 87 olabilir; ön özetli ML-DSA yasaktır; ML-DSA anahtarlarında `parameters` alanı bulunmamalıdır; FIPS 140-3 üçüncü seviye donanım güvenlik modülü zorunludur; sertifika otoritesi ortak imzalayıcı anahtarı için azami altı yıl güven süresi vardır.
+
+Takvimi şöyledir. Birinci faz şu andadır: Cloudflare ile bir fizibilite çalışması ile X.509 yedekli bağlantı testleri yapılmaktadır. İkinci fazın hedefi 2027'nin ilk çeyreğidir: ilk kamusal Merkle ağacı sertifikası başlatması yapılacak ve kriterleri karşılayan sertifika şeffaflığı günlüğü operatörleri davet edilecektir; uygunluk için 1 Şubat 2026'dan önce çalışan bir günlük işletiyor olmak gerekmektedir. Üçüncü fazın hedefi 2027'nin üçüncü çeyreğidir: kuantuma dayanıklı kök deposunun açılışı ile sertifika otoritesi kayıtları yapılacaktır.
+
+Chrome 150 ve üstü zaten özel ile kurumsal ortamlarda Merkle ağacı sertifikası olmayan post kuantum X.509 sertifikalarını desteklemektedir; yani özel PKI'da bugün test edilebilir.
+
+Kaynakları googlechrome.github.io'daki taslak politika ile sıkça sorulan sorular sayfaları ve chromium.org'un 27 Şubat 2026 tarihli post kuantum kimlik doğrulama yol haritasıdır; yol haritası dört aşamalıdır ve tarih vermemektedir.
+
+Mozilla tarafında blog.mozilla.org/security üzerinde PQC, ML-DSA veya kök deposu ile ilgili hiçbir gönderi bulunamamıştır ve Mozilla'nın PQC kök politikası belirsizdir.
+
+Cloudflare'in beklentisi şudur: web PKI'da ML-DSA sertifikaları 2027 başında, Merkle ağacı sertifikası tabanlı post kuantum kimlik doğrulama 2027 ortasında ve tam post kuantum 2029'da gelecektir.
 
 ### 6. TLS
 
-#### 6.1 ⭐ RFC 10024 — hibrit anahtar değişimi artık RFC
+#### 6.1 RFC 10024, hibrit anahtar değişimi artık bir RFC'dir
 
-- **Tam ad:** "Post-Quantum Traditional (PQ/T) Hybrid Key Agreement Mechanisms for TLS 1.3"
-- **RFC 10024, Ağustos 2026, Standards Track.** (← `draft-ietf-tls-ecdhe-mlkem-05`, 10.08.2026)
-- Yazarlar: Kwiatkowski (PQShield), Kampanakis (AWS), Westerbaan (Cloudflare), Stebila (Waterloo)
+Tam adı "Post-Quantum Traditional (PQ/T) Hybrid Key Agreement Mechanisms for TLS 1.3"tür. RFC 10024, Ağustos 2026, Standards Track'tir ve öncülü `draft-ietf-tls-ecdhe-mlkem-05`'tir, 10 Ağustos 2026. Yazarları Kwiatkowski (PQShield), Kampanakis (AWS), Westerbaan (Cloudflare) ile Stebila'dır (Waterloo).
 
-**IANA TLS Supported Groups — gerçek kayıtlı değerler:**
+IANA TLS desteklenen gruplar kaydındaki gerçek kayıtlı değerler şunlardır.
 
-| Değer | Hex | İsim | Recommended | Referans |
+| Değer | Onaltılık | İsim | Önerilen | Referans |
 |---|---|---|---|---|
-| 4587 | **0x11EB** | SecP256r1MLKEM768 | N | RFC 10024 |
-| **4588** | **0x11EC** | **X25519MLKEM768** | **Y** ⭐ | RFC 10024 |
-| 4589 | **0x11ED** | SecP384r1MLKEM1024 | N | RFC 10024 |
-| 512 | 0x0200 | MLKEM512 | N | draft-connolly-tls-mlkem-key-agreement-05 |
-| 513 | 0x0201 | MLKEM768 | N | aynı |
-| 514 | 0x0202 | MLKEM1024 | N | aynı |
-| 25497 | 0x63A5 | X25519Kyber768Draft00 | **D** (discouraged) | RFC 10024 ile obsolete |
-| 25498 | 0x63A6 | SecP256r1Kyber768Draft00 | **D** | RFC 10024 ile obsolete |
+| 4587 | 0x11EB | SecP256r1MLKEM768 | Hayır | RFC 10024 |
+| 4588 | 0x11EC | X25519MLKEM768 | Evet | RFC 10024 |
+| 4589 | 0x11ED | SecP384r1MLKEM1024 | Hayır | RFC 10024 |
+| 512 | 0x0200 | MLKEM512 | Hayır | `draft-connolly-tls-mlkem-key-agreement-05` |
+| 513 | 0x0201 | MLKEM768 | Hayır | Aynı |
+| 514 | 0x0202 | MLKEM1024 | Hayır | Aynı |
+| 25497 | 0x63A5 | X25519Kyber768Draft00 | Önerilmez | RFC 10024 ile geçersiz kılınmıştır |
+| 25498 | 0x63A6 | SecP256r1Kyber768Draft00 | Önerilmez | RFC 10024 ile geçersiz kılınmıştır |
 
-**X25519MLKEM768, Recommended=Y işaretli TEK post-quantum gruptur.**
+X25519MLKEM768, önerilen olarak işaretli tek post kuantum gruptur.
 
-**Tel üzerindeki boyutlar (RFC 10024 §3):** X25519MLKEM768 → istemci key_share **1.216 B** (1.184 ML-KEM ek + 32 X25519), sunucu **1.120 B**, paylaşılan sır 64 B.
+Tel üzerindeki boyutlar RFC 10024 §3'tedir: X25519MLKEM768 için istemci anahtar payı 1.216 bayttır, yani 1.184 baytlık ML-KEM eklentisi ile 32 baytlık X25519; sunucu payı 1.120 bayttır; paylaşılan sır 64 bayttır.
 
-**Yan not:** TLS 1.3 yeniden yayınlandı — **RFC 9846, Temmuz 2026**, RFC 8446'yı obsolete ediyor. RFC 10024 artık 9846'ya atıf yapıyor.
+Yan not olarak TLS 1.3 yeniden yayımlanmıştır: RFC 9846, Temmuz 2026, RFC 8446'yı geçersiz kılmaktadır ve RFC 10024 artık 9846'ya atıf yapmaktadır.
 
-**Saf ML-KEM:** `draft-ietf-tls-mlkem-10` (2 Eylül 2026), **"Approved-announcement sent"** (RFC Editor kuyruğunda), hedef **Informational**.
+Saf ML-KEM için `draft-ietf-tls-mlkem-10`, 2 Eylül 2026, onay duyurusu gönderilmiş durumdadır, yani RFC Editor kuyruğundadır, ve hedefi bilgilendiricidir.
 
-#### 6.2 Benimseme oranı — Eylül 2026
+#### 6.2 Benimseme oranı, Eylül 2026
 
-⚠️ **radar.cloudflare.com bot koruması nedeniyle HTTP 403 döndü; canlı Eylül 2026 rakamını çekemedim. Uydurmadım.** Canlı rakam tarayıcıyla https://radar.cloudflare.com/post-quantum adresinden görülebilir.
+radar.cloudflare.com bot koruması nedeniyle HTTP 403 döndürmüştür ve canlı Eylül 2026 rakamı çekilememiştir; uydurulmamıştır. Canlı rakam bir tarayıcıyla radar.cloudflare.com/post-quantum adresinden görülebilir.
 
-**Cloudflare birincil kaynaklarındaki belgelenmiş seyir:**
+Cloudflare'in birincil kaynaklarındaki belgelenmiş seyir şöyledir.
 
 | Tarih | Rakam | Kaynak |
 |---|---|---|
-| 2024 başı | %3'ün altı | blog.cloudflare.com/radar-origin-pq-key-transparency-aspa |
-| Eyl 2025 | Top 100k alan adının **%39'u** PQ anahtar değişimini destekliyor | blog.cloudflare.com/pq-2025 |
-| Eki 2025 | İnsan kaynaklı trafiğin **yarısından fazlası** | pq-2025 (28.10.2025) |
-| Şub 2026 | **%60'ın üzerinde** | radar-origin-pq-key-transparency-aspa (27.02.2026) |
-| **7 Nis 2026** | **%65'in üzerinde** insan trafiği | blog.cloudflare.com/post-quantum-roadmap |
-| **23 Haz 2026** | **"üçte ikiden fazla"** tarayıcı trafiği | blog.cloudflare.com/post-quantum-eo-2026 |
+| 2024 başı | Yüzde üçün altı | blog.cloudflare.com'un radar yazısı |
+| Eylül 2025 | En büyük 100 bin alan adının %39'u post kuantum anahtar değişimini desteklemektedir | blog.cloudflare.com/pq-2025 |
+| Ekim 2025 | İnsan kaynaklı trafiğin yarısından fazlası | Aynı yazı, 28 Ekim 2025 |
+| Şubat 2026 | Yüzde altmışın üzerinde | Radar yazısı, 27 Şubat 2026 |
+| 7 Nisan 2026 | İnsan trafiğinin %65'inin üzerinde | blog.cloudflare.com/post-quantum-roadmap |
+| 23 Haziran 2026 | Tarayıcı trafiğinin üçte ikisinden fazlası | blog.cloudflare.com/post-quantum-eo-2026 |
 
-**Origin tarafı çok geride:** Cloudflare→müşteri origin bağlantılarında origin'lerin **yalnızca ~%10'u** PQ anahtar değişimini destekliyor (Şub 2026), 2025 başındaki <%1'den ~10 kat artış.
+Kaynak sunucu tarafı çok geridedir: Cloudflare'den müşteri kaynak sunucusuna giden bağlantılarda kaynakların yalnızca yaklaşık %10'u post kuantum anahtar değişimini desteklemektedir, Şubat 2026 itibarıyla; bu, 2025 başındaki yüzde birin altındaki orandan yaklaşık on kat artıştır.
 
-⚠️ Metrik uyarısı: Cloudflare'in manşet rakamı **"insan/tarayıcı kaynaklı"** trafik. Bot/API istemcileri dahil tüm trafik rakamı daha düşük; o rakamı bulamadım.
+Metrik uyarısı şudur: Cloudflare'in manşet rakamı insan veya tarayıcı kaynaklı trafiktir. Bot ile API istemcileri dahil tüm trafik rakamı daha düşüktür ve o rakam bulunamamıştır.
 
-#### 6.3 İstemci / kütüphane durumu
+#### 6.3 İstemci ile kütüphane durumu
 
-| Ürün | Durum | Sürüm / Tarih |
+| Ürün | Durum | Sürüm ile tarih |
 |---|---|---|
-| **Chrome** | M124 (Nis 2024) X25519Kyber768 varsayılan; **M131'de ML-KEM'e geçiş** (6 Kas 2024). Politika metni: *"Prior to Google Chrome 131, the algorithm was Kyber."* | M131 |
-| Chrome kapatma anahtarı | `PostQuantumKeyAgreementEnabled` **kaldırıldı**: `chrome.*:116-146`. M147 stable 7 Nis 2026 → **artık kapatmanın desteklenen yolu yok** | M147+ |
-| Chrome stable (bugün) | 152.0.7977.83 (M152 stable 25.08.2026) | |
-| **Firefox** | **132** (29 Eki 2024): TLS 1.3 için `mlkem768x25519`. **135** (4 Şub 2025): HTTP/3 + QUIC | 132 / 135 |
-| **Apple** | Apple Platform Security: *"On devices with iOS 26, iPadOS 26, or later, TLS 1.3 with quantum-secure encryption (X25519MLKEM768) is enabled by default for URLSession and Network APIs"* | iOS/iPadOS/macOS 26 (Eyl-Eki 2025) |
-| **OpenSSL** | **3.5.0 (8 Nis 2025), ilk LTS** — destek 8 Nis 2030'a kadar. ML-KEM + ML-DSA + SLH-DSA. Varsayılan keyshare X25519MLKEM768 + X25519. ⚠️ **OpenSSL 3.0 LTS desteği 7 Eylül 2026'da (dün) bitti** | 3.5 LTS |
-| **BoringSSL** | `SSL_GROUP_X25519_MLKEM768 0x11ec`, `SSL_SIGN_ML_DSA_44/65/87 = 0x0904/0905/0906` | main |
-| **Go** | **1.24** (Şub 2025): X25519MLKEM768 varsayılan; `GODEBUG=tlsmlkem=0` ile geri alınır | 1.24 |
-| **rustls** | 0.23.16 Kyber→ML-KEM; **0.23.22** (30.01.2025) X25519MLKEM768; **0.23.27** (05.05.2025) `prefer-post-quantum` **varsayılan feature**; 0.23.37 (24.02.2026) ML-KEM-1024 | 0.23.27+ |
+| Chrome | M124'te, yani Nisan 2024'te, X25519Kyber768 varsayılan olmuştur; M131'de ML-KEM'e geçilmiştir, 6 Kasım 2024. Politika metni şöyledir: "Prior to Google Chrome 131, the algorithm was Kyber." | M131 |
+| Chrome kapatma anahtarı | `PostQuantumKeyAgreementEnabled` kaldırılmıştır, `chrome.*:116-146` aralığında geçerliydi. M147 kararlı sürümü 7 Nisan 2026'da çıkmıştır ve artık kapatmanın desteklenen bir yolu yoktur | M147 ve üstü |
+| Chrome kararlı sürüm, bugün | 152.0.7977.83; M152 kararlı sürümü 25 Ağustos 2026'dadır | — |
+| Firefox | 132'de, yani 29 Ekim 2024'te, TLS 1.3 için `mlkem768x25519` gelmiştir. 135'te, yani 4 Şubat 2025'te, HTTP/3 ile QUIC desteği gelmiştir | 132 ile 135 |
+| Apple | Apple platform güvenliği dokümanı şöyle demektedir: "On devices with iOS 26, iPadOS 26, or later, TLS 1.3 with quantum-secure encryption (X25519MLKEM768) is enabled by default for URLSession and Network APIs" | iOS, iPadOS ile macOS 26, Eylül ile Ekim 2025 |
+| OpenSSL | 3.5.0, 8 Nisan 2025, ilk uzun destekli sürümdür ve desteği 8 Nisan 2030'a kadardır. ML-KEM, ML-DSA ile SLH-DSA içerir. Varsayılan anahtar payı X25519MLKEM768 ile X25519'dur. OpenSSL 3.0 uzun destekli sürümünün desteği 7 Eylül 2026'da, yani dün, bitmiştir | 3.5 uzun destekli |
+| BoringSSL | `SSL_GROUP_X25519_MLKEM768` 0x11ec'tir; `SSL_SIGN_ML_DSA_44`, `65` ile `87` sırasıyla 0x0904, 0x0905 ile 0x0906'dır | Ana dal |
+| Go | 1.24'te, yani Şubat 2025'te, X25519MLKEM768 varsayılan olmuştur; `GODEBUG=tlsmlkem=0` ile geri alınır | 1.24 |
+| rustls | 0.23.16'da Kyber'den ML-KEM'e geçilmiştir; 0.23.22'de, 30 Ocak 2025, X25519MLKEM768 gelmiştir; 0.23.27'de, 5 Mayıs 2025, `prefer-post-quantum` varsayılan bir özellik olmuştur; 0.23.37'de, 24 Şubat 2026, ML-KEM-1024 gelmiştir | 0.23.27 ve üstü |
 
-#### 6.4 ML-DSA ile TLS kimlik doğrulama
+#### 6.4 TLS'te ML-DSA ile kimlik doğrulama
 
-- **`draft-ietf-tls-mldsa-05`**, **6 Temmuz 2026**. IESG durumu: **"Approved-announcement to be sent :: AD Followup"** — IESG onayladı, **henüz RFC değil**. Hedef statü: **Informational**. Sorumlu AD: Deb Cooley.
+`draft-ietf-tls-mldsa-05`, 6 Temmuz 2026 tarihlidir. IESG durumu onay duyurusunun gönderileceği ile alan direktörü takibi aşamasındadır; yani IESG onaylamıştır ancak henüz RFC değildir. Hedef statüsü bilgilendiricidir ve sorumlu alan direktörü Deb Cooley'dir.
 
-**IANA TLS SignatureScheme — kayıtlı değerler:**
-| Hex | İsim | Recommended | Referans |
+IANA TLS imza şeması kaydındaki değerler şunlardır.
+
+| Onaltılık | İsim | Önerilen | Referans |
 |---|---|---|---|
-| **0x0904** | mldsa44 | N | draft-ietf-tls-mldsa-00 |
-| **0x0905** | mldsa65 | N | draft-ietf-tls-mldsa-00 |
-| **0x0906** | mldsa87 | N | draft-ietf-tls-mldsa-00 |
-| 0x0911–0x091C | slhdsa_sha2_128s … slhdsa_shake_256f (12 adet) | N | draft-reddy-tls-slhdsa-01 |
+| 0x0904 | mldsa44 | Hayır | `draft-ietf-tls-mldsa-00` |
+| 0x0905 | mldsa65 | Hayır | `draft-ietf-tls-mldsa-00` |
+| 0x0906 | mldsa87 | Hayır | `draft-ietf-tls-mldsa-00` |
+| 0x0911 ile 0x091C arası | `slhdsa_sha2_128s`'ten `slhdsa_shake_256f`'e kadar 12 adet | Hayır | `draft-reddy-tls-slhdsa-01` |
 
-(Registry hâlâ `-00`'a atıf yapıyor; RFC çıkınca güncellenecek. Tüm PQ imza şemaları Recommended=N.)
+Kayıt hâlâ sıfırıncı revizyona atıf yapmaktadır ve RFC çıkınca güncellenecektir. Tüm post kuantum imza şemaları önerilmeyen olarak işaretlidir.
 
-**Kim gerçekten ML-DSA ile TLS kimlik doğrulaması yapıyor:**
-- **Cloudflare, 29 Temmuz 2026** — "Post-quantum authentication to origins is now supported". ML-DSA-44/65/87, **Authenticated Origin Pulls** (tüm planlarda ücretsiz) ve **Custom Origin Trust Store** (ACM gerekli). Cloudflare **ML-DSA-44** öneriyor. Haziran 2026'da başlatıldı; 10 Haziran 2026'da bir BoringSSL güncellemesi kesintiye yol açtı.
-- **rustls 0.23.44 (7 Eylül 2026 — dün):** *"Support for post-quantum secure ML-DSA certificates is now enabled by default in the aws-lc-rs crypto provider."* Öncesinde rustls-post-quantum 0.2.3 (16.07.2025, doğrulama) ve 0.2.4 (23.09.2025, imzalama, `aws-lc-rs-unstable` altında).
-- **Hiçbir public WebPKI CA'sı tarayıcıya dönük TLS için ML-DSA sertifikası vermiyor.** Bugün bu tamamen private PKI / origin'e dönük bir hikâye.
+Gerçekten ML-DSA ile TLS kimlik doğrulaması yapanlar şunlardır. Cloudflare 29 Temmuz 2026'da kaynak sunuculara post kuantum kimlik doğrulamasının desteklendiğini duyurmuştur: ML-DSA-44, 65 ile 87 desteklenmektedir; tüm planlarda ücretsiz olan doğrulanmış kaynak çekmeleri ile sertifika yönetimi gerektiren özel kaynak güven deposu bunu kullanmaktadır. Cloudflare ML-DSA-44'ü önermektedir. Özellik Haziran 2026'da başlatılmış ve 10 Haziran 2026'da bir BoringSSL güncellemesi kesintiye yol açmıştır. rustls 0.23.44, 7 Eylül 2026, yani dün, şöyle demektedir: "Support for post-quantum secure ML-DSA certificates is now enabled by default in the aws-lc-rs crypto provider." Öncesinde rustls-post-quantum 0.2.3, 16 Temmuz 2025, doğrulama getirmiş; 0.2.4, 23 Eylül 2025, imzalamayı `aws-lc-rs-unstable` altında getirmiştir.
+
+Hiçbir kamuya açık web PKI sertifika otoritesi tarayıcıya dönük TLS için ML-DSA sertifikası vermemektedir. Bugün bu tamamen özel PKI ile kaynak sunucuya dönük bir hikâyedir.
 
 #### 6.5 Bilinen sorunlar
 
-**ClientHello boyutu / MTU / ossification.** X25519MLKEM768 istemci key_share'i **1.216 bayta** çıkarıyor; tipik ClientHello artık tek TCP segmentine / QUIC Initial'a sığmıyor.
-- Chrome politika metni: *"devices that do not correctly implement TLS may malfunction when offered the new option… Such devices are not post-quantum-ready and will interfere with an enterprise's post-quantum transition."*
-- Go 1.24 notları doğrudan **https://tldr.fail/** adresine yönlendiriyor — ClientHello'yu segmentler arasında birleştiremeyen sunucular el sıkışmayı zaman aşımına uğratıyor.
-- ⚠️ **RFC 10024'ün kendisinde MTU/middlebox/parçalanma rehberliği YOK** (metin MTU/fragment/middlebox/ossif için tarandı — hiçbiri geçmiyor). Bu tartışma implementasyon dokümanlarında.
+**İstemci merhabası boyutu, azami iletim birimi ile kemikleşme.** X25519MLKEM768 istemci anahtar payını 1.216 bayta çıkarmaktadır ve tipik bir istemci merhabası artık tek bir TCP segmentine ya da QUIC ilk paketine sığmamaktadır. Chrome politika metni şöyledir: "devices that do not correctly implement TLS may malfunction when offered the new option… Such devices are not post-quantum-ready and will interfere with an enterprise's post-quantum transition." Go 1.24 notları doğrudan tldr.fail adresine yönlendirmektedir; istemci merhabasını segmentler arasında birleştiremeyen sunucular el sıkışmayı zaman aşımına uğratmaktadır. RFC 10024'ün kendisinde azami iletim birimi, ara kutu veya parçalanma rehberliği yoktur; metin bu terimler için taranmış ve hiçbiri bulunamamıştır. Bu tartışma implementasyon dokümanlarındadır.
 
-**Ölçülmüş middlebox kırılması** (pq-2025, Cloudflare→origin): "hızlı" yaklaşım (PQ key share'i iyimser gönder) bağlantıların **%0,05'ini** kırıyor; "güvenli" yaklaşım (grubu ilan et ama key share gönderme, HelloRetryRequest turunu kabul et) evrensel olarak tolere ediliyor.
+**Ölçülmüş ara kutu kırılması.** Cloudflare'in kaynak sunuculara yönelik pq-2025 ölçümüne göre hızlı yaklaşım, yani post kuantum anahtar payını iyimser göndermek, bağlantıların %0,05'ini kırmaktadır; güvenli yaklaşım, yani grubu ilan edip anahtar payı göndermemek ve bir yeniden merhaba turunu kabul etmek, evrensel olarak tolere edilmektedir.
 
-**Sertifika/imza boyutu.** Cloudflare'in duruşu (blog.cloudflare.com/ml-dsa-will-have-to-do, 9 Temmuz 2026): daha iyisi zamanında gelmiyor — **FN-DSA ~2033, çok değişkenli şemalar 2034 öncesi değil, SQIsign 2035 öncesi olası değil** — 2030-2035 regülasyon tarihlerine karşı, dolayısıyla *"ML-DSA will have to do."*
+**Sertifika ile imza boyutu.** Cloudflare'in duruşu 9 Temmuz 2026 tarihli yazısında şudur: daha iyisi zamanında gelmemektedir, çünkü FN-DSA yaklaşık 2033'te, çok değişkenli şemalar 2034'ten önce değil ve SQIsign 2035'ten önce olası değildir; 2030 ile 2035 arasındaki düzenleme tarihlerine karşı ML-DSA idare etmek zorundadır.
 
-**Trust Anchor IDs:** `draft-ietf-tls-trust-anchor-ids-04` (1 Mayıs 2026), aktif TLS WG dokümanı, IESG'de işlem yok. Chrome'da chromestatus özelliği **5132064512540672**, durum **Proposed**, milestone atanmamış — **shipping değil**.
+**Güven çıpası kimlikleri.** `draft-ietf-tls-trust-anchor-ids-04`, 1 Mayıs 2026, aktif bir TLS çalışma grubu dokümanıdır ve IESG'de işlem yoktur. Chrome'da özellik numarası 5132064512540672'dir, durumu önerilmiştir ve kilometre taşı atanmamıştır; yani sevk edilmemektedir.
 
-**Merkle Tree Certificates:** çalışma grubu değişti. `draft-davidben-tls-merkle-tree-certs` expire oldu; **yeni PLANTS WG'ye** (PKI, Logs, And Tree Signatures) adopte edildi → **`draft-ietf-plants-merkle-tree-certs-05`**, 6 Temmuz 2026, "I-D Exists".
+**Merkle ağacı sertifikaları.** Çalışma grubu değişmiştir: `draft-davidben-tls-merkle-tree-certs` süresi dolmuş ve yeni PLANTS çalışma grubuna, yani PKI, günlükler ile ağaç imzaları grubuna, kabul edilmiştir; sonucu `draft-ietf-plants-merkle-tree-certs-05`'tir, 6 Temmuz 2026, mevcut bir internet taslağıdır.
 
----
+### 7. FIDO2 ile WebAuthn PQC, ekosistemin en geri kalmış alanı
 
-### 7. FIDO2 / WebAuthn PQC — ⚠️ Ekosistemin en geri kalmış alanı
+#### 7.1 WebAuthn Level 3 W3C önerisi olmuştur ancak PQC yoktur
 
-#### 7.1 WebAuthn Level 3 — **W3C Recommendation oldu, ama PQC yok**
+Durumu W3C önerisidir ve 25 Ağustos 2026 tarihlidir, yani çok yenidir.
 
-- **Durum: W3C Recommendation, 25 Ağustos 2026** (çok yeni!)
-- ⚠️ **Doküman post-quantum kriptografiden, ML-DSA'dan veya "quantum" kelimesinden hiç bahsetmiyor.** Spec EdDSA, ES256, RS256 gibi mevcut eğri/RSA algoritmalarına odaklı.
-- **Level 4 diye bir halef yok** — doküman kendini Level 2'nin (2021) halefi olarak tanımlıyor, ileriye dönük referans içermiyor.
-- https://www.w3.org/TR/webauthn-3/
+Doküman post kuantum kriptografiden, ML-DSA'dan veya kuantum kelimesinden hiç bahsetmemektedir. Spesifikasyon EdDSA, ES256 ile RS256 gibi mevcut eğri ile RSA algoritmalarına odaklıdır.
 
-#### 7.2 CTAP — PQC yok
+Level 4 diye bir halef yoktur; doküman kendini 2021 tarihli Level 2'nin halefi olarak tanımlamakta ve ileriye dönük bir referans içermemektedir. Kaynağı w3.org/TR/webauthn-3'tür.
+
+#### 7.2 CTAP'ta PQC yoktur
 
 | Sürüm | Durum | Tarih |
 |---|---|---|
-| CTAP 2.3.1 | Working Draft | **29 Mayıs 2026** |
-| CTAP 2.3 | Proposed Standard | **26 Şubat 2026** |
-| CTAP 2.2 | Proposed Standard | 14 Temmuz 2025 |
-| CTAP 2.1 | Proposed Standard | 15 Haziran 2021 (errata 21.06.2022) |
+| CTAP 2.3.1 | Çalışma taslağı | 29 Mayıs 2026 |
+| CTAP 2.3 | Önerilen standart | 26 Şubat 2026 |
+| CTAP 2.2 | Önerilen standart | 14 Temmuz 2025 |
+| CTAP 2.1 | Önerilen standart | 15 Haziran 2021; errata 21 Haziran 2022 |
 
-**CTAP 2.3 spec metnini doğrudan çektim: "post-quantum", "quantum", "ML-DSA", "Dilithium" veya -48/-49/-50 codepoint'leri geçmiyor.** Spec algoritma seçimini IANA COSE registry'sine ve WebAuthn'a devrediyor: *"PublicKeyCredentialParameters' algorithm identifiers are values that SHOULD be registered in the IANA COSE Algorithms registry."*
+CTAP 2.3 spesifikasyon metni doğrudan çekilmiştir: post kuantum, kuantum, ML-DSA ile Dilithium kelimeleri ve eksi 48, 49 ile 50 kod noktaları geçmemektedir. Spesifikasyon algoritma seçimini IANA COSE kaydına ile WebAuthn'a devretmektedir: "PublicKeyCredentialParameters' algorithm identifiers are values that SHOULD be registered in the IANA COSE Algorithms registry."
 
-**Teorik olarak iyi haber:** COSE ML-DSA codepoint'leri (-48/-49/-50) RFC 9964 ile IANA'ya kayıtlı olduğu için, **CTAP/WebAuthn'ın spec değişikliği gerektirmeden ML-DSA'yı taşıyabilmesi mimari olarak mümkün.** Engel spec değil, **donanım**.
+Teorik olarak iyi haber şudur: COSE ML-DSA kod noktaları, yani eksi 48, 49 ile 50, RFC 9964 ile IANA'ya kayıtlı olduğu için CTAP ile WebAuthn'ın spesifikasyon değişikliği gerektirmeden ML-DSA'yı taşıyabilmesi mimari olarak mümkündür. Engel spesifikasyon değil donanımdır.
 
-#### 7.3 Donanım — **hiçbir ürün yok, yeni donanım gerekiyor**
+#### 7.3 Donanımda hiçbir ürün yoktur ve yeni donanım gerekmektedir
 
-Yubico'nun kendi blog yazısı (21 Ekim 2025, "Future-proofing authentication: A look at the future of post-quantum cryptography") net:
+Yubico'nun 21 Ekim 2025 tarihli "Future-proofing authentication: A look at the future of post-quantum cryptography" başlıklı blog yazısı nettir:
 
-> *"Prototype ≠ product: The PQ demo shows feasibility and performance direction, not a shipment announcement."*
-> *"New hardware is required: PQ algorithms have bigger footprints; they don't fit on today's keys."*
-
-- FIDO Authenticate konferansında bir donanım güvenlik anahtarında post-quantum imza **prototipi** gösterildi. Beta yetenekler "sınırlı sayıda nitelikli test kullanıcısına" açık.
-- Yubico ayrıca standartların olgunlaşması gerektiğini vurguluyor: yalnızca imza üretimi değil, **PIN protokolleri, attestation, kayıt UX'i ve kripto-çevik altyapı** da gerekiyor.
-- Yubico'nun **26 Haziran 2026** tarihli EO 14412 yazısında **hiçbir ürün/takvim güncellemesi yok** — yalnızca kurumlara *"Hardware security keys, smart cards, and tokens used in your authentication stack need to support PQC algorithms ML-KEM and ML-DSA"* tavsiyesi veriliyor. Kendi ürünleri hakkında beyan yok.
-- Yubico'nun mevcut blog akışında (Ağu-Eyl 2026) PQC gönderisi yok. HyperCloud entegrasyonunda "hybrid post-quantum (RSA+ML-KEM) data-at-rest encryption" geçiyor — ama bu **veri şifreleme**, FIDO kimlik bilgisi değil.
-
-**Sonuç: 8 Eylül 2026 itibarıyla ML-DSA destekleyen sevk edilen hiçbir FIDO2 donanım authenticator'ı bulunamadı.**
-
-#### 7.4 FIDO Alliance — normatif çıktı yok
-
-fidoalliance.org üzerinde PQC ile ilgili bulunanlar yalnızca **etkinlik/webinar** düzeyinde:
-- "How Passkeys and Post-Quantum Cryptography Are Reshaping the Future of Security" (webinar, 1 Temmuz 2026)
-- "Member Event: Future-Proofing Authentication: FIDO, PKI, and the Path to Post-Quantum Security" (11 Ağustos 2025)
-- "IEEE Spectrum: Google Develops Quantum-Safe Security Keys" (haber alıntısı, 1 Eylül 2023 — Google'ın OpenSK'daki Dilithium+ECDSA hibrit denemesi)
-
-**Bulunamadı:** FIDO Alliance'ın yayınlanmış bir PQC yol haritası, beyaz kâğıdı, PQC sertifikasyon programı veya PQC algoritması ekleyen bir CTAP taslağı. **PQC'yi ele alan resmî bir FIDO Alliance normatif dokümanı yok.**
-
-⚠️ Not: Bu bölümde arama bütçesi tükendiği için yalnızca doğrudan site çekimleriyle çalıştım. Duyurulmuş ama bu sayfalarda listelenmemiş bir çalışma olabilir — **kısmen belirsiz.**
-
----
-
-### 8. Rust Ekosistemi
-
-#### 8.1 Saf Rust — RustCrypto ⚠️
-
-| Crate | Sürüm | Tarih | İndirme | Repo |
-|---|---|---|---|---|
-| `ml-kem` | **0.3.2** | 10.05.2026 | 2.464.049 | RustCrypto/KEMs |
-| `ml-dsa` | **0.1.1** | 05.06.2026 | 770.685 | RustCrypto/signatures |
-| `slh-dsa` | **0.2.0-rc.5** | 28.04.2026 | 876.336 | RustCrypto/signatures |
-
-⚠️ **Her üçünün README'sinde de aynı uyarı var:**
-> *"⚠️ Security Warning — The implementation contained in this crate has never been independently audited! USE AT YOUR OWN RISK!"*
-
-Ek olarak: sabit zaman (constant-time) garantisi veya yan kanal direnci hakkında **hiçbir beyan yok**; ACVP test vektörü uyumu belirtilmemiş. `ml-kem`'de `zeroize` bir **opsiyonel feature** (varsayılan değil). Hepsi hâlâ **pre-1.0**, `slh-dsa` ise **release candidate**.
-
-**Bir IdP'nin imza yolunda bunları kullanmasını önermem** — denetlenmemiş, pre-1.0 ve yan kanal beyanı yok.
-
-#### 8.2 aws-lc-rs — üretim için en olgun seçenek ✅
-
-- **Sürüm 1.18.1, 1 Eylül 2026.** 214.900.000+ toplam indirme (78,8M yakın dönem). AWS-LC bağlaması (saf Rust değil), `ring` ile API-uyumlu.
-- **ML-KEM:** `aws_lc_rs::kem` modülünde `ML_KEM_512`, `ML_KEM_768`, `ML_KEM_1024` — "NIST FIPS 203" olarak belgelenmiş, **unstable işaretli değil**.
-- **ML-DSA:** `aws_lc_rs::signature` modülünde `ML_DSA_44`, `ML_DSA_65`, `ML_DSA_87` (doğrulama) ve `ML_DSA_44_SIGNING`, `ML_DSA_65_SIGNING`, `ML_DSA_87_SIGNING` (imzalama). *"The signature is the raw ML-DSA signature encoding described in FIPS 204."* **unstable işaretli değil.**
-- **SLH-DSA:** dokümantasyonda desteğe dair kanıt yok.
-
-#### 8.3 ⚠️ FIPS 140-3 validasyonu — PQC İÇİN HENÜZ YOK
-
-Bu, FIPS zorunluluğu olan bir IdP için **kritik** bir bulgu.
-
-- **CMVP aktif sertifika araması (`Algorithm=ML-KEM`, `CertificateStatus=Active`) → "No certificates match the search criteria" (0 sonuç).**
-- **AWS-LC'nin en yeni validasyonu — Sertifika #5429**, "AWS-LC Cryptographic Module (dynamic)", **20 Temmuz 2026**, FIPS 140-3 **Overall Level 1**, sunset 13.08.2029. Onaylı algoritmalar: AES (CBC/CCM/CMAC/CTR/ECB/GCM/GMAC/KW/KWP/XTS), SHA-1, SHA-2, ECDSA, RSA, HKDF/SSH/TLS/PBKDF, KAS-ECC-SSC, Counter DRBG. **ML-KEM ve ML-DSA bu listede YOK.**
-- Aktif AWS-LC sertifikaları: #5429 (20.07.2026), #5314 (05.06.2026), #5298 (03.06.2026), #5146 (26.01.2026), #4816 (01.10.2024), #4631 (06.10.2023).
-- **Modules In Process (MIP) listesi** (201 modül): `AWS-LC 4 Cryptographic Module` (dynamic ve static) — **"Comment Resolution - Lab"**, 14.08.2026. Ayrıca kuyrukta: Code Siren PQC Library (Desktop/Mobile), CryptoComply 140-3 FIPS Provider with PQC (04.09.2026), PQCryptoLib-Core (25.08.2026).
-
-> **Sonuç: `aws-lc-rs`'i `fips` feature'ı ile derlemek size FIPS-validasyonlu ML-KEM/ML-DSA VERMEZ.** PQC algoritmaları validasyon sınırının dışında. FIPS 140-3 zorunluluğunuz varsa PQC'yi bugün "FIPS modunda" kullanamazsınız. AWS-LC 4 validasyonunu bekleyin.
+> "Prototype ≠ product: The PQ demo shows feasibility and performance direction, not a shipment announcement."
 >
-> ⚠️ *Belirsizlik: CMVP arama arayüzünün "Algorithm" filtresi tam eşleşme mi yapıyor doğrulayamadım; ancak #5429 sertifika detay sayfasında ML-KEM/ML-DSA'nın bulunmaması bulguyu bağımsız olarak destekliyor.*
+> "New hardware is required: PQ algorithms have bigger footprints; they don't fit on today's keys."
+
+FIDO Authenticate konferansında bir donanım güvenlik anahtarında post kuantum imza prototipi gösterilmiştir. Beta yetenekler sınırlı sayıda nitelikli test kullanıcısına açıktır.
+
+Yubico ayrıca standartların olgunlaşması gerektiğini vurgulamaktadır: yalnızca imza üretimi değil, PIN protokolleri, attestation, kayıt kullanıcı deneyimi ile kriptografik çeviklik altyapısı da gerekmektedir.
+
+Yubico'nun 26 Haziran 2026 tarihli EO 14412 yazısında hiçbir ürün veya takvim güncellemesi yoktur; yalnızca kurumlara şu tavsiye verilmektedir: "Hardware security keys, smart cards, and tokens used in your authentication stack need to support PQC algorithms ML-KEM and ML-DSA". Kendi ürünleri hakkında bir beyan yoktur.
+
+Yubico'nun mevcut blog akışında, yani Ağustos ile Eylül 2026'da, bir PQC gönderisi yoktur. HyperCloud entegrasyonunda hibrit post kuantum, yani RSA ile ML-KEM, duran veri şifrelemesi geçmektedir; ancak bu bir veri şifrelemesidir, FIDO kimlik bilgisi değildir.
+
+Sonuç şudur: 8 Eylül 2026 itibarıyla ML-DSA destekleyen ve sevk edilen hiçbir FIDO2 donanım kimlik doğrulayıcısı bulunamamıştır.
+
+#### 7.4 FIDO Alliance'ın normatif çıktısı yoktur
+
+fidoalliance.org üzerinde PQC ile ilgili bulunanlar yalnızca etkinlik ile web semineri düzeyindedir: "How Passkeys and Post-Quantum Cryptography Are Reshaping the Future of Security" (web semineri, 1 Temmuz 2026); "Member Event: Future-Proofing Authentication: FIDO, PKI, and the Path to Post-Quantum Security" (11 Ağustos 2025); "IEEE Spectrum: Google Develops Quantum-Safe Security Keys" (haber alıntısı, 1 Eylül 2023; Google'ın OpenSK'daki Dilithium ile ECDSA hibrit denemesi).
+
+Bulunamayanlar şunlardır: FIDO Alliance'ın yayımlanmış bir PQC yol haritası, beyaz kâğıdı, PQC sertifikasyon programı veya PQC algoritması ekleyen bir CTAP taslağı. PQC'yi ele alan resmî bir FIDO Alliance normatif dokümanı yoktur.
+
+Not olarak bu bölümde arama bütçesi tükendiği için yalnızca doğrudan site çekimleriyle çalışılmıştır. Duyurulmuş ancak bu sayfalarda listelenmemiş bir çalışma olabilir; kısmen belirsizdir.
+
+### 8. Rust ekosistemi
+
+#### 8.1 Saf Rust, RustCrypto
+
+| Crate | Sürüm | Tarih | İndirme | Depo |
+|---|---|---|---|---|
+| `ml-kem` | 0.3.2 | 10 Mayıs 2026 | 2.464.049 | RustCrypto/KEMs |
+| `ml-dsa` | 0.1.1 | 5 Haziran 2026 | 770.685 | RustCrypto/signatures |
+| `slh-dsa` | 0.2.0-rc.5 | 28 Nisan 2026 | 876.336 | RustCrypto/signatures |
+
+Her üçünün README dosyasında da aynı uyarı vardır: "Security Warning — The implementation contained in this crate has never been independently audited! USE AT YOUR OWN RISK!"
+
+Ek olarak sabit zaman garantisi veya yan kanal direnci hakkında hiçbir beyan yoktur; ACVP test vektörü uyumu belirtilmemiştir. `ml-kem` crate'inde `zeroize` opsiyonel bir özelliktir ve varsayılan değildir. Hepsi hâlâ 1.0 öncesidir ve `slh-dsa` bir sürüm adayıdır.
+
+Bir IdP'nin imza yolunda bunların kullanılması önerilmez: denetlenmemişlerdir, 1.0 öncesidirler ve yan kanal beyanları yoktur.
+
+#### 8.2 aws-lc-rs, üretim için en olgun seçenek
+
+Sürümü 1.18.1'dir, 1 Eylül 2026 tarihlidir ve 214,9 milyondan fazla toplam indirmesi vardır; yakın dönemde 78,8 milyon indirilmiştir. AWS-LC bağlamasıdır, yani saf Rust değildir, ve `ring` ile API uyumludur.
+
+ML-KEM tarafında `aws_lc_rs::kem` modülünde `ML_KEM_512`, `ML_KEM_768` ile `ML_KEM_1024` vardır; NIST FIPS 203 olarak belgelenmiştir ve kararsız işaretli değildir.
+
+ML-DSA tarafında `aws_lc_rs::signature` modülünde doğrulama için `ML_DSA_44`, `ML_DSA_65` ile `ML_DSA_87`, imzalama için `ML_DSA_44_SIGNING`, `ML_DSA_65_SIGNING` ile `ML_DSA_87_SIGNING` vardır. Dokümantasyon şöyle demektedir: "The signature is the raw ML-DSA signature encoding described in FIPS 204." Kararsız işaretli değildir.
+
+SLH-DSA için dokümantasyonda desteğe dair bir kanıt yoktur.
+
+#### 8.3 FIPS 140-3 validasyonu PQC için henüz yoktur
+
+Bu, FIPS zorunluluğu olan bir IdP için kritik bir bulgudur.
+
+CMVP'de aktif sertifika araması, yani algoritma ML-KEM ile durum aktif filtresi, sıfır sonuç vermekte ve arama kriterlerine uyan sertifika bulunmadığını söylemektedir.
+
+AWS-LC'nin en yeni validasyonu 5429 numaralı sertifikadır: "AWS-LC Cryptographic Module (dynamic)", 20 Temmuz 2026, FIPS 140-3 genel birinci seviye, batımı 13 Ağustos 2029. Onaylı algoritmaları AES (CBC, CCM, CMAC, CTR, ECB, GCM, GMAC, KW, KWP ile XTS modlarında), SHA-1, SHA-2, ECDSA, RSA, HKDF ile SSH, TLS ve PBKDF türetmeleri, KAS-ECC-SSC ile sayaç tabanlı deterministik rastgele bit üretecidir. ML-KEM ile ML-DSA bu listede yoktur.
+
+Aktif AWS-LC sertifikaları 5429 (20 Temmuz 2026), 5314 (5 Haziran 2026), 5298 (3 Haziran 2026), 5146 (26 Ocak 2026), 4816 (1 Ekim 2024) ile 4631'dir (6 Ekim 2023).
+
+İşlemdeki modüller listesinde, ki 201 modül vardır, `AWS-LC 4 Cryptographic Module` dinamik ile statik biçimlerde yer almakta ve laboratuvar yorum çözümü aşamasındadır, 14 Ağustos 2026. Ayrıca kuyrukta Code Siren PQC Library'nin masaüstü ile mobil sürümleri, CryptoComply 140-3 FIPS Provider with PQC (4 Eylül 2026) ile PQCryptoLib-Core (25 Ağustos 2026) bulunmaktadır.
+
+> **Sonuç.** `aws-lc-rs`'i `fips` özelliğiyle derlemek size FIPS validasyonlu ML-KEM veya ML-DSA vermez. PQC algoritmaları validasyon sınırının dışındadır. FIPS 140-3 zorunluluğunuz varsa PQC'yi bugün FIPS modunda kullanamazsınız ve AWS-LC 4 validasyonunu beklemeniz gerekir.
+>
+> Belirsizlik şudur: CMVP arama arayüzünün algoritma filtresinin tam eşleşme yapıp yapmadığı doğrulanamamıştır; ancak 5429 numaralı sertifikanın detay sayfasında ML-KEM ile ML-DSA'nın bulunmaması bulguyu bağımsız olarak desteklemektedir.
 
 #### 8.4 Diğer crate'ler
 
 | Crate | Sürüm | Tarih | Not |
 |---|---|---|---|
-| `oqs` (liboqs-rust) | **0.11.0** | 01.05.2025 | liboqs bağlaması; OQS projesi genel olarak üretim için uygun olmadığı uyarısını taşır. **1,5 yıldır güncellenmemiş.** |
-| `pqcrypto` | **0.18.1** | 11.12.2024 | Thom Wiggers. ML-KEM, McEliece, HQC, ML-DSA, Falcon, SPHINCS+. **~2 yıldır güncellenmemiş.** |
-| `fips204` | **0.4.6** | 22.12.2024 | integritychain, ~1.714 satır. **~2 yıldır güncellenmemiş.** |
-| `rustls` | **0.23.44** | 07.09.2026 | Aşağıya bakınız |
+| `oqs`, yani liboqs-rust | 0.11.0 | 1 Mayıs 2025 | liboqs bağlamasıdır; OQS projesi genel olarak üretim için uygun olmadığı uyarısını taşımaktadır. Bir buçuk yıldır güncellenmemiştir |
+| `pqcrypto` | 0.18.1 | 11 Aralık 2024 | Thom Wiggers'ındır. ML-KEM, McEliece, HQC, ML-DSA, Falcon ile SPHINCS+ içerir. Yaklaşık iki yıldır güncellenmemiştir |
+| `fips204` | 0.4.6 | 22 Aralık 2024 | integritychain'indir, yaklaşık 1.714 satırdır. Yaklaşık iki yıldır güncellenmemiştir |
+| `rustls` | 0.23.44 | 7 Eylül 2026 | Aşağıya bakınız |
 
-#### 8.5 rustls ✅
+#### 8.5 rustls
 
-- **Sürüm 0.23.44, 7 Eylül 2026 (dün).**
-- aws-lc-rs sağlayıcısıyla desteklenen anahtar değişim grupları: SECP256R1, SECP384R1, X25519, **MLKEM768, MLKEM1024, X25519MLKEM768, SECP256R1MLKEM768**.
-- **0.23.27'den (05.05.2025) itibaren `prefer-post-quantum` varsayılan feature** — PQ anahtar değişimi varsayılan olarak tercih ediliyor.
-- **0.23.44 ile: aws-lc-rs sağlayıcısında ML-DSA sertifikaları varsayılan olarak etkin.**
+Sürümü 0.23.44'tür ve 7 Eylül 2026, yani dün, çıkmıştır.
 
-**Rust tarafında TLS için durum iyi. Sorun JOSE tarafında.**
+aws-lc-rs sağlayıcısıyla desteklenen anahtar değişim grupları SECP256R1, SECP384R1, X25519, MLKEM768, MLKEM1024, X25519MLKEM768 ile SECP256R1MLKEM768'dir.
 
-#### 8.6 ⚠️ Rust JOSE/JWT — RFC 9964 implementasyonu YOK
+0.23.27'den, yani 5 Mayıs 2025'ten itibaren `prefer-post-quantum` varsayılan bir özelliktir ve post kuantum anahtar değişimi varsayılan olarak tercih edilmektedir. 0.23.44 ile aws-lc-rs sağlayıcısında ML-DSA sertifikaları varsayılan olarak etkindir.
 
-| Crate | Sürüm | Tarih | ML-DSA? |
+Rust tarafında TLS için durum iyidir; sorun JOSE tarafındadır.
+
+#### 8.6 Rust JOSE ile JWT tarafında RFC 9964 implementasyonu yoktur
+
+| Crate | Sürüm | Tarih | ML-DSA var mı |
 |---|---|---|---|
-| `josekit` | 0.10.3 | **20 Mayıs 2025** | ❌ RFC 9964'ten (Mayıs 2026) **bir yıl önce**; PQC olması mümkün değil |
-| `jsonwebtoken` | **11.0.0** | 24 Temmuz 2026 | ❌ `Algorithm` enum'u: HS256/384/512, ES256/384, RS256/384/512, PS256/384/512, EdDSA. **Post-quantum varyant yok.** |
+| `josekit` | 0.10.3 | 20 Mayıs 2025 | Yoktur; RFC 9964'ten, yani Mayıs 2026'dan bir yıl öncedir ve PQC olması mümkün değildir |
+| `jsonwebtoken` | 11.0.0 | 24 Temmuz 2026 | Yoktur; `Algorithm` enum'u HS256, HS384, HS512, ES256, ES384, RS256, RS384, RS512, PS256, PS384, PS512 ile EdDSA içerir ve post kuantum varyant yoktur |
 
-**Bulunamadı:** RFC 9964'ü (alg `ML-DSA-44/65/87`, kty `AKP`) uygulayan hiçbir Rust crate'i.
+Bulunamayan şey şudur: RFC 9964'ü, yani `ML-DSA-44`, `ML-DSA-65` ile `ML-DSA-87` algoritmalarını ve `AKP` anahtar tipini uygulayan hiçbir Rust crate'i yoktur.
 
-> **Bu, ekibiniz için en somut boşluk.** JWS/JWT tarafında ML-DSA'yı bugün kullanmak istiyorsanız **kendiniz yazmanız gerekecek**: `aws-lc-rs`'in `ML_DSA_*_SIGNING` API'sini alıp üzerine RFC 9964'ün JWS serileştirmesini + AKP JWK tipini (seed-only `priv`, base64url `pub`) inşa etmek. İyi haber: iş yükü küçük — ML-DSA'nın JWS entegrasyonu düz bir "imzala/doğrula", RSA-PSS gibi parametre karmaşası yok.
+> **Bu, ekip için en somut boşluktur.** JWS ile JWT tarafında ML-DSA'yı bugün kullanmak isteniyorsa kendimiz yazmamız gerekecektir: `aws-lc-rs`'in ML-DSA imzalama API'si alınıp üzerine RFC 9964'ün JWS serileştirmesi ile AKP JWK tipi, yani yalnızca tohum içeren `priv` ile base64url kodlu `pub`, inşa edilir. İyi haber iş yükünün küçük olmasıdır: ML-DSA'nın JWS entegrasyonu düz bir imzala ve doğrula işidir ve RSA-PSS'teki gibi bir parametre karmaşası yoktur.
 
-⚠️ Rust OIDC/IdP framework'lerinde (`openidconnect`, `rauthy`, `oxide-auth`) PQC desteğini araştıramadım — **belirsiz** (arama bütçesi tükendi).
+Rust OIDC ile IdP çatılarında, yani `openidconnect`, `rauthy` ile `oxide-auth`'ta PQC desteği araştırılamamıştır ve belirsizdir; arama bütçesi tükenmiştir.
 
----
+### 9. Bir IdP ekibi için pratik çıkarımlar
 
-### 9. Bir IdP Ekibi İçin Pratik Çıkarımlar
+**Bugün yapılabilecekler.**
 
-#### Bugün yapılabilecekler ✅
-1. **TLS terminasyonunda X25519MLKEM768'i açın.** RFC 10024 ile standart, Recommended=Y, trafiğin ~2/3'ü zaten kullanıyor. rustls 0.23.27+ / OpenSSL 3.5 LTS ile bedava geliyor. "Harvest now, decrypt later" riskini bugün kapatır.
-2. **Origin/servis-içi mTLS'te ML-DSA'ya geçin.** Private PKI'nızı kontrol ediyorsanız engel yok: RFC 9881 (X.509) + rustls 0.23.44 (varsayılan açık) + aws-lc-rs. Cloudflare bunu Temmuz 2026'dan beri üretimde yapıyor.
-3. **Kripto-çeviklik (crypto-agility) borcunu şimdi ödeyin.** JWKS'inizin `kty: "AKP"` taşıyabilmesi, `alg` allowlist'inizin veri odaklı olması, anahtar rotasyonunun algoritma değişimini destekleyebilmesi. **En pahalı iş bu, ve şimdi yapılabilir.**
-4. **CBOM (cryptographic bill of materials) çıkarın.** EO 14412 uyarınca CISA rehberliği geliyor; federal müşteriniz varsa zaten isteyecekler.
-5. **Anahtar üretimini seed-tabanlı kurgulayın.** RFC 9964 `priv` için 32 baytlık seed'i **zorunlu** kılıyor. HSM'iniz sadece expanded key veriyorsa şimdi öğrenin.
+1. TLS sonlandırmasında X25519MLKEM768 açılır. RFC 10024 ile standarttır, önerilen olarak işaretlidir ve trafiğin yaklaşık üçte ikisi zaten kullanmaktadır. rustls 0.23.27 ve üstü ile OpenSSL 3.5 uzun destekli sürümünde bedava gelir. Şimdi topla sonra çöz riskini bugün kapatır.
+2. Kaynak sunucu ile servis içi mTLS'te ML-DSA'ya geçilir. Özel PKI kontrol ediliyorsa engel yoktur: RFC 9881, rustls 0.23.44 varsayılan açık hâliyle ve aws-lc-rs yeterlidir. Cloudflare bunu Temmuz 2026'dan beri üretimde yapmaktadır.
+3. Kriptografik çeviklik borcu şimdi ödenir. JWKS'in `kty: "AKP"` taşıyabilmesi, `alg` izin listesinin veri odaklı olması ve anahtar rotasyonunun algoritma değişimini destekleyebilmesi gerekir. En pahalı iş budur ve şimdi yapılabilir.
+4. Kriptografik malzeme listesi çıkarılır. EO 14412 uyarınca CISA rehberliği gelmektedir; federal bir müşteri varsa zaten isteyecektir.
+5. Anahtar üretimi tohum tabanlı kurgulanır. RFC 9964 `priv` için 32 baytlık tohumu zorunlu kılmaktadır. Donanım güvenlik modülü yalnızca genişletilmiş anahtar veriyorsa bu şimdi öğrenilmelidir.
 
-#### Şimdi başlatılabilecek işler 🔨
-6. **RFC 9964 JWS desteğini kendiniz yazın** (Rust'ta yok). `aws-lc-rs` üzerine ince bir katman. JWKS'te AKP anahtarlarını yayınlamaya başlayın — istemciler `alg`'ı tanımıyorsa yok sayacaktır.
-7. **Token boyutu bütçenizi test edin.** ML-DSA-44 imzası **2.420 bayt** → base64url ≈ **3.227 karakter**. Ed25519 (64 B → 86 karakter) ile karşılaştırın. Cookie boyut limitleri (4 KB), HTTP header limitleri (nginx varsayılan 8 KB, ALB 16 KB), URL fragment akışları — hepsi kırılabilir. **Bunu bugün ölçün.**
+**Şimdi başlatılabilecek işler.**
 
-#### Bekleyin ⏸️
-8. **JWE için PQ şifreleme:** yok. `draft-ietf-jose-pqc-kem-06` yalnızca COSE kapsıyor; `draft-ietf-jose-hpke-encrypt-22` ML-KEM içermiyor. Şifreli ID token / JARM kullanıyorsanız bugün kuantum-güvenli seçenek yok.
-9. **Public trust PQC sertifikaları:** CA/B Forum SC-106 hâlâ draft PR. Chrome ise X.509 PQC'yi root store'a **almayacağını** ilan etti — MTC'ye gidiyor (Faz 2 Q1 2027, Faz 3 Q3 2027). Cloudflare beklentisi WebPKI'da ML-DSA "2027 başı".
-10. **FIDO2 PQC:** WebAuthn L3'te bahsi bile yok, CTAP 2.3'te yok, donanım yok (Yubico: "yeni donanım gerekiyor"). **2028+ konusu.** Passkey stratejinizi buna göre planlayın — passkey'ler kuantum geçişinde en geç kalan halka olacak.
-11. **FIPS 140-3 validasyonlu PQC:** kuyrukta, henüz yok. AWS-LC 4 "Comment Resolution" aşamasında.
-12. **SLH-DSA JOSE/COSE:** IESG'de ama codepoint'ler henüz IANA'da yok; ayrıca yalnızca 2 parametre seti (128s) tanımlanıyor.
+6. RFC 9964 JWS desteği kendimiz yazılır, çünkü Rust'ta yoktur. `aws-lc-rs` üzerine ince bir katmandır. JWKS'te AKP anahtarları yayımlamaya başlanır; istemciler algoritmayı tanımıyorsa yok sayacaktır.
+7. Token boyutu bütçesi test edilir. ML-DSA-44 imzası 2.420 bayttır ve base64url ile yaklaşık 3.227 karakter eder. Ed25519 ile karşılaştırıldığında, ki 64 bayt ve 86 karakterdir, fark büyüktür. Çerez boyut limitleri 4 KB, HTTP başlık limitleri nginx'te varsayılan 8 KB ve yük dengeleyicide 16 KB, ayrıca URL fragment akışları kırılabilir. Bu bugün ölçülmelidir.
 
-#### Takvim çıpaları 📅
+**Beklenmesi gerekenler.**
+
+8. JWE için post kuantum şifreleme yoktur. `draft-ietf-jose-pqc-kem-06` yalnızca COSE'u kapsamaktadır ve `draft-ietf-jose-hpke-encrypt-22` ML-KEM içermemektedir. Şifreli kimlik token'ı veya JARM kullanılıyorsa bugün kuantum güvenli bir seçenek yoktur.
+9. Kamuya açık güvende PQC sertifikaları beklemektedir. CA ile tarayıcı forumundaki SC-106 hâlâ taslak bir PR'dır. Chrome ise X.509 PQC'yi kök deposuna almayacağını ilan etmiş ve Merkle ağacı sertifikalarına yönelmiştir; ikinci fazı 2027'nin ilk çeyreği, üçüncü fazı üçüncü çeyreğidir. Cloudflare beklentisi web PKI'da ML-DSA için 2027 başıdır.
+10. FIDO2 PQC beklemektedir. WebAuthn Level 3'te bahsi bile yoktur, CTAP 2.3'te yoktur ve donanım yoktur; Yubico yeni donanım gerektiğini söylemektedir. Bu, 2028 ve sonrasının konusudur. Passkey stratejisi buna göre planlanmalıdır; passkey'ler kuantum geçişinde en geç kalan halka olacaktır.
+11. FIPS 140-3 validasyonlu PQC kuyruktadır ve henüz yoktur. AWS-LC 4 yorum çözümü aşamasındadır.
+12. JOSE ile COSE için SLH-DSA IESG'dedir ancak kod noktaları henüz IANA'da yoktur; ayrıca yalnızca iki parametre seti, yani 128s varyantları, tanımlanmaktadır.
+
+**Takvim çıpaları.**
+
 | Tarih | Olay |
 |---|---|
-| Q1 2027 | Chrome CQRP Faz 2 (MTC bootstrapping) |
-| ~2027 | Chrome CQRP Faz 3; WebPKI'da ML-DSA (Cloudflare beklentisi); HQC finali (NIST hedefi) |
-| geç 2026 – erken 2027 | FIPS 206 / FN-DSA (draft-ietf-cose-falcon beklentisi) |
-| 2029 | Cloudflare tam PQ hedefi |
-| **31 Ara 2030** | **EO 14412: anahtar tesisi PQC (+ yükleniciler)**; CNSA 2.0 yazılım imzalama & ağ ekipmanı |
-| **31 Ara 2031** | **EO 14412: imza/kimlik doğrulama PQC** ← IdP'nin asıl tarihi |
-| 2033 | CNSA 2.0 web/bulut ve işletim sistemleri |
-| 2035 | IR 8547 (taslak) "disallowed" |
+| 2027 birinci çeyrek | Chrome kuantuma dayanıklı kök programının ikinci fazı, yani Merkle ağacı sertifikası başlatması |
+| Yaklaşık 2027 | Aynı programın üçüncü fazı; Cloudflare beklentisiyle web PKI'da ML-DSA; NIST hedefiyle HQC finali |
+| 2026 sonu ile 2027 başı | FIPS 206 ile FN-DSA; `draft-ietf-cose-falcon` beklentisidir |
+| 2029 | Cloudflare'in tam post kuantum hedefi |
+| 31 Aralık 2030 | EO 14412 ile anahtar tesisinin PQC'ye geçmesi ve yüklenicilerin uyumu; CNSA 2.0 ile yazılım imzalama ve ağ ekipmanı |
+| 31 Aralık 2031 | EO 14412 ile imza ve kimlik doğrulamanın PQC'ye geçmesi; bu, IdP'nin asıl tarihidir |
+| 2033 | CNSA 2.0 ile web, bulut ve işletim sistemleri |
+| 2035 | IR 8547 taslağındaki yasaklama tarihi |
 
-#### ⚠️ Parametre seti çelişkisine dikkat
-Web/IETF ekosistemi **ML-DSA-44** ve **ML-KEM-768** etrafında toplanıyor (Chrome CQRP CA cosigner'ları için ML-DSA-44 **zorunlu**; Cloudflare ML-DSA-44 öneriyor; X25519MLKEM768 tek Recommended=Y grup). CNSA 2.0 ise **yalnızca ML-DSA-87 ve ML-KEM-1024**'e izin veriyor. NSS müşteriniz varsa **iki ayrı profil** desteklemeniz gerekecek.
+**Parametre seti çelişkisine dikkat.** Web ile IETF ekosistemi ML-DSA-44 ile ML-KEM-768 etrafında toplanmaktadır: Chrome kuantuma dayanıklı kök programı sertifika otoritesi ortak imzalayıcıları için ML-DSA-44'ü zorunlu kılmakta, Cloudflare ML-DSA-44 önermekte ve X25519MLKEM768 önerilen olarak işaretli tek grup olmaktadır. CNSA 2.0 ise yalnızca ML-DSA-87 ile ML-KEM-1024'e izin vermektedir. Ulusal güvenlik sistemi müşterisi varsa iki ayrı profil desteklenmesi gerekecektir.
 
----
+### 10. Belirsizlikler ve bulunamayanlar, dürüst liste
 
-### 10. Belirsizlikler ve Bulunamayanlar (dürüst liste)
+**Bulunamayan veya doğrulanamayanlar.**
 
-**Bulunamadı / doğrulanamadı:**
-1. **Cloudflare Radar'ın canlı Eylül 2026 yüzdesi** — radar.cloudflare.com bot koruması nedeniyle 403 döndü, Radar API token istiyor. **Rakam uydurulmadı.** Alıntılanabilir en güncel rakam: "üçte ikiden fazla" (23 Haziran 2026). Bot dahil tüm-trafik rakamı hiç bulunamadı.
-2. **NSA CNSA 2.0 birincil PDF'i** — media.defense.gov ve nsa.gov 403 döndü. Takvim tablosu **ikincil kaynaktan**; doğrulanması gerekir. NSA'nın 2025/2026'da takvimi revize edip etmediği **belirsiz**.
-3. **HQC'nin FIPS numarası** — hiçbir NIST kaynağında atanmış numara yok. Dolaşan "FIPS 207" iddiası doğrulanamadı.
-4. **FIPS 206 taslağının 28 Ağustos 2025'te onaya gönderildiği** iddiası — yalnızca ikincil kaynaklarda, NIST'te doğrulanamadı.
-5. **Federal Register'da EO 14412'nin resmî sitesi/atıfı** — federalregister.gov erişimi engelledi. Ancak **whitehouse.gov'dan doğrudan doğrulandı**.
-6. **Rust OIDC/IdP framework'lerinde PQC desteği** (`openidconnect`, `rauthy`, `oxide-auth`) — araştırılamadı, arama bütçesi tükendi.
-7. **Mozilla root store'un PQC politikası** — blog.mozilla.org/security'de hiçbir PQC gönderisi yok.
-8. **FIDO Alliance'ın duyurulmuş ama site listelerinde görünmeyen PQC çalışması** olabilir — bu bölüm yalnızca doğrudan site çekimiyle yapıldı, kısmen belirsiz.
+1. Cloudflare Radar'ın canlı Eylül 2026 yüzdesi: radar.cloudflare.com bot koruması nedeniyle 403 döndürmüş ve Radar API'si bir jeton istemiştir. Rakam uydurulmamıştır. Alıntılanabilir en güncel rakam 23 Haziran 2026 tarihli üçte ikiden fazla ifadesidir. Bot dahil tüm trafik rakamı hiç bulunamamıştır.
+2. NSA'nın CNSA 2.0 birincil PDF'i: media.defense.gov ile nsa.gov 403 döndürmüştür. Takvim tablosu ikincil kaynaktandır ve doğrulanması gerekir. NSA'nın 2025 veya 2026'da takvimi revize edip etmediği belirsizdir.
+3. HQC'nin FIPS numarası: hiçbir NIST kaynağında atanmış bir numara yoktur ve dolaşan FIPS 207 iddiası doğrulanamamıştır.
+4. FIPS 206 taslağının 28 Ağustos 2025'te onaya gönderildiği iddiası: yalnızca ikincil kaynaklardadır ve NIST'te doğrulanamamıştır.
+5. Federal Register'da EO 14412'nin resmî sitesi veya atfı: federalregister.gov erişimi engellemiştir. Ancak whitehouse.gov'dan doğrudan doğrulanmıştır.
+6. Rust OIDC ile IdP çatılarında PQC desteği, yani `openidconnect`, `rauthy` ile `oxide-auth`: araştırılamamıştır, arama bütçesi tükenmiştir.
+7. Mozilla kök deposunun PQC politikası: blog.mozilla.org/security'de hiçbir PQC gönderisi yoktur.
+8. FIDO Alliance'ın duyurulmuş ancak site listelerinde görünmeyen bir PQC çalışması olabilir; bu bölüm yalnızca doğrudan site çekimiyle yapılmıştır ve kısmen belirsizdir.
 
-**Çelişkili / dikkat gerektiren:**
-9. **Firefox'ta "varsayılan açık" sürümü:** FF 132 notu "Added support for" diyor; Cloudflare Kasım 2024'te varsayılan olduğunu söylüyor. Mozilla birincil kaynağından pref varsayılanı doğrulanamadı — **muhtemelen 132, belirsiz**.
-10. **Chrome 131'in ML-KEM geçiş noktası** kurumsal politika açıklamasından çıkarıldı (otoriter ama release note değil).
-11. **`draft-ietf-tls-mldsa` ve `draft-ietf-tls-mlkem` ikisi de Informational** — codepoint kaydı için alışılmadık. Datatracker API'sinden doğrulandı, ama WG gerekçesi bulunamadı.
-12. **COSE codepoint çakışması riski:** `cose-falcon` -54/-55 istiyor, `jose-pq-composite-sigs` -54..-59 istiyor. İkisi de TBD. **Bu değerleri koda sabit yazmayın.**
-13. **CMVP "Algorithm=ML-KEM" aramasının 0 sonuç vermesi** filtre davranışından da kaynaklanabilir; ancak AWS-LC #5429 sertifika detayında ML-KEM/ML-DSA'nın olmaması bulguyu destekliyor.
+**Çelişkili veya dikkat gerektirenler.**
 
----
+9. Firefox'ta varsayılan açık olan sürüm: Firefox 132 notu destek eklendiğini söylemekte, Cloudflare Kasım 2024'te varsayılan olduğunu söylemektedir. Mozilla'nın birincil kaynağından tercih varsayılanı doğrulanamamıştır; muhtemelen 132'dir ancak belirsizdir.
+10. Chrome 131'in ML-KEM geçiş noktası bir kurumsal politika açıklamasından çıkarılmıştır; otoriterdir ancak bir sürüm notu değildir.
+11. `draft-ietf-tls-mldsa` ile `draft-ietf-tls-mlkem` ikisi de bilgilendiricidir; kod noktası kaydı için alışılmadıktır. Datatracker API'sinden doğrulanmıştır ancak çalışma grubu gerekçesi bulunamamıştır.
+12. COSE kod noktası çakışması riski: `cose-falcon` eksi 54 ile 55'i, `jose-pq-composite-sigs` eksi 54 ile 59 arasını istemektedir. İkisi de belirlenecek durumdadır ve bu değerler koda sabit yazılmamalıdır.
+13. CMVP'de algoritma ML-KEM aramasının sıfır sonuç vermesi filtre davranışından da kaynaklanabilir; ancak AWS-LC 5429 numaralı sertifikanın detayında ML-KEM ile ML-DSA'nın olmaması bulguyu desteklemektedir.
 
-### Kaynak URL'leri
+### Kaynak adresleri
 
-**NIST:** [FIPS 203](https://csrc.nist.gov/pubs/fips/203/final) · [FIPS 204](https://csrc.nist.gov/pubs/fips/204/final) · [FIPS 205](https://csrc.nist.gov/pubs/fips/205/final) · [PQC Standardization](https://csrc.nist.gov/projects/post-quantum-cryptography/post-quantum-cryptography-standardization) · [PQC News](https://csrc.nist.gov/Projects/post-quantum-cryptography/news) · [IR 8545](https://csrc.nist.gov/pubs/ir/8545/final) · [IR 8547 ipd](https://csrc.nist.gov/pubs/ir/8547/ipd) · [IR 8610](https://csrc.nist.gov/pubs/ir/8610/final) · [SP 800-208](https://csrc.nist.gov/pubs/sp/800/208/final) · [SP 800-227](https://csrc.nist.gov/pubs/sp/800/227/final) · [SP 800-230 ipd](https://csrc.nist.gov/pubs/sp/800/230/ipd) · [SP 800-131A r3 ipd](https://csrc.nist.gov/pubs/sp/800/131/a/r3/ipd) · [HQC duyurusu](https://www.nist.gov/news-events/news/2025/03/nist-selects-hqc-fifth-algorithm-post-quantum-encryption) · [CMVP cert 5429](https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/5429) · [CMVP MIP](https://csrc.nist.gov/Projects/cryptographic-module-validation-program/modules-in-process/modules-in-process-list)
+**NIST.** csrc.nist.gov/pubs/fips/203/final; /204/final; /205/final; post kuantum kriptografi standardizasyon sayfası; PQC haber sayfası; /pubs/ir/8545/final; /pubs/ir/8547/ipd; /pubs/ir/8610/final; /pubs/sp/800/208/final; /pubs/sp/800/227/final; /pubs/sp/800/230/ipd; /pubs/sp/800/131/a/r3/ipd; nist.gov'un Mart 2025 HQC duyurusu; CMVP 5429 numaralı sertifika sayfası; CMVP işlemdeki modüller listesi.
 
-**Beyaz Saray:** [EO 14412](https://www.whitehouse.gov/presidential-actions/2026/06/securing-the-nation-against-advanced-cryptographic-attacks/)
+**Beyaz Saray.** whitehouse.gov'un 2026/06 tarihli EO 14412 sayfası.
 
-**IETF/IANA:** [RFC 9964](https://www.rfc-editor.org/rfc/rfc9964.html) · [RFC 9881](https://www.rfc-editor.org/rfc/rfc9881.html) · [RFC 9909](https://www.rfc-editor.org/rfc/rfc9909.html) · [RFC 9935](https://www.rfc-editor.org/rfc/rfc9935.html) · [RFC 10024](https://www.rfc-editor.org/rfc/rfc10024.html) · [RFC 9864](https://www.rfc-editor.org/rfc/rfc9864.html) · [RFC 9958](https://datatracker.ietf.org/doc/rfc9958/) · [RFC 9955](https://datatracker.ietf.org/doc/rfc9955/) · [IANA COSE](https://www.iana.org/assignments/cose/cose.xhtml) · [IANA JOSE](https://www.iana.org/assignments/jose/jose.xhtml) · [IANA TLS](https://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml) · [COSE WG](https://datatracker.ietf.org/wg/cose/documents/) · [JOSE WG](https://datatracker.ietf.org/wg/jose/documents/) · [LAMPS WG](https://datatracker.ietf.org/wg/lamps/documents/) · [PQUIP WG](https://datatracker.ietf.org/wg/pquip/documents/) · [draft-ietf-cose-sphincs-plus](https://datatracker.ietf.org/doc/draft-ietf-cose-sphincs-plus/) · [draft-ietf-cose-falcon](https://datatracker.ietf.org/doc/draft-ietf-cose-falcon/) · [draft-ietf-jose-pqc-kem](https://datatracker.ietf.org/doc/draft-ietf-jose-pqc-kem/) · [draft-ietf-jose-hpke-encrypt](https://datatracker.ietf.org/doc/draft-ietf-jose-hpke-encrypt/) · [draft-ietf-jose-pq-composite-sigs](https://datatracker.ietf.org/doc/draft-ietf-jose-pq-composite-sigs/) · [draft-ietf-lamps-pq-composite-sigs](https://datatracker.ietf.org/doc/draft-ietf-lamps-pq-composite-sigs/) · [draft-ietf-lamps-pq-composite-kem](https://datatracker.ietf.org/doc/draft-ietf-lamps-pq-composite-kem/) · [draft-ietf-tls-mldsa](https://datatracker.ietf.org/doc/draft-ietf-tls-mldsa/) · [draft-ietf-tls-mlkem](https://datatracker.ietf.org/doc/draft-ietf-tls-mlkem/) · [draft-ietf-tls-trust-anchor-ids](https://datatracker.ietf.org/doc/draft-ietf-tls-trust-anchor-ids/) · [draft-ietf-plants-merkle-tree-certs](https://datatracker.ietf.org/doc/draft-ietf-plants-merkle-tree-certs/) · [draft-ietf-oauth-rfc8725bis](https://datatracker.ietf.org/doc/draft-ietf-oauth-rfc8725bis/)
+**IETF ile IANA.** RFC 9964, 9881, 9909, 9935, 10024, 9864, 9958 ile 9955; IANA COSE, JOSE ile TLS parametre kayıtları; COSE, JOSE, LAMPS ile PQUIP çalışma grubu doküman listeleri; `draft-ietf-cose-sphincs-plus`, `draft-ietf-cose-falcon`, `draft-ietf-jose-pqc-kem`, `draft-ietf-jose-hpke-encrypt`, `draft-ietf-jose-pq-composite-sigs`, `draft-ietf-lamps-pq-composite-sigs`, `draft-ietf-lamps-pq-composite-kem`, `draft-ietf-tls-mldsa`, `draft-ietf-tls-mlkem`, `draft-ietf-tls-trust-anchor-ids`, `draft-ietf-plants-merkle-tree-certs` ile `draft-ietf-oauth-rfc8725bis` sayfaları.
 
-**PKI/Tarayıcı:** [CA/B Forum SC-106 PR](https://github.com/cabforum/servercert/pull/679) · [SCWG 13.08.2026 tutanak](https://cabforum.org/2026/08/13/2026-08-13-minutes-of-the-server-certificate-working-group/) · [Chrome CQRP policy](https://googlechrome.github.io/chromerootprogram/cqrp/draft-policy) · [Chrome CQRP FAQ](https://googlechrome.github.io/chromerootprogram/cqrp/faq) · [Chromium PQ auth roadmap](https://www.chromium.org/Home/chromium-security/post-quantum-auth-roadmap/)
+**PKI ile tarayıcı.** github.com/cabforum/servercert/pull/679; cabforum.org'un 13 Ağustos 2026 tutanağı; googlechrome.github.io'daki kuantuma dayanıklı kök programı politikası ile sıkça sorulan sorular; chromium.org'un post kuantum kimlik doğrulama yol haritası.
 
-**FIDO/W3C:** [WebAuthn L3](https://www.w3.org/TR/webauthn-3/) · [FIDO spec indirme](https://fidoalliance.org/specifications/download/) · [Yubico PQC yazısı](https://www.yubico.com/blog/future-proofing-authentication-a-look-at-the-future-of-post-quantum-cryptography/)
+**FIDO ile W3C.** w3.org/TR/webauthn-3; fidoalliance.org'un spesifikasyon indirme sayfası; Yubico'nun post kuantum kriptografi yazısı.
 
-**Cloudflare:** [pq-2025](https://blog.cloudflare.com/pq-2025/) · [PQ roadmap](https://blog.cloudflare.com/post-quantum-roadmap/) · [ML-DSA will have to do](https://blog.cloudflare.com/ml-dsa-will-have-to-do/) · [PQ origin auth](https://blog.cloudflare.com/post-quantum-authentication-to-origins/) · [Radar PQ transparency](https://blog.cloudflare.com/radar-origin-pq-key-transparency-aspa/) · [EO yazısı](https://blog.cloudflare.com/post-quantum-eo-2026/)
+**Cloudflare.** blog.cloudflare.com'un pq-2025, post-quantum-roadmap, ml-dsa-will-have-to-do, post-quantum-authentication-to-origins, radar-origin-pq-key-transparency-aspa ile post-quantum-eo-2026 yazıları.
 
-**Rust:** [ml-dsa](https://github.com/RustCrypto/signatures/tree/master/ml-dsa) · [ml-kem](https://github.com/RustCrypto/KEMs/tree/master/ml-kem) · [aws-lc-rs kem](https://docs.rs/aws-lc-rs/latest/aws_lc_rs/kem/index.html) · [aws-lc-rs signature](https://docs.rs/aws-lc-rs/latest/aws_lc_rs/signature/index.html) · [AWS-LC PQREADME](https://github.com/aws/aws-lc/blob/main/crypto/fipsmodule/PQREADME.md) · [rustls kx_group](https://docs.rs/rustls/latest/rustls/crypto/aws_lc_rs/kx_group/index.html) · [jsonwebtoken Algorithm](https://docs.rs/jsonwebtoken/latest/jsonwebtoken/enum.Algorithm.html)
+**Rust.** RustCrypto'nun ml-dsa ile ml-kem depoları; docs.rs'te aws-lc-rs'in kem ile signature modülleri; AWS-LC'nin PQREADME dosyası; docs.rs'te rustls'in anahtar değişim grubu modülü; docs.rs'te jsonwebtoken'ın `Algorithm` enum'u.
 
-**Diğer:** [OpenSSL 3.5 notları](https://openssl-library.org/news/openssl-3.5-notes/) · [Go 1.24](https://go.dev/doc/go1.24) · [Apple TLS security](https://support.apple.com/guide/security/tls-security-sec100a75d12/web) · [tldr.fail](https://tldr.fail/)
+**Diğer.** openssl-library.org'un 3.5 sürüm notları; go.dev'in Go 1.24 dokümanı; support.apple.com'un TLS güvenlik sayfası; tldr.fail.
 
 ---
 
-## HAT 2 — WebAuthn Level 3 / CTAP 2.3 / Passkey Ekosistemi
+## Hat 2 — WebAuthn Level 3, CTAP 2.3 ile passkey ekosistemi
 
-## WebAuthn / Passkey Durum Raporu — 8 Eylül 2026
-### Rust tabanlı sunucu taraflı Identity Provider (RP) ekibi için
+Bu, 8 Eylül 2026 tarihli bir WebAuthn ile passkey durum raporudur ve Rust tabanlı, sunucu tarafı bir kimlik sağlayıcı, yani ilgili taraf, ekibi içindir.
 
-**Metodoloji notu:** Aşağıdaki bulguların büyük kısmı birincil kaynaklardan (w3.org/TR, fidoalliance.org/specs dizin listeleri, github.com/w3c/webauthn, crates.io API, raw GitHub kaynak dosyaları) doğrulandı. Doğrulayamadığım noktalar **[DOĞRULANMADI]** olarak işaretlendi. Bu oturumda WebSearch kotası doldu; son bölümdeki bazı boşluklar bu yüzden kapatılamadı.
+**Metodoloji notu.** Aşağıdaki bulguların büyük kısmı birincil kaynaklardan doğrulanmıştır: w3.org/TR, fidoalliance.org'un spesifikasyon dizin listeleri, github.com/w3c/webauthn, crates.io API'si ile ham GitHub kaynak dosyaları. Doğrulanamayan noktalar açıkça işaretlenmiştir. Bu oturumda web arama kotası dolmuştur ve son bölümdeki bazı boşluklar bu yüzden kapatılamamıştır.
 
----
-
-### 1. WebAuthn Level 3 spec durumu
+### 1. WebAuthn Level 3 spesifikasyon durumu
 
 | Öğe | Değer |
 |---|---|
-| Tam ad | Web Authentication: An API for accessing Public Key Credentials — Level 3 |
-| Durum | **W3C Recommendation (REC)** — yani tamamlandı |
-| REC tarihi | **25 Ağustos 2026** |
-| Sabit URL | https://www.w3.org/TR/2026/REC-webauthn-3-20260825/ |
-| Canlı URL | https://www.w3.org/TR/webauthn-3/ |
-| CR Snapshot | 26 Mayıs 2026 |
-| PR (Proposed Rec) duyurusu | 20 Temmuz 2026 |
+| Tam ad | Web Authentication: An API for accessing Public Key Credentials, Level 3 |
+| Durum | W3C önerisidir, yani tamamlanmıştır |
+| Öneri tarihi | 25 Ağustos 2026 |
+| Sabit adres | w3.org/TR/2026/REC-webauthn-3-20260825 |
+| Canlı adres | w3.org/TR/webauthn-3 |
+| Aday öneri anlık görüntüsü | 26 Mayıs 2026 |
+| Önerilen öneri duyurusu | 20 Temmuz 2026 |
 
-Spec metni: "There have been no substantive changes since the Candidate Recommendation Snapshot of 26 May 2026." Yani Mayıs 2026'dan beri normatif değişiklik yok — **L3'e karşı kodlamak artık güvenli**.
+Spesifikasyon metni şöyle demektedir: "There have been no substantive changes since the Candidate Recommendation Snapshot of 26 May 2026." Yani Mayıs 2026'dan beri normatif bir değişiklik yoktur ve Level 3'e karşı kodlamak artık güvenlidir.
 
-Kaynaklar:
-- https://www.w3.org/TR/webauthn-3/
-- https://www.w3.org/news/2026/proposed-advancement-of-webauthn-3-to-w3c-recommendation/
-- https://www.w3.org/news/2026/w3c-invites-implementations-of-web-authentication-an-api-for-accessing-public-key-credentials-level-3/
+Kaynakları w3.org/TR/webauthn-3 ile w3.org'un 2026 tarihli iki haber sayfasıdır.
 
-#### Level 4 başladı mı? — Evet, tam şu anda
+**Level 4 başlamış mıdır.** Evet, tam şu anda başlamaktadır.
 
-- W3C Web Authentication WG taslak charter'ı (2026) **tek normatif deliverable olarak "WebAuthn Level 4"** listeliyor. Charter 2 yıllık; **L4 için hedef tamamlanma Q4 2028**. Önceki charter 30 Nisan 2024 – 30 Nisan 2026 arasıydı.
-  - https://w3c.github.io/charter-drafts/2026/charter-wg-webauthn-2026.html
-- GitHub milestone **"L4 (First Published Working Draft)"**: **due date 9 Eylül 2026** (yani yarın), %81 tamamlanmış, 11 açık / 47 kapalı issue.
-  - https://github.com/w3c/webauthn/milestone/27
+W3C Web Authentication çalışma grubunun 2026 taslak charter'ı tek normatif çıktı olarak WebAuthn Level 4'ü listelemektedir. Charter iki yıllıktır ve Level 4 için hedef tamamlanma 2028'in dördüncü çeyreğidir. Önceki charter 30 Nisan 2024 ile 30 Nisan 2026 arasındaydı. Kaynağı w3c.github.io'daki charter taslağıdır.
 
-**L4 kapsamına giren açık issue'lar (RP tarafını ilgilendirenler kalın):**
-- #2291 — **Add Immediate uiMode** (aşağıda 2.8)
-- #2078 — **Add "sign" extension** (ham imzalama; dijital cüzdan / belge imzalama / AI ajanları)
-- #2437 — **Support Algorithm Migration** (post-quantum geçişi için kritik)
-- #2393 — **Add ML-DSA test vectors** (post-quantum)
-- #2377 — Add "Credential Manager Trust Group (CMTG) Key" extension
-- #2150 — Exclude platform authenticators with self-attestation
-- #2095 — Alternative error codes
-- #2072 — WebDriver BiDi desteği
-- #2404 — CTAP 2.3 version string for virtual authenticators
+GitHub'daki "L4 (First Published Working Draft)" kilometre taşının son tarihi 9 Eylül 2026'dır, yani yarındır; %81 tamamlanmıştır ve 11 açık ile 47 kapalı issue vardır. Kaynağı github.com/w3c/webauthn/milestone/27'dir.
 
-Charter'ın kapsama eklediği yeni başlıklar: remote desktop / non-modal UI, credential backup & recovery seçenekleri, transport ve "durability" sinyalleri, **WebAuthn aracılı ham imzalama (AI ajanları dahil)**, authenticator hakkında gizlilik korumalı güven sinyalleri, gizlilik için genişletilmiş WebAuthn Extensions.
+Level 4 kapsamına giren açık issue'lar şunlardır; ilgili taraf tarafını ilgilendirenler öne çıkmaktadır. #2291 anlık kullanıcı arayüzü modunu eklemektedir, 2.8'e bakınız. #2078 ham imzalama için bir `sign` uzantısı eklemektedir; dijital cüzdan, belge imzalama ile AI ajanları içindir. #2437 algoritma göçünü desteklemektedir ve post kuantum geçişi için kritiktir. #2393 ML-DSA test vektörleri eklemektedir. #2377 kimlik bilgisi yöneticisi güven grubu anahtarı uzantısını eklemektedir. #2150 kendinden attestation'lı platform kimlik doğrulayıcılarını dışlamaktadır. #2095 alternatif hata kodları getirmektedir. #2072 WebDriver BiDi desteği eklemektedir. #2404 sanal kimlik doğrulayıcılar için CTAP 2.3 sürüm dizesi eklemektedir.
 
-**IdP ekibi için çıkarım:** L3 hedefleyin, L4'ü izleyin. L4'teki "durability signals" ve "trust signals" doğrudan sizin device-bound vs synced politikanızı etkileyecek.
+Charter'ın kapsama eklediği yeni başlıklar uzak masaüstü ile kalıcı olmayan arayüz, kimlik bilgisi yedekleme ile kurtarma seçenekleri, taşıma ile dayanıklılık sinyalleri, AI ajanları dahil WebAuthn aracılı ham imzalama, kimlik doğrulayıcı hakkında gizlilik korumalı güven sinyalleri ile gizlilik için genişletilmiş WebAuthn uzantılarıdır.
 
----
+IdP ekibi için çıkarım şudur: Level 3 hedeflenir ve Level 4 izlenir. Level 4'teki dayanıklılık ile güven sinyalleri doğrudan cihaza bağlı ile senkronize passkey politikasını etkileyecektir.
 
-### 2. L3 özellikleri ve SUNUCU TARAFI etkileri
+### 2. Level 3 özellikleri ve sunucu tarafı etkileri
 
-#### 2.1 PRF extension (hmac-secret)
+#### 2.1 PRF uzantısı, yani hmac-secret
 
-**Ne yapar:** Authenticator içinde credential'a bağlı bir gizli anahtardan, RP'nin verdiği salt ile deterministik 32 baytlık çıktı türetir. E2E şifreleme anahtarı için kullanılır.
+**Ne yapar.** Kimlik doğrulayıcı içinde kimlik bilgisine bağlı bir gizli anahtardan, ilgili tarafın verdiği tuzla deterministik 32 baytlık bir çıktı türetir. Uçtan uca şifreleme anahtarı için kullanılır.
 
-**CTAP eşlemesi:** Tarayıcıdaki `prf` = CTAP2'deki `hmac-secret` eklentisi.
+**CTAP eşlemesi.** Tarayıcıdaki `prf`, CTAP2'deki `hmac-secret` uzantısıdır.
 
-**Kritik salt türetmesi (tarayıcı yapar, siz değil):**
+**Kritik tuz türetmesi**, ki bunu tarayıcı yapar, siz değil:
+
 ```
 actualSalt = SHA-256( UTF8("WebAuthn PRF") || 0x00 || developerSalt )
 ```
-Bu, web bağlamında türetilen sırların native/CTAP bağlamından kriptografik olarak izole olmasını sağlar. **Native uygulama SDK'ları (YubiKit, libfido2) bu prefix'i uygulamaz** — native ve web aynı sırrı istiyorsa domain separation'ı kendiniz yapmalısınız.
 
-**API şekilleri:**
+Bu, web bağlamında türetilen sırların yerel ile CTAP bağlamından kriptografik olarak izole olmasını sağlar. Yerel uygulama SDK'ları, yani YubiKit ile libfido2, bu öneki uygulamaz; yerel ile web aynı sırrı istiyorsa alan ayrımını kendiniz yapmanız gerekir.
+
+API şekilleri şunlardır:
+
 ```js
 // Kayıt (create) — sadece yetenek sorgusu / etkinleştirme
 extensions: { prf: {} }
@@ -771,43 +723,42 @@ extensions: { prf: { evalByCredential: {
     "<base64url-credentialId2>": { first: saltB }
 } } }
 ```
-`evalByCredential`, W3C spec'inde **credential ID'nin base64url string hali** ile anahtarlanır (raw bytes değil). Rust tarafında serileştirirken buna dikkat.
 
-**Sunucu ne saklamalı / ne saklamamalı:**
-- **SAKLA:** credential ID ile birlikte **credential başına rastgele bir salt** (kayıt sırasında üretilir). Bu salt gizli değil, ama benzersiz olmalı.
-- **SAKLA:** `prf.enabled` bayrağı (bu credential PRF destekliyor mu) — UI'da "bu cihazla şifreli veriye erişebilirsiniz" demek için.
-- **ASLA SAKLAMA:** PRF çıktısının kendisi. Türetilmiş anahtar tarayıcıda kalır; sunucu **sadece ciphertext** görür.
-- Anahtar rotasyonu için `first`/`second` ikilisini kullanın: eski salt `first`, yeni salt `second` → tek işlemde iki sır, geçiş yapabilirsiniz.
-- Pratik desen: `HKDF(prf.results.first, info="enc")` → AES-GCM anahtarı, `HKDF(prf.results.second, info="mac")` → HMAC anahtarı; ayrık `info` string'leri ile.
+`evalByCredential`, W3C spesifikasyonunda kimlik bilgisi kimliğinin base64url dizesiyle anahtarlanır, ham baytlarla değil. Rust tarafında serileştirirken buna dikkat edilmelidir.
 
-**Platform destek uyarıları (Yubico rehberi, ~2025 ortası verisi — 2026 için [KISMEN DOĞRULANDI]):**
-| Platform | Platform passkey | Harici anahtar (YubiKey) |
+**Sunucu ne saklamalı ve ne saklamamalıdır.** Saklanacaklar: kimlik bilgisi kimliğiyle birlikte kimlik bilgisi başına rastgele bir tuz, ki kayıt sırasında üretilir ve gizli değildir ancak benzersiz olmalıdır; ayrıca `prf.enabled` bayrağı, yani bu kimlik bilgisinin PRF destekleyip desteklemediği, ki arayüzde bu cihazla şifreli veriye erişilebileceğini söylemek içindir. Asla saklanmayacak şey PRF çıktısının kendisidir; türetilmiş anahtar tarayıcıda kalır ve sunucu yalnızca şifreli metni görür.
+
+Anahtar rotasyonu için `first` ile `second` ikilisi kullanılır: eski tuz `first`, yeni tuz `second` olur ve tek işlemde iki sır alınarak geçiş yapılabilir. Pratik desen `HKDF(prf.results.first, info="enc")` ile bir AES-GCM anahtarı ve `HKDF(prf.results.second, info="mac")` ile bir HMAC anahtarı türetmektir; ayrık bilgi dizeleriyle.
+
+Platform destek uyarıları Yubico rehberindendir ve yaklaşık 2025 ortası verisidir; 2026 için kısmen doğrulanmıştır.
+
+| Platform | Platform passkey'i | Harici anahtar, yani YubiKey |
 |---|---|---|
-| Windows 11 | **Hayır** — Windows Hello hmac-secret desteklemiyor | Evet (Chrome/Edge/Firefox) |
-| macOS 15+ | Evet (iCloud Keychain, Safari 18+) | Chrome: evet, **Safari: hayır** |
-| iOS/iPadOS 18+ | Evet (iCloud Keychain) | **Hayır** — iOS harici authenticator'a extension verisi geçirmiyor |
-| Android | Evet (Google Password Manager) | USB: evet, **NFC: hayır** |
+| Windows 11 | Hayır; Windows Hello hmac-secret desteklememektedir | Evet; Chrome, Edge ile Firefox'ta |
+| macOS 15 ve üstü | Evet; iCloud Anahtar Zinciri, Safari 18 ve üstü | Chrome'da evet, Safari'de hayır |
+| iOS ile iPadOS 18 ve üstü | Evet; iCloud Anahtar Zinciri | Hayır; iOS harici kimlik doğrulayıcıya uzantı verisi geçirmemektedir |
+| Android | Evet; Google Parola Yöneticisi | USB'de evet, NFC'de hayır |
 
-**En önemli sonuç:** PRF tabanlı E2E şifrelemeyi tek kimlik doğrulama yöntemi yapmayın. Windows Hello platform passkey'leri ve iOS+YubiKey kombinasyonu çalışmaz. Mutlaka fallback (parola tabanlı KDF veya kurtarma kodu) tasarlayın.
+En önemli sonuç şudur: PRF tabanlı uçtan uca şifreleme tek kimlik doğrulama yöntemi yapılmamalıdır. Windows Hello platform passkey'leri ile iOS ve YubiKey kombinasyonu çalışmamaktadır. Mutlaka bir yedek yol, yani parola tabanlı anahtar türetme veya kurtarma kodu, tasarlanmalıdır.
 
-Kaynaklar:
-- https://developers.yubico.com/WebAuthn/Concepts/PRF_Extension/Developers_Guide_to_PRF.html
-- https://developers.yubico.com/WebAuthn/Concepts/PRF_Extension/CTAP2_HMAC_Secret_Deep_Dive.html
-- https://github.com/w3c/webauthn/wiki/Explainer:-PRF-extension
-- https://bitwarden.com/blog/prf-webauthn-and-its-role-in-passkeys/
+Kaynakları developers.yubico.com'un PRF uzantısı geliştirici rehberi ile CTAP2 hmac-secret derin incelemesi, github.com/w3c/webauthn wiki'sindeki PRF açıklayıcısı ve bitwarden.com'un PRF yazısıdır.
 
 #### 2.2 largeBlob durumu
 
-- L3 REC'te **hâlâ mevcut**: §10.1.5 "Large blob storage extension (largeBlob)".
-- w3c/webauthn issue taramasında **deprecation, at-risk veya kaldırma tartışması bulunamadı**. Yani spec seviyesinde sağlıklı.
-- Bilinen kısıt (issue #1622'de netleştirilmiş): **CTAP authenticator'larda discoverable credential zorunlu**.
-- Pratik gerçek: destek dar ve PRF çoğu kullanım senaryosunda yerini aldı. **[DOĞRULANMADI]** — 2026 için güncel tarayıcı/platform destek matrisini bulamadım; passkeys.dev destek matrisi largeBlob'u listelemiyor.
+Level 3 önerisinde hâlâ mevcuttur; §10.1.5'te büyük ikili veri depolama uzantısı olarak tanımlıdır.
 
-**IdP tavsiyesi:** largeBlob'a bağımlılık kurmayın. Küçük sırlar için PRF + sunucuda ciphertext saklama modeli çok daha taşınabilir.
+w3c/webauthn issue taramasında kullanımdan kaldırma, riskli işaretleme veya kaldırma tartışması bulunamamıştır; yani spesifikasyon seviyesinde sağlıklıdır.
 
-#### 2.3 Related Origin Requests (ROR)
+Bilinen kısıt issue #1622'de netleştirilmiştir: CTAP kimlik doğrulayıcılarında keşfedilebilir kimlik bilgisi zorunludur.
 
-**Dosya:** `https://<RP ID>/.well-known/webauthn`
+Pratik gerçek şudur: destek dardır ve PRF çoğu kullanım senaryosunda yerini almıştır. 2026 için güncel tarayıcı ile platform destek matrisi bulunamamıştır; passkeys.dev destek matrisi largeBlob'u listelememektedir.
+
+IdP tavsiyesi largeBlob'a bağımlılık kurmamaktır. Küçük sırlar için PRF ile sunucuda şifreli metin saklama modeli çok daha taşınabilirdir.
+
+#### 2.3 İlişkili köken istekleri
+
+Dosya adresi `https://<RP ID>/.well-known/webauthn`'dur.
+
 ```json
 {
   "origins": [
@@ -818,106 +769,68 @@ Kaynaklar:
 }
 ```
 
-**Sunucu tarafı gereksinimleri (kesin):**
-- HTTPS üzerinden servis edilmeli
-- `Content-Type: application/json` **zorunlu**
-- HTTP **200** dönmeli
-- Tarayıcı bu dosyayı **credentials olmadan ve Referer başlığı olmadan** çeker — yani auth arkasına koymayın, CDN/edge'de cache'lenebilir olmalı
-- RP ID'nin kendisiyle eşleşen origin'leri listelemeye gerek yok
+Sunucu tarafı gereksinimleri kesindir: HTTPS üzerinden servis edilmelidir; `Content-Type: application/json` zorunludur; HTTP 200 dönmelidir; tarayıcı bu dosyayı kimlik bilgisi olmadan ve Referer başlığı olmadan çeker, yani kimlik doğrulamanın arkasına konmamalıdır ve içerik dağıtım ağında önbelleklenebilir olmalıdır; ilgili taraf kimliğinin kendisiyle eşleşen kökenleri listelemeye gerek yoktur.
 
-**Label limiti:** `maxLabels` = **5**. "Label", eTLD+1'in soldaki etiketi (örn. `shopping.com` ve `shopping.co.uk` → ikisi de "shopping" label'ı, **tek** sayılır). Spec istemcilerin en az 5 desteklemesini şart koşuyor; **5'ten fazlasını destekleyen bilinen istemci yok, 5'i tavan kabul edin.**
+Etiket limiti beştir. Etiket, etkin en üst düzey alan adı artı birin soldaki etiketidir; örneğin `shopping.com` ile `shopping.co.uk` ikisi de shopping etiketine sahiptir ve tek sayılır. Spesifikasyon istemcilerin en az beş desteklemesini şart koşmaktadır; beşten fazlasını destekleyen bilinen bir istemci yoktur ve beş tavan kabul edilmelidir.
 
-**Tarayıcı desteği (passkeys.dev device-support matrisi, son güncelleme 20 Mayıs 2026):**
-- Chrome 128+, Edge 128+ (çoğu platform)
-- Firefox 152+
-- Safari: matris "macOS Safari 15+" diyor — bu **büyük olasılıkla hatalı/bozuk bir satır** (Safari 15 WebAuthn L3 öncesi). **[DOĞRULANMADI]** — Safari'nin ROR desteğini kesinleştiremedim.
+Tarayıcı desteği passkeys.dev cihaz destek matrisine göre, son güncellemesi 20 Mayıs 2026, şöyledir: Chrome 128 ve üstü ile Edge 128 ve üstü çoğu platformda, Firefox 152 ve üstü. Safari için matris macOS Safari 15 ve üstü demektedir; bu büyük olasılıkla hatalı veya bozuk bir satırdır, çünkü Safari 15 WebAuthn Level 3 öncesidir. Safari'nin ilişkili köken desteği kesinleştirilememiştir.
 
-**Runtime tespiti:** `PublicKeyCredential.getClientCapabilities()` → `relatedOrigins` alanı.
+Çalışma zamanı tespiti `PublicKeyCredential.getClientCapabilities()` çağrısının `relatedOrigins` alanıyla yapılır.
 
-**Mimari uyarı:** passkeys.dev açıkça diyor ki *ROR, federation mümkün DEĞİLKEN kullanılmalıdır*. Siz zaten bir **Identity Provider** yazıyorsunuz — yani OIDC/SAML federation'ı zaten elinizde. ROR'u sadece IdP'nin kendi çoklu markalı/çoklu ülkeli domainleri için düşünün, müşteri RP'leri için değil. Ayrıca ROR desteklemeyen istemciler için identifier-first akışı + backend lookup fallback'i şart.
+Mimari uyarı şudur: passkeys.dev açıkça ilişkili köken isteklerinin federasyon mümkün değilken kullanılması gerektiğini söylemektedir. Siz zaten bir kimlik sağlayıcı yazmaktasınız, yani OIDC ile SAML federasyonu zaten elinizdedir. İlişkili köken isteklerini yalnızca IdP'nin kendi çok markalı veya çok ülkeli alan adları için düşünün, müşteri ilgili tarafları için değil. Ayrıca desteklemeyen istemciler için önce tanımlayıcı akışı ile arka uçta arama yedeği şarttır.
 
-Kaynaklar:
-- https://passkeys.dev/docs/advanced/related-origins/
-- https://github.com/w3c/webauthn/blob/main/explainers/related-origin-requests.md (artık bakımda değil, passkeys.dev'e yönlendiriyor)
-- https://www.w3.org/TR/webauthn-3/#sctn-related-origins
+Kaynakları passkeys.dev'in ilişkili kökenler sayfası, github.com/w3c/webauthn'daki açıklayıcı, ki artık bakımda değildir ve passkeys.dev'e yönlendirmektedir, ile w3.org/TR/webauthn-3'ün ilgili bölümüdür.
 
 #### 2.4 Signal API
 
-Üç statik metot (`PublicKeyCredential.` üzerinde):
+`PublicKeyCredential` üzerinde üç statik metot vardır.
 
 | Metot | Ne zaman çağrılır | Sunucu tarafı sorumluluğu |
 |---|---|---|
-| `signalUnknownCredential()` | Bilinmeyen credential ID ile başarısız bir sign-in girişiminden **sonra** — kullanıcı authenticated DEĞİLKEN çağrılabilir | Sunucu "bu credential ID bende yok" cevabını dönmeli; frontend bu sinyali gönderir. Provider yetim passkey'i siler. |
-| `signalAllAcceptedCredentials()` | **Sadece authenticated kullanıcı için**. Her başarılı girişte ve credential yönetimi değişikliğinden sonra | Sunucu, kullanıcının **TÜM** geçerli credential ID'lerini + `userId` (userHandle) döndürmeli |
-| `signalCurrentUserDetails()` | Kullanıcı adı/görünen ad güncellendiğinde **ve her girişte** | Sunucu güncel `name` ve `displayName` döndürmeli |
+| `signalUnknownCredential()` | Bilinmeyen bir kimlik bilgisi kimliğiyle başarısız bir giriş denemesinden sonra; kullanıcı kimliği doğrulanmamışken de çağrılabilir | Sunucu bu kimlik bilgisinin kendisinde olmadığı cevabını dönmeli, ön yüz bu sinyali göndermelidir. Sağlayıcı yetim passkey'i siler |
+| `signalAllAcceptedCredentials()` | Yalnızca kimliği doğrulanmış kullanıcı için; her başarılı girişte ve kimlik bilgisi yönetimi değişikliğinden sonra | Sunucu kullanıcının tüm geçerli kimlik bilgisi kimliklerini ve kullanıcı tutamağını döndürmelidir |
+| `signalCurrentUserDetails()` | Kullanıcı adı ya da görünen ad güncellendiğinde ve her girişte | Sunucu güncel `name` ile `displayName` değerlerini döndürmelidir |
 
-**KRİTİK TEHLİKE:** `signalAllAcceptedCredentials()` çağrısında listeden **eksik bıraktığınız her geçerli credential provider tarafından gizlenir**. Boş liste gönderirseniz kullanıcının tüm passkey'leri gizlenir. Sayfalama (pagination) uygulanmış bir credential listesi endpoint'ini asla doğrudan bu API'ye bağlamayın — tam liste dönmelisiniz. Bazı provider'lar sonraki çağrıyla geri getirebilir, ama garanti değil.
+> **Kritik tehlike.** `signalAllAcceptedCredentials()` çağrısında listede eksik bırakılan her geçerli kimlik bilgisi sağlayıcı tarafından gizlenir. Boş bir liste gönderilirse kullanıcının tüm passkey'leri gizlenir. Sayfalama uygulanmış bir kimlik bilgisi listesi endpoint'i asla doğrudan bu API'ye bağlanmamalıdır; tam liste dönülmelidir. Bazı sağlayıcılar sonraki çağrıyla geri getirebilir ancak bu garanti değildir.
 
-**Tarayıcı desteği:**
-- Chrome / Edge **132+** masaüstü — Ocak 2025
-- Chrome Android **144** — 5 Aralık 2025
-- Safari: Temmuz 2026 itibarıyla **shipped değil** (Safari 26 hedef olarak gösterilmişti)
-- Firefox: **shipped değil**, resmi tutum yok
+Tarayıcı desteği şöyledir: Chrome ile Edge masaüstünde 132 ve üstü, Ocak 2025; Chrome Android'de 144, 5 Aralık 2025; Safari Temmuz 2026 itibarıyla sevk etmemiştir, Safari 26 hedef olarak gösterilmişti; Firefox sevk etmemiştir ve resmî bir tutumu yoktur.
 
-**Provider davranışı:** Google Password Manager sinyalleri aktif olarak işliyor. Chrome eklenti tabanlı provider'lar kendi kararlarını veriyor.
+Sağlayıcı davranışında Google Parola Yöneticisi sinyalleri aktif olarak işlemektedir. Chrome eklenti tabanlı sağlayıcılar kendi kararlarını vermektedir.
 
-Kaynaklar:
-- https://developer.chrome.com/docs/identity/webauthn-signal-api
-- https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredential/signalAllAcceptedCredentials_static
-- https://www.w3.org/TR/webauthn-3/#sctn-signal-methods
+Kaynakları developer.chrome.com'un Signal API dokümanı, MDN'in ilgili sayfası ile w3.org/TR/webauthn-3'ün sinyal metotları bölümüdür.
 
-**Sunucu tarafı iş listesi:**
-1. `GET /credentials/signal-payload` gibi bir endpoint: authenticated kullanıcı için `{ rpId, userId, allAcceptedCredentialIds: [...] }` (tam liste, sayfalama yok)
-2. Başarısız doğrulamada credential ID'yi frontend'e geri verip `signalUnknownCredential` tetiklenmesini sağlayın
-3. Profil güncelleme akışına `signalCurrentUserDetails` hook'u
+Sunucu tarafı iş listesi şudur. Birincisi kimliği doğrulanmış kullanıcı için `{ rpId, userId, allAcceptedCredentialIds: [...] }` döndüren, sayfalama içermeyen bir endpoint yazmaktır. İkincisi başarısız doğrulamada kimlik bilgisi kimliğini ön yüze geri verip `signalUnknownCredential` çağrısının tetiklenmesini sağlamaktır. Üçüncüsü profil güncelleme akışına `signalCurrentUserDetails` kancası eklemektir.
 
-#### 2.5 Conditional mediation / conditional create
+#### 2.5 Koşullu aracılık ile koşullu oluşturma
 
-**Conditional get (autofill UI)** — `mediation: 'conditional'` + `autocomplete="username webauthn"`:
-- Android: Chrome 108+, Edge 122+, Firefox
-- iOS/iPadOS: Safari 16.1+, Chrome 108+, Firefox 122+, Edge 122+
-- macOS: Safari 16.1+, Chrome 108+, Firefox 122+, Edge 122+
-- Windows: Chrome 108+, Edge 122+, Firefox 122+
+**Koşullu alma, yani otomatik doldurma arayüzü**, `mediation: 'conditional'` ile `autocomplete="username webauthn"` kullanır. Desteği şöyledir: Android'de Chrome 108 ve üstü, Edge 122 ve üstü ile Firefox; iOS ile iPadOS'ta Safari 16.1 ve üstü, Chrome 108 ve üstü, Firefox 122 ve üstü ile Edge 122 ve üstü; macOS'ta Safari 16.1 ve üstü, Chrome 108 ve üstü, Firefox 122 ve üstü ile Edge 122 ve üstü; Windows'ta Chrome 108 ve üstü, Edge 122 ve üstü ile Firefox 122 ve üstü.
 
-**Conditional create (otomatik passkey yükseltmesi / "passkey upgrades")** — parola ile girişten sonra sessizce passkey oluşturur:
-- macOS: Safari 18+, Chrome 136+
-- Windows: Chrome 136+
-- iOS/iPadOS: iOS 18+ (Safari ve diğer tarayıcılar, Apple Passwords)
-- **Android: Chrome 142+** (Google Password Manager ile)
-- Firefox: **desteklemiyor**
-- Üçüncü parti parola yöneticisi kapsamı düzensiz
+**Koşullu oluşturma**, yani otomatik passkey yükseltmesi, parolayla girişten sonra sessizce bir passkey oluşturur. Desteği şöyledir: macOS'ta Safari 18 ve üstü ile Chrome 136 ve üstü; Windows'ta Chrome 136 ve üstü; iOS ile iPadOS'ta iOS 18 ve üstü, yani Safari, diğer tarayıcılar ile Apple Passwords; Android'de Chrome 142 ve üstü, Google Parola Yöneticisiyle. Firefox desteklememektedir ve üçüncü taraf parola yöneticisi kapsamı düzensizdir.
 
-**Sunucu tarafı etkileri (önemli):**
-- Chrome **parola doldurulmasından sonra 5 dakikalık katı bir pencere** uyguluyor; nihai kararı Google Password Manager veriyor. Apple'da karar mercii Authentication Services; yayınlanmış kesin pencere yok.
-- **UI göstermeden credential oluşur** → kullanıcı bunu bilmez. Kullanıcıya sonradan "hesabınıza bir passkey eklendi" bildirimi gönderin ve credential yönetim ekranınızda görünür yapın.
-- `excludeCredentials` listesini doğru doldurun — yoksa aynı provider'da mükerrer passkey birikir.
-- `credProps.rk` çıktısını kontrol edin: discoverable olmayan bir credential oluşmuşsa passkey UX'i çalışmaz.
-- Bu akışta **attestation isteme** — sessiz akışı bozar.
+Sunucu tarafı etkileri önemlidir. Chrome, parola doldurulmasından sonra beş dakikalık katı bir pencere uygulamakta ve nihai kararı Google Parola Yöneticisi vermektedir; Apple'da karar mercii Authentication Services'tır ve yayımlanmış kesin bir pencere yoktur. Kimlik bilgisi arayüz gösterilmeden oluşmakta ve kullanıcı bunu bilmemektedir; kullanıcıya sonradan hesabına bir passkey eklendiği bildirimi gönderilmeli ve kimlik bilgisi yönetim ekranında görünür yapılmalıdır. `excludeCredentials` listesi doğru doldurulmalıdır, yoksa aynı sağlayıcıda mükerrer passkey birikir. `credProps.rk` çıktısı kontrol edilmelidir; keşfedilebilir olmayan bir kimlik bilgisi oluşmuşsa passkey kullanıcı deneyimi çalışmaz. Bu akışta attestation istenmemelidir, çünkü sessiz akışı bozar.
 
-Kaynaklar:
-- https://developer.chrome.com/docs/identity/webauthn-conditional-create
-- https://passkeys.dev/device-support/
-- https://chromestatus.com/feature/5135710007590912
+Kaynakları developer.chrome.com'un koşullu oluşturma dokümanı, passkeys.dev cihaz destek sayfası ile chromestatus.com'daki ilgili özellik kaydıdır.
 
-#### 2.6 Cross-device authentication (hybrid transport)
+#### 2.6 Cihazlar arası kimlik doğrulama, hibrit taşıma
 
-- Hybrid transport (QR + BLE yakınlık) artık CTAP spec'inin normal parçası; roaming security key'ler değil, **platform authenticator'lar ve istemciler** tarafından uygulanıyor.
-- Platform desteği: Android 9+, iOS 16+, macOS 13+.
-- **CTAP 2.3 (Şubat 2026) hybrid için birden fazla veri aktarım kanalı ekledi** — mevcut WebSocket'e ek olarak **Bluetooth Low Energy** veri kanalı. Bu, internet bağlantısı zayıf senaryolarda güvenilirliği artırır.
-- **RP tarafı etkisi neredeyse yok.** Sadece `transports` alanında `"hybrid"` değerini tanıyıp saklamanız yeterli (`AuthenticatorTransport` enum'unuzda bilinmeyen değerleri hata vermeden kabul edin — bu ileride yeni transport'lar eklendiğinde kırılmamanız için kritik).
+Hibrit taşıma, yani QR kodu ile Bluetooth yakınlığı, artık CTAP spesifikasyonunun normal bir parçasıdır; gezici güvenlik anahtarları değil, platform kimlik doğrulayıcıları ile istemciler tarafından uygulanmaktadır. Platform desteği Android 9 ve üstü, iOS 16 ve üstü ile macOS 13 ve üstüdür.
 
-#### 2.7 credProps, credProtect, minPinLength, devicePubKey
+CTAP 2.3, yani Şubat 2026, hibrit için birden fazla veri aktarım kanalı eklemiştir: mevcut WebSocket'e ek olarak düşük enerjili Bluetooth veri kanalı gelmiştir. Bu, internet bağlantısının zayıf olduğu senaryolarda güvenilirliği artırır.
 
-| Extension | Durum | RP tarafı |
+İlgili taraf tarafında etkisi neredeyse yoktur. Yalnızca `transports` alanında `"hybrid"` değerini tanıyıp saklamak yeterlidir; `AuthenticatorTransport` enum'unuzda bilinmeyen değerleri hata vermeden kabul etmelisiniz, çünkü bu ileride yeni taşımalar eklendiğinde kırılmamak için kritiktir.
+
+#### 2.7 credProps, credProtect, minPinLength ile devicePubKey
+
+| Uzantı | Durum | İlgili taraf tarafı |
 |---|---|---|
-| **credProps** | L3'te tanımlı, yaygın destekleniyor. Issue #1988 ile **doğrulama (assertion) sırasında da kullanımına** izin verildi (29 Kas 2023) | `rk: true/false` sakla — credential'ın gerçekten discoverable olup olmadığını bilmenin tek yolu. Discoverable değilse usernameless akışa sokmayın. |
-| **credProtect** | CTAP 2.1 eklentisi, WebAuthn Extension Registry'de kayıtlı (WebAuthn core spec TOC'unda yok — bu normal) | `userVerificationRequired` (level 3) isteyebilirsiniz; ancak zorlarsanız desteklemeyen authenticator'lar reddeder. Genelde `userVerificationOptionalWithCredentialIDList` (level 2) makul. |
-| **minPinLength** | CTAP 2.1 eklentisi, kayıtlı | Sadece attestation ile anlamlı; kurumsal senaryolar. Tüketici IdP'sinde gereksiz. |
-| **devicePubKey** (device-bound key) | **L3'ten çıkarıldı.** Üç yönlü doğrulandı: L3 REC'te (25 Ağu 2026) "devicePubKey"/"device-bound" ifadesi yok; Editor's Draft'ın (3 Eyl 2026) tanımlı uzantı listesi `appid`, `appidExclude`, `credProps`, `prf`, `largeBlob`, `remoteClientDataJSON`'dan ibaret; ilgili tüm issue'lar (#1691, #1658, #1846, #1817, #1922, #1739) kapalı. | **Üzerine mimari kurmayın.** Device-bound garanti istiyorsanız ayrı bir device-bound credential (security key veya attested platform authenticator) kaydettirin. |
+| credProps | Level 3'te tanımlıdır ve yaygın desteklenmektedir. Issue #1988 ile doğrulama sırasında da kullanımına izin verilmiştir, 29 Kasım 2023 | `rk` değeri saklanır; kimlik bilgisinin gerçekten keşfedilebilir olup olmadığını bilmenin tek yoludur. Keşfedilebilir değilse kullanıcı adsız akışa sokulmaz |
+| credProtect | CTAP 2.1 uzantısıdır ve WebAuthn uzantı kaydında kayıtlıdır; çekirdek spesifikasyonun içindekiler listesinde yoktur ve bu normaldir | Üçüncü seviye, yani kullanıcı doğrulaması zorunlu, istenebilir; ancak zorlanırsa desteklemeyen kimlik doğrulayıcılar reddeder. Genelde ikinci seviye, yani kimlik bilgisi listesiyle opsiyonel kullanıcı doğrulaması, makuldür |
+| minPinLength | CTAP 2.1 uzantısıdır ve kayıtlıdır | Yalnızca attestation ile anlamlıdır ve kurumsal senaryolar içindir. Tüketici IdP'sinde gereksizdir |
+| devicePubKey, yani cihaza bağlı anahtar | Level 3'ten çıkarılmıştır ve bu üç yönlü doğrulanmıştır: 25 Ağustos 2026 tarihli Level 3 önerisinde `devicePubKey` ile cihaza bağlı ifadesi geçmemektedir; 3 Eylül 2026 tarihli editör taslağının tanımlı uzantı listesi `appid`, `appidExclude`, `credProps`, `prf`, `largeBlob` ile `remoteClientDataJSON`'dan ibarettir; ilgili tüm issue'lar, yani #1691, #1658, #1846, #1817, #1922 ile #1739, kapalıdır | Üzerine mimari kurulmaz. Cihaza bağlılık garantisi isteniyorsa ayrı bir cihaza bağlı kimlik bilgisi, yani bir güvenlik anahtarı veya attestation'lı platform kimlik doğrulayıcısı, kaydettirilir |
 
-#### 2.8 Immediate mediation / "get if available"
+#### 2.8 Anlık aracılık, yani varsa al
 
-**ÖNEMLİ API DEĞİŞİKLİĞİ:** `mediation: 'immediate'` **artık çalışmıyor**. Spec 5 Kasım 2025'te güncellendi; doğru alan artık **`uiMode: 'immediate'`**.
+Önemli bir API değişikliği vardır: `mediation: 'immediate'` artık çalışmamaktadır. Spesifikasyon 5 Kasım 2025'te güncellenmiştir ve doğru alan artık `uiMode: 'immediate'`'tır.
 
 ```js
 const cred = await navigator.credentials.get({
@@ -926,251 +839,169 @@ const cred = await navigator.credentials.get({
 });
 ```
 
-**Davranış:**
-- Yerelde credential varsa anında sunar; yoksa **hiç UI göstermeden** `NotAllowedError` DOMException ile reddeder.
-- Öncesinde **user gesture** zorunlu
-- Tarayıcı ardışık çağrıları **rate-limit** eder
-- **Gizli/private modda her zaman `NotAllowedError`** fırlatır
-- **`allowCredentials` dolu istekler reddedilir** (tracking önlemi)
-- `signal` (AbortController) parametresi kullanılamaz
+Davranışı şöyledir: yerelde kimlik bilgisi varsa anında sunar, yoksa hiç arayüz göstermeden `NotAllowedError` istisnasıyla reddeder. Öncesinde bir kullanıcı jesti zorunludur. Tarayıcı ardışık çağrıları hız sınırlamasına tabi tutar. Gizli modda her zaman `NotAllowedError` fırlatır. İzleme önlemi olarak `allowCredentials` dolu istekler reddedilir. `signal` parametresi, yani iptal denetleyicisi, kullanılamaz.
 
-**Tespit:** `getClientCapabilities()` → `immediateGet`
+Tespiti `getClientCapabilities()` çağrısının `immediateGet` alanıyla yapılır.
 
-**Durum:** Chrome **149**'da genel kullanıma açıldı. Mayıs 2026 itibarıyla **immediate UI mode'u destekleyen tek tarayıcı Chrome**. Safari ve Firefox: değerlendiriyor, kamuya açık taahhüt yok.
+Durumu şudur: Chrome 149'da genel kullanıma açılmıştır ve Mayıs 2026 itibarıyla anlık arayüz modunu destekleyen tek tarayıcı Chrome'dur. Safari ile Firefox değerlendirmektedir ancak kamuya açık bir taahhütleri yoktur.
 
-**Spec seviyesi:** Bu özellik **Credential Management API'yi genişletiyor** ve w3c/webauthn'da **L4 milestone'unda (issue #2291)**. Yani **L3 REC'in parçası DEĞİL.**
+Spesifikasyon seviyesinde bu özellik Credential Management API'sini genişletmektedir ve w3c/webauthn'da Level 4 kilometre taşındadır, issue #2291. Yani Level 3 önerisinin parçası değildir.
 
-**Gizlilik notu (IdP olarak sizi ilgilendirir):** Bu API, siteye "bu kullanıcıda credential var mı" bilgisini zamanlama farkıyla sızdırır. Yukarıdaki kısıtlar bu yüzden var. Kullanımınızı tek bir "Sign in" butonuna bağlayın, sayfa yüklenmesinde otomatik tetiklemeyin.
+Gizlilik notu bir IdP olarak sizi ilgilendirir: bu API siteye bu kullanıcıda kimlik bilgisi olup olmadığını zamanlama farkıyla sızdırır. Yukarıdaki kısıtlar bu yüzden vardır. Kullanımınızı tek bir giriş düğmesine bağlayın ve sayfa yüklenmesinde otomatik tetiklemeyin.
 
-Kaynaklar:
-- https://github.com/w3c/webauthn/blob/main/explainers/immediate-mediation.md
-- https://developer.chrome.com/blog/webauthn-immediate-ui
-- https://developer.chrome.com/docs/identity/immediate-ui-mode
-
----
+Kaynakları github.com/w3c/webauthn'daki anlık aracılık açıklayıcısı ile developer.chrome.com'un iki yazısıdır.
 
 ### 3. CTAP durumu
 
-| Spec | Sürüm | Durum | Tarih |
+| Spesifikasyon | Sürüm | Durum | Tarih |
 |---|---|---|---|
-| CTAP | 2.1 | Proposed Standard | 15 Haz 2021 |
-| CTAP | **2.2** | **Proposed Standard** | **14 Tem 2025** |
-| CTAP | **2.3** | **Proposed Standard** | **26 Şub 2026** |
-| CTAP | **2.3.1** | **Working Draft** | **29 May 2026** |
-| FIDO Server Requirements | **2.3** | **Review Draft** | **26 Şub 2026** |
+| CTAP | 2.1 | Önerilen standart | 15 Haziran 2021 |
+| CTAP | 2.2 | Önerilen standart | 14 Temmuz 2025 |
+| CTAP | 2.3 | Önerilen standart | 26 Şubat 2026 |
+| CTAP | 2.3.1 | Çalışma taslağı | 29 Mayıs 2026 |
+| FIDO Server Requirements | 2.3 | İnceleme taslağı | 26 Şubat 2026 |
 
-- CTAP 2.3 URL: https://fidoalliance.org/specs/fido-v2.3-ps-20260226/fido-client-to-authenticator-protocol-v2.3-ps-20260226.html
-- Server Requirements URL: https://fidoalliance.org/specs/fidoserver/fido-server-v2.3-rd-20260226.html
-- Dizin: https://fidoalliance.org/specs/
+Kaynakları fidoalliance.org'daki CTAP 2.3 önerilen standart sayfası, sunucu gereksinimleri inceleme taslağı ile spesifikasyon dizinidir.
 
-#### CTAP 2.2 ne getirdi
-- **hmac-secret-mc**: hmac-secret'ı `authenticatorMakeCredential` sırasında da çalıştırır → **kayıt anında PRF çıktısı alabilirsiniz**, ikinci bir doğrulama turu gerekmez. E2E şifrelemeli onboarding için büyük UX kazancı.
-- **Persistent PIN/UV Auth Tokens (PPUAT)**: power cycle'a dayanan, sadece okuma amaçlı (`enumerateRPs`, `enumerateCredentials`, `getCredentialMetadata`) dar kapsamlı token. RP etkisi yok, native credential yönetim araçlarını ilgilendirir.
-- **PIN complexity policy**: `getInfo`'da `pinComplexityPolicy` ve `pinComplexityPolicyURL`. RP etkisi yok.
-- **thirdPartyPayment extension**: işlem başlatanın RP'den farklı olduğu senaryolar (PSD2 SCA / Secure Payment Confirmation). **Ödeme akışı olan IdP'ler için ilgili.**
-- **Hybrid transport** normatifleşti.
-- **Zenginleşen getInfo**: `attestationFormats` (RP tercih ettiği formatı seçebilir), `maxPINLength`, `uvCountSinceLastPinEntry`.
-- **JSON-over-CTAP**: Digital Credentials API isteklerini hybrid transport üzerinden JSON olarak taşır. Geleneksel RP sunucularını **etkilemez**.
+**CTAP 2.2 ne getirmiştir.** `hmac-secret-mc`, hmac-secret'ı `authenticatorMakeCredential` sırasında da çalıştırır, yani kayıt anında PRF çıktısı alınabilir ve ikinci bir doğrulama turu gerekmez; uçtan uca şifrelemeli katılım akışı için büyük bir kullanıcı deneyimi kazancıdır. Kalıcı PIN ile kullanıcı doğrulama yetkilendirme token'ları güç döngüsüne dayanır ve yalnızca okuma amaçlı, dar kapsamlı token'lardır; ilgili taraf etkisi yoktur, yerel kimlik bilgisi yönetim araçlarını ilgilendirir. PIN karmaşıklık politikası `getInfo` içinde `pinComplexityPolicy` ile `pinComplexityPolicyURL` olarak gelir; ilgili taraf etkisi yoktur. Üçüncü taraf ödeme uzantısı, işlem başlatanın ilgili taraftan farklı olduğu senaryolar içindir, yani PSD2 güçlü müşteri kimlik doğrulaması ile güvenli ödeme onayı; ödeme akışı olan IdP'ler için ilgilidir. Hibrit taşıma normatifleşmiştir. `getInfo` zenginleşmiştir: `attestationFormats` ile ilgili taraf tercih ettiği formatı seçebilir, ayrıca `maxPINLength` ile `uvCountSinceLastPinEntry` gelmiştir. CTAP üzerinden JSON, dijital kimlik bilgisi API'si isteklerini hibrit taşıma üzerinden JSON olarak taşır ve geleneksel ilgili taraf sunucularını etkilemez.
 
-#### CTAP 2.3 ne getirdi (26 Şub 2026)
-- **Breaking change YOK** — CTAP 2.2 uyumlu her implementasyon otomatik olarak 2.3 uyumlu. FIDO, 2.2 için ayrı sertifikasyon kategorisi açmadı; **2.3 artık tüm FIDO2 sertifikasyonlarının temeli**.
-- Hybrid için **çoklu veri aktarım kanalı → BLE** eklendi
-- **Long Touch for Reset**
-- `authenticatorGetInfo` versions listesine `FIDO_2_3`
-- NFC (ISO7816/ISO14443) kullanıcı etkileşim gereksinimleri netleştirildi
-- `setMinPINLength` ve `pinComplexityPolicy` etkileşimleri geliştirildi
-- `authenticatorReset` veya eşdeğer fabrika sıfırlama zorunlu hale geldi
-- Smart Card arayüzü desteklenen FIDO arayüzleri listesine eklendi
+**CTAP 2.3 ne getirmiştir, 26 Şubat 2026.** Kırıcı bir değişiklik yoktur; CTAP 2.2 uyumlu her implementasyon otomatik olarak 2.3 uyumludur. FIDO, 2.2 için ayrı bir sertifikasyon kategorisi açmamıştır ve 2.3 artık tüm FIDO2 sertifikasyonlarının temelidir. Hibrit için çoklu veri aktarım kanalı, yani düşük enerjili Bluetooth, eklenmiştir. Sıfırlama için uzun dokunuş gelmiştir. `authenticatorGetInfo` sürüm listesine `FIDO_2_3` eklenmiştir. NFC, yani ISO 7816 ile ISO 14443, kullanıcı etkileşim gereksinimleri netleştirilmiştir. `setMinPINLength` ile `pinComplexityPolicy` etkileşimleri geliştirilmiştir. `authenticatorReset` veya eşdeğer bir fabrika sıfırlaması zorunlu hâle gelmiştir. Akıllı kart arayüzü desteklenen FIDO arayüzleri listesine eklenmiştir.
 
-#### FIDO Server Requirements v2.3 — SİZİ DOĞRUDAN İLGİLENDİRİR
-- **Post-quantum ML-DSA algoritmaları önerilen listeye eklendi: ML-DSA-44, ML-DSA-65, ML-DSA-87**
-- **Fully-specified algoritmalar eklendi: ESP256, ESP384, ESP512, Ed25519**
+**FIDO Server Requirements v2.3 sizi doğrudan ilgilendirir.** Post kuantum ML-DSA algoritmaları önerilen listeye eklenmiştir: ML-DSA-44, ML-DSA-65 ile ML-DSA-87. Tam belirtilmiş algoritmalar da eklenmiştir: ESP256, ESP384, ESP512 ile Ed25519.
 
-**Rust IdP için aksiyon:** COSE algoritma tablonuzu genişletmeye hazırlanın. `pubKeyCredParams` listenize ESP256/Ed25519'u eklemeyi ve doğrulama tarafında ML-DSA'ya yer bırakmayı planlayın. L4'teki #2437 "Support Algorithm Migration" issue'su, mevcut credential'ların algoritma geçişini konuşuyor — bu, veri modelinizde algoritma alanını ve rotasyon yolunu şimdiden düşünmenizi gerektirir.
+Rust IdP için aksiyon şudur: COSE algoritma tablosu genişletilmeye hazırlanır. `pubKeyCredParams` listesine ESP256 ile Ed25519 eklemek ve doğrulama tarafında ML-DSA'ya yer bırakmak planlanır. Level 4'teki #2437 numaralı algoritma göçü issue'su mevcut kimlik bilgilerinin algoritma geçişini konuşmaktadır; bu, veri modelinde algoritma alanının ve rotasyon yolunun şimdiden düşünülmesini gerektirir.
 
----
+### 4. Credential Exchange Format ile Protocol
 
-### 4. Credential Exchange Format (CXF) ve Protocol (CXP)
+Dizini fidoalliance.org/specs/cx'tir.
 
-Dizin: https://fidoalliance.org/specs/cx/
+**CXF, yani değişim formatı.**
 
-#### CXF — Credential Exchange Format
 | Sürüm | Durum | Tarih |
 |---|---|---|
-| 1.0 | Working Draft | 2024-05-22 |
-| 1.0 | Working Draft | 2024-10-03 |
-| 1.0 | Review Draft | 2025-03-13 |
-| **1.0** | **Proposed Standard** | **2025-08-14** |
-| **1.0** | **PS + Errata** | **errata 2026-03-09** (yayın 22 Nis 2026) |
+| 1.0 | Çalışma taslağı | 22 Mayıs 2024 |
+| 1.0 | Çalışma taslağı | 3 Ekim 2024 |
+| 1.0 | İnceleme taslağı | 13 Mart 2025 |
+| 1.0 | Önerilen standart | 14 Ağustos 2025 |
+| 1.0 | Önerilen standart artı errata | Errata 9 Mart 2026, yayın 22 Nisan 2026 |
 
-URL: https://fidoalliance.org/specs/cx/cxf-v1.0-ps-20250814.html
+Kapsamı 17 kimlik bilgisi tipidir: adresler, API anahtarları, temel kimlik doğrulama, kredi kartları, özel alanlar, ehliyet, dosyalar, üretilmiş parolalar, kimlik belgeleri, öğe referansları, notlar, passkey'ler, pasaportlar, kişi adları, SSH anahtarları, tek kullanımlık zaman tabanlı parolalar ile Wi-Fi parolaları.
 
-**Kapsam:** 17 credential tipi — adresler, API anahtarları, basic auth, kredi kartları, custom fields, ehliyet, dosyalar, üretilmiş parolalar, kimlik belgeleri, item referansları, notlar, **passkey'ler**, pasaportlar, kişi adları, SSH anahtarları, TOTP, Wi-Fi passphrase'leri.
+Passkey veri modelinin zorunlu alanları `credentialId`, `rpId`, `username`, `userDisplayName`, `userHandle` ile `key`'dir; opsiyonel olarak `fido2Extensions` bulunur ve hmac kimlik bilgileri, kimlik bilgisi ikili verileri ile büyük ikili verileri içerir.
 
-**Passkey veri modeli (zorunlu alanlar):** `credentialId`, `rpId`, `username`, `userDisplayName`, `userHandle`, `key`, ve opsiyonel `fido2Extensions` (hmac credentials, credential blobs, large blobs dahil).
+İlgili taraf tarafını ilgilendiren iki kritik nokta vardır.
 
-**RP tarafını ilgilendiren KRİTİK iki nokta:**
-1. **Özel anahtar gerçekten dışa aktarılıyor.** `key` alanı: PKCS#8 ASN.1 DER, Base64url kodlu. Yani passkey taşınabilirliği anahtarın kendisinin taşınması demek — credential ID ve public key **değişmez**, dolayısıyla **sizin veritabanınızda hiçbir şey değişmez ve siz taşımayı göremezsiniz**.
-2. **Signature counter kuralı:** *"Sıfırdan farklı signature counter'a sahip passkey'ler dışa aktarımdan hariç tutulmalıdır; içe aktaran taraf counter'ları sıfırlamalıdır."* → **Sunucunuzda katı signature counter kontrolü yapıyorsanız, taşınmış bir credential counter'ı sıfırlanmış olarak geri gelir ve kullanıcıyı kilitlersiniz.**
+Birincisi özel anahtarın gerçekten dışa aktarılmasıdır. `key` alanı PKCS#8 ASN.1 DER biçimindedir ve base64url kodludur. Yani passkey taşınabilirliği anahtarın kendisinin taşınması demektir; kimlik bilgisi kimliği ile açık anahtar değişmez, dolayısıyla sizin veritabanınızda hiçbir şey değişmez ve taşımayı göremezsiniz.
 
-**Aksiyon:** Synced/backup-eligible (BE=1) credential'lar için signature counter kontrolünü **devre dışı bırakın veya sadece loglayın**. Sıkı counter kontrolünü yalnızca BE=0 (device-bound) credential'lara uygulayın. Bu zaten önceki en iyi pratikti; CXF bunu zorunlu hale getiriyor.
+İkincisi imza sayacı kuralıdır: sıfırdan farklı imza sayacına sahip passkey'ler dışa aktarımdan hariç tutulmalı ve içe aktaran taraf sayaçları sıfırlamalıdır. Sunucunuzda katı imza sayacı kontrolü yapıyorsanız, taşınmış bir kimlik bilgisi sayacı sıfırlanmış olarak geri gelir ve kullanıcıyı kilitlersiniz.
 
-**AAGUID etkisi:** CXF veri modelinde AAGUID passkey'in zorunlu alanları arasında listelenmiyor. Dolayısıyla bir passkey 1Password'den Bitwarden'a taşındığında, **sizin kayıt anında sakladığınız AAGUID artık gerçeği yansıtmaz.** AAGUID'i "kaydolduğu andaki provider" olarak yorumlayın, "şu anki provider" olarak değil. UI'da gösteriyorsanız bunu bir ipucu olarak sunun, kesin bilgi olarak değil.
+Aksiyon şudur: senkronize veya yedeklemeye uygun kimlik bilgileri için, yani BE değeri bir olanlar için, imza sayacı kontrolü devre dışı bırakılır veya yalnızca loglanır. Sıkı sayaç kontrolü yalnızca BE değeri sıfır olan, yani cihaza bağlı kimlik bilgilerine uygulanır. Bu zaten önceki en iyi uygulamaydı; CXF bunu zorunlu hâle getirmektedir.
 
-#### CXP — Credential Exchange Protocol
+AAGUID etkisi şudur: CXF veri modelinde AAGUID passkey'in zorunlu alanları arasında listelenmemektedir. Dolayısıyla bir passkey 1Password'den Bitwarden'a taşındığında kayıt anında sakladığınız AAGUID artık gerçeği yansıtmaz. AAGUID kaydolduğu andaki sağlayıcı olarak yorumlanmalı, şu anki sağlayıcı olarak yorumlanmamalıdır. Arayüzde gösteriliyorsa bir ipucu olarak sunulmalı, kesin bilgi olarak sunulmamalıdır.
+
+**CXP, yani değişim protokolü.**
+
 | Sürüm | Durum | Tarih |
 |---|---|---|
-| 1.0 | Working Draft | 2024-05-22 |
-| **1.0** | **Working Draft** | **2024-10-03** ← en yeni |
+| 1.0 | Çalışma taslağı | 22 Mayıs 2024 |
+| 1.0 | Çalışma taslağı | 3 Ekim 2024, en yenisidir |
 
-**CXP hâlâ sadece Working Draft.** Dizinde hiçbir RD veya PS sürümü yok. Belgenin kendi ifadesi: *"This is a Working Draft Specification and is not intended to be a basis for any implementations as the Specification may change."*
+CXP hâlâ yalnızca bir çalışma taslağıdır. Dizinde hiçbir inceleme taslağı veya önerilen standart sürümü yoktur. Belgenin kendi ifadesi şudur: "This is a Working Draft Specification and is not intended to be a basis for any implementations as the Specification may change."
 
-**Bu dikkat çekici bir ayrışma:** CXF (format) Proposed Standard'a ulaşıp errata almışken, CXP (aktarım protokolü) iki yıldır WD'de takılı. Yani ekosistem formatta anlaşmış, ancak provider'lar arası **canlı, doğrudan aktarım protokolü henüz standartlaşmamış**. Pratikte taşımalar dosya tabanlı (şifrelenmiş CXF arşivi) yapılıyor.
+Bu dikkat çekici bir ayrışmadır: CXF, yani format, önerilen standarda ulaşıp errata alırken CXP, yani aktarım protokolü, iki yıldır çalışma taslağında takılıdır. Yani ekosistem formatta anlaşmıştır ancak sağlayıcılar arası canlı ve doğrudan aktarım protokolü henüz standartlaşmamıştır. Pratikte taşımalar dosya tabanlı, yani şifrelenmiş bir CXF arşiviyle yapılmaktadır.
 
-**CXP teknik özeti (WD):**
-- 5 adım: importer export isteği + şifreleme parametreleri oluşturur → exporter yetkilendirme sonrası migration key belirler → veri şifrelenir → export response iletilir → importer çözer ve saklar
-- **HPKE (RFC 9180)** kullanılıyor. KEM/KDF/AEAD taraflar arasında müzakere ediliyor, varsayılan dayatılmıyor. Modlar: base, psk, auth, auth-psk
-- Credential'lar **DEFLATE** ile sıkıştırılıp **JWE** dosyası olarak şifreleniyor
-- Roller: Exporter, Importer, Credential Owner, opsiyonel Authorizing Party
+CXP'nin çalışma taslağındaki teknik özeti şöyledir. Beş adımı vardır: içe aktaran taraf bir dışa aktarma isteği ile şifreleme parametreleri oluşturur; dışa aktaran taraf yetkilendirme sonrası göç anahtarını belirler; veri şifrelenir; dışa aktarma yanıtı iletilir; içe aktaran taraf çözer ve saklar. HPKE, yani RFC 9180, kullanılmaktadır ve anahtar kapsülleme, anahtar türetme ile kimlik doğrulamalı şifreleme taraflar arasında müzakere edilmekte, bir varsayılan dayatılmamaktadır; modları temel, ön paylaşımlı anahtarlı, kimlik doğrulamalı ile ikisinin birleşimidir. Kimlik bilgileri DEFLATE ile sıkıştırılıp bir JWE dosyası olarak şifrelenmektedir. Rolleri dışa aktaran, içe aktaran, kimlik bilgisi sahibi ile opsiyonel yetkilendiren taraftır.
 
-#### Hangi platformlar/parola yöneticileri shipledi?
-**[DOĞRULANMADI]** — Bu soruyu güvenilir şekilde cevaplayamadım. WebSearch kotası dolduğu için vendor duyurularını tarayamadım. 1Password blogunun son yazıları (Tem–Eyl 2026) taradığımda credential exchange / passkey taşınabilirliği ile ilgili **hiçbir yazı bulamadım**. Apple, Google, Bitwarden, Dashlane için sürüm/tarih doğrulaması yapılamadı.
+**Hangi platformlar ile parola yöneticileri sevk etmiştir.** Bu soru güvenilir şekilde cevaplanamamıştır. Web arama kotası dolduğu için satıcı duyuruları taranamamıştır. 1Password blogunun son yazıları, yani Temmuz ile Eylül 2026 arası, tarandığında kimlik bilgisi değişimi veya passkey taşınabilirliğiyle ilgili hiçbir yazı bulunamamıştır. Apple, Google, Bitwarden ile Dashlane için sürüm veya tarih doğrulaması yapılamamıştır.
 
-**Uydurma yapmıyorum:** Bu konuda ekibinize kesin bir "X shipledi" bilgisi veremem. Ancak yukarıdaki spec durumu (CXP'nin WD'de takılı olması) ekosistem genelinde **tam otomatik provider-to-provider taşımanın Eylül 2026'da henüz olgunlaşmadığına** işaret ediyor.
+Uydurma yapılmamaktadır: bu konuda ekibinize kesin bir sevk edildi bilgisi verilemez. Ancak yukarıdaki spesifikasyon durumu, yani CXP'nin çalışma taslağında takılı olması, ekosistem genelinde tam otomatik sağlayıcıdan sağlayıcıya taşımanın Eylül 2026'da henüz olgunlaşmadığına işaret etmektedir.
 
----
+### 5. Cihaza bağlı ile senkronize passkey: BE ile BS bayrakları
 
-### 5. Device-bound vs synced passkey: BE / BS bayrakları
+**Bayraklar.** `authenticatorData` bayrak baytında BE, yani yedekleme uygunluğu, üçüncü bittir ve kimlik bilgisinin yedeklenebilir veya senkronize edilebilir olup olmadığını söyler; kimlik bilgisinin ömrü boyunca değişmez. BS, yani yedekleme durumu, dördüncü bittir ve kimlik bilgisinin şu anda yedeklenmiş veya senkronize durumda olup olmadığını söyler; zamanla değişir.
 
-#### Bayraklar
-`authenticatorData` flags baytında:
-- **BE (Backup Eligibility, bit 3)**: Credential yedeklenebilir/senkronize edilebilir mi. **Credential'ın ömrü boyunca DEĞİŞMEZ.**
-- **BS (Backup State, bit 4)**: Credential şu anda yedeklenmiş/senkronize durumda mı. **Zamanla DEĞİŞİR.**
+Geçerli kombinasyonlar BE sıfır ile BS sıfır, yani cihaza bağlı; BE bir ile BS sıfır, yani senkronize edilebilir ancak henüz değil; ve BE bir ile BS bir, yani senkronize durumdur. BE sıfır ile BS bir geçersizdir ve reddedilmelidir.
 
-Geçerli kombinasyonlar: `BE=0,BS=0` (device-bound), `BE=1,BS=0` (senkronize edilebilir ama henüz değil), `BE=1,BS=1` (senkronize). **`BE=0,BS=1` geçersizdir — reddedin.**
+**Sunucunun yapması gerekenler.**
 
-#### Sunucunun yapması gerekenler
-1. **Kayıtta BE'yi sakla ve bir daha değiştirme.** Sonraki doğrulamalarda gelen BE, saklanan BE'den farklıysa bu bir protokol ihlali — logla ve reddet.
-2. **BS'yi her doğrulamada güncelle.** BS 0→1 geçişi "kullanıcı yedekleme etkinleştirdi" demektir; 1→0 geçişi "yedekleme devre dışı — kurtarma riski" demektir ve kullanıcıya uyarı göstermek için iyi bir tetikleyicidir.
-3. **Signature counter politikasını BE'ye bağlayın:**
-   - `BE=0` → counter monoton artmalı, ihlal = klonlama şüphesi, reddet
-   - `BE=1` → counter genellikle hep 0 gelir; **kontrol etmeyin** (CXF taşımaları da counter'ı sıfırlıyor)
-4. **Hesap kurtarma politikası:** `BE=1,BS=1` bir passkey tek başına bootstrap için yeterli sayılabilir (passkeys.dev'in "synced passkey" tanımı tam olarak bu: *"başka bir login challenge gerektirmeden oturum açmayı bootstrap edebilen credential"*). `BE=0` bir passkey **tek kimlik doğrulama faktörünüz olmamalı** — cihaz kaybı = hesap kaybı. Kullanıcı sadece device-bound credential kaydettiyse ikinci bir credential veya kurtarma kodu isteyin.
-5. **Kurumsal / yüksek güvenlik politikası:** Cihazdan çıkmama garantisi istiyorsanız `BE=0` şartı koyabilirsiniz — ancak bu, tüm modern platform passkey'lerini (iCloud Keychain, GPM) dışlar ve pratikte kullanıcıları security key'lere zorlar. Bunu bilinçli yapın.
+1. Kayıtta BE saklanır ve bir daha değiştirilmez. Sonraki doğrulamalarda gelen BE saklanandan farklıysa bu bir protokol ihlalidir; loglanır ve reddedilir.
+2. BS her doğrulamada güncellenir. BS'nin sıfırdan bire geçmesi kullanıcının yedeklemeyi etkinleştirdiği anlamına gelir; birden sıfıra geçmesi yedeklemenin devre dışı bırakıldığı ve kurtarma riski oluştuğu anlamına gelir ve kullanıcıya uyarı göstermek için iyi bir tetikleyicidir.
+3. İmza sayacı politikası BE'ye bağlanır: BE sıfırsa sayaç monoton artmalıdır ve ihlal bir klonlama şüphesidir, reddedilir; BE birse sayaç genellikle hep sıfır gelir ve kontrol edilmez, çünkü CXF taşımaları da sayacı sıfırlamaktadır.
+4. Hesap kurtarma politikası şöyledir: BE bir ile BS bir olan bir passkey tek başına önyükleme için yeterli sayılabilir, ki passkeys.dev'in senkronize passkey tanımı tam olarak budur, yani başka bir giriş meydan okuması gerektirmeden oturum açmayı önyükleyebilen kimlik bilgisi. BE sıfır olan bir passkey tek kimlik doğrulama faktörünüz olmamalıdır, çünkü cihaz kaybı hesap kaybı demektir. Kullanıcı yalnızca cihaza bağlı kimlik bilgisi kaydettiyse ikinci bir kimlik bilgisi veya kurtarma kodu istenmelidir.
+5. Kurumsal veya yüksek güvenlik politikası: cihazdan çıkmama garantisi isteniyorsa BE sıfır şartı konabilir; ancak bu, tüm modern platform passkey'lerini, yani iCloud Anahtar Zinciri ile Google Parola Yöneticisi'ni dışlar ve pratikte kullanıcıları güvenlik anahtarlarına zorlar. Bu bilinçli yapılmalıdır.
 
-#### AAGUID kullanımı
-- AAGUID sadece **attestation `none` DIŞINDA** anlamlı bir değer taşır. `attestation: "none"` istediğinizde tarayıcılar AAGUID'i **sıfırlar** (16 bayt 0x00) — bu gizlilik amaçlı ve kasıtlıdır.
-- Provider adını göstermek istiyorsanız `attestation: "direct"` veya `"indirect"` istemeniz gerekir. **[DOĞRULANMADI]** — Apple ve Google'ın 2026'da hangi conveyance ayarında sıfır olmayan AAGUID döndürdüğünü kesin olarak doğrulayamadım.
-- AAGUID'i **UI ipucu** olarak kullanın ("1Password'de kayıtlı"), güvenlik kararı olarak değil. Yukarıda anlattığım gibi CXF taşımaları AAGUID'i eskitir.
+**AAGUID kullanımı.** AAGUID yalnızca attestation `none` dışında anlamlı bir değer taşır. `attestation: "none"` istendiğinde tarayıcılar AAGUID'i sıfırlar, yani 16 bayt sıfır yapar; bu gizlilik amaçlıdır ve kasıtlıdır. Sağlayıcı adı gösterilmek isteniyorsa `attestation: "direct"` veya `"indirect"` istenmesi gerekir. Apple ile Google'ın 2026'da hangi iletim ayarında sıfır olmayan AAGUID döndürdüğü kesin olarak doğrulanamamıştır. AAGUID bir arayüz ipucu olarak kullanılmalıdır, örneğin 1Password'de kayıtlı demek için, bir güvenlik kararı olarak değil; yukarıda anlatıldığı gibi CXF taşımaları AAGUID'i eskitmektedir.
 
-**Community listesi:** https://github.com/passkeydeveloper/passkey-authenticator-aaguids
-- Topluluk tarafından yürütülüyor, provider'lar PR ile ekleniyor (GitHub profil doğrulaması şartıyla)
-- JSON şeması: AAGUID'ler üst düzey anahtar (küçük harf), zorunlu `name`, opsiyonel `icon_dark` / `icon_light` (base64 SVG data URI)
-- **Repo kendisi uyarıyor:** *"başka hiçbir amaç için kullanılmak üzere tasarlanmamıştır"* ve emekliye ayrılabilir — o durumda JSON dosyaları boş nesneye indirgenecek
-- Repo, otoriter güvenlik bilgisi için **FIDO MDS'i** öneriyor ve *"bu listedeki bazı AAGUID'ler FIDO MDS'te bulunmayabilir"* diyor
-- **[DOĞRULANMADI]** Listedeki provider sayısı ve son güncelleme tarihi tespit edilemedi.
+Topluluk listesi github.com/passkeydeveloper/passkey-authenticator-aaguids adresindedir. Topluluk tarafından yürütülmekte ve sağlayıcılar GitHub profil doğrulaması şartıyla PR ile eklenmektedir. JSON şeması şöyledir: AAGUID'ler küçük harfli üst düzey anahtarlardır, `name` zorunludur, `icon_dark` ile `icon_light` opsiyoneldir ve base64 SVG veri URI'si taşır. Deponun kendisi uyarmaktadır: başka hiçbir amaç için kullanılmak üzere tasarlanmamıştır ve emekliye ayrılabilir; o durumda JSON dosyaları boş bir nesneye indirgenecektir. Depo, otoriter güvenlik bilgisi için FIDO metadata servisini önermekte ve bu listedeki bazı AAGUID'lerin orada bulunmayabileceğini söylemektedir. Listedeki sağlayıcı sayısı ile son güncelleme tarihi tespit edilememiştir.
 
-**Pratik gerçek:** Synced passkey provider'ları (Apple iCloud Keychain, Google Password Manager, 1Password, Bitwarden, Dashlane, Windows Hello) genel olarak MDS'e metadata yayınlamıyor; bu yüzden community listesi var. **[DOĞRULANMADI]** — 2026 için provider bazında MDS varlığını tek tek doğrulayamadım.
+Pratik gerçek şudur: senkronize passkey sağlayıcıları, yani Apple iCloud Anahtar Zinciri, Google Parola Yöneticisi, 1Password, Bitwarden, Dashlane ile Windows Hello, genel olarak metadata servisine metadata yayımlamamaktadır; bu yüzden topluluk listesi vardır. 2026 için sağlayıcı bazında metadata servisindeki varlık tek tek doğrulanamamıştır.
 
-#### FIDO MDS durumu
-Dizin: https://fidoalliance.org/specs/mds/
+**FIDO metadata servisi durumu.** Dizini fidoalliance.org/specs/mds'tir.
 
 | Belge | Sürüm | Durum | Tarih |
 |---|---|---|---|
-| FIDO Metadata Service | 3.0 | PS | 2021-05-18 |
-| FIDO Metadata Service | 3.1 | PS | 2025-05-21 |
-| FIDO Metadata Service | **3.1.1** | **PS** | **2026-01-05** (yayın 12 May 2026) |
-| FIDO Metadata Statement | 3.0 | PS | 2021-05-18 |
-| FIDO Metadata Statement | 3.1 | PS | 2025-05-21 |
-| FIDO Metadata Statement | **3.1.1** | **PS** | **2026-01-05** (yayın 12 May 2026) |
-| Convenience Metadata Service | 1.0 | PS | 2025-05-21 |
+| FIDO Metadata Service | 3.0 | Önerilen standart | 18 Mayıs 2021 |
+| FIDO Metadata Service | 3.1 | Önerilen standart | 21 Mayıs 2025 |
+| FIDO Metadata Service | 3.1.1 | Önerilen standart | 5 Ocak 2026, yayın 12 Mayıs 2026 |
+| FIDO Metadata Statement | 3.0 | Önerilen standart | 18 Mayıs 2021 |
+| FIDO Metadata Statement | 3.1 | Önerilen standart | 21 Mayıs 2025 |
+| FIDO Metadata Statement | 3.1.1 | Önerilen standart | 5 Ocak 2026, yayın 12 Mayıs 2026 |
+| Convenience Metadata Service | 1.0 | Önerilen standart | 21 Mayıs 2025 |
 
-**MDS v4 YOK.** v3 hattı devam ediyor, güncel nokta sürüm **3.1.1**. Ayrıca 2025'te eklenen **"Convenience Metadata Service" v1.0** ilginç — muhtemelen MDS BLOB'unu tüketmeyi kolaylaştıran bir katman. **[DOĞRULANMADI]** — içeriğini incelemedim, ekibinize bakmasını öneririm.
+Metadata servisinin dördüncü sürümü yoktur; üçüncü hat devam etmekte ve güncel nokta sürümü 3.1.1'dir. Ayrıca 2025'te eklenen birinci sürüm kolaylık metadata servisi ilginçtir; muhtemelen metadata servisi veri bloğunu tüketmeyi kolaylaştıran bir katmandır. İçeriği incelenmemiştir ve ekibin bakması önerilir.
 
-**[DOĞRULANMADI]** — MDS BLOB endpoint URL'i ve imza doğrulama zinciri detaylarını (JWT + x5c + root cert) bu oturumda doğrulayamadım. `https://mds3.fidoalliance.org/` civarında olduğunu biliyorum ama teyit etmedim; spec'ten okuyun.
-
----
+Metadata servisi veri bloğu endpoint adresi ile imza doğrulama zinciri detayları, yani JWT, `x5c` ile kök sertifika, bu oturumda doğrulanamamıştır. Adresin `https://mds3.fidoalliance.org/` civarında olduğu bilinmekte ancak teyit edilmemiştir; spesifikasyondan okunmalıdır.
 
 ### 6. Attestation gerçekliği
 
-**L3'ün getirdikleri (changelog'dan):** Apple Anonymous Attestation ve **Compound Attestation** formatları eklendi. Ayrıca CTAP 2.2 ile `getInfo.attestationFormats` sayesinde istemci tercih ettiği formatı müzakere edebiliyor.
+**Level 3'ün getirdikleri**, değişiklik günlüğüne göre: Apple anonim attestation'ı ile bileşik attestation formatları eklenmiştir. Ayrıca CTAP 2.2 ile `getInfo.attestationFormats` sayesinde istemci tercih ettiği formatı müzakere edebilmektedir.
 
-**Enterprise attestation (CTAP 2.1+):** Authenticator, önceden yapılandırılmış bir RP ID listesine karşı benzersiz tanımlayıcı (seri numarası gibi) döndürebilir. İki tip: platform-managed (istemci RP ID listesini tutar) ve vendor-facilitated (authenticator kendi listesini tutar). **Yalnızca MDM ile yönetilen kurumsal ortamlarda anlamlıdır.**
+**Kurumsal attestation, CTAP 2.1 ve üstü.** Kimlik doğrulayıcı, önceden yapılandırılmış bir ilgili taraf kimliği listesine karşı seri numarası gibi benzersiz bir tanımlayıcı döndürebilir. İki tipi vardır: platform yönetimli, ki istemci ilgili taraf kimliği listesini tutar, ile satıcı kolaylaştırmalı, ki kimlik doğrulayıcı kendi listesini tutar. Yalnızca mobil cihaz yönetimiyle yönetilen kurumsal ortamlarda anlamlıdır.
 
-**Ne zaman anlamlı:**
-- **Anlamlı:** Kurumsal/regüle ortam; belirli sertifikalı authenticator modellerini (FIPS, belirli AAL seviyesi) zorunlu kılmanız gerekiyor; cihaz envanteri ile eşleştirme yapıyorsunuz. MDS ile birlikte kullanılır: AAGUID → metadata statement → sertifikasyon seviyesi + bilinen güvenlik açıkları (`StatusReport`).
-- **Anlamsız / zararlı (tüketici IdP'si):** 
-  - Synced passkey'lerde attestation zaten yok veya anonim — "hangi cihazda" sorusuna cevap vermez, çünkü anahtar zaten senkronize
-  - Attestation istemek Apple/Google'da ek kullanıcı onay ekranları ve dönüşüm kaybı yaratır
-  - Conditional create (sessiz passkey yükseltme) akışını **bozar**
-  - Bir allowlist uygularsanız kullanıcı tabanınızın bir kısmını kaydolamaz hale getirirsiniz
+**Ne zaman anlamlıdır.** Kurumsal veya düzenlenmiş bir ortamda, belirli sertifikalı kimlik doğrulayıcı modellerini, yani FIPS veya belirli bir güvence seviyesini, zorunlu kılmanız gerektiğinde ve cihaz envanteriyle eşleştirme yaptığınızda anlamlıdır. Metadata servisiyle birlikte kullanılır: AAGUID'den metadata beyanına, oradan sertifikasyon seviyesi ile bilinen güvenlik açıklarına, yani durum raporuna gidilir.
 
-**Tavsiye:** Tüketici IdP'si için `attestation: "none"`. Kurumsal tenant'lar için tenant bazlı bir politika bayrağıyla `"direct"` + MDS doğrulaması + AAGUID allowlist. İki akışı kod düzeyinde ayırın (webauthn-rs bunu zaten `Passkey` vs `AttestedPasskey` ayrımıyla modelliyor — aşağıya bakın).
+**Ne zaman anlamsız veya zararlıdır**, yani tüketici IdP'sinde. Senkronize passkey'lerde attestation zaten yoktur veya anonimdir ve hangi cihazda sorusuna cevap vermez, çünkü anahtar zaten senkronizedir. Attestation istemek Apple ile Google'da ek kullanıcı onay ekranları ve dönüşüm kaybı yaratır. Koşullu oluşturma, yani sessiz passkey yükseltmesi, akışını bozar. Bir izin listesi uygulanırsa kullanıcı tabanının bir kısmı kaydolamaz hâle gelir.
 
-**[DOĞRULANMADI]** — 2026'da tarayıcıların `indirect` conveyance'i pratikte nasıl ele aldığı (anonymization CA kullanıp kullanmadığı) konusunda güncel bir kaynak doğrulayamadım.
+Tavsiye şudur: tüketici IdP'si için `attestation: "none"` kullanılır. Kurumsal kiracılar için kiracı bazlı bir politika bayrağıyla `"direct"`, metadata servisi doğrulaması ile AAGUID izin listesi kullanılır. İki akış kod düzeyinde ayrılır; webauthn-rs bunu zaten `Passkey` ile `AttestedPasskey` ayrımıyla modellemektedir, aşağıya bakınız.
 
----
+Tarayıcıların 2026'da dolaylı iletimi pratikte nasıl ele aldığı, yani anonimleştirme sertifika otoritesi kullanıp kullanmadığı konusunda güncel bir kaynak doğrulanamamıştır.
 
-### 7. Passkey benimseme istatistikleri (Eylül 2026)
+### 7. Passkey benimseme istatistikleri, Eylül 2026
 
-**Bu bölüm zayıf — dürüst olmam gerekirse 2026 tarihli birincil FIDO raporunu bulamadım.**
+Bu bölüm zayıftır; dürüst olmak gerekirse 2026 tarihli birincil FIDO raporu bulunamamıştır.
 
-Doğrulayabildiklerim:
+Doğrulanabilenler şunlardır.
 
-**FIDO Alliance (fidoalliance.org/passkeys, 2024 tarihli bağımsız anket):**
-- İnsanların **%53'ü** en az bir hesapta passkey etkinleştirmiş
-- **%22'si** etkinleştirebildiği her hesapta etkinleştirmiş
-- Kaynak: "2024 Consumer Password & Passkey Trends" — https://fidoalliance.org/passkeys/
+FIDO Alliance'ın passkeys sayfasındaki 2024 tarihli bağımsız ankete göre insanların %53'ü en az bir hesapta passkey etkinleştirmiş, %22'si etkinleştirebildiği her hesapta etkinleştirmiştir. Kaynağı "2024 Consumer Password & Passkey Trends"tir.
 
-**FIDO'nun aynı sayfada alıntıladığı kurumsal metrikler:**
-- Yubico: phishing ve credential hırsızlığına maruziyette **%99.99 azalma**
-- Amazon: **6x daha hızlı** oturum açma süresi
-- Google: parolalara kıyasla **4x daha iyi** oturum açma başarı oranı
+FIDO'nun aynı sayfada alıntıladığı kurumsal metrikler şunlardır: Yubico'da oltalama ile kimlik bilgisi hırsızlığına maruziyette %99,99 azalma; Amazon'da altı kat daha hızlı oturum açma süresi; Google'da parolalara kıyasla dört kat daha iyi oturum açma başarı oranı.
 
-**Chrome for Developers, "Modernize authentication with passkeys..." (21 Mayıs 2026) — https://developer.chrome.com/blog/io26-web-identity:**
-- **Pixiv**: passkey sonrası **%99 giriş başarı oranı** — parolalara göre **%29 iyileşme**
-- **Adidas**: zero-prompt conditional create stratejisiyle **passkey oluşturmalarında %8 artış**
+Chrome for Developers'ın 21 Mayıs 2026 tarihli yazısına göre Pixiv'de passkey sonrası giriş başarı oranı %99 olmuş ve parolalara göre %29 iyileşme sağlanmıştır; Adidas'ta sıfır istemli koşullu oluşturma stratejisiyle passkey oluşturmalarında %8 artış olmuştur.
 
-**FIDO Alliance ana sayfasındaki 2026 haberleri (adoption sayısı içermiyor):**
-- 14 Ağu 2026 — OpenAI + Yubico ortaklığı: OpenAI'nin Advanced Account Security programı kapsamında özel phishing-dirençli YubiKey'ler
-- 17 Tem 2026 — RSA Security + FIDO Alliance ortak brifingi
-- 27 May 2026 — Authenticate APAC 2026 (2–3 Haziran)
+FIDO Alliance ana sayfasındaki 2026 haberleri benimseme sayısı içermemektedir: 14 Ağustos 2026'da OpenAI ile Yubico ortaklığı duyurulmuştur ve OpenAI'nin gelişmiş hesap güvenliği programı kapsamında özel oltalamaya dirençli YubiKey'ler verilmektedir; 17 Temmuz 2026'da RSA Security ile FIDO Alliance ortak brifingi yapılmıştır; 27 Mayıs 2026'da Authenticate APAC 2026 duyurulmuştur, 2 ile 3 Haziran tarihlidir.
 
-**[DOĞRULANMADI] / Kapatılamayan boşluklar:**
-- 2025 veya 2026 tarihli "Online Authentication Barometer" / "State of Passkeys" raporu — fidoalliance.org/content/research/ ve /research-and-resources/ sayfaları fetch'te navigasyon iskeletinden fazlasını vermedi
-- Google/Microsoft/Apple/Amazon/PayPal'ın 2026 passkey kullanıcı sayıları
-- Synced vs device-bound passkey oranı — **hiçbir kamuya açık veri bulamadım**
-- Cross-device (hybrid/QR) kullanım oranları — **veri bulamadım**
+Kapatılamayan boşluklar şunlardır: 2025 veya 2026 tarihli çevrimiçi kimlik doğrulama barometresi ya da passkey durum raporu, çünkü fidoalliance.org'un araştırma sayfaları çekimde gezinme iskeletinden fazlasını vermemiştir; Google, Microsoft, Apple, Amazon ile PayPal'ın 2026 passkey kullanıcı sayıları; senkronize ile cihaza bağlı passkey oranı, ki hiçbir kamuya açık veri bulunamamıştır; cihazlar arası, yani hibrit ve QR kodu, kullanım oranları, ki veri bulunamamıştır.
 
-Ekibiniz bu bölümü kendi tarafında https://fidoalliance.org/content/research/ üzerinden tarayarak tamamlamalı.
-
----
+Ekibiniz bu bölümü kendi tarafında fidoalliance.org'un araştırma sayfasını tarayarak tamamlamalıdır.
 
 ### 8. Rust ekosistemi: webauthn-rs
 
-**Repo:** https://github.com/kanidm/webauthn-rs
-**crates.io:** https://crates.io/crates/webauthn-rs
+Deposu github.com/kanidm/webauthn-rs, paketi crates.io/crates/webauthn-rs'tir.
 
 | Sürüm | Tarih | Not |
 |---|---|---|
-| **0.5.5** | **2026-04-30** | **en güncel stabil** (`max_stable_version`) |
-| 0.6.1-dev | 2026-04-30 | prerelease (`max_version` / `newest_version`) |
-| 0.6.0-dev | 2026-03-20 | prerelease |
-| 0.5.4 | 2025-12-10 | |
-| 0.5.3 | 2025-10-23 | |
+| 0.5.5 | 30 Nisan 2026 | En güncel kararlı sürümdür |
+| 0.6.1-dev | 30 Nisan 2026 | Ön sürümdür |
+| 0.6.0-dev | 20 Mart 2026 | Ön sürümdür |
+| 0.5.4 | 10 Aralık 2025 | — |
+| 0.5.3 | 23 Ekim 2025 | — |
 
-- crate `updated_at`: 2026-04-30 → **aktif bakımda**
-- `recent_downloads`: ~2.47M → ekosistemde baskın konumda
-- SUSE product security tarafından güvenlik denetiminden geçmiş
+Crate'in güncellenme tarihi 30 Nisan 2026'dır, yani aktif bakımdadır. Yakın dönem indirmesi yaklaşık 2,47 milyondur, yani ekosistemde baskın konumdadır. SUSE ürün güvenliği tarafından bir güvenlik denetiminden geçmiştir.
 
-#### Workspace yapısı
-- **webauthn-rs** — güvenli, yüksek seviye API (önerilen)
-- **webauthn-rs-core** — düşük seviye protokol
-- **webauthn-rs-proto** — protokol tipleri/bindings
-- **fido-mds** — "Authenticator transparency parser" → **FIDO MDS ayrıştırma için hazır crate var, kendiniz yazmayın**
-- (webauthn-authenticator-rs ayrı repo/crate, istemci tarafı)
+**Workspace yapısı.** `webauthn-rs` güvenli ve yüksek seviyeli API'dir ve önerilendir. `webauthn-rs-core` düşük seviyeli protokoldür. `webauthn-rs-proto` protokol tipleri ile bağlayıcılarıdır. `fido-mds` bir kimlik doğrulayıcı şeffaflık ayrıştırıcısıdır, yani FIDO metadata servisi ayrıştırması için hazır bir crate vardır ve kendiniz yazmamalısınız. `webauthn-authenticator-rs` ayrı bir depo ile crate'tir ve istemci tarafıdır.
 
-#### Feature flag'ler (`webauthn-rs/Cargo.toml`)
+**Özellik bayrakları**, `webauthn-rs/Cargo.toml` dosyasından:
+
 ```
 default                                    = ["attestation"]
 preview-features                           = ["conditional-ui"]
@@ -1183,9 +1014,7 @@ danger-credential-internals
 danger-user-presence-only-security-keys
 ```
 
-#### L3 özellik desteği — GERÇEK DURUM
-
-`webauthn-rs-proto/src/extensions.rs` kaynak kodundan doğrulanmış:
+**Level 3 özellik desteğinin gerçek durumu**, `webauthn-rs-proto/src/extensions.rs` kaynak kodundan doğrulanmıştır:
 
 ```rust
 pub struct RequestRegistrationExtensions {
@@ -1205,403 +1034,335 @@ pub struct RequestAuthenticationExtensions {
 
 | Özellik | webauthn-rs desteği |
 |---|---|
-| credProps | **Var** (`cred_props`) |
-| credProtect | **Var** (`cred_protect`) |
-| minPinLength | **Var** (`min_pin_length`) |
-| uvm | **Var** |
-| appid (U2F geçiş) | **Var** |
-| hmac-secret (ham CTAP) | **Var** (`hmac_create_secret` / `hmac_get_secret`) |
-| **PRF extension (WebAuthn seviyesi)** | **YOK** |
-| **largeBlob** | **YOK** |
-| **devicePubKey** | **YOK** |
-| Conditional UI | **Var** ama `preview-features` / `conditional-ui` flag'i arkasında |
-| Conditional create | **[DOĞRULANMADI]** — açık bir API bulamadım |
-| Signal API | **Yok — ve olması da gerekmez** (bu tamamen istemci tarafı API'si; sizin sadece payload endpoint'i yazmanız gerekiyor) |
-| Related Origin Requests | **Yok — gerekmez** (tarayıcı özelliği; sizin sadece `.well-known/webauthn` servis etmeniz gerekiyor) |
-| BE/BS bayrakları | **Kısmen** — `allow_backup_eligible_upgrade` iç konfigürasyonu var (passkey akışında `true`, security key ve attested passkey akışında `false`), ancak **`backup_eligible` / `backup_state` public API'de RP'ye açılmıyor** |
-| Attestation + MDS | **Var** — `attestation` default feature; AttestationCaList; ayrı `fido-mds` crate'i |
+| credProps | Vardır, `cred_props` alanıyla |
+| credProtect | Vardır, `cred_protect` alanıyla |
+| minPinLength | Vardır, `min_pin_length` alanıyla |
+| uvm | Vardır |
+| appid, yani U2F geçişi | Vardır |
+| hmac-secret, ham CTAP | Vardır, `hmac_create_secret` ile `hmac_get_secret` alanlarıyla |
+| PRF uzantısı, WebAuthn seviyesinde | Yoktur |
+| largeBlob | Yoktur |
+| devicePubKey | Yoktur |
+| Koşullu arayüz | Vardır ancak `preview-features` ile `conditional-ui` bayrakları arkasındadır |
+| Koşullu oluşturma | Doğrulanamamıştır; açık bir API bulunamamıştır |
+| Signal API | Yoktur ve olması da gerekmez; bu tamamen istemci tarafı bir API'dir ve sizin yalnızca bir yük endpoint'i yazmanız gerekir |
+| İlişkili köken istekleri | Yoktur ve gerekmez; bu bir tarayıcı özelliğidir ve sizin yalnızca `.well-known/webauthn` servis etmeniz gerekir |
+| BE ile BS bayrakları | Kısmen vardır; `allow_backup_eligible_upgrade` adlı bir iç yapılandırma bulunmaktadır, passkey akışında doğru ile güvenlik anahtarı ve attestation'lı passkey akışında yanlış değerindedir, ancak `backup_eligible` ile `backup_state` genel API'de ilgili tarafa açılmamaktadır |
+| Attestation ile metadata servisi | Vardır; `attestation` varsayılan bir özelliktir, `AttestationCaList` bulunmaktadır ve ayrı bir `fido-mds` crate'i vardır |
 
-#### En kritik iki boşluk
+**En kritik iki boşluk.**
 
-**1. PRF yok.** Bu, sizin E2E şifreleme planınız için doğrudan engel. Elde `hmac_get_secret` var ama bu **ham CTAP hmac-secret**'tır — WebAuthn `prf` eklentisinin `SHA-256("WebAuthn PRF" || 0x00 || salt)` domain separation'ını ve `evalByCredential` yapısını içermez. PRF istiyorsanız:
-   - `webauthn-rs-proto`'daki extension struct'larını genişletmeniz (fork veya upstream PR), **veya**
-   - Extension input/output'u kendi katmanınızda JSON seviyesinde ele almanız gerekir
-   
-   `danger-credential-internals` feature'ı `Credential` tipine `Into`/`From` ile erişim veriyor — kaçış kapısı olarak bunu kullanabilirsiniz.
+Birincisi PRF'in olmamasıdır ve bu, uçtan uca şifreleme planı için doğrudan bir engeldir. Elde `hmac_get_secret` vardır ancak bu ham CTAP hmac-secret'tır; WebAuthn `prf` uzantısının `SHA-256("WebAuthn PRF" || 0x00 || salt)` alan ayrımını ile `evalByCredential` yapısını içermez. PRF isteniyorsa ya `webauthn-rs-proto` içindeki uzantı yapıları genişletilmeli, yani fork alınmalı veya yukarı akışa bir PR açılmalı, ya uzantı girdisi ile çıktısı kendi katmanınızda JSON seviyesinde ele alınmalıdır. `danger-credential-internals` özelliği `Credential` tipine dönüşüm trait'leriyle erişim vermektedir ve bir kaçış kapısı olarak kullanılabilir.
 
-**2. BE/BS RP'ye açılmıyor.** Bölüm 5'teki politikaları (counter kontrolünü BE'ye bağlama, BS geçişlerinde uyarı, kurtarma politikası) uygulamak için bu bayraklara erişmeniz **şart**. Çözüm: `danger-credential-internals` ile `Credential` iç yapısına inin veya upstream'e bir accessor PR'ı açın. Bu, projenizde erken çözmeniz gereken bir mimari karar.
+İkincisi BE ile BS'nin ilgili tarafa açılmamasıdır. Beşinci bölümdeki politikaları, yani sayaç kontrolünü BE'ye bağlamayı, BS geçişlerinde uyarmayı ile kurtarma politikasını, uygulamak için bu bayraklara erişim şarttır. Çözümü `danger-credential-internals` ile `Credential` iç yapısına inmek veya yukarı akışa bir erişimci PR'ı açmaktır. Bu, projede erken çözülmesi gereken bir mimari karardır.
 
-#### Alternatifler
-- **passkey-rs** (github.com/1Password/passkey-rs) — **[DOĞRULANMADI]** sürüm/durum doğrulayamadım. Not: ağırlıklı olarak **istemci/authenticator** tarafı içindir (1Password'ün kendi authenticator implementasyonu), sunucu RP'si için değil. Sizin kullanım senaryonuza uygun değil.
-- **webauthn-authenticator-rs** — kanidm ekosisteminde, **istemci/authenticator** tarafı. Test/sanal authenticator için kullanışlı.
-- **fido-mds** — kanidm workspace'inde, MDS ayrıştırma. Sunucu tarafı için kullanışlı.
-
----
+**Alternatifler.** `passkey-rs`, yani github.com/1Password/passkey-rs, için sürüm ile durum doğrulanamamıştır; not olarak ağırlıklı olarak istemci ile kimlik doğrulayıcı tarafı içindir, yani 1Password'ün kendi kimlik doğrulayıcı implementasyonudur, sunucu ilgili tarafı için değildir ve sizin kullanım senaryonuza uygun değildir. `webauthn-authenticator-rs` kanidm ekosistemindedir ve istemci ile kimlik doğrulayıcı tarafıdır; test ile sanal kimlik doğrulayıcı için kullanışlıdır. `fido-mds` kanidm workspace'indedir ve metadata servisi ayrıştırması yapar; sunucu tarafı için kullanışlıdır.
 
 ### Özet: IdP ekibi için aksiyon listesi
 
-**Hemen yapılacaklar**
-1. **BE/BS bayraklarına erişimi çözün** — webauthn-rs'te bu public değil. Bu, bölüm 5'teki tüm politikaların ön koşulu. `danger-credential-internals` veya upstream PR.
-2. **Signature counter politikasını BE'ye bağlayın.** BE=1 → kontrol yok. Bu, CXF passkey taşımalarında kullanıcı kilitlenmesini önler (CXF counter'ı sıfırlıyor).
-3. **AAGUID'i "kayıt anındaki provider ipucu" olarak modelleyin**, güvenlik kararı olarak değil. CXF taşımaları AAGUID'i eskitiyor.
-4. **`attestation: "none"` varsayılan yapın**; kurumsal tenant'lar için ayrı bir attested akış (webauthn-rs'in `AttestedPasskey` tipi + `fido-mds`).
-5. **`transports` alanında bilinmeyen değerleri hata vermeden kabul edin** (`"hybrid"` ve gelecekteki değerler için).
+**Hemen yapılacaklar.**
 
-**Kısa vadede (L3 özelliklerini benimseme)**
-6. **Signal API payload endpoint'i** yazın — tam credential listesi, sayfalama YOK. Yanlış yaparsanız kullanıcıların passkey'lerini gizlersiniz. Chrome 132+/Android 144+ kullanıcılarınızın önemli kısmını kapsıyor.
-7. **Conditional create** akışını ekleyin (Chrome 136+/142+, Safari 18+, iOS 18+): parola girişinden sonra sessiz passkey yükseltmesi. `excludeCredentials`'ı doğru doldurun, attestation istemeyin, kullanıcıya sonradan bildirim gönderin.
-8. **PRF için:** webauthn-rs'i genişletmeniz gerekecek. Kayıtta credential başına salt üretip saklayın, `prf.enabled`'ı saklayın, PRF çıktısını **asla** saklamayın. Windows Hello ve iOS+harici anahtar senaryoları için fallback şart.
-9. **ROR'u sadece kendi çoklu-domain markanız için** düşünün; müşteri RP'leri için OIDC federation zaten elinizde. Kullanırsanız: `application/json`, HTTP 200, auth yok, maksimum 5 label.
+1. BE ile BS bayraklarına erişim çözülür; webauthn-rs'te bu genel değildir ve beşinci bölümdeki tüm politikaların ön koşuludur. `danger-credential-internals` kullanılır veya yukarı akışa PR açılır.
+2. İmza sayacı politikası BE'ye bağlanır: BE bir ise kontrol yapılmaz. Bu, CXF passkey taşımalarında kullanıcı kilitlenmesini önler, çünkü CXF sayacı sıfırlamaktadır.
+3. AAGUID kayıt anındaki sağlayıcı ipucu olarak modellenir, bir güvenlik kararı olarak değil; CXF taşımaları AAGUID'i eskitmektedir.
+4. `attestation: "none"` varsayılan yapılır; kurumsal kiracılar için ayrı bir attestation'lı akış kurulur, yani webauthn-rs'in `AttestedPasskey` tipi ile `fido-mds` kullanılır.
+5. `transports` alanında bilinmeyen değerler hata vermeden kabul edilir; `"hybrid"` ile gelecekteki değerler içindir.
 
-**İzlenecekler**
-10. **L4 First Public Working Draft — 9 Eylül 2026 (yarın).** Özellikle `uiMode: 'immediate'` (#2291), `sign` extension (#2078), algorithm migration (#2437).
-11. **Post-quantum:** FIDO Server Requirements v2.3 (26 Şub 2026) ML-DSA-44/65/87 ve ESP256/384/512, Ed25519'u önerilen listeye aldı. COSE algoritma tablonuzu ve credential veri modelinizdeki algoritma/rotasyon alanını buna göre tasarlayın.
-12. **CXP hâlâ Working Draft (2024-10-03).** Provider-to-provider canlı taşıma standartlaşmadı. CXF ise PS (2025-08-14 + errata 2026-03-09). Taşınabilirlik geliyor ama henüz tam değil.
+**Kısa vadede, yani Level 3 özelliklerini benimseme.**
 
-**Kapatamadığım boşluklar (ekibin doğrulaması gereken)**
-- 2025/2026 FIDO adoption raporlarının gerçek sayıları
-- CXF/CXP'yi hangi vendor'ların gerçekten shiplediği (1Password blogunda Tem–Eyl 2026'da ilgili yazı yok)
-- Safari'nin ROR ve Signal API destek durumu (kesin sürüm)
-- largeBlob'un 2026 tarayıcı destek matrisi
-- MDS BLOB endpoint URL'i ve imza zinciri detayları
+6. Signal API yük endpoint'i yazılır; tam kimlik bilgisi listesi verilir ve sayfalama yapılmaz. Yanlış yapılırsa kullanıcıların passkey'leri gizlenir. Chrome 132 ve üstü ile Android 144 ve üstü kullanıcılarınızın önemli bir kısmını kapsamaktadır.
+7. Koşullu oluşturma akışı eklenir; Chrome 136 ile 142 ve üstü, Safari 18 ve üstü ile iOS 18 ve üstünde çalışır ve parola girişinden sonra sessiz bir passkey yükseltmesidir. `excludeCredentials` doğru doldurulur, attestation istenmez ve kullanıcıya sonradan bildirim gönderilir.
+8. PRF için webauthn-rs genişletilmelidir. Kayıtta kimlik bilgisi başına tuz üretilip saklanır, `prf.enabled` saklanır ve PRF çıktısı asla saklanmaz. Windows Hello ile iOS artı harici anahtar senaryoları için bir yedek yol şarttır.
+9. İlişkili köken istekleri yalnızca kendi çok alan adlı markanız için düşünülür; müşteri ilgili tarafları için OIDC federasyonu zaten elinizdedir. Kullanılırsa `application/json` içerik tipi, HTTP 200, kimlik doğrulaması olmaması ile en fazla beş etiket kuralına uyulur.
+
+**İzlenecekler.**
+
+10. Level 4'ün ilk kamuya açık çalışma taslağı 9 Eylül 2026'dadır, yani yarındır. Özellikle `uiMode: 'immediate'` (#2291), `sign` uzantısı (#2078) ile algoritma göçü (#2437) izlenmelidir.
+11. Post kuantum tarafında FIDO Server Requirements v2.3, 26 Şubat 2026, ML-DSA-44, 65 ile 87'yi ve ESP256, ESP384, ESP512 ile Ed25519'u önerilen listeye almıştır. COSE algoritma tablosu ile kimlik bilgisi veri modelindeki algoritma ve rotasyon alanı buna göre tasarlanmalıdır.
+12. CXP hâlâ bir çalışma taslağıdır, 3 Ekim 2024. Sağlayıcıdan sağlayıcıya canlı taşıma standartlaşmamıştır. CXF ise önerilen standarttır, 14 Ağustos 2025 ve 9 Mart 2026 errata'sıyla. Taşınabilirlik gelmektedir ancak henüz tam değildir.
+
+**Kapatılamayan boşluklar**, ekibin doğrulaması gerekenler: 2025 ile 2026 FIDO benimseme raporlarının gerçek sayıları; CXF ile CXP'yi hangi satıcıların gerçekten sevk ettiği, ki 1Password blogunda Temmuz ile Eylül 2026 arasında ilgili bir yazı yoktur; Safari'nin ilişkili köken istekleri ile Signal API destek durumu ve kesin sürümü; largeBlob'un 2026 tarayıcı destek matrisi; metadata servisi veri bloğu endpoint adresi ile imza zinciri detayları.
 
 ---
 
-## HAT 3 — PQC ↔ Kimlik Doğrulama Kesişimi
+## Hat 3 — PQC ile kimlik doğrulamanın kesişimi
 
-## Research report — FIDO2/WebAuthn PQC hardware & Rust JOSE PQC (as of 8 Sep 2026)
+Bu, 8 Eylül 2026 tarihli bir araştırma raporudur: FIDO2 ile WebAuthn post kuantum donanımı ve Rust JOSE PQC durumu.
 
-**Method caveat:** the session's WebSearch budget (200/200) was exhausted before I started, so all of this comes from direct API queries (crates.io, GitHub, chromestatus) and targeted page fetches. That means **negative findings for vendor announcements are "not found by targeted fetch," not exhaustive**. I flag each one.
+Yöntem uyarısı şudur: oturumun web arama bütçesi başlamadan önce, yani 200 üzerinden 200 olarak, tükenmiştir; dolayısıyla buradaki her şey doğrudan API sorgularından, yani crates.io, GitHub ile chromestatus'tan, ve hedefli sayfa çekimlerinden gelmektedir. Bu, satıcı duyuruları için olumsuz bulguların hedefli çekimle bulunamadı anlamına geldiğini, kapsamlı bir tarama olmadığını gösterir. Her biri ayrıca işaretlenmiştir.
 
----
+### A. FIDO2 ile WebAuthn post kuantum donanımı ve ekosistemi
 
-### A) FIDO2/WebAuthn post-quantum hardware & ecosystem
+#### A1. Spesifikasyon durumu: PQC yalnızca issue aşamasındadır, henüz spesifikasyon metni değildir
 
-#### A1. Spec status: PQC is issue-stage only, not yet spec text
+Canlı WebAuthn editör taslağı çekilmiş ve tam oluşturulmuş metin, yani 1,53 milyon karakter, taranmıştır.
 
-I fetched the live WebAuthn Editor's Draft and grepped the full rendered text (1.53M chars):
+`https://w3c.github.io/webauthn/` başlığı "Web Authentication: An API for accessing Public Key Credentials Level 3"tür ve editör taslağı 3 Eylül 2026 tarihlidir. Geçiş sayıları şöyledir: `ML-DSA` sıfır, `post-quantum` sıfır, `quantum` sıfır, `Dilithium` sıfır, `AKP` sıfır ve COSE kimlikleri eksi 49 ile eksi 50 sıfırdır. Sağlama kontrolü olarak `ES256` 162, `EdDSA` 21 ve `COSEAlgorithmIdentifier` 43 kez geçmektedir, yani bu gerçek spesifikasyon gövdesidir.
 
-- `https://w3c.github.io/webauthn/` — title: *"Web Authentication: An API for accessing Public Key Credentials Level 3"*, **Editor's Draft, 3 September 2026**
-- Occurrences: `ML-DSA` = **0**, `post-quantum` = **0**, `quantum` = **0**, `Dilithium` = **0**, `AKP` = **0**, COSE ids `-49`/`-50` = **0**. (Sanity check: `ES256` = 162, `EdDSA` = 21, `COSEAlgorithmIdentifier` = 43 — so it is the real spec body.)
+Sonuç şudur: 8 Eylül 2026 itibarıyla yayımlanmış veya taslak hâlindeki hiçbir WebAuthn spesifikasyon metni ML-DSA'dan bahsetmemektedir. Bu, 25 Ağustos 2026 tarihli Level 3 önerisinde PQC bulunmaması gerçeğiyle tutarlıdır. Editör taslağının hâlâ Level 3 olarak markalandığına dikkat edilmelidir; Level 4 yalnızca GitHub kilometre taşları olarak, yani ilk yayımlanan çalışma taslağı ile ikinci çalışma taslağı olarak, vardır, henüz editör taslağı metni olarak yoktur.
 
-**Conclusion: as of 8 Sep 2026 no published or draft WebAuthn spec text mentions ML-DSA.** This is consistent with your established fact that L3 REC (25 Aug 2026) has no PQC. Note the ED is still branded L3; L4 exists only as GitHub milestones ("L4 (First Published Working Draft)", "L4 WD02"), not yet as ED text.
+#### A2. W3C WebAuthn GitHub'ında aktif bir post kuantum iş kolu vardır ve asıl sinyal budur
 
-#### A2. W3C WebAuthn GitHub: an active `[PQ]` workstream (this is the real signal)
+`repo:w3c/webauthn ML-DSA OR "post-quantum" OR PQ` araması 15 sonuç vermektedir. 2026 kümesi şöyledir.
 
-GitHub search `repo:w3c/webauthn ML-DSA OR "post-quantum" OR PQ` → 15 results. The 2026 cluster:
-
-| # | Type | Opened | State | Title / substance |
+| Numara | Tür | Açılış | Durum | Başlık ve özü |
 |---|---|---|---|---|
-| [2475](https://github.com/w3c/webauthn/pull/2475) | PR | 2026-09-02 | open | `[PQ] Back up and restore overridden credentials` |
-| [2471](https://github.com/w3c/webauthn/issues/2471) | issue | 2026-08-26 | open | `[PQ] SHA-256 usage` — clientDataHash/rpIdHash are hard-wired to SHA-256 with no agility; SHA-256 is not approved for general hashing under CNSA 2.0. Options floated: formal CNSA exception, or a signed extension carrying SHA-384/512 |
-| [2462](https://github.com/w3c/webauthn/issues/2462) | issue | 2026-08-06 | **closed** | `pkOptions.pubKeyCredParams` default will be unsafe after Q-day — filed by **nsatragno (Google/Chrome)**; proposes documenting that the default alg set is deprecated, plus UA warnings and a removal timeline |
-| [2456](https://github.com/w3c/webauthn/issues/2456) | issue | 2026-07-29 | open | `[PQ] Add new batch attestation type for Merkle tree certificates` — **ve7jtb (John Bradley, Yubico)**. PQ attestation-size mitigation |
-| [2448](https://github.com/w3c/webauthn/issues/2448) | issue | 2026-07-16 | open | `[PQ] Default Algorithms for Authenticators perhaps need updating` — ve7jtb. Proposes adding **P-384** now and **ML-DSA-44** as the PQ option |
-| [2437](https://github.com/w3c/webauthn/pull/2437) | PR | 2026-06-30 | open | `Support Algorithm Migration` — **akshayku (Microsoft)**. Adds an `algPolicy` extension + `acceptedAlgs` in GetAssertion options; "silent migration with no extra UI". Last activity 2026-08-26; nsatragno pushing back toward a single preference list / existing signal API |
-| [2417](https://github.com/w3c/webauthn/issues/2417) | issue | 2026-04-22 | open | `[PQ] Post Quantum Crypto and WebAuthn Transition for RP` — akshayku, milestone **L4 WD02**. Explicitly cites the IANA COSE ids **-48, -49, -50**. Three asks: (1) don't overwrite a credential of a different alg for the same userID/rpID, (2) let RPs express alg preference at *authentication* time, (3) silent credential creation during authentication |
-| [2393](https://github.com/w3c/webauthn/issues/2393) | issue | 2026-02-26 | open | `[PQ] Add ML-DSA test vectors` — **emlun (Emil Lundberg, Yubico)**, milestone L4 FPWD. Rationale states ML-DSA now has IANA COSE ids, **"authenticator manufacturers are beginning to implement support,"** and RPs are interested |
+| 2475 | PR | 2 Eylül 2026 | Açık | Geçersiz kılınan kimlik bilgilerini yedekleme ile geri yükleme |
+| 2471 | Issue | 26 Ağustos 2026 | Açık | SHA-256 kullanımı: istemci veri özeti ile ilgili taraf kimliği özeti SHA-256'ya çivilenmiştir ve çeviklik yoktur; SHA-256 CNSA 2.0 altında genel özetleme için onaylı değildir. Önerilen seçenekler resmî bir CNSA istisnası veya SHA-384 ya da SHA-512 taşıyan imzalı bir uzantıdır |
+| 2462 | Issue | 6 Ağustos 2026 | Kapalı | `pkOptions.pubKeyCredParams` varsayılanı kuantum gününden sonra güvensiz olacaktır; nsatragno (Google ile Chrome) açmıştır. Varsayılan algoritma setinin kullanımdan kaldırıldığının belgelenmesini, kullanıcı aracısı uyarılarını ile bir kaldırma takvimini önermektedir |
+| 2456 | Issue | 29 Temmuz 2026 | Açık | Merkle ağacı sertifikaları için yeni bir toplu attestation tipi eklemek; ve7jtb, yani John Bradley, Yubico. Post kuantum attestation boyutu azaltmasıdır |
+| 2448 | Issue | 16 Temmuz 2026 | Açık | Kimlik doğrulayıcılar için varsayılan algoritmaların güncellenmesi gerekebilir; ve7jtb. Şimdi P-384'ün ile post kuantum seçeneği olarak ML-DSA-44'ün eklenmesini önermektedir |
+| 2437 | PR | 30 Haziran 2026 | Açık | Algoritma göçünü desteklemek; akshayku, Microsoft. Bir `algPolicy` uzantısı ile doğrulama isteği seçeneklerine `acceptedAlgs` eklemektedir; ek arayüz olmadan sessiz göç hedeflenmektedir. Son hareketi 26 Ağustos 2026'dır ve nsatragno tek bir tercih listesi ile mevcut sinyal API'sine doğru itmektedir |
+| 2417 | Issue | 22 Nisan 2026 | Açık | İlgili taraf için post kuantum kripto ile WebAuthn geçişi; akshayku, kilometre taşı Level 4 ikinci çalışma taslağı. IANA COSE kimlikleri eksi 48, 49 ile 50'ye açıkça atıf yapmaktadır. Üç talebi vardır: aynı kullanıcı ile ilgili taraf kimliği için farklı algoritmalı bir kimlik bilgisinin üzerine yazılmaması; ilgili tarafların doğrulama anında algoritma tercihi belirtebilmesi; doğrulama sırasında sessiz kimlik bilgisi oluşturma |
+| 2393 | Issue | 26 Şubat 2026 | Açık | ML-DSA test vektörleri eklemek; emlun, yani Emil Lundberg, Yubico; kilometre taşı Level 4 ilk yayımlanan çalışma taslağı. Gerekçesi ML-DSA'nın artık IANA COSE kimliklerine sahip olması, kimlik doğrulayıcı üreticilerinin desteği uygulamaya başlaması ile ilgili tarafların ilgilenmesidir |
 
-The four named participants map to Yubico (ve7jtb, emlun), Microsoft (akshayku) and Google/Chrome (nsatragno) — i.e. the WG *is* actively designing the PQC transition, but entirely at the algorithm-agility/migration layer, with no ML-DSA registration merged yet.
+Adı geçen dört katılımcı Yubico'yu (ve7jtb ile emlun), Microsoft'u (akshayku) ile Google ve Chrome'u (nsatragno) temsil etmektedir; yani çalışma grubu post kuantum geçişini aktif olarak tasarlamaktadır ancak tamamen algoritma çevikliği ile göç katmanında çalışmaktadır ve henüz birleştirilmiş bir ML-DSA kaydı yoktur.
 
-**Uncertainty:** WebFetch could not render GitHub comment threads (only issue bodies), and the GitHub API hit its unauthenticated rate limit. So I could not read the discussion under #2462/#2471, which is where vendor commitments would most likely appear. Worth a re-check with an authenticated `gh`.
+Belirsizlik şudur: web çekimi GitHub yorum akışlarını oluşturamamış, yalnızca issue gövdelerini verebilmiştir ve GitHub API'si kimlik doğrulamasız hız sınırına takılmıştır. Dolayısıyla 2462 ile 2471 numaralı issue'ların altındaki tartışma okunamamıştır ve satıcı taahhütleri büyük olasılıkla oradadır. Kimliği doğrulanmış bir `gh` istemcisiyle yeniden kontrol edilmeye değer.
 
-#### A3. Hardware authenticators
+#### A3. Donanım kimlik doğrulayıcıları
 
-**Yubico — the most concrete data point, and it is explicitly "not a product":**
-[*Future-proofing authentication: A look at the future of post-quantum cryptography*](https://www.yubico.com/blog/future-proofing-authentication-a-look-at-the-future-of-post-quantum-cryptography/), Christopher Harrell, **21 Oct 2025**:
-- *"Prototype ≠ product: The PQ demo shows feasibility and performance direction, not a shipment announcement."*
-- *"New hardware is required: PQ algorithms have bigger footprints; they don't fit on today's keys."*
-- *"Standards progress is underway: FIDO, IETF, and other standards work is progressing, but there's more to do beyond 'make a signature'…"*
-- Beta capabilities described as available to "a limited set of qualified testers"; PQ work characterized as "prototype level," "not product-ready yet."
+**Yubico en somut veri noktasıdır ve açıkça ürün değildir.** Christopher Harrell'in 21 Ekim 2025 tarihli "Future-proofing authentication: A look at the future of post-quantum cryptography" yazısı şunları söylemektedir: "Prototype ≠ product: The PQ demo shows feasibility and performance direction, not a shipment announcement."; "New hardware is required: PQ algorithms have bigger footprints; they don't fit on today's keys."; "Standards progress is underway: FIDO, IETF, and other standards work is progressing, but there's more to do beyond 'make a signature'…". Beta yetenekler sınırlı sayıda nitelikli test kullanıcısına açık olarak tanımlanmakta ve post kuantum çalışması prototip seviyesi ile ürüne hazır değil olarak nitelenmektedir.
 
-Yubico's later PQC post, [*Post-quantum cryptography is now a federal mandate*](https://www.yubico.com/blog/post-quantum-cryptography-is-now-a-federal-mandate-heres-what-it-means-and-what-your-agency-should-do-now/) (Joe Scalone, **26 Jun 2026**), contains **no** YubiKey product/firmware/roadmap commitment — only the generic guidance that keys "need to support PQC algorithms ML-KEM and ML-DSA." Yubico site search for "post-quantum" returns 76 results across 9 pages, but the 2026 items surfaced are webinars, the federal-mandate post, and an unrelated partner mention (HyperCloud: hybrid RSA+ML-KEM *data-at-rest*, not YubiKey signing).
+Yubico'nun sonraki PQC yazısı, yani Joe Scalone'un 26 Haziran 2026 tarihli "Post-quantum cryptography is now a federal mandate" yazısı, hiçbir YubiKey ürünü, ürün yazılımı veya yol haritası taahhüdü içermemekte, yalnızca anahtarların ML-KEM ile ML-DSA desteklemesi gerektiğine dair genel rehberlik vermektedir. Yubico site aramasında post kuantum sorgusu dokuz sayfada 76 sonuç döndürmektedir, ancak 2026 kalemleri web seminerleri, federal zorunluluk yazısı ile ilgisiz bir ortak anmasıdır; HyperCloud'daki hibrit RSA ile ML-KEM duran veri şifrelemesi YubiKey imzalaması değildir.
 
-**No shipping YubiKey ML-DSA product found.** Given Harrell's "new hardware is required," a PQC YubiKey implies a new hardware generation, not a firmware update to the 5.x line.
+Sevk edilen bir ML-DSA YubiKey ürünü bulunamamıştır. Harrell'in yeni donanım gerekiyor ifadesi göz önüne alındığında, bir PQC YubiKey'i 5.x hattına bir ürün yazılımı güncellemesini değil yeni bir donanım kuşağını ima etmektedir.
 
-**Google / OpenSK:** [github.com/google/OpenSK](https://github.com/google/OpenSK) is actively maintained (most recent commit **4 Sep 2026**, ~1–4 week cadence), but recent work is Wasefire framework migration, dependency bumps, CTAPHID timeout fixes, BioEnrollment. **No PQC/Dilithium/ML-DSA commits found.** Google Security Blog's quantum post list shows [*Toward Quantum Resilient Security Keys*](https://security.googleblog.com/2023/08/toward-quantum-resilient-security-keys.html) (15 Aug 2023) with **no follow-up security-key post** through 2026 — the 2026 posts are *Cultivating a robust and efficient quantum-safe HTTPS* (27 Feb 2026) and the Android one below. So the 2023 Dilithium+ECDSA hybrid appears to have **no public follow-up**.
+**Google ile OpenSK.** github.com/google/OpenSK aktif bakımdadır; en son commit 4 Eylül 2026'dır ve bir ile dört haftalık bir kadans vardır. Ancak son çalışmalar Wasefire çatısına göç, bağımlılık yükseltmeleri, CTAPHID zaman aşımı düzeltmeleri ile biyometrik kayıttır. PQC, Dilithium veya ML-DSA commit'i bulunamamıştır. Google Güvenlik Blogu'nun kuantum yazıları listesinde 15 Ağustos 2023 tarihli "Toward Quantum Resilient Security Keys" yazısı vardır ve 2026'ya kadar güvenlik anahtarıyla ilgili bir devam yazısı yoktur; 2026 yazıları 27 Şubat 2026 tarihli kuantuma dayanıklı HTTPS yazısı ile aşağıdaki Android yazısıdır. Yani 2023'teki Dilithium ile ECDSA hibriti kamuya açık bir devam almamış görünmektedir.
 
-**Google Android (adjacent, and the strongest shipping PQC signal):** [*Security for the Quantum Era: Implementing Post-Quantum Cryptography in Android*](https://blog.google/security/security-for-the-quantum-era-implementing-post-quantum-cryptography-in-android/), **25 Mar 2026**: *"Android 17 updates Android Keystore to natively support ML-DSA. This allows applications to leverage quantum-safe signatures entirely within the device's secure hardware."* Also AVB verified boot integrating ML-DSA, and Play hybrid signing blocks. **The post does not mention FIDO2, WebAuthn, passkeys, security keys, or Titan** — ML-DSA is used for platform integrity and app signing, not credentials. Hardware-backed ML-DSA in Keystore is nonetheless the substrate a future Android PQC passkey would need.
+**Google Android**, komşu bir alandır ve sevk edilen en güçlü PQC sinyalidir. 25 Mart 2026 tarihli "Security for the Quantum Era: Implementing Post-Quantum Cryptography in Android" yazısı şöyle demektedir: "Android 17 updates Android Keystore to natively support ML-DSA. This allows applications to leverage quantum-safe signatures entirely within the device's secure hardware." Ayrıca doğrulanmış açılışta ML-DSA entegrasyonu ile Play hibrit imzalama blokları vardır. Yazı FIDO2, WebAuthn, passkey, güvenlik anahtarı veya Titan'dan bahsetmemektedir; ML-DSA platform bütünlüğü ile uygulama imzalaması için kullanılmaktadır, kimlik bilgileri için değil. Yine de anahtar deposunda donanım destekli ML-DSA, gelecekteki bir Android post kuantum passkey'inin ihtiyaç duyacağı alt yapıdır.
 
-**Feitian:** [ftsafe.com/Products/FIDO](https://www.ftsafe.com/Products/FIDO) — ePass FIDO, ePass FIDO-NFC, BioPass FIDO, iePass FIDO, MultiPass FIDO. **No PQC/ML-DSA claims. Not found.**
+**Feitian.** ftsafe.com'un FIDO ürünleri sayfasında ePass FIDO, ePass FIDO-NFC, BioPass FIDO, iePass FIDO ile MultiPass FIDO vardır. PQC veya ML-DSA iddiası yoktur ve bulunamamıştır.
 
-**SoloKeys:** org repos active through Aug 2026 (solo2 updated 2026-08-20, fido-authenticator 2026-08-17, ctap-types 2026-08-10, trussed 2026-08-09). They carry a fork of **libcrux** (updated 2026-08-09) — libcrux upstream is the formally-verified ML-KEM/ML-DSA library, so the primitive is in reach — but **no PQC work visible in the FIDO firmware repos. Not found.**
+**SoloKeys.** Organizasyon depoları Ağustos 2026'ya kadar aktiftir: solo2 20 Ağustos 2026, fido-authenticator 17 Ağustos 2026, ctap-types 10 Ağustos 2026 ile trussed 9 Ağustos 2026'da güncellenmiştir. libcrux'un bir fork'unu taşımaktadırlar, 9 Ağustos 2026'da güncellenmiştir; libcrux yukarı akışta formel olarak doğrulanmış ML-KEM ile ML-DSA kütüphanesidir, yani ilkel erişilebilir durumdadır. Ancak FIDO ürün yazılımı depolarında görünür bir PQC çalışması yoktur ve bulunamamıştır.
 
-**Nitrokey:** [nitrokey.com/news](https://www.nitrokey.com/news) — no PQC items 2025–2026 (NetHSM, NitroPhone, pricing). **Not found.**
+**Nitrokey.** nitrokey.com/news sayfasında 2025 ile 2026'da PQC kalemi yoktur; NetHSM, NitroPhone ile fiyatlandırma vardır. Bulunamamıştır.
 
-**TPM 2.0 / TCG: NOT VERIFIED.** trustedcomputinggroup.org returned **HTTP 403** to both WebFetch and curl-with-browser-UA on `/?s=post-quantum` and the TPM 2.0 Library Specification resource page. I have no evidence either way on a TPM 2.0 revision adding ML-DSA/ML-KEM. This is the biggest unresolved gap in part A.
+**TPM 2.0 ile TCG doğrulanmamıştır.** trustedcomputinggroup.org hem web çekimine hem tarayıcı kullanıcı aracısıyla curl'e HTTP 403 döndürmüştür; post kuantum araması ile TPM 2.0 kütüphane spesifikasyonu kaynak sayfası için denenmiştir. ML-DSA veya ML-KEM ekleyen bir TPM 2.0 revizyonu hakkında iki yönde de kanıt yoktur. Bu, A bölümündeki en büyük çözülmemiş boşluktur.
 
-**Google Titan specifically:** no dedicated PQC announcement found (Titan firmware is OpenSK-adjacent but not identical). **Not found.**
+**Google Titan özelinde** ayrı bir PQC duyurusu bulunamamıştır; Titan ürün yazılımı OpenSK'ya komşudur ancak aynı değildir.
 
-#### A4. Passkey providers
+#### A4. Passkey sağlayıcıları
 
-- **Google/Chrome:** no WebAuthn PQC feature on chromestatus. Querying the chromestatus API for `ML-DSA`, `post-quantum` and `webauthn` returns 15 WebAuthn features, **none PQC**. The only ML-DSA match is [**"Algorithm Updates in WebCrypto"** (id 5198951632470016), status **Proposed**, desktop milestone **154**]: *"Add post-quantum cryptography and a common symmetric AEAD… ML-KEM - 768, 1024; ML-DSA - 44, 65, 87; ChaCha20-Poly1305; X-Wing."* That's WebCrypto, not WebAuthn.
-- **Microsoft:** Security Blog PQC posts — *Quantum-safe security: Progress towards next-generation cryptography* (20 Aug 2025), *Building your cryptographic inventory* (16 Apr 2026), *Accelerating the quantum-safe timeline* (30 Jun 2026), *SFI July 2026 progress report* (10 Jul 2026). **None surfaced passkey/FIDO2/WebAuthn/Entra PQC content** in the listing; I could not open *Accelerating the quantum-safe timeline* (my guessed URL 404'd). Microsoft's actual WebAuthn PQC engagement is visible instead in W3C issues #2417/#2437 (akshayku).
-- **Apple:** **not found** — I had no search capability to locate an Apple PQC-passkey statement, and did not fetch an Apple page. Treat as unverified rather than negative.
-- **1Password:** [1password.com/blog](https://1password.com/blog) — no PQC/quantum-safe posts in the listing. `blog.1password.com/?s=post-quantum` 301s to the unfiltered blog. **Not found.** (1Password's Nick Steele is a listed WebAuthn contributor, but no PQC statement located.)
+**Google ile Chrome.** chromestatus'ta WebAuthn PQC özelliği yoktur. chromestatus API'sinde ML-DSA, post kuantum ile webauthn sorguları 15 WebAuthn özelliği döndürmekte ve hiçbiri PQC değildir. Tek ML-DSA eşleşmesi 5198951632470016 numaralı "Algorithm Updates in WebCrypto" özelliğidir; durumu önerilmiştir ve masaüstü kilometre taşı 154'tür: "Add post-quantum cryptography and a common symmetric AEAD… ML-KEM - 768, 1024; ML-DSA - 44, 65, 87; ChaCha20-Poly1305; X-Wing." Bu WebCrypto'dur, WebAuthn değildir.
 
-#### A5. FIDO Alliance PQC program
+**Microsoft.** Güvenlik blogundaki PQC yazıları 20 Ağustos 2025 tarihli kuantum güvenli güvenlik ilerlemesi, 16 Nisan 2026 tarihli kriptografik envanter oluşturma, 30 Haziran 2026 tarihli kuantum güvenli takvimi hızlandırma ile 10 Temmuz 2026 tarihli güvenli gelecek girişimi ilerleme raporudur. Hiçbiri listede passkey, FIDO2, WebAuthn veya Entra PQC içeriği yüzeye çıkarmamıştır; kuantum güvenli takvimi hızlandırma yazısı açılamamış ve tahmin edilen adres 404 dönmüştür. Microsoft'un asıl WebAuthn PQC katılımı bunun yerine W3C'deki 2417 ile 2437 numaralı issue'larda, yani akshayku üzerinden, görünmektedir.
 
-`fidoalliance.org/?s=post-quantum` returns **10 total results**, all of which I enumerated:
-- Events: *How Passkeys and Post-Quantum Cryptography Are Reshaping the Future of Security* (1 Jul 2026); *Member Event: Future-Proofing Authentication: FIDO, PKI, and the Path to Post-Quantum Security* (11 Aug 2025)
-- Regional workshop recaps (India Aug 2026, Taipei Dec 2025, Korea Dec 2025), seminar decks (Jun 2025 / Mar 2025), APAC Summit 2024
-- News: *IEEE Spectrum: Google Develops Quantum-Safe Security Keys* (1 Sep 2023)
-- One member profile
+**Apple.** Bulunamamıştır; bir Apple PQC passkey beyanını bulacak arama yeteneği olmamış ve bir Apple sayfası çekilmemiştir. Olumsuz değil doğrulanmamış olarak ele alınmalıdır.
 
-**No FIDO Alliance PQC white paper, no PQC working group, and no PQC certification program found.** `fidoalliance.org/specifications/` contains no PQC/ML-DSA mention. The white-paper index pages are JS-rendered and Cloudflare-blocked to curl, so a paper could exist unlisted by site search — but two independent paths turned up nothing.
+**1Password.** 1password.com/blog listesinde PQC veya kuantum güvenli yazı yoktur; `blog.1password.com/?s=post-quantum` adresi filtresiz bloga yönlenmektedir. Bulunamamıştır. 1Password'ten Nick Steele listelenmiş bir WebAuthn katkıcısıdır ancak bir PQC beyanı bulunamamıştır.
 
-#### A6. Part A bottom line
+#### A5. FIDO Alliance'ın PQC programı
 
-PQC in FIDO2/WebAuthn is, today, **standards-committee work plus one admitted prototype**. Nobody ships an ML-DSA FIDO2 authenticator. The three concrete blockers visible in the record are: credential/attestation size (→ Merkle-tree attestation #2456), lack of algorithm agility for migration (→ #2417/#2437), and the hard-wired SHA-256 hashes (→ #2471). Yubico states plainly that PQ "doesn't fit on today's keys."
+`fidoalliance.org/?s=post-quantum` toplam on sonuç döndürmektedir ve hepsi sayılmıştır. Etkinlikler: 1 Temmuz 2026 tarihli passkey'ler ile post kuantum kriptografinin güvenliğin geleceğini nasıl yeniden şekillendirdiği; 11 Ağustos 2025 tarihli üye etkinliği. Bölgesel atölye özetleri: Ağustos 2026 Hindistan, Aralık 2025 Taipei ile Aralık 2025 Kore. Seminer sunumları: Haziran 2025 ile Mart 2025. Ayrıca 2024 APAC zirvesi vardır. Haber olarak 1 Eylül 2023 tarihli IEEE Spectrum alıntısı bulunmaktadır. Bir de üye profili vardır.
 
----
+FIDO Alliance'ın bir PQC beyaz kâğıdı, bir PQC çalışma grubu ile bir PQC sertifikasyon programı bulunamamıştır. `fidoalliance.org/specifications/` sayfası PQC veya ML-DSA'dan hiç bahsetmemektedir. Beyaz kâğıt dizin sayfaları JavaScript ile oluşturulmakta ve curl'e Cloudflare tarafından bloke edilmektedir, dolayısıyla site aramasında listelenmeyen bir kâğıt var olabilir; ancak iki bağımsız yol da bir şey bulamamıştır.
 
-### B) Rust JOSE/JWT libraries with PQC support
+#### A6. A bölümünün sonucu
 
-#### B1. The libraries you named: mostly no
+FIDO2 ile WebAuthn'da PQC bugün standart komitesi çalışması artı kabul edilmiş tek bir prototipten ibarettir. Hiç kimse bir ML-DSA FIDO2 kimlik doğrulayıcısı sevk etmemektedir. Kayıtta görünen üç somut engel şunlardır: kimlik bilgisi ile attestation boyutu, ki Merkle ağacı attestation'ına, yani 2456 numaralı issue'ya işaret etmektedir; göç için algoritma çevikliğinin olmaması, ki 2417 ile 2437 numaralı kayıtlara işaret etmektedir; ve çivilenmiş SHA-256 özetleri, ki 2471 numaralı issue'ya işaret etmektedir. Yubico açıkça post kuantumun bugünün anahtarlarına sığmadığını söylemektedir.
 
-| Crate | Latest | Date | ML-DSA / RFC 9964? |
+### B. PQC destekli Rust JOSE ile JWT kütüphaneleri
+
+#### B1. Adı geçen kütüphaneler, çoğunlukla hayır
+
+| Crate | Son sürüm | Tarih | ML-DSA veya RFC 9964 var mı |
 |---|---|---|---|
-| **josekit** | 0.10.3 | 2025-05-20 | **No.** README supported-signing list is HS/RS/PS/ES256-384-512, ES256K, EdDSA only. No `AKP`, no ML-DSA, no RFC 9964. GitHub issue search for ML-DSA/post-quantum/PQC/Dilithium/AKP → **0 results**. No CHANGELOG.md in repo |
-| **jsonwebtoken** | 11.0.0 | 2026-07-24 | **Not yet — but in flight.** See below |
-| **biscuit-auth** | 6.0.0 | 2025-07-16 | No evidence found (my GitHub query 422'd; not retried). Crate is >1 yr stale. Treat as **not found**, low confidence |
-| **jwt** (rust-jwt, mikkyang) | 0.16.0 | 2022-01-09 | **No.** Unmaintained since 2022 |
-| **jose-jwt** | — | — | **Crate does not exist on crates.io (404)** |
-| **openidconnect** | 4.0.1 | 2025-07-06 | **No.** Repo issue search for ML-DSA/post-quantum/PQC → **0 results** |
-| **oxide-auth** | 0.6.1 | 2024-06-02 | **No.** Stale since Jun 2024 |
-| **rauthy** | — (not on crates.io) | — | **No.** See below |
+| josekit | 0.10.3 | 20 Mayıs 2025 | Yoktur. README'deki desteklenen imzalama listesi HS, RS, PS ile ES'in 256, 384 ve 512 varyantları, ES256K ile EdDSA'dan ibarettir. `AKP` yoktur, ML-DSA yoktur, RFC 9964 yoktur. GitHub'da ML-DSA, post kuantum, PQC, Dilithium ile AKP araması sıfır sonuç vermektedir. Depoda bir değişiklik günlüğü dosyası yoktur |
+| jsonwebtoken | 11.0.0 | 24 Temmuz 2026 | Henüz yoktur ancak uçuştadır; aşağıya bakınız |
+| biscuit-auth | 6.0.0 | 16 Temmuz 2025 | Kanıt bulunamamıştır; GitHub sorgusu 422 döndürmüş ve yeniden denenmemiştir. Crate bir yıldan fazladır bayattır. Bulunamadı olarak, düşük güvenle ele alınmalıdır |
+| jwt, yani rust-jwt, mikkyang | 0.16.0 | 9 Ocak 2022 | Yoktur; 2022'den beri bakımsızdır |
+| jose-jwt | — | — | Crate crates.io'da yoktur, 404 döndürmektedir |
+| openidconnect | 4.0.1 | 6 Temmuz 2025 | Yoktur; depo issue aramasında ML-DSA, post kuantum ile PQC sıfır sonuç vermektedir |
+| oxide-auth | 0.6.1 | 2 Haziran 2024 | Yoktur; Haziran 2024'ten beri bayattır |
+| rauthy | crates.io'da yoktur | — | Yoktur; aşağıya bakınız |
 
-**jsonwebtoken — active ML-DSA work, unmerged:**
-- Issue [#534](https://github.com/Keats/jsonwebtoken/issues/534) *"Support for ML-DSA signed JWTs"*, opened **12 Aug 2026** by PhilSchmieder, citing **RFC 9964** JOSE bindings and noting aws-lc-rs + RustCrypto both have implementations.
-- PR [#535](https://github.com/Keats/jsonwebtoken/pull/535) *"Add support for ML-DSA signatures"*, opened **17 Aug 2026**, last activity **3 Sep 2026**, **status: open, changes requested**. Adds ML-DSA-44/65/87 using RFC 9964 wire names (Rust enum `Algorithm::MLDSA44`), **`kty: "AKP"`** JWK import/export + thumbprints per RFC 9964, PKCS#8 DER/PEM private keys, raw + SPKI public keys, parameter-set length validation. **Two backends: `aws_lc_rs` (bumped 1.15 → 1.18) and `rust_crypto` (the `ml-dsa` crate via `signature` 3.x).** Collaborator arckoor requested changes on JWK serde complexity, test macros, public API surface, alg-family naming. **No merge timeline given.**
-- This is feasible now because 11.0.0 (2026-07-24) introduced the `CryptoProvider` abstraction.
+**jsonwebtoken'da aktif ancak birleştirilmemiş bir ML-DSA çalışması vardır.** 534 numaralı issue, yani "Support for ML-DSA signed JWTs", 12 Ağustos 2026'da PhilSchmieder tarafından açılmış, RFC 9964 JOSE bağlamalarına atıf yapmış ve aws-lc-rs ile RustCrypto'nun ikisinde de implementasyon olduğunu belirtmiştir. 535 numaralı PR, yani "Add support for ML-DSA signatures", 17 Ağustos 2026'da açılmış, son hareketi 3 Eylül 2026'dır ve durumu açık ile değişiklik istendi şeklindedir. ML-DSA-44, 65 ile 87'yi RFC 9964 kablo adlarıyla eklemekte, yani Rust enum'unda `Algorithm::MLDSA44` olarak; RFC 9964 uyarınca `kty: "AKP"` JWK içe ile dışa aktarımı ve parmak izlerini; PKCS#8 DER ile PEM özel anahtarlarını; ham ile SPKI açık anahtarlarını; ve parametre seti uzunluk doğrulamasını getirmektedir. İki arka ucu vardır: `aws_lc_rs`, ki 1.15'ten 1.18'e yükseltilmiştir, ile `rust_crypto`, ki `signature` 3.x üzerinden `ml-dsa` crate'ini kullanmaktadır. Katkıcı arckoor JWK serileştirme karmaşıklığı, test makroları, genel API yüzeyi ile algoritma ailesi isimlendirmesi konusunda değişiklik istemiştir. Bir birleştirme takvimi verilmemiştir. Bu, 24 Temmuz 2026 tarihli 11.0.0 sürümünün `CryptoProvider` soyutlamasını getirmesiyle mümkün olmuştur.
 
-**rauthy — wants it, has not shipped it:** issue [#857](https://github.com/sebadob/rauthy/issues/857) *"Feat: FIPS 204"* (opened **18 Apr 2025**, still open, labels `enhancement`/`future`, assigned to maintainer sebadob). Maintainer states the upstream JWT crate rejected the FIPS 204 proposal, so rauthy built its own JWT stack instead. The rauthy CHANGELOG has exactly **one** PQC hit (line 3654, in the **v0.30.0** section, PR [#941](https://github.com/sebadob/rauthy/pull/941) closed 2025-05-14): *"…makes Rauthy independent for things like PQC algorithms / FIPS 204 in the future."* — i.e. groundwork only. **No ML-DSA in shipped rauthy.**
+**rauthy bunu istemektedir ancak sevk etmemiştir.** 857 numaralı issue, yani "Feat: FIPS 204", 18 Nisan 2025'te açılmıştır, hâlâ açıktır, etiketleri iyileştirme ile gelecek şeklindedir ve bakımcı sebadob'a atanmıştır. Bakımcı, yukarı akıştaki JWT crate'inin FIPS 204 önerisini reddettiğini, bu yüzden rauthy'nin kendi JWT yığınını inşa ettiğini belirtmektedir. rauthy'nin değişiklik günlüğünde tam olarak bir PQC eşleşmesi vardır; 3654 numaralı satırda, v0.30.0 bölümünde, 14 Mayıs 2025'te kapanan 941 numaralı PR şöyle demektedir: "…makes Rauthy independent for things like PQC algorithms / FIPS 204 in the future." Yani yalnızca zemin hazırlığıdır ve sevk edilen rauthy'de ML-DSA yoktur.
 
-#### B2. Crates you didn't ask about that *do* implement ML-DSA JWS — the actual answer
+#### B2. Sorulmayan ancak ML-DSA JWS uygulayan crate'ler, asıl cevap
 
-crates.io search surfaced three, two of which explicitly implement RFC 9964 semantics:
+crates.io araması üç tane yüzeye çıkarmıştır ve ikisi RFC 9964 semantiğini açıkça uygulamaktadır.
 
-**`jwt-simple` 0.13.1 (2026-08-19) — by far the most-used, and it ships today.**
-- 6,157,377 total downloads / 994,638 recent. Repo: [jedisct1/rust-jwt-simple](https://github.com/jedisct1/rust-jwt-simple)
-- ML-DSA landed in **0.13.0, released 2026-07-30**; release note: *"ML-DSA is now supported."*
-- README algorithm table lists `ML-DSA-44`, `ML-DSA-65`, `ML-DSA-87` ("FIPS 204, post-quantum"), with `MLDSA44KeyPair`/`MLDSA65KeyPair`/`MLDSA87KeyPair`. README recommends ML-DSA-44.
-- Backend: **`superboring` 0.1.14** (pure-Rust). Cargo.toml comment: *"the current `boring` crate does not implement ML-DSA yet, so ML-DSA signatures always use a Rust implementation until a new version of the crate is out."*
-- **Caveat:** the `alg` names match RFC 9964 wire names, but I found **no `AKP` or RFC 9964 reference** in its README — JWK/`kty: "AKP"` support is **unverified/likely absent**. If you need RFC 9964 JWK interop specifically, verify before relying on it.
+**`jwt-simple` 0.13.1, 19 Ağustos 2026, açık ara en çok kullanılan ve bugün sevk edilendir.** Toplam 6.157.377 indirmesi ile 994.638 yakın dönem indirmesi vardır; deposu jedisct1/rust-jwt-simple'dır. ML-DSA 30 Temmuz 2026'da çıkan 0.13.0 sürümünde gelmiştir ve sürüm notu "ML-DSA is now supported" demektedir. README algoritma tablosu `ML-DSA-44`, `ML-DSA-65` ile `ML-DSA-87`'yi FIPS 204 post kuantum olarak listelemekte ve `MLDSA44KeyPair`, `MLDSA65KeyPair` ile `MLDSA87KeyPair` tiplerini sunmaktadır; README ML-DSA-44'ü önermektedir. Arka ucu saf Rust olan `superboring` 0.1.14'tür ve Cargo.toml yorumu şöyledir: mevcut `boring` crate'i henüz ML-DSA uygulamadığı için ML-DSA imzaları crate'in yeni bir sürümü çıkana kadar her zaman bir Rust implementasyonu kullanmaktadır. Uyarı şudur: algoritma adları RFC 9964 kablo adlarıyla eşleşmektedir ancak README'de `AKP` veya RFC 9964 referansı bulunamamıştır; JWK ile `kty: "AKP"` desteği doğrulanmamıştır ve muhtemelen yoktur. Özellikle RFC 9964 JWK birlikte çalışabilirliği gerekiyorsa güvenmeden önce doğrulanmalıdır.
 
-**`jose-rs` 0.7.0 (2026-08-05) — the most standards-complete PQC JOSE crate found.** Repo: [kushaldas/jose-rs](https://github.com/kushaldas/jose-rs). Created 2026-04-02; 1,300 downloads (new, small).
-- README *Supported algorithms*: **"JWS post-quantum signatures (opt-in): ML-DSA-44 / ML-DSA-65 / ML-DSA-87 (FIPS 204), plus the six composite algorithms from `draft-ietf-jose-pq-composite-sigs-03`: ML-DSA-44-ES256, ML-DSA-65-ES256, ML-DSA-87-ES384, ML-DSA-44-Ed25519, ML-DSA-65-Ed25519, ML-DSA-87-Ed448."**
-- JWK row: "RSA / EC / oct / OKP / **AKP** key types". README §"JWK wire format (`kty = "AKP"`)" says *"Per `draft-ietf-cose-dilithium`, ML-DSA keys use the new `"AKP"`…"* — note it cites the **COSE draft, not RFC 9964 by number**; composite algs reuse AKP members with raw concatenated keys.
-- Feature flag `post-quantum` (off by default). Backend: `ml-dsa ^0.1.0` (RustCrypto) via the author's `kryptering` crate (145k downloads). Examples `jwt_ml_dsa` and `jwt_composite` included. **This is the only crate found that also does hybrid/composite ML-DSA+classical JWS.**
+**`jose-rs` 0.7.0, 5 Ağustos 2026, bulunan en standartlara uygun PQC JOSE crate'idir.** Deposu kushaldas/jose-rs'tir; 2 Nisan 2026'da oluşturulmuştur ve 1.300 indirmesi vardır, yani yeni ile küçüktür. README'deki desteklenen algoritmalar bölümü şöyle demektedir: isteğe bağlı JWS post kuantum imzaları olarak ML-DSA-44, ML-DSA-65 ile ML-DSA-87, yani FIPS 204, artı `draft-ietf-jose-pq-composite-sigs-03` belgesindeki altı bileşik algoritma, yani ML-DSA-44-ES256, ML-DSA-65-ES256, ML-DSA-87-ES384, ML-DSA-44-Ed25519, ML-DSA-65-Ed25519 ile ML-DSA-87-Ed448. JWK satırı RSA, EC, oct, OKP ile AKP anahtar tiplerini listelemektedir. README'nin AKP kablo biçimi bölümü şöyle demektedir: `draft-ietf-cose-dilithium` uyarınca ML-DSA anahtarları yeni `AKP` tipini kullanmaktadır; dikkat edilmelidir ki numarasıyla RFC 9964'e değil COSE taslağına atıf yapmaktadır. Bileşik algoritmalar AKP üyelerini ham birleştirilmiş anahtarlarla yeniden kullanmaktadır. Özellik bayrağı `post-quantum`'dur ve varsayılan kapalıdır. Arka ucu yazarın `kryptering` crate'i üzerinden RustCrypto'nun `ml-dsa ^0.1.0` crate'idir; `kryptering`'in 145 bin indirmesi vardır. `jwt_ml_dsa` ile `jwt_composite` örnekleri dahildir. Bu, hibrit ile bileşik ML-DSA artı klasik JWS'i de yapan bulunan tek crate'tir.
 
-**`jose4rs` 0.5.0 (2026-09-05) — brand new, tiny.** Repo: [ogital-net/jose4rs](https://github.com/ogital-net/jose4rs). Created 2026-08-24, 79 downloads, 5 releases in 12 days. Port of Java jose4j. README: ML-DSA-44/65/87 under an optional **`pq-ml-dsa`** feature which "implies `aws-lc`"; supports "optional `AKP` keys for ML-DSA" per RFC 9964. **Too immature to depend on** (version churn, ~zero adoption), but confirms the RFC 9964 pattern is being implemented independently.
+**`jose4rs` 0.5.0, 5 Eylül 2026, yepyeni ve küçüktür.** Deposu ogital-net/jose4rs'tir; 24 Ağustos 2026'da oluşturulmuştur, 79 indirmesi vardır ve 12 günde beş sürüm çıkarmıştır. Java jose4j'nin bir portudur. README'ye göre ML-DSA-44, 65 ile 87 opsiyonel bir `pq-ml-dsa` özelliği altındadır ve bu özellik `aws-lc` kullanımını ima etmektedir; RFC 9964 uyarınca ML-DSA için opsiyonel `AKP` anahtarlarını desteklemektedir. Bağımlılık alınamayacak kadar olgunlaşmamıştır, çünkü sürüm çalkantısı vardır ve benimsenmesi sıfıra yakındır; ancak RFC 9964 deseninin bağımsız olarak uygulandığını doğrulamaktadır.
 
-Also surfaced, informational: `pq-algorithm-id` 0.0.1 (2026-01-26, "Algorithm identifier mappings (JOSE, COSE, X.509)", 25 downloads, no repo) and `pq-oid` 1.0.3 (2026-02-20). A crates.io search for **`rfc9964` returns 0 crates**.
+Bilgi amaçlı olarak `pq-algorithm-id` 0.0.1, 26 Ocak 2026, "Algorithm identifier mappings (JOSE, COSE, X.509)", 25 indirme ile deposuz, ve `pq-oid` 1.0.3, 20 Şubat 2026, da yüzeye çıkmıştır. crates.io'da `rfc9964` araması sıfır crate döndürmektedir.
 
-Primitive layer, for reference: **`ml-dsa` 0.1.1 (RustCrypto/signatures, 2026-06-05)**, first stable 0.1.0 on 2026-05-17 — pure Rust, FIPS-204 final. **`fips204` 0.4.6 (2024-12-22)** — integritychain, stale ~21 months.
+İlkel katman referans olarak şöyledir: `ml-dsa` 0.1.1, RustCrypto/signatures, 5 Haziran 2026; ilk kararlı sürümü 0.1.0, 17 Mayıs 2026'dır; saf Rust'tır ve FIPS 204 final sürümünü uygulamaktadır. `fips204` 0.4.6, 22 Aralık 2024, integritychain'indir ve yaklaşık 21 aydır bayattır.
 
-#### B3. FIPS 140-3 validated ML-DSA reachable from Rust — the key negative result
+#### B3. Rust'tan erişilebilir FIPS 140-3 validasyonlu ML-DSA, kilit olumsuz sonuç
 
-**No CMVP-validated module I checked has ML-DSA in its approved algorithm list.**
+Kontrol edilen hiçbir CMVP validasyonlu modülün onaylı algoritma listesinde ML-DSA yoktur.
 
-**AWS-LC** ([crypto/fipsmodule/FIPS.md](https://github.com/aws/aws-lc/blob/main/crypto/fipsmodule/FIPS.md)) — awarded certificates:
+AWS-LC'nin FIPS dokümanına göre verilmiş sertifikalar şunlardır.
 
-| Module | Cert |
+| Modül | Sertifika |
 |---|---|
-| AWS-LC-FIPS v1.0 | [#4631](https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/4631) |
-| AWS-LC Cryptographic Module (dynamic, NetOS) | [#5146](https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/5146) |
-| AWS-LC-FIPS v2.0 (dynamic) | [#5429](https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/5429) |
-| AWS-LC-FIPS v2.0 (static) | [#4816](https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/4816) |
-| AWS-LC-FIPS v3.1 (dynamic) | [#5298](https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/5298) |
-| AWS-LC-FIPS v3.1 (static) | [#5314](https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/5314) |
+| AWS-LC-FIPS v1.0 | 4631 |
+| AWS-LC Cryptographic Module, dinamik, NetOS | 5146 |
+| AWS-LC-FIPS v2.0, dinamik | 5429 |
+| AWS-LC-FIPS v2.0, statik | 4816 |
+| AWS-LC-FIPS v3.1, dinamik | 5298 |
+| AWS-LC-FIPS v3.1, statik | 5314 |
 
-I opened the two current ones on csrc.nist.gov:
-- **Cert #5298** — "AWS-LC 3 Cryptographic Module (dynamic)", **validated 2026-06-03**, active, sunset 2031-06-02. Approved algorithms include **ML-KEM KeyGen + EncapDecap** (CAVP A6176–A6180, A6184, A6278–A6279). **ML-DSA: not present.**
-- **Cert #5314** — "AWS-LC 3 Cryptographic Module (static)", **validated 2026-06-05**, active, sunset 2031-06-04. **ML-KEM present** (CAVP A6288–A6315). **ML-DSA: not present.**
+Güncel iki tanesi csrc.nist.gov'da açılmıştır. 5298 numaralı sertifika "AWS-LC 3 Cryptographic Module (dynamic)" içindir, 3 Haziran 2026'da validasyondan geçmiştir, aktiftir ve batımı 2 Haziran 2031'dir; onaylı algoritmaları ML-KEM anahtar üretimi ile kapsülleme ve çözme işlemlerini içermektedir, CAVP numaraları A6176 ile A6180, A6184 ve A6278 ile A6279'dur; ML-DSA bulunmamaktadır. 5314 numaralı sertifika "AWS-LC 3 Cryptographic Module (static)" içindir, 5 Haziran 2026'da validasyondan geçmiştir, aktiftir ve batımı 4 Haziran 2031'dir; ML-KEM bulunmaktadır, CAVP numaraları A6288 ile A6315 arasıdır; ML-DSA bulunmamaktadır.
 
-**AWS-LC-FIPS v4.0 (static and dynamic) is on the CMVP Modules-In-Process list — tested by an accredited lab, submitted to NIST, not yet certified.** FIPS 4.0 is the module that adds ML-DSA.
+AWS-LC-FIPS v4.0'ın statik ile dinamik biçimleri CMVP'nin işlemdeki modüller listesindedir; akredite bir laboratuvar tarafından test edilmiş ve NIST'e sunulmuştur ancak henüz sertifikalanmamıştır. ML-DSA'yı ekleyen modül FIPS 4.0'dır.
 
-This ties directly to Rust: **aws-lc-rs 1.18.0 (crates.io publish date 2026-08-07)** stabilized the ML-DSA APIs. `aws-lc-rs/src/unstable/signature.rs` now reads *"The ML-DSA signature APIs have been stabilized; use `crate::signature` instead"*, with deprecated aliases for `PqdsaKeyPair`/`PqdsaPrivateKey`/`PqdsaPublicKey`. `signature.rs` exposes `ML_DSA_44`/`ML_DSA_65`/`ML_DSA_87` (+ `_SIGNING` variants), documented as **pure ML-DSA with an empty context string — HashML-DSA (pre-hash) is not supported**. Release notes: *"ML-DSA no longer requires the `unstable` feature, and is now available under `fips` — the FIPS 4.0 module provides ML-DSA, which is what had kept these APIs unstable"*, and 1.18.0 upgrades aws-lc-fips-sys from FIPS 3.x to 4.x, which *"has completed validation testing… and has been submitted to NIST for certification."*
+Bu doğrudan Rust'la ilgilidir: aws-lc-rs 1.18.0, crates.io yayın tarihi 7 Ağustos 2026, ML-DSA API'lerini kararlı hâle getirmiştir. `aws-lc-rs/src/unstable/signature.rs` dosyası artık ML-DSA imza API'lerinin kararlı hâle geldiğini ve bunun yerine `crate::signature` kullanılması gerektiğini söylemekte, `PqdsaKeyPair`, `PqdsaPrivateKey` ile `PqdsaPublicKey` için kullanımdan kaldırılmış takma adlar sunmaktadır. `signature.rs` dosyası `ML_DSA_44`, `ML_DSA_65` ile `ML_DSA_87` ve imzalama varyantlarını açmakta, bunları boş bağlam dizesiyle saf ML-DSA olarak belgelemekte ve ön özetli ML-DSA'nın desteklenmediğini belirtmektedir. Sürüm notları şöyledir: ML-DSA artık `unstable` özelliğini gerektirmemektedir ve `fips` altında kullanılabilirdir, çünkü FIPS 4.0 modülü ML-DSA sağlamaktadır ve bu API'leri kararsız tutan şey buydu; ayrıca 1.18.0, aws-lc-fips-sys'i FIPS 3.x'ten 4.x'e yükseltmektedir ve bu modül validasyon testini tamamlamış ile sertifikasyon için NIST'e sunulmuştur.
 
-> **Date discrepancy flagged:** the GitHub release page summarizer reported v1.18.0 as "August 7, **2024**." crates.io is authoritative and says **2026-08-07**; aws-lc-rs 1.18.1 and 1.17.4 both published 2026-09-01. Treat 2024 as a summarizer error.
+> **Tarih tutarsızlığı işaretlenmiştir.** GitHub sürüm sayfası özetleyicisi v1.18.0'ı 7 Ağustos 2024 olarak raporlamıştır. crates.io otoriterdir ve 7 Ağustos 2026 demektedir; aws-lc-rs 1.18.1 ile 1.17.4'ün ikisi de 1 Eylül 2026'da yayımlanmıştır. 2024 bir özetleyici hatası olarak ele alınmalıdır.
 
-**So the trap is:** upgrading to aws-lc-rs 1.18 to get FIPS-mode ML-DSA moves you from a **certified** module (3.x, #5298/#5314) to an **uncertified, in-process** one (4.0). Staying on 3.x keeps the certificate but has no ML-DSA. There is currently no way to get *validated* ML-DSA through aws-lc-rs.
+Dolayısıyla tuzak şudur: FIPS modunda ML-DSA almak için aws-lc-rs 1.18'e yükseltmek sizi sertifikalı bir modülden, yani 3.x ile 5298 ve 5314'ten, sertifikasız ve işlemdeki bir modüle, yani 4.0'a taşır. 3.x'te kalmak sertifikayı korur ancak ML-DSA vermez. Şu anda aws-lc-rs üzerinden validasyonlu ML-DSA almanın bir yolu yoktur.
 
-**wolfSSL** ([wolfssl.com/license/fips](https://www.wolfssl.com/license/fips/)): active certs **#5041** and **#4718** (both valid through 2030-07-17); historical FIPS 140-2 **#3389**, **#2425**. **Neither active cert includes ML-DSA or ML-KEM.** wolfCrypt **v7.0.0** is "in early development," "pending submission," with planned FIPS 203 ML-KEM and FIPS 204 ML-DSA. The page notes FIPS 140-2 stops being accepted for new federal procurement after **September 2026**.
+**wolfSSL.** wolfssl.com/license/fips sayfasına göre aktif sertifikalar 5041 ile 4718'dir ve ikisi de 17 Temmuz 2030'a kadar geçerlidir; tarihsel FIPS 140-2 sertifikaları 3389 ile 2425'tir. Hiçbir aktif sertifika ML-DSA veya ML-KEM içermemektedir. wolfCrypt v7.0.0 erken geliştirme aşamasındadır, sunum beklemektedir ve planlanan FIPS 203 ML-KEM ile FIPS 204 ML-DSA desteğini içermektedir. Sayfa, FIPS 140-2'nin Eylül 2026'dan sonra yeni federal alımlar için kabul edilmeyi bırakacağını belirtmektedir.
 
-**BoringCrypto:** **not checked** — I ran out of a usable search path. Unverified.
+**BoringCrypto** kontrol edilmemiştir; kullanılabilir bir arama yolu kalmamıştır ve doğrulanmamıştır.
 
-#### B4. Part B bottom line
+#### B4. B bölümünün sonucu
 
-If you want ML-DSA JWS in Rust **today**: `jwt-simple` 0.13.1 (mature, high adoption, pure-Rust superboring backend, but AKP/JWK interop unverified) or `jose-rs` 0.7.0 (proper `AKP` JWK + composite hybrid algs, but 1.3k downloads and 5 months old). `jsonwebtoken` PR #535 is the one to watch if you want ML-DSA in the mainstream crate with a choice of aws-lc-rs or RustCrypto backends. **Nothing in Rust gives you FIPS-140-3-validated ML-DSA** — that waits on AWS-LC-FIPS 4.0 clearing CMVP or wolfCrypt 7.0.0 being submitted.
+Rust'ta bugün ML-DSA JWS isteniyorsa iki seçenek vardır: `jwt-simple` 0.13.1, ki olgundur, benimsenmesi yüksektir ve saf Rust superboring arka ucunu kullanır ancak AKP ile JWK birlikte çalışabilirliği doğrulanmamıştır; ya da `jose-rs` 0.7.0, ki düzgün bir `AKP` JWK'sı ile bileşik hibrit algoritmalar sunar ancak 1,3 bin indirmelidir ve beş aylıktır. `jsonwebtoken`'ın 535 numaralı PR'ı, ana akım crate'te aws-lc-rs ile RustCrypto arka uçları arasında seçim yaparak ML-DSA isteniyorsa izlenmesi gereken çalışmadır. Rust'ta hiçbir şey size FIPS 140-3 validasyonlu ML-DSA vermemektedir; bu, AWS-LC-FIPS 4.0'ın CMVP'yi geçmesini veya wolfCrypt 7.0.0'ın sunulmasını beklemektedir.
 
----
+### Açık belirsizlik ile bulunamayanlar defteri
 
-### Explicit uncertainty / not-found ledger
+Doğrulanmayan ve bloke olan: TCG ile TPM 2.0 PQC durumu; trustedcomputinggroup.org denenen her çekim yoluna 403 döndürmektedir ve iki yönde de bir sonuç yoktur.
 
-- **Not verified (blocked):** TCG / TPM 2.0 PQC status — trustedcomputinggroup.org returns 403 to every fetch path I tried. No conclusion either way.
-- **Not verified (no search):** Apple PQC passkey statements. Absence here is my tooling, not evidence.
-- **Not read (rate limit):** comment threads on W3C issues #2462, #2471, #2448, #2456 — WebFetch renders only issue bodies, and the GitHub API hit the 60/hr unauthenticated cap. Vendor commitments would most plausibly live there. Re-run with authenticated `gh`.
-- **Low-confidence negative:** biscuit-auth PQC (one query 422'd, not retried).
-- **Not checked:** BoringCrypto CMVP status; Microsoft *Accelerating the quantum-safe timeline* (30 Jun 2026) body; FIDO white-paper index behind Cloudflare/JS.
-- **Fabrication guard:** every version number and date above came from crates.io API, raw GitHub files, csrc.nist.gov certificate pages, or chromestatus API — except the single flagged aws-lc-rs "2024" summarizer error, which I corrected against crates.io.
+Doğrulanmayan ve arama yapılamayan: Apple'ın PQC passkey beyanları. Buradaki yokluk araç eksikliğidir, kanıt değildir.
 
----
+Okunamayan ve hız sınırına takılan: W3C'deki 2462, 2471, 2448 ile 2456 numaralı issue'ların yorum akışları; web çekimi yalnızca issue gövdelerini oluşturmakta ve GitHub API'si saatte 60 isteklik kimlik doğrulamasız sınıra takılmaktadır. Satıcı taahhütleri en makul olarak orada bulunur ve kimliği doğrulanmış bir `gh` istemcisiyle yeniden çalıştırılmalıdır.
 
-## HAT 4 — TLS'te Post-Quantum — Gerçek Dağıtım Verisi
+Düşük güvenli olumsuz: biscuit-auth'un PQC durumu; bir sorgu 422 döndürmüş ve yeniden denenmemiştir.
 
-### Post-Quantum Cryptography in TLS — state of play, 8 September 2026
+Kontrol edilmeyen: BoringCrypto'nun CMVP durumu; Microsoft'un 30 Haziran 2026 tarihli kuantum güvenli takvimi hızlandırma yazısının gövdesi; Cloudflare ile JavaScript arkasındaki FIDO beyaz kâğıt dizini.
 
-**Method note / limitation up front:** the WebSearch budget for this session was already exhausted before I started, so everything below comes from direct fetches of primary sources (IANA CSVs, IETF Datatracker + RFC Editor, chromestatus/chromiumdash APIs, Chrome policy templates JSON, openssl-library.org, go.dev, firefox.com release notes, support.apple.com, BoringSSL git, crates.io, blog.cloudflare.com). **`radar.cloudflare.com` is behind a Cloudflare bot challenge and returned HTTP 403 to both WebFetch and curl on every attempt (page HTML, `/post-quantum`, `/adoption-and-usage`, and the internal API paths); `api.cloudflare.com/client/v4/radar/*` requires an API token.** So I could not read the live September 2026 Radar figure. I have not invented one.
+Uydurma koruması: yukarıdaki her sürüm numarası ile tarih crates.io API'sinden, ham GitHub dosyalarından, csrc.nist.gov sertifika sayfalarından veya chromestatus API'sinden gelmektedir; tek istisna işaretlenen aws-lc-rs 2024 özetleyici hatasıdır ve crates.io'ya karşı düzeltilmiştir.
 
 ---
 
-### 1. X25519MLKEM768 adoption
+## Hat 4 — TLS'te post kuantum, gerçek dağıtım verisi
 
-#### What I could NOT get
-The exact current Cloudflare Radar percentage for September 2026. Radar is inaccessible without a browser/token. **Marked unknown — not estimated.**
+Bu, 8 Eylül 2026 itibarıyla TLS'te post kuantum kriptografinin durumudur.
 
-#### What is documented in primary Cloudflare sources
-| Date | Figure | Source |
+Yöntem notu ile sınırlama baştan verilmiştir: bu oturumun web arama bütçesi başlamadan önce zaten tükenmişti, dolayısıyla aşağıdaki her şey birincil kaynakların doğrudan çekiminden gelmektedir; IANA CSV dosyaları, IETF Datatracker ile RFC Editor, chromestatus ile chromiumdash API'leri, Chrome politika şablonu JSON'ları, openssl-library.org, go.dev, Firefox sürüm notları, support.apple.com, BoringSSL git deposu, crates.io ile blog.cloudflare.com kullanılmıştır. radar.cloudflare.com bir Cloudflare bot meydan okumasının arkasındadır ve hem web çekimine hem curl'e her denemede HTTP 403 döndürmüştür; sayfa HTML'i, `/post-quantum`, `/adoption-and-usage` ile iç API yolları denenmiştir. `api.cloudflare.com/client/v4/radar/*` bir API jetonu gerektirmektedir. Dolayısıyla canlı Eylül 2026 Radar rakamı okunamamıştır ve bir rakam uydurulmamıştır.
+
+### 1. X25519MLKEM768 benimsenmesi
+
+**Alınamayan.** Eylül 2026 için tam güncel Cloudflare Radar yüzdesi alınamamıştır. Radar bir tarayıcı veya jeton olmadan erişilemezdir. Bilinmiyor olarak işaretlenmiştir ve tahmin edilmemiştir.
+
+**Cloudflare'in birincil kaynaklarında belgelenenler.**
+
+| Tarih | Rakam | Kaynak |
 |---|---|---|
-| Start of 2024 | "under 3%" | [radar-origin-pq-key-transparency-aspa](https://blog.cloudflare.com/radar-origin-pq-key-transparency-aspa/) (27 Feb 2026) |
-| Sept 2025 | 39% of top 100k domains *support* PQ key agreement | [pq-2025](https://blog.cloudflare.com/pq-2025/) |
-| Oct 2025 | "over half of human-initiated traffic with Cloudflare is protected … with post-quantum encryption" | [pq-2025](https://blog.cloudflare.com/pq-2025/) (28 Oct 2025) |
-| Feb 2026 | "over 60%" | [radar-origin-pq-key-transparency-aspa](https://blog.cloudflare.com/radar-origin-pq-key-transparency-aspa/) |
-| **7 Apr 2026** | **"over 65% of human traffic to Cloudflare is post-quantum encrypted"** | [post-quantum-roadmap](https://blog.cloudflare.com/post-quantum-roadmap/) |
-| **23 Jun 2026** | **"over two-thirds" of browser traffic to Cloudflare** | [post-quantum-eo-2026](https://blog.cloudflare.com/post-quantum-eo-2026/) |
+| 2024 başı | Yüzde üçün altı | 27 Şubat 2026 tarihli radar yazısı |
+| Eylül 2025 | En büyük 100 bin alan adının %39'u post kuantum anahtar anlaşmasını desteklemektedir | pq-2025 |
+| Ekim 2025 | Cloudflare ile insan kaynaklı trafiğin yarısından fazlası post kuantum şifrelemeyle korunmaktadır | pq-2025, 28 Ekim 2025 |
+| Şubat 2026 | Yüzde altmışın üzerinde | Radar yazısı |
+| 7 Nisan 2026 | Cloudflare'e gelen insan trafiğinin %65'inden fazlası post kuantum şifrelidir | post-quantum-roadmap |
+| 23 Haziran 2026 | Cloudflare'e gelen tarayıcı trafiğinin üçte ikisinden fazlası | post-quantum-eo-2026 |
 
-Origin-side (Cloudflare → customer origin) is far behind: **~10% of origins support PQ-preferred key agreement as of Feb 2026, up ~10x from <1% at the start of 2025.**
+Kaynak sunucu tarafı, yani Cloudflare'den müşteri kaynak sunucusuna giden yön, çok geridedir: Şubat 2026 itibarıyla kaynakların yaklaşık %10'u post kuantum tercihli anahtar anlaşmasını desteklemektedir ve bu, 2025 başındaki yüzde birin altından yaklaşık on kat artıştır.
 
-Caveat on the metric: Cloudflare's headline number is "human/browser-initiated" traffic. The all-traffic number (including bots/API clients) is lower; I could not retrieve it.
+Metrik uyarısı şudur: Cloudflare'in manşet rakamı insan ile tarayıcı kaynaklı trafiktir. Botlar ile API istemcilerini de içeren tüm trafik rakamı daha düşüktür ve alınamamıştır.
 
-Canonical URL: `https://radar.cloudflare.com/post-quantum` (dedicated PQ section, plus a per-hostname "does this site support PQ" checker announced Feb 2026).
+Kanonik adres `https://radar.cloudflare.com/post-quantum`'dur; adanmış bir post kuantum bölümü ile Şubat 2026'da duyurulan, bir sitenin post kuantumu destekleyip desteklemediğini sorgulayan bir denetleyici içermektedir.
 
----
+### 2. `draft-ietf-tls-ecdhe-mlkem` artık RFC 10024'tür
 
-### 2. draft-ietf-tls-ecdhe-mlkem → **now RFC 10024**
+RFC 10024 olarak Ağustos 2026'da Standards Track, yani önerilen standart olarak yayımlanmıştır. Başlığı "Post-Quantum Traditional (PQ/T) Hybrid Key Agreement Mechanisms for TLS 1.3"tür. Yazarları K. Kwiatkowski (PQShield), P. Kampanakis (AWS), B. E. Westerbaan (Cloudflare) ile D. Stebila'dır (Waterloo); sorumlu alan direktörü Paul Wouters'tır. Son internet taslağı revizyonu `draft-ietf-tls-ecdhe-mlkem-05`'tir ve Datatracker damgası 10 Ağustos 2026'dır. Kaynakları rfc-editor.org/rfc/rfc10024.txt ile datatracker.ietf.org/doc/rfc10024'tür.
 
-- **Published as RFC 10024, August 2026, Standards Track (Proposed Standard).** Title: *Post-Quantum Traditional (PQ/T) Hybrid Key Agreement Mechanisms for TLS 1.3*. Authors: K. Kwiatkowski (PQShield), P. Kampanakis (AWS), B. E. Westerbaan (Cloudflare), D. Stebila (Waterloo). Responsible AD: Paul Wouters.
-- Final I-D revision: **draft-ietf-tls-ecdhe-mlkem-05**, datatracker timestamp 2026-08-10.
-- https://www.rfc-editor.org/rfc/rfc10024.txt · https://datatracker.ietf.org/doc/rfc10024/
+**IANA TLS desteklenen gruplar kaydı**, hem kayıt CSV dosyasına hem RFC 10024'ün IANA bölümüne karşı doğrulanmıştır. Kaynağı `https://www.iana.org/assignments/tls-parameters/tls-parameters-8.csv`'dir.
 
-#### IANA TLS Supported Groups — verified against the registry CSV *and* RFC 10024 §IANA
-Source: `https://www.iana.org/assignments/tls-parameters/tls-parameters-8.csv`
-
-| Value | Hex | Name | DTLS-OK | Recommended | Reference |
+| Değer | Onaltılık | İsim | DTLS uygun | Önerilen | Referans |
 |---|---|---|---|---|---|
-| 4587 | **0x11EB** | SecP256r1MLKEM768 | Y | N | RFC 10024 |
-| 4588 | **0x11EC** | **X25519MLKEM768** | Y | **Y** | RFC 10024 |
-| 4589 | **0x11ED** | SecP384r1MLKEM1024 | Y | N | RFC 10024 |
-| 512 | 0x0200 | MLKEM512 | Y | N | draft-connolly-tls-mlkem-key-agreement-05 |
-| 513 | 0x0201 | MLKEM768 | Y | N | draft-connolly-tls-mlkem-key-agreement-05 |
-| 514 | 0x0202 | MLKEM1024 | Y | N | draft-connolly-tls-mlkem-key-agreement-05 |
-| 4585 | 0x11E9 | SecP256r1MLKEM512 | Y | N | draft-rosomakho-tls-ecdhe-mlkem512-00 |
-| 4586 | 0x11EA | MLKEM512X25519 | Y | N | draft-rosomakho-tls-ecdhe-mlkem512-00 |
-| 4590 | 0x11EE | curveSM2MLKEM768 | N | N | draft-yang-tls-hybrid-sm2-mlkem-03 |
-| 25497 | 0x63A5 | X25519Kyber768Draft00 **(OBSOLETE)** | Y | **D** (discouraged) | obsoleted by RFC 10024 |
-| 25498 | 0x63A6 | SecP256r1Kyber768Draft00 **(OBSOLETE)** | Y | **D** | obsoleted by RFC 10024 |
+| 4587 | 0x11EB | SecP256r1MLKEM768 | Evet | Hayır | RFC 10024 |
+| 4588 | 0x11EC | X25519MLKEM768 | Evet | Evet | RFC 10024 |
+| 4589 | 0x11ED | SecP384r1MLKEM1024 | Evet | Hayır | RFC 10024 |
+| 512 | 0x0200 | MLKEM512 | Evet | Hayır | `draft-connolly-tls-mlkem-key-agreement-05` |
+| 513 | 0x0201 | MLKEM768 | Evet | Hayır | Aynı |
+| 514 | 0x0202 | MLKEM1024 | Evet | Hayır | Aynı |
+| 4585 | 0x11E9 | SecP256r1MLKEM512 | Evet | Hayır | `draft-rosomakho-tls-ecdhe-mlkem512-00` |
+| 4586 | 0x11EA | MLKEM512X25519 | Evet | Hayır | Aynı |
+| 4590 | 0x11EE | curveSM2MLKEM768 | Hayır | Hayır | `draft-yang-tls-hybrid-sm2-mlkem-03` |
+| 25497 | 0x63A5 | X25519Kyber768Draft00, eskimiştir | Evet | Önerilmez | RFC 10024 ile geçersiz kılınmıştır |
+| 25498 | 0x63A6 | SecP256r1Kyber768Draft00, eskimiştir | Evet | Önerilmez | RFC 10024 ile geçersiz kılınmıştır |
 
-X25519MLKEM768 is the **only** PQ group marked Recommended=Y. RFC 10024 explicitly flipped the two Kyber-draft codepoints to "D".
+X25519MLKEM768, önerilen olarak işaretli tek post kuantum gruptur. RFC 10024 iki Kyber taslağı kod noktasını açıkça önerilmez durumuna çevirmiştir.
 
-Independent confirmation of 0x11EC: BoringSSL `include/openssl/ssl.h` line 2699 — `#define SSL_GROUP_X25519_MLKEM768 0x11ec`.
+0x11EC değerinin bağımsız doğrulaması BoringSSL'in `include/openssl/ssl.h` dosyasının 2699. satırındadır: `#define SSL_GROUP_X25519_MLKEM768 0x11ec`.
 
-#### Wire sizes (RFC 10024 §3, verbatim)
-- X25519MLKEM768: client share **1216 bytes** (1184 ML-KEM ek + 32 X25519); server share **1120 bytes** (1088 ct + 32); shared secret 64 B.
-- SecP256r1MLKEM768: client share 1249 B; server share 1153 B; shared secret 64 B.
-- SecP384r1MLKEM1024: client share 1665 B; server share 1665 B; shared secret 80 B.
+**Tel üzerindeki boyutlar**, RFC 10024 §3'ten birebir: X25519MLKEM768 için istemci payı 1216 bayttır, yani 1184 baytlık ML-KEM kapsülü ile 32 baytlık X25519; sunucu payı 1120 bayttır, yani 1088 baytlık şifreli metin ile 32; paylaşılan sır 64 bayttır. SecP256r1MLKEM768 için istemci payı 1249, sunucu payı 1153 bayttır ve paylaşılan sır 64 bayttır. SecP384r1MLKEM1024 için istemci ile sunucu payı 1665 bayttır ve paylaşılan sır 80 bayttır.
 
-#### Pure ML-KEM (non-hybrid): draft-ietf-tls-mlkem
-- **draft-ietf-tls-mlkem-10**, dated **2 Sept 2026** (datatracker `time` 2026-09-03). IESG state: **"Approved-announcement sent"** — i.e. in the RFC Editor queue, not yet an RFC. Intended status: **Informational**.
-- Registers MLKEM512/768/1024 (512/513/514). The IANA registry still cites the predecessor individual draft `draft-connolly-tls-mlkem-key-agreement-05` (expired, replaced by the WG draft); the reference will be updated at RFC publication.
-- https://datatracker.ietf.org/doc/draft-ietf-tls-mlkem/
+**Saf ML-KEM, yani hibrit olmayan.** `draft-ietf-tls-mlkem-10`, 2 Eylül 2026 tarihlidir; Datatracker zamanı 3 Eylül 2026'dır. IESG durumu onay duyurusu gönderildi şeklindedir, yani RFC Editor kuyruğundadır ve henüz bir RFC değildir. Hedeflenen statüsü bilgilendiricidir. MLKEM512, 768 ile 1024'ü, yani 512, 513 ile 514 değerlerini kaydetmektedir. IANA kaydı hâlâ öncülü olan bireysel taslağa, yani süresi dolmuş ve çalışma grubu taslağıyla değiştirilmiş `draft-connolly-tls-mlkem-key-agreement-05`'e atıf yapmaktadır; referans RFC yayımlandığında güncellenecektir.
 
-#### Also worth flagging: TLS 1.3 itself was re-issued
-**RFC 9846, July 2026** — *The Transport Layer Security (TLS) Protocol Version 1.3*, obsoleting RFC 8446 (and 5077, 5246, 6961, 7627, 8422). RFC 10024 references RFC 9846, not 8446. https://www.rfc-editor.org/rfc/rfc9846.txt
+**Ayrıca işaretlenmeye değer: TLS 1.3'ün kendisi yeniden yayımlanmıştır.** RFC 9846, Temmuz 2026, "The Transport Layer Security (TLS) Protocol Version 1.3", RFC 8446'yı ve 5077, 5246, 6961, 7627 ile 8422'yi geçersiz kılmaktadır. RFC 10024, 8446'ya değil 9846'ya atıf yapmaktadır.
 
----
+### 3. Tarayıcı ile kütüphane durumu
 
-### 3. Browser and library status
-
-| Implementation | X25519MLKEM768 status | Version / date | Source |
+| Implementasyon | X25519MLKEM768 durumu | Sürüm ile tarih | Kaynak |
 |---|---|---|---|
-| **Chrome** | PQ by default since **M124** (desktop, Apr 2024) using X25519**Kyber**768; **switched to ML-KEM (X25519MLKEM768) in Chrome 131** (stable 6 Nov 2024). Android default Nov 2024. | M131 | Chrome policy templates JSON, verbatim: *"Prior to Google Chrome 131, the algorithm was Kyber, an earlier draft iteration of the standard."* |
-| **Chrome escape hatch** | `PostQuantumKeyAgreementEnabled` is **deprecated and gone**: `supported_on: chrome.*:116-146`, `chrome_os:116-146`, `android:116-146`. M147 hit stable **7 Apr 2026**, so there is no longer any supported way to turn PQ key agreement off. ChromeOS device-level `DevicePostQuantumKeyAgreementEnabled` likewise `chrome_os:128-146`. | removed as of M147 | chromeenterprise.google policy templates JSON |
-| Chrome current stable | **152.0.7977.83**; M152 stable 25 Aug 2026 | — | chromiumdash `fetch_releases` |
-| **Firefox** | *"Added support for a post-quantum key exchange mechanism for TLS 1.3 (mlkem768x25519)"* — **Firefox 132, 29 Oct 2024**. HTTP/3/QUIC added in **Firefox 135, 4 Feb 2025**: *"Added support for a post-quantum key exchange mechanism (mlkem768x25519) for HTTP/3."* | 132 / 135 | firefox.com release notes |
-| **Safari / Apple** | Apple Platform Security guide, verbatim: *"On devices with iOS 26, iPadOS 26, or later, TLS 1.3 with quantum-secure encryption (with the X25519MLKEM768 key exchange algorithm) is enabled by default for `URLSession` framework and the `Network` APIs."* Shipped Sept/Oct 2025 with iOS/iPadOS/macOS 26. | iOS/iPadOS/macOS 26 | support.apple.com/guide/security/tls-security-sec100a75d12/web |
-| **OpenSSL** | **3.5.0, 8 Apr 2025** — first **LTS** under the new policy, supported to **8 Apr 2030**. Adds ML-KEM, ML-DSA, SLH-DSA. *"The default TLS keyshares have been changed to offer X25519MLKEM768 and X25519"* and *"The default TLS supported groups list has been changed to include and prefer hybrid PQC KEM groups."* Note: **OpenSSL 3.0 LTS support ended 2026-09-07 — yesterday.** | 3.5 LTS | openssl-library.org/news/openssl-3.5-notes/ + /policies/releasestrat/ |
-| **BoringSSL** | `SSL_GROUP_X25519_MLKEM768 0x11ec`, `SSL_GROUP_MLKEM1024 0x0202`, plus `SSL_SIGN_ML_DSA_44/65/87 = 0x0904/0x0905/0x0906` in current `include/openssl/ssl.h`. | main | boringssl.googlesource.com |
-| **Go** | **Go 1.24, Feb 2025**: *"The new post-quantum X25519MLKEM768 key exchange mechanism is now supported and is enabled by default when Config.CurvePreferences is nil. GODEBUG setting `tlsmlkem=0` reverts the default."* `X25519Kyber768Draft00` removed. (Go 1.23, Aug 2024, had the Kyber draft on by default.) | 1.24 | go.dev/doc/go1.24 |
-| **rustls** | 0.23.16 (2024-10-28) moved kyber768 → ML-KEM-768. **0.23.22 (2025-01-30)**: X25519MLKEM768 with the aws-lc-rs provider + new `prefer-post-quantum` crate feature. **0.23.27 (2025-05-05)**: *"Prefer post-quantum key exchange algorithms by default"* and `prefer-post-quantum` added to default features. 0.23.28 (2025-06-16) added `secp256r1mlkem768`. 0.23.37 (2026-02-24) added ML-KEM-1024. | 0.23.27 default | GitHub releases + crates.io version dates |
+| Chrome | M124'ten beri masaüstünde varsayılan olarak post kuantum kullanılmaktadır, Nisan 2024, X25519Kyber768 ile; Chrome 131'de ML-KEM'e, yani X25519MLKEM768'e geçilmiştir, kararlı sürüm 6 Kasım 2024. Android varsayılanı Kasım 2024'tür | M131 | Chrome politika şablonu JSON'u birebir şöyle demektedir: "Prior to Google Chrome 131, the algorithm was Kyber, an earlier draft iteration of the standard." |
+| Chrome kaçış kapısı | `PostQuantumKeyAgreementEnabled` kullanımdan kaldırılmış ve gitmiştir: desteklenen aralıklar `chrome.*:116-146`, `chrome_os:116-146` ile `android:116-146`'dır. M147 kararlı sürümü 7 Nisan 2026'da çıkmıştır, dolayısıyla post kuantum anahtar anlaşmasını kapatmanın desteklenen bir yolu artık yoktur. ChromeOS cihaz düzeyindeki `DevicePostQuantumKeyAgreementEnabled` de aynı şekilde `chrome_os:128-146` aralığındadır | M147 itibarıyla kaldırılmıştır | chromeenterprise.google politika şablonları JSON'u |
+| Chrome güncel kararlı sürüm | 152.0.7977.83; M152 kararlı sürümü 25 Ağustos 2026'dır | — | chromiumdash `fetch_releases` |
+| Firefox | Sürüm notu şöyledir: "Added support for a post-quantum key exchange mechanism for TLS 1.3 (mlkem768x25519)", Firefox 132, 29 Ekim 2024. HTTP/3 ile QUIC desteği Firefox 135'te eklenmiştir, 4 Şubat 2025: "Added support for a post-quantum key exchange mechanism (mlkem768x25519) for HTTP/3." | 132 ile 135 | firefox.com sürüm notları |
+| Safari ile Apple | Apple platform güvenliği rehberi birebir şöyledir: "On devices with iOS 26, iPadOS 26, or later, TLS 1.3 with quantum-secure encryption (with the X25519MLKEM768 key exchange algorithm) is enabled by default for `URLSession` framework and the `Network` APIs." iOS, iPadOS ile macOS 26 ile Eylül ve Ekim 2025'te sevk edilmiştir | iOS, iPadOS ile macOS 26 | support.apple.com'un TLS güvenliği sayfası |
+| OpenSSL | 3.5.0, 8 Nisan 2025, yeni politika altındaki ilk uzun destekli sürümdür ve desteği 8 Nisan 2030'a kadardır. ML-KEM, ML-DSA ile SLH-DSA eklemektedir. Sürüm notları şöyledir: "The default TLS keyshares have been changed to offer X25519MLKEM768 and X25519" ve "The default TLS supported groups list has been changed to include and prefer hybrid PQC KEM groups." Not olarak OpenSSL 3.0 uzun destekli sürümünün desteği 7 Eylül 2026'da, yani dün, bitmiştir | 3.5 uzun destekli | openssl-library.org'un 3.5 notları ile sürüm stratejisi sayfası |
+| BoringSSL | Güncel `include/openssl/ssl.h` dosyasında `SSL_GROUP_X25519_MLKEM768` 0x11ec, `SSL_GROUP_MLKEM1024` 0x0202 ile `SSL_SIGN_ML_DSA_44`, `65` ve `87` sırasıyla 0x0904, 0x0905 ile 0x0906'dır | Ana dal | boringssl.googlesource.com |
+| Go | Go 1.24, Şubat 2025: "The new post-quantum X25519MLKEM768 key exchange mechanism is now supported and is enabled by default when Config.CurvePreferences is nil. GODEBUG setting `tlsmlkem=0` reverts the default." `X25519Kyber768Draft00` kaldırılmıştır. Go 1.23, Ağustos 2024, Kyber taslağını varsayılan açık tutuyordu | 1.24 | go.dev/doc/go1.24 |
+| rustls | 0.23.16, 28 Ekim 2024, kyber768'den ML-KEM-768'e geçmiştir. 0.23.22, 30 Ocak 2025, aws-lc-rs sağlayıcısıyla X25519MLKEM768 ile yeni `prefer-post-quantum` crate özelliğini getirmiştir. 0.23.27, 5 Mayıs 2025, post kuantum anahtar değişim algoritmalarını varsayılan olarak tercih etmekte ve `prefer-post-quantum` varsayılan özelliklere eklenmektedir. 0.23.28, 16 Haziran 2025, `secp256r1mlkem768` eklemiştir. 0.23.37, 24 Şubat 2026, ML-KEM-1024 eklemiştir | 0.23.27 varsayılanı | GitHub sürümleri ile crates.io sürüm tarihleri |
 
----
+### 4. TLS'te ML-DSA kimlik doğrulaması
 
-### 4. ML-DSA authentication in TLS
+`draft-ietf-tls-mldsa-05`, 6 Temmuz 2026 tarihlidir; Datatracker zamanı 8 Temmuz 2026'dır. IESG durumu onay duyurusunun gönderileceği ile alan direktörü takibi şeklindedir, yani IESG onaylamıştır ancak henüz bir RFC değildir. Hedeflenen statüsü bilgilendiricidir. Sorumlu alan direktörü Deb Cooley, çoban Sean Turner'dır. `draft-tls-westerbaan-mldsa` belgesinin yerini almıştır. IETF son çağrısı Mayıs 2026'daydı ve IANA işlemi şu anda beklemede ile inceleme gerekiyor durumundadır.
 
-- **draft-ietf-tls-mldsa-05**, dated **6 July 2026** (datatracker `time` 2026-07-08). IESG state: **"Approved-announcement to be sent :: AD Followup"** — approved by the IESG, **not yet an RFC**. Intended status: **Informational**. Responsible AD: Deb Cooley; shepherd Sean Turner. Replaces `draft-tls-westerbaan-mldsa`. IETF Last Call was May 2026; IANA action currently "On Hold / review needed."
-- https://datatracker.ietf.org/doc/draft-ietf-tls-mldsa/
+**IANA TLS imza şeması kod noktaları**, `tls-signaturescheme.csv` dosyasından doğrulanmıştır.
 
-#### IANA TLS SignatureScheme codepoints (verified from `tls-signaturescheme.csv`)
-| Hex | Name | Recommended | Reference |
+| Onaltılık | İsim | Önerilen | Referans |
 |---|---|---|---|
-| **0x0904** | mldsa44 | N | draft-ietf-tls-mldsa-00 |
-| **0x0905** | mldsa65 | N | draft-ietf-tls-mldsa-00 |
-| **0x0906** | mldsa87 | N | draft-ietf-tls-mldsa-00 |
-| 0x0907–0x0910 | Unassigned | | |
-| 0x0911–0x091C | slhdsa_sha2_128s … slhdsa_shake_256f (12 entries) | N | draft-reddy-tls-slhdsa-01 |
+| 0x0904 | mldsa44 | Hayır | `draft-ietf-tls-mldsa-00` |
+| 0x0905 | mldsa65 | Hayır | `draft-ietf-tls-mldsa-00` |
+| 0x0906 | mldsa87 | Hayır | `draft-ietf-tls-mldsa-00` |
+| 0x0907 ile 0x0910 arası | Atanmamıştır | | |
+| 0x0911 ile 0x091C arası | `slhdsa_sha2_128s`'ten `slhdsa_shake_256f`'e 12 girdi | Hayır | `draft-reddy-tls-slhdsa-01` |
 
-(Registry still points at `-00`; it'll be re-pointed at the RFC. All PQ signature schemes are Recommended=N.)
+Kayıt hâlâ sıfırıncı revizyona işaret etmektedir ve RFC'ye yeniden yönlendirilecektir. Tüm post kuantum imza şemaları önerilmeyen olarak işaretlidir.
 
-#### Who is actually shipping PQ certificate auth in TLS
-- **Cloudflare, 29 July 2026** — *"Post-quantum authentication to origins is now supported."* ML-DSA-44/65/87 (all FIPS 204 parameter sets) in **Authenticated Origin Pulls** (free, all plans, per-zone and per-hostname) and **Custom Origin Trust Store** (requires Advanced Certificate Manager, upload your own ML-DSA CA). Paired with X25519MLKEM768 for key agreement. Cloudflare recommends **ML-DSA-44**. Launched June 2026; a BoringSSL update caused a service incident on **10 June 2026**. https://blog.cloudflare.com/post-quantum-authentication-to-origins/
-- **rustls 0.23.44, released 2026-09-07 (yesterday)**: *"Support for post-quantum secure ML-DSA certificates is now enabled by default in the aws-lc-rs crypto provider."* Preceded by rustls-post-quantum 0.2.3 (2025-07-16, ML-DSA verification) and 0.2.4 (2025-09-23, ML-DSA signing under `aws-lc-rs-unstable`).
-- **BoringSSL** has the ML-DSA signature scheme constants in its public header.
-- **No public WebPKI CA is issuing ML-DSA certificates for browser-facing TLS.** Cloudflare's roadmap describes pilot one-year ML-DSA-87 issuance from late 2025 and broad availability ~2027 after HSM audits. Browsers have shipped **nothing** for PQ cert auth. This is entirely private-PKI / origin-facing today.
+**TLS'te post kuantum sertifika kimlik doğrulamasını gerçekten sevk edenler.** Cloudflare 29 Temmuz 2026'da kaynak sunuculara post kuantum kimlik doğrulamasının desteklendiğini duyurmuştur. FIPS 204'ün tüm parametre setleri, yani ML-DSA-44, 65 ile 87, doğrulanmış kaynak çekmelerinde, ki ücretsizdir, tüm planlarda ve bölge ile hostname bazında kullanılabilir, ve özel kaynak güven deposunda, ki gelişmiş sertifika yöneticisi gerektirir ve kendi ML-DSA sertifika otoritenizi yüklemenize izin verir, desteklenmektedir. Anahtar anlaşması için X25519MLKEM768 ile eşleştirilmektedir ve Cloudflare ML-DSA-44'ü önermektedir. Haziran 2026'da başlatılmış ve 10 Haziran 2026'da bir BoringSSL güncellemesi bir servis olayına yol açmıştır.
 
----
+rustls 0.23.44, 7 Eylül 2026, yani dün, şöyle demektedir: "Support for post-quantum secure ML-DSA certificates is now enabled by default in the aws-lc-rs crypto provider." Öncesinde rustls-post-quantum 0.2.3, 16 Temmuz 2025, ML-DSA doğrulaması getirmiş; 0.2.4, 23 Eylül 2025, ML-DSA imzalamasını `aws-lc-rs-unstable` altında getirmiştir.
 
-### 5. Open problems
+BoringSSL, ML-DSA imza şeması sabitlerini genel başlık dosyasında taşımaktadır.
 
-#### ClientHello size, MTU, ossification
-- X25519MLKEM768 pushes the client key_share to **1216 bytes**, so a typical ClientHello no longer fits in one TCP segment / QUIC Initial. Chrome's own policy text: *"devices that do not correctly implement TLS may malfunction when offered the new option. For example, they may disconnect in response to unrecognized options or the resulting larger messages. Such devices are not post-quantum-ready and will interfere with an enterprise's post-quantum transition."*
-- Go's 1.24 notes point directly at **https://tldr.fail/** — servers that fail to reassemble a ClientHello split across TCP segments, causing handshake timeouts. Go ships `GODEBUG=tlsmlkem=0` as the workaround.
-- Cloudflare's historical framing (pq-2025): *"some middleboxes, load-balancers, and other software tacitly assume the ClientHello always fits in a single packet"* — the same ossification that killed the earlier NTRU-HRSS experiment.
-- RFC 10024 itself contains **no** MTU/middlebox/fragmentation guidance (I grepped the full text for MTU/fragment/middlebox/packet/ossif/HelloRetry — nothing). That discussion lives in implementation docs, not the RFC.
+Hiçbir kamuya açık web PKI sertifika otoritesi tarayıcıya dönük TLS için ML-DSA sertifikası vermemektedir. Cloudflare'in yol haritası 2025 sonundan itibaren pilot bir yıllık ML-DSA-87 verme sürecini ve donanım güvenlik modülü denetimlerinden sonra yaklaşık 2027'de geniş kullanılabilirliği tarif etmektedir. Tarayıcılar post kuantum sertifika kimlik doğrulaması için hiçbir şey sevk etmemiştir. Bu, bugün tamamen özel PKI ile kaynak sunucuya dönük bir konudur.
 
-#### Middlebox breakage, measured
-From pq-2025 (Oct 2025), on Cloudflare→origin connections: the "fast" approach (offer the PQ key share optimistically) breaks **0.05%** of connections; the "safe" approach (advertise the group but send no PQ key share, accept a HelloRetryRequest round trip) was universally tolerated. Cloudflare uses the safe method where compatibility matters.
+### 5. Açık problemler
 
-#### Certificate / signature size
-- ML-DSA-44 signature is **2,420 bytes** vs 64 bytes for Ed25519 (Cloudflare, [ml-dsa-will-have-to-do](https://blog.cloudflare.com/ml-dsa-will-have-to-do/), 9 July 2026). A full PQ chain multiplies this across leaf + intermediates + CT SCTs + OCSP.
-- Cloudflare's position (same post): nothing better arrives in time — **FN-DSA ~2033, multivariate schemes not before 2034, SQIsign unlikely before 2035** — against regulatory deadlines of 2030–2035, so "ML-DSA will have to do."
-- **EO 14412** (signed 22 June 2026) sets: PQ **key establishment** for High Value Assets / high-impact systems by **31 Dec 2030**; PQ **authentication** by **31 Dec 2031**; federal contractors to NIST PQC FIPS by 31 Dec 2030. (Per Cloudflare's [post-quantum-eo-2026](https://blog.cloudflare.com/post-quantum-eo-2026/); I did not fetch the EO text itself.)
+**İstemci merhabası boyutu, azami iletim birimi ile kemikleşme.** X25519MLKEM768, istemci anahtar payını 1216 bayta çıkarmaktadır, dolayısıyla tipik bir istemci merhabası artık tek bir TCP segmentine ya da QUIC ilk paketine sığmamaktadır. Chrome'un kendi politika metni şöyledir: "devices that do not correctly implement TLS may malfunction when offered the new option. For example, they may disconnect in response to unrecognized options or the resulting larger messages. Such devices are not post-quantum-ready and will interfere with an enterprise's post-quantum transition." Go'nun 1.24 notları doğrudan tldr.fail adresine işaret etmektedir; TCP segmentleri arasına bölünmüş bir istemci merhabasını yeniden birleştiremeyen sunucular el sıkışmanın zaman aşımına uğramasına yol açmaktadır ve Go geçici çözüm olarak `GODEBUG=tlsmlkem=0` sunmaktadır. Cloudflare'in tarihsel çerçevelemesi pq-2025'te şöyledir: bazı ara kutular, yük dengeleyiciler ile diğer yazılımlar istemci merhabasının her zaman tek bir pakete sığdığını zımnen varsaymaktadır; bu, daha önceki NTRU-HRSS denemesini öldüren aynı kemikleşmedir. RFC 10024'ün kendisinde azami iletim birimi, ara kutu veya parçalanma rehberliği yoktur; tam metin bu terimler ile yeniden merhaba için taranmış ve hiçbiri bulunamamıştır. Bu tartışma RFC'de değil implementasyon dokümanlarındadır.
 
-#### draft-ietf-tls-trust-anchor-ids
-- **draft-ietf-tls-trust-anchor-ids-04**, dated **1 May 2026**. Active TLS WG document, IESG state "I-D Exists" (no WGLC/IESG action yet). Authors: Bob Beck (OpenSSL), David Benjamin (Google), Devon O'Brien, Kyle Nekritz (Meta).
-- Defines short OID-based trust anchor IDs, a `trust_anchors` extension (ClientHello / EncryptedExtensions / CertificateRequest / Certificate), a retry mechanism, and an HTTPS/SVCB DNS service parameter so servers can advertise trust anchors out-of-band. Purpose: efficient multi-certificate negotiation, intermediate elision (saves hundreds–thousands of bytes), and smoother PQ root rollout.
-- Chrome: chromestatus feature **5132064512540672 "Trust Anchor Identifiers (TAI)"**, status **Proposed**, no milestone assigned, owner dadrian@google.com, last updated 8 May 2025. **Not shipping.**
+**Ölçülmüş ara kutu kırılması.** pq-2025'ten, Ekim 2025, Cloudflare'den kaynak sunucuya giden bağlantılarda: hızlı yaklaşım, yani post kuantum anahtar payını iyimser sunmak, bağlantıların %0,05'ini kırmaktadır; güvenli yaklaşım, yani grubu ilan edip post kuantum anahtar payı göndermemek ve bir yeniden merhaba turunu kabul etmek, evrensel olarak tolere edilmektedir. Cloudflare uyumluluğun önemli olduğu yerlerde güvenli yöntemi kullanmaktadır.
 
-#### Merkle Tree Certificates
-- Moved working groups: `draft-davidben-tls-merkle-tree-certs` is expired (last individual rev -10, 22 Jan 2026) and was **adopted by the new PLANTS WG** (PKI, Logs, And Tree Signatures).
-- Current: **draft-ietf-plants-merkle-tree-certs-05**, dated **6 July 2026**, IESG state "I-D Exists". Authors: David Benjamin, Devon O'Brien, Bas Westerbaan, Luke Valenta, Filippo Valsorda.
-- Idea: an X.509 profile with logging baked in — CA logs first, then collects cosignatures; the cert carries an inclusion proof. Log entries hold hashes rather than full PQ keys/signatures, and "landmark-relative" certificates can drop signatures entirely for up-to-date clients. Cloudflare's bootstrap post: https://blog.cloudflare.com/bootstrap-mtc/ (28 Oct 2025).
-- Cloudflare's roadmap targets **mid-2027** for MTC-based PQ authentication on visitor→Cloudflare connections, early 2028 for Cloudflare One, **full PQ by 2029**.
+**Sertifika ile imza boyutu.** ML-DSA-44 imzası 2.420 bayttır, Ed25519'un 64 baytına karşılık; kaynağı Cloudflare'in 9 Temmuz 2026 tarihli yazısıdır. Tam bir post kuantum zinciri bunu yaprak, ara sertifikalar, sertifika şeffaflığı imzalı zaman damgaları ile OCSP boyunca çarpmaktadır. Cloudflare'in aynı yazıdaki pozisyonu şudur: daha iyisi zamanında gelmemektedir, çünkü FN-DSA yaklaşık 2033'te, çok değişkenli şemalar 2034'ten önce değil ve SQIsign 2035'ten önce olası değildir; 2030 ile 2035 arasındaki düzenleyici son tarihlere karşı ML-DSA idare etmek zorundadır. EO 14412, 22 Haziran 2026'da imzalanmıştır ve şunları belirlemektedir: yüksek değerli varlıklar ile yüksek etkili sistemler için post kuantum anahtar tesisi 31 Aralık 2030'a kadar, post kuantum kimlik doğrulaması 31 Aralık 2031'e kadar ve federal yüklenicilerin NIST PQC FIPS'lerine uyumu 31 Aralık 2030'a kadar. Bu, Cloudflare'in post-quantum-eo-2026 yazısındandır; kararnamenin metni çekilmemiştir.
+
+**`draft-ietf-tls-trust-anchor-ids`.** Dördüncü revizyonu 1 Mayıs 2026 tarihlidir. Aktif bir TLS çalışma grubu dokümanıdır ve IESG durumu internet taslağı mevcut şeklindedir, yani henüz son çağrı veya IESG işlemi yoktur. Yazarları Bob Beck (OpenSSL), David Benjamin (Google), Devon O'Brien ile Kyle Nekritz'tir (Meta). Kısa, nesne tanımlayıcısı tabanlı güven çıpası kimlikleri, bir `trust_anchors` uzantısı, yani istemci merhabasında, şifreli uzantılarda, sertifika isteğinde ile sertifikada, bir yeniden deneme mekanizması ile sunucuların güven çıpalarını bant dışı ilan edebilmesi için bir HTTPS ve SVCB DNS servis parametresi tanımlamaktadır. Amacı verimli çoklu sertifika müzakeresi, ara sertifika elemesi, ki yüzlerce ile binlerce bayt tasarruf ettirir, ve daha yumuşak bir post kuantum kök geçişidir. Chrome'da chromestatus özelliği 5132064512540672 numaralı "Trust Anchor Identifiers"tır; durumu önerilmiştir, kilometre taşı atanmamıştır, sahibi dadrian@google.com'dur ve son güncellemesi 8 Mayıs 2025'tir. Sevk edilmemektedir.
+
+**Merkle ağacı sertifikaları.** Çalışma grubu değişmiştir: `draft-davidben-tls-merkle-tree-certs` süresi dolmuştur, son bireysel revizyonu onuncudur ve 22 Ocak 2026 tarihlidir; yeni PLANTS çalışma grubu tarafından, yani PKI, günlükler ile ağaç imzaları grubu tarafından, kabul edilmiştir. Güncel belge `draft-ietf-plants-merkle-tree-certs-05`'tir, 6 Temmuz 2026 tarihlidir ve IESG durumu internet taslağı mevcut şeklindedir. Yazarları David Benjamin, Devon O'Brien, Bas Westerbaan, Luke Valenta ile Filippo Valsorda'dır. Fikri günlüklemenin içine gömüldüğü bir X.509 profilidir: sertifika otoritesi önce günlüğe yazar, sonra ortak imzalar toplar ve sertifika bir dahil edilme kanıtı taşır. Günlük girdileri tam post kuantum anahtarlar ile imzalar yerine özetler tutar ve yer imine göreli sertifikalar güncel istemciler için imzaları tamamen düşürebilir. Cloudflare'in başlatma yazısı blog.cloudflare.com/bootstrap-mtc'dir, 28 Ekim 2025. Cloudflare'in yol haritası ziyaretçiden Cloudflare'e bağlantılarda Merkle ağacı sertifikası tabanlı post kuantum kimlik doğrulamasını 2027 ortasına, Cloudflare One'ı 2028 başına ve tam post kuantumu 2029'a hedeflemektedir.
+
+### Açıkça belirsiz ve çözülmemiş olanlar
+
+1. Canlı Cloudflare Radar Eylül 2026 yüzdesi alınamamıştır. Radar tarayıcı olmayan istemcileri engellemektedir, yani 403 ile bir JavaScript meydan okuması dönmektedir, ve Radar API'si bir jeton gerektirmektedir. Alıntılanabilir en güncel rakam 23 Haziran 2026 tarihli üçte ikiden fazla ifadesidir. Tarayıcısı olan herkes güncel rakamı radar.cloudflare.com/post-quantum adresinden okuyabilir.
+2. Firefox'ta varsayılan açık olan sürüm belirsizdir. Firefox 132'nin sürüm notu destek eklendiğini söylemekte, Cloudflare'in zaman çizelgesi Firefox'un Kasım 2024'te varsayılan açık olduğunu söylemektedir. Firefox 132, 29 Ekim 2024'te ve 133, 26 Kasım 2024'te çıkmıştır; Firefox 133 notları post kuantum hakkında bir şey söylememektedir. Varsayılan açık hâlin 132'de geldiğine inanılmaktadır ancak arama olmadan bir Mozilla birincil kaynağından tercih varsayılanı teyit edilememiştir.
+3. Chrome 131'in ML-KEM geçiş noktası olduğu, Chrome kurumsal politika açıklamasından çıkarılmıştır; bu açıklama sürüm konusunda otoriterdir ancak bir sürüm notu değildir. chromestatus'ta ayrı bir X25519MLKEM768 girdisi yoktur; eski "X25519Kyber768 key encapsulation for TLS" girdisi, yani 5257822742249472 numaralı M124 kaydı, hiç değiştirilmemiştir.
+4. `draft-ietf-tls-mldsa` ile `draft-ietf-tls-mlkem` ikisi de bilgilendiricidir ve bu, protokol kod noktası kayıtları için alışılmadıktır. Bu, ikisi için de Datatracker API'sinden, yani hedeflenen standart seviyesi alanından, doğrulanmıştır, dolayısıyla bir yanlış okuma değildir; ancak çalışma grubu gerekçesi bulunamamıştır.
+5. Apple platform güvenliği rehberindeki iOS 26 ile iPadOS 26 veya üstü ifadesinin ötesinde kesin Safari ya da iOS sürümünü adlandıran bir Apple sürüm notu veya güvenlik blogu bulunamamıştır; macOS 26 okunan Apple sayfası tarafından değil Cloudflare tarafından iddia edilmektedir.
+
+Kaynakları IANA TLS parametreleri, RFC 10024, RFC 9846, `draft-ietf-tls-mldsa`, `draft-ietf-tls-mlkem`, `draft-ietf-tls-trust-anchor-ids`, `draft-ietf-plants-merkle-tree-certs`, OpenSSL 3.5 notları ile sürüm stratejisi, Go 1.24 dokümanı, Firefox 132 ile 135 sürüm notları, Apple TLS güvenliği sayfası, Chrome politika listesi, chromestatus, Cloudflare'in pq-2025, post kuantum yol haritası, ML-DSA, kaynak kimlik doğrulaması, radar ile başkanlık kararnamesi ve Merkle ağacı sertifikası yazıları, rustls sürümleri ile BoringSSL'in `ssl.h` dosyasıdır.
 
 ---
 
-### Explicitly uncertain / unresolved
+# Kısım V — Mimari
 
-1. **The live Cloudflare Radar September 2026 percentage — not retrieved.** Radar blocks non-browser clients (403 + JS challenge) and the Radar API needs a token. Latest citable figure is "over two-thirds" (23 June 2026). Anyone with a browser can read the current number at https://radar.cloudflare.com/post-quantum.
-2. **Firefox "enabled by default" version.** Firefox 132's release note says "Added support for"; Cloudflare's timeline says Firefox was default-on in November 2024. Firefox 132 shipped 29 Oct 2024 and 133 on 26 Nov 2024, and the Firefox 133 notes say nothing about PQ. I believe default-on landed in 132, but I could not confirm the pref default from a Mozilla primary source without search.
-3. **Chrome 131 as the ML-KEM switch point** is inferred from the Chrome enterprise policy description ("Prior to Google Chrome 131, the algorithm was Kyber"), which is authoritative on the version but is not a release note. chromestatus has no separate X25519MLKEM768 entry — the old "X25519Kyber768 key encapsulation for TLS" entry (id 5257822742249472, M124) was never superseded.
-4. **draft-ietf-tls-mldsa and draft-ietf-tls-mlkem are both Informational**, which is unusual for protocol codepoint registrations; I confirmed this from the Datatracker API (`intendedstdlevelname/inf/`) for both, so it is not a misreading, but I did not find the WG rationale.
-5. I did not find an Apple release note or security blog naming the exact Safari/iOS build beyond "iOS 26 / iPadOS 26 or later" from the Apple Platform Security guide; macOS 26 is asserted by Cloudflare, not by the Apple page I read.
-
-Sources: [IANA TLS parameters](https://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml), [RFC 10024](https://www.rfc-editor.org/rfc/rfc10024.txt), [RFC 9846](https://www.rfc-editor.org/rfc/rfc9846.txt), [draft-ietf-tls-mldsa](https://datatracker.ietf.org/doc/draft-ietf-tls-mldsa/), [draft-ietf-tls-mlkem](https://datatracker.ietf.org/doc/draft-ietf-tls-mlkem/), [draft-ietf-tls-trust-anchor-ids](https://datatracker.ietf.org/doc/draft-ietf-tls-trust-anchor-ids/), [draft-ietf-plants-merkle-tree-certs](https://datatracker.ietf.org/doc/draft-ietf-plants-merkle-tree-certs/), [OpenSSL 3.5 notes](https://openssl-library.org/news/openssl-3.5-notes/), [OpenSSL release strategy](https://openssl-library.org/policies/releasestrat/), [Go 1.24](https://go.dev/doc/go1.24), [Firefox 132](https://www.firefox.com/en-US/firefox/132.0/releasenotes/), [Firefox 135](https://www.firefox.com/en-US/firefox/135.0/releasenotes/), [Apple TLS security](https://support.apple.com/guide/security/tls-security-sec100a75d12/web), [Chrome policy list](https://chromeenterprise.google/policies/), [chromestatus](https://chromestatus.com/feature/5132064512540672), [Cloudflare pq-2025](https://blog.cloudflare.com/pq-2025/), [Cloudflare PQ roadmap](https://blog.cloudflare.com/post-quantum-roadmap/), [Cloudflare ML-DSA post](https://blog.cloudflare.com/ml-dsa-will-have-to-do/), [Cloudflare PQ origin auth](https://blog.cloudflare.com/post-quantum-authentication-to-origins/), [Cloudflare Radar PQ transparency](https://blog.cloudflare.com/radar-origin-pq-key-transparency-aspa/), [Cloudflare EO post](https://blog.cloudflare.com/post-quantum-eo-2026/), [Cloudflare MTC](https://blog.cloudflare.com/bootstrap-mtc/), [rustls releases](https://github.com/rustls/rustls/releases), [BoringSSL ssl.h](https://boringssl.googlesource.com/boringssl/+/refs/heads/main/include/openssl/ssl.h).
-
-
----
-
-# KISIM V — MİMARİ
-
-*Çok kiracılık, yüksek erişilebilirlik, yetkilendirme ve oturum mimarisi.*
+Çok kiracılık, yüksek erişilebilirlik, yetkilendirme ile oturum mimarisi.

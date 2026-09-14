@@ -1,801 +1,660 @@
-# 25. Gözlemlenebilirlik ve ölçekte denetim
+# §25 — Gözlemlenebilirlik ve ölçekte denetim
 
-> `ARGUS.md` §25'den taşındı. Numaralandırma korundu; bu dosyanın
-> içindeki `§25 §X` referansları aynı anlamda.
+Bu bölüm `ARGUS.md` dosyasının 25. kısmından taşınmıştır. Numaralandırma korunmuştur; dosya içindeki `§25 §X` referansları aynı anlamdadır.
 
-
-Tarih: 8 Eylül 2026. Toplam ~55 arama/fetch (22 WebSearch + ~33 WebFetch/doğrudan indirme). Tüm iddialar kaynaklıdır; doğrulanamayanlar sonda listelenmiştir.
+Tarih 8 Eylül 2026'dır. Toplam yaklaşık 55 arama ile çekme yapılmıştır. Tüm iddialar kaynaklıdır; doğrulanamayanlar sonda listelenmiştir.
 
 ---
 
-## 0. En kritik bulgu: Ön ölçümünüz literatürle birebir örtüşüyor
+## 0. En kritik bulgu: ön ölçümünüz literatürle birebir örtüşmektedir
 
-Per-event hash-chained audit log ölçümündeki **8 bağlantı = 1 bağlantı** eşitliği tesadüf değil. ⚠️ *Yapısal olan yalnızca şudur: **tek bir doğrusal zincirde ardışık zincir hash'lerinin hesaplanması arasında seri bağımlılık vardır.** Ölçülen ~5.900/s değeri bu uygulamaya ve donanıma özgüdür, evrensel bir tavan değildir (§6 §4.4).* İki bağımsız kaynak seri bağımlılığı doğruluyor:
+Olay başına özet zincirli denetim günlüğü ölçümündeki sekiz bağlantının bir bağlantıya eşit olması bir tesadüf değildir. Yapısal olan yalnızca şudur: tek bir doğrusal zincirde ardışık zincir özetlerinin hesaplanması arasında seri bağımlılık vardır. Ölçülen saniyede yaklaşık 5.900 değeri bu uygulamaya ile donanıma özgüdür, evrensel bir tavan değildir; §6'nın 4.4 bölümüne bakınız. İki bağımsız kaynak seri bağımlılığı doğrulamaktadır.
 
-**Crosby & Wallach, "Efficient Data Structures for Tamper-Evident Logging", USENIX Security 2009** (PDF: https://static.usenix.org/event/sec09/tech/full_papers/crosby.pdf — indirildi ve metin çıkarıldı). Tablo 2, tek çekirdek Intel Core2 Duo 2.4GHz, SHA-1 + 1024-bit DSA:
+Crosby ile Wallach'ın USENIX Security 2009'daki kurcalama kanıtlı günlükleme için verimli veri yapıları makalesi indirilmiş ile metni çıkarılmıştır. İkinci tablosu, tek çekirdek Intel Core2 Duo 2,4 GHz, SHA-1 ile 1024 bitlik DSA ile şunları vermektedir.
 
-| Adım | CPU payı | İzole hız |
+| Adım | İşlemci payı | İzole hız |
 |---|---|---|
-| A — syslog mesajını parse et | 2,4 % | 81.000 ev/s |
-| B — olayı log'a insert et | 2,6 % | 66.000 ev/s |
-| C — commitment üret (Merkle root) | 11,8 % | 15.000 ev/s |
-| D — commitment'ı imzala | **83,3 %** | **2.100 ev/s** |
-| Membership proof (locality ile) | — | 8.600 /s |
-| Membership proof (locality yok) | — | **32 /s** |
+| A, sistem günlüğü mesajını ayrıştırma | %2,4 | Saniyede 81.000 olay |
+| B, olayı günlüğe ekleme | %2,6 | Saniyede 66.000 olay |
+| C, taahhüt üretme, yani Merkle kökü | %11,8 | Saniyede 15.000 olay |
+| D, taahhüdü imzalama | %83,3 | Saniyede 2.100 olay |
+| Üyelik kanıtı, yerellikle | — | Saniyede 8.600 |
+| Üyelik kanıtı, yerellik olmadan | — | Saniyede 32 |
 
-Uçtan uca: **1.750 olay/s** (her olayda imza), imzalar başka çekirdeğe/HSM'e offload edilirse **10.500 olay/s** (= 1,9 MB/s, 1,1 TB/hafta). Kâğıttan doğrudan alıntı: *"signatures account for over 80% of the runtime cost of an insert"* ve *"inserting events into the log is twenty times faster than generating and signing commitments"*.
+Uçtan uca saniyede 1.750 olaydır, yani her olayda imza atılırsa; imzalar başka bir çekirdeğe ya da donanım güvenlik modülüne devredilirse saniyede 10.500 olaydır, ki saniyede 1,9 megabayt ile haftada 1,1 terabayttır. Makaleden doğrudan alıntılar şunlardır: imzalar bir eklemenin çalışma zamanı maliyetinin %80'inden fazlasını oluşturmaktadır; ile olayları günlüğe eklemek, taahhüt üretip imzalamaktan yirmi kat hızlıdır.
 
-Ve tam olarak sizin kararınızı öneriyorlar: *"The logger may amortize the costs of generating a signed commitment over many inserted events... Under light load, the logger could sign every commitment and insert 1,750 events per second. With increasing load, the logger might sign one in every 16 commitments to obtain an estimated insert rate of 17,000 events per second. Clients will still receive signed commitments within a fraction of a second, but several clients can now receive the same commitment."*
+Makale tam olarak sizin kararınızı önermektedir.
 
-→ **~10x throughput artışı, karşılığında yalnızca "birden fazla istemci aynı commitment'ı alır" takası.** Ölçülen düz append-only değeri (⚠️ *ölçüm etiketi: §6 §4.4, [YENİDEN ÜRETİM BEKLİYOR] — çıplak insert, ürün throughput'u değil*) bu tabloya oturuyor (adım A+B ≈ 66.000/s teorik tavan, gerçek DB fsync maliyetiyle 22k makul).
+> *"The logger may amortize the costs of generating a signed commitment over many inserted events... Under light load, the logger could sign every commitment and insert 1,750 events per second. With increasing load, the logger might sign one in every 16 commitments to obtain an estimated insert rate of 17,000 events per second. Clients will still receive signed commitments within a fraction of a second, but several clients can now receive the same commitment."*
 
-**Agent Flight Recorder** (arXiv:2609.01931, 1 Eylül 2026, https://arxiv.org/html/2609.01931) — 5 kademeli ablation, N=10.000 olay:
+Yani yaklaşık 10 kat iş hacmi artışı vardır ile karşılığındaki tek takas birden fazla istemcinin aynı taahhüdü almasıdır. Ölçülen düz yalnızca ekleme değeri, ki §6'nın 4.4 bölümündedir ile yeniden üretim beklemektedir, bu tabloya oturmaktadır: A ile B adımları teorik tavanı vermekte ile gerçek veritabanı senkronizasyon maliyetiyle ölçülen değer makul kalmaktadır.
 
-| Konfigürasyon | Medyan gecikme | P95 | P99 | Bayt/olay |
+Ajan uçuş kaydedici çalışması, arXiv 2609.01931, 1 Eylül 2026, beş kademeli bir ayrıştırma yapmaktadır; örneklem 10.000 olaydır.
+
+| Yapılandırma | Medyan gecikme | 95. yüzdelik | 99. yüzdelik | Olay başına bayt |
 |---|---|---|---|---|
-| Baseline (düz JSON) | 20,3 µs | 26,2 µs | 30,7 µs | 272 |
-| Schema (deterministik CBOR) | **6,0 µs** | 8,2 µs | 10,0 µs | 476 |
-| **+ Chain (SHA-256 hash chain)** | **48,2 µs** | 57,2 µs | 76,8 µs | 477 |
-| + Merkle (100-olay epoch) | 48,8 µs | 60,8 µs | ~4,1 ms | 512 |
-| + Full (on-chain anchoring) | 47,6 µs | 60,2 µs | ~30 ms | 512 |
+| Temel, düz JSON | 20,3 mikrosaniye | 26,2 | 30,7 | 272 |
+| Şema, deterministik CBOR | 6,0 mikrosaniye | 8,2 | 10,0 | 476 |
+| Artı zincir, SHA-256 özet zinciri | 48,2 mikrosaniye | 57,2 | 76,8 | 477 |
+| Artı Merkle, 100 olaylık dönem | 48,8 mikrosaniye | 60,8 | Yaklaşık 4,1 milisaniye | 512 |
+| Artı tam, zincir üstü çıpalama | 47,6 mikrosaniye | 60,2 | Yaklaşık 30 milisaniye | 512 |
 
-→ Hash chain tek başına medyan gecikmeyi **6 µs → 48 µs (8x)** çıkarıyor. Merkle batching *üstüne* neredeyse hiç medyan maliyet eklemiyor (48,2 → 48,8 µs); sadece P99'da epoch sınırında ~4 ms tepe var. Bu, "hash chain pahalı, Merkle checkpoint bedava" tezinizin bağımsız doğrulaması.
+Yani özet zinciri tek başına medyan gecikmeyi altı mikrosaniyeden 48 mikrosaniyeye, yani sekiz kat çıkarmaktadır. Merkle yığınlama bunun üstüne neredeyse hiç medyan maliyet eklememektedir; yalnızca 99. yüzdelikte dönem sınırında yaklaşık dört milisaniyelik bir tepe vardır. Bu, özet zincirinin pahalı, Merkle denetim noktasının bedava olduğu tezinin bağımsız doğrulamasıdır.
 
-**Kritik ek bulgu — hash chain'in asıl maliyeti insert değil, DOĞRULAMA:** Crosby & Wallach: *"where a classic hash chain might require an 800MB trace to prove that a randomly chosen event is in a log with 80 million events, our prototype returns a 3KB proof with the same semantics."* Karşılaştırma tablosu:
+Kritik bir ek bulgu vardır: özet zincirinin asıl maliyeti ekleme değil doğrulamadır. Crosby ile Wallach şunu söylemektedir: klasik bir özet zinciri, 80 milyon olaylık bir günlükte rastgele seçilmiş bir olayın bulunduğunu kanıtlamak için 800 megabaytlık bir iz gerektirebilirken, prototipleri aynı semantikle üç kilobaytlık bir kanıt döndürmektedir.
 
-| | Hash chain | Skiplist | History tree |
+| | Özet zinciri | Atlama listesi | Geçmiş ağacı |
 |---|---|---|---|
-| ADD | O(1) | O(1) | O(log²n) |
-| Incremental proof boyutu | O(n−k) | O(n) | **O(log²n)** |
-| Membership proof boyutu | O(n−k) | O(n) | **O(log²n)** |
+| Ekleme | Sabit zamanlıdır | Sabit zamanlıdır | Logaritmanın karesi mertebesindedir |
+| Artımlı kanıt boyutu | Doğrusaldır | Doğrusaldır | Logaritmanın karesi mertebesindedir |
+| Üyelik kanıtı boyutu | Doğrusaldır | Doğrusaldır | Logaritmanın karesi mertebesindedir |
 
-→ Hash chain'in O(1) insert'i cazip görünür ama denetçi her iki snapshot arasındaki **her ara olayı** taramak zorundadır. Merkle/history tree yapısı hem insert'i batch'lenebilir kılar hem proof'u logaritmik yapar. **Hash chain, ölçekte iki kere kaybediyor.**
+Yani özet zincirinin sabit zamanlı eklemesi cazip görünmekte ancak denetçi iki anlık görüntü arasındaki her ara olayı taramak zorunda kalmaktadır. Merkle ya da geçmiş ağacı yapısı hem eklemeyi yığınlanabilir kılmakta hem kanıtı logaritmik yapmaktadır. Özet zinciri ölçekte iki kere kaybetmektedir.
 
 ---
 
-## 1. Denetim logu standartları ve şemaları
+## 1. Denetim günlüğü standartları ile şemaları
 
-### 1.1 RFC 8417 Security Event Token (SET) — denetim formatı olarak?
+### 1.1 RFC 8417 güvenlik olayı belirteci, bir denetim formatı olarak
 
-https://www.rfc-editor.org/rfc/rfc8417.html — Standards Track, Temmuz 2018.
+Standartlar yolundadır, Temmuz 2018.
 
-Claim'ler: `iss` (REQUIRED), `iat` (REQUIRED), `jti` (REQUIRED, *"MAY be used by clients to track whether a particular SET has already been received"*), `events` (REQUIRED — URI → JSON payload map), `aud` (RECOMMENDED), `sub`/`sub_id`, `txn` (korelasyon), `toe` (olayın gerçekleşme zamanı — `iat`'ten farklı!).
+İddiaları şunlardır: veren zorunludur, veriliş zamanı zorunludur, benzersiz tanımlayıcı zorunludur ile istemciler tarafından belirli bir belirtecin zaten alınıp alınmadığını izlemek için kullanılabilmektedir, olaylar nesnesi zorunludur ve adresten JSON yüküne bir eşlemedir, izleyici kitle önerilmektedir, özne alanları bulunmaktadır, işlem alanı korelasyon içindir ile olayın gerçekleşme zamanı veriliş zamanından farklıdır.
 
-**Kritik semantik sınır:** *"Security events are not commands issued between parties."* SET bir *olgu bildirimidir*, komut değil. Bu denetim logu semantiğiyle mükemmel uyumlu.
+Kritik semantik sınır şudur: güvenlik olayları taraflar arasında verilen komutlar değildir. Belirteç bir olgu bildirimidir, bir komut değildir. Bu, denetim günlüğü semantiğiyle mükemmel uyumludur.
 
-**Denetim için doğrudan destek:** *"If a SET needs to be retained for audit purposes, the signature can be used to provide verification of its authenticity."* İmza JWS ile; gizlilik gerekiyorsa JWE.
+Denetim için doğrudan destek şudur: bir belirteç denetim amacıyla saklanacaksa, imza onun gerçekliğinin doğrulanması için kullanılabilmektedir. İmza JWS ile atılmakta; gizlilik gerekiyorsa JWE kullanılmaktadır.
 
-**Değerlendirme:** SET, Argus'un **dışa yayın (egress) formatı** olarak mükemmel — çünkü SSF/CAEP/RISC/SCIM ekosisteminin tamamı bunu konuşuyor. Ama **dahili depolama formatı** olarak kötü: JWT/JWS her kayda ~700+ bayt base64 overhead ve per-event imza (= Crosby'nin %83'lük D adımı) getirir. **Depola canonical binary olarak, yayınla SET olarak.**
+Değerlendirme şudur: belirteç, Argus'un dışa yayın formatı olarak mükemmeldir, çünkü paylaşılan sinyal ekosisteminin tamamı bunu konuşmaktadır. Ancak dahilî depolama formatı olarak kötüdür: JWT ile JWS her kayda 700'den fazla bayt base64 ek yükü ile olay başına imza getirmektedir, ki Crosby'nin %83'lük adımıdır. Kanonik ikili biçimde depolanmalı ile belirteç olarak yayımlanmalıdır.
 
-### 1.2 RFC 9967 — SCIM SET profili
+### 1.2 RFC 9967, SCIM belirteç profili
 
-https://www.rfc-editor.org/rfc/rfc9967.html — Standards Track, **Mayıs 2026** (çok yeni). RFC 7643 ve 7644'ü günceller.
+Standartlar yolundadır, Mayıs 2026; çok yenidir. RFC 7643 ile 7644'ü güncellemektedir.
 
-12 event URI'si, 3 sınıfta:
-- **Feed:** `urn:ietf:params:scim:event:feed:add` / `:remove`
-- **Provisioning:** `prov:create:{notice|full}`, `prov:patch:{notice|full}`, `prov:put:{notice|full}`, `prov:delete`, `prov:activate`, `prov:deactivate`
-- **Misc:** `misc:asyncresp`
+Üç sınıfta 12 olay adresi bulunmaktadır: besleme ekleme ile çıkarma; sağlama tarafında oluşturma, yama, yerleştirme, silme, etkinleştirme ile devre dışı bırakma; ile çeşitli sınıfında eşzamansız yanıt.
 
-`notice` vs `full` ayrımı önemli: `notice` sadece "değişti" der (PII yaymaz), `full` veriyi taşır. **Argus'un denetim yayınında `notice` varyantı varsayılan olmalı.**
+Bildirim ile tam varyantı ayrımı önemlidir: bildirim yalnızca değişti demektedir ile kişisel veri yaymamaktadır, tam ise veriyi taşımaktadır. Argus'un denetim yayınında bildirim varyantı varsayılan olmalıdır.
 
-Durability şartı: *"Event Receivers MUST ensure events are persisted directly or indirectly to meet local recovery needs before acknowledging the SET Events were received."*
+Dayanıklılık şartı şudur: olay alıcıları, belirteçlerin alındığını onaylamadan önce olayların doğrudan ya da dolaylı olarak yerel kurtarma ihtiyaçlarını karşılayacak şekilde kalıcılaştırıldığından emin olmak zorundadır.
 
-`sub_id` kullanımı zorunlu (`sub` değil) — format tipi + resource URI + external ID + unique id.
+Özne tanımlayıcısı kullanımı zorunludur, yani format tipi, kaynak adresi, dış kimlik ile benzersiz kimlik taşınmalıdır.
 
-### 1.3 OpenTelemetry semantic conventions — kimlik/auth durumu
+### 1.3 OpenTelemetry anlamsal sözleşmeleri, kimlik ile kimlik doğrulama durumu
 
-**Güncel sürüm: 1.44.0** (https://opentelemetry.io/docs/specs/semconv/).
+Güncel sürüm 1.44.0'dır.
 
-Kapsanan alanlar: General, CI/CD, Cloud Providers, CloudEvents, Database, Exceptions, FaaS, Feature Flags, GenAI, GraphQL, HTTP, Messaging, Object Stores, RPC, System, .NET, Apps, Azure, Browser, CLI, DNS, Hardware, Mobile, NFS, OTel SDK, Runtime, URL.
+Kapsanan alanlar genel, sürekli tümleştirme, bulut sağlayıcıları, bulut olayları, veritabanı, istisnalar, işlev olarak hizmet, özellik bayrakları, üretken yapay zekâ, GraphQL, HTTP, mesajlaşma, nesne depoları, uzak yordam çağrısı, sistem, .NET, uygulamalar, Azure, tarayıcı, komut satırı, alan adı sistemi, donanım, mobil, ağ dosya sistemi, geliştirme kiti, çalışma zamanı ile adreslerdir.
 
-**→ Authentication / identity / IAM / security events için ADANMIŞ SEMANTIC CONVENTION YOK.** Bu Argus için önemli: OTel'in kimlik olayları için hazır bir taksonomisi yok, kendi taksonomiinizi kurmalısınız (ve OCSF'e maplemelisiniz).
+Yani kimlik doğrulama, kimlik ile güvenlik olayları için adanmış bir anlamsal sözleşme yoktur. Bu Argus için önemlidir: OpenTelemetry'nin kimlik olayları için hazır bir taksonomisi bulunmamaktadır ile kendi taksonominizi kurmanız ve OCSF'e eşlemeniz gerekmektedir.
 
-**`enduser.*` hikâyesi — kesin durum:**
+Son kullanıcı öznitelikleri hikâyesinin kesin durumu şöyledir.
 
-| Attribute | Durum (semconv 1.44) | Kaynak |
-|---|---|---|
-| `enduser.id` | **AKTİF**, Development stability. "Contains sensitive PII" notu | https://opentelemetry.io/docs/specs/semconv/registry/attributes/enduser/ |
-| `enduser.pseudo.id` | AKTİF, Development. "Pseudonymous identifier, random non-linked value" | aynı |
-| `enduser.role` | **DEPRECATED** → `user.roles` | aynı |
-| `enduser.scope` | **DEPRECATED**, yerine geçen yok | aynı |
-| `user.id`, `user.name`, `user.email`, `user.full_name`, `user.roles`, `user.hash` | Hepsi **Development** (stable değil) | https://opentelemetry.io/docs/specs/semconv/registry/attributes/user/ |
-
-Tarihçe (GitHub issue #1104, https://github.com/open-telemetry/semantic-conventions/issues/1104): `enduser.id` PR #731 ile deprecate edilip `user.id`'ye taşındı; ancak `user.id`'nin "authenticated mı anonymous mı" belirsizliği şikâyet konusu oldu; issue PR #1456 ile kapandı ve `enduser.id` **geri getirildi** — şimdi `enduser.id` (authenticated end-user, PII) ile `enduser.pseudo.id` (pseudonymous) ayrımı var.
-
-→ **Pratik sonuç:** `enduser.pseudo.id`'yi trace/metrik yolunda, gerçek `user.id`'yi yalnızca audit log yolunda kullanın. Ve *hiçbiri stable değil* — semconv'a hard-code bağımlılık kurmayın, bir mapping katmanı koyun.
-
-**OTel Events modeli** (https://opentelemetry.io/docs/specs/semconv/general/events/): Event = `EventRecord` = "`event.name` taşıyan bir `LogRecord`". Kural: *"Event names MUST NOT include dynamic values. Use attributes for identifiers, names, or other values that vary per occurrence."* Durum: **Development**.
-
-### 1.4 OCSF — en güçlü aday, ve büyük bir sürpriz
-
-**Güncel sürüm: 1.9.0, 3 Ağustos 2026** (https://github.com/ocsf/ocsf-schema/releases). Sürüm geçmişi: 1.5.0 (28 Nis 2025), 1.6.0 (1 Ağu 2025), 1.7.0 (14 Kas 2025), 1.8.0 (18 Mar 2026), 1.9.0 (3 Ağu 2026) — yılda ~3 sürüm, hızlı hareket eden bir standart.
-
-**IAM kategorisi (category_uid = 3), OCSF 1.9.0** (https://schema.ocsf.io/1.9.0/categories):
-
-| Sınıf | UID |
+| Öznitelik | Durum, 1.44 sürümünde |
 |---|---|
-| Account Change | 3001 |
-| **Authentication** | **3002** |
-| Authorize Session | 3003 |
-| Entity Management | 3004 |
-| User Access Management | 3005 |
-| Group Management | 3006 |
-| **User Management** | **3007** (1.9.0'da yeni) |
-| **Role Management** | **3008** (1.9.0'da yeni) |
+| Son kullanıcı kimliği | Aktiftir, geliştirme kararlılığındadır ile hassas kişisel veri içermektedir |
+| Son kullanıcı takma kimliği | Aktiftir, geliştirme kararlılığındadır; rastgele ile bağlanmamış bir değerdir |
+| Son kullanıcı rolü | Kullanımdan kaldırılmıştır; yerine kullanıcı rolleri gelmiştir |
+| Son kullanıcı kapsamı | Kullanımdan kaldırılmıştır ile yerine geçen yoktur |
+| Kullanıcı kimliği, adı, e-postası, tam adı, rolleri ile özeti | Hepsi geliştirme aşamasındadır, kararlı değildir |
 
-**Authentication [3002] detayı** (https://schema.ocsf.io/1.7.0/classes/authentication): zorunlu alanlar `category_uid`, `class_uid`, `severity_id`, `time`, `metadata`, `user`; ayrıca `dst_endpoint` veya `service`'ten biri. `activity_id`: 1=Logon, 2=Logoff, 3=Authentication Ticket, 4=Service Ticket Request, 5=Service Ticket Renew, 7=Account Switch. Anahtar alanlar: `auth_protocol_id` (NTLM, Kerberos, OAUTH 2.0, SAML...), `logon_type_id`, `is_mfa`, `session`, `actor`, `src_endpoint`, `status_id` (0=Unknown, 1=Success, 2=Failure).
+Tarihçe şöyledir: son kullanıcı kimliği bir öneriyle kullanımdan kaldırılıp kullanıcı kimliğine taşınmış; ancak kullanıcı kimliğinin kimlik doğrulanmış mı anonim mi olduğu belirsizliği şikâyet konusu olmuş; ilgili konu bir öneriyle kapanmış ile son kullanıcı kimliği geri getirilmiştir. Şimdi kimliği doğrulanmış son kullanıcı ile takma adlı kullanıcı ayrımı bulunmaktadır.
 
-**🔥 SÜRPRİZ — OCSF 1.9.0 "Record Integrity" profili.** Argus'un tam olarak yaptığı şeyi standartlaştırmış:
+Pratik sonuç şudur: takma kimlik iz ile metrik yolunda, gerçek kullanıcı kimliği yalnızca denetim günlüğü yolunda kullanılmalıdır. Hiçbiri kararlı değildir; anlamsal sözleşmelere sabit kodlu bağımlılık kurulmamalı ile bir eşleme katmanı konulmalıdır.
 
-https://schema.ocsf.io/1.9.0/profiles/record_integrity — *"adds one or more cryptographic attestations over the event itself, providing integrity, authenticity, and non-repudiation independent of any domain-specific content."* 80+ event class'a uygulanabilir. Tek attribute: `attestation_list`.
+OpenTelemetry olay modelinde olay, bir olay adı taşıyan bir günlük kaydıdır. Kural şudur: olay adları dinamik değer içermemelidir; oluşum başına değişen tanımlayıcılar, adlar ya da diğer değerler için öznitelikler kullanılmalıdır. Durumu geliştirme aşamasındadır.
 
-`attestation` nesnesi (https://raw.githubusercontent.com/ocsf/ocsf-schema/main/objects/attestation.json):
-- `authority_uid` — attestation'ı üreten otorite
-- **`chain_uid`** — *"Identifier of the append-only chain, such as a forensic or audit log"*
-- **`fingerprint`** — *"The fingerprint of this event's canonical serialization"*
-- **`prev_event`** — *"Reference to the previous event in a tamper-evident chain"*
-- `signatures` — fingerprint üzerinden hesaplanan bir veya daha fazla dijital imza
-- `uid`
+### 1.4 OCSF, en güçlü aday ile büyük bir sürpriz
 
-Ve çoklu attestation destekleniyor: *"a producer at write time and a downstream processor at ingest"* bağımsız attestation ekleyebilir.
+Güncel sürüm 1.9.0'dır, 3 Ağustos 2026. Sürüm geçmişi 28 Nisan 2025'teki 1.5.0'dan 3 Ağustos 2026'daki 1.9.0'a uzanmaktadır; yılda yaklaşık üç sürümle hızlı hareket eden bir standarttır.
 
-→ **Argus'un Merkle checkpoint modeli, OCSF `record_integrity` profiliyle wire-uyumlu olarak ifade edilebilir.** Her olayda `prev_event` doldurmak zorunda değilsiniz (bu opsiyonel); checkpoint'i ayrı bir attestation olarak yayınlayabilirsiniz. Bu, Argus'un denetim çıktısını *doğrudan* SIEM'lerin anlayabileceği hale getirir.
+Kimlik ile erişim yönetimi kategorisi, 1.9.0'da, şu sınıfları içermektedir.
 
-**Benimseme:** AWS Security Lake OCSF'i native olarak kullanıyor; custom source'lar **OCSF + Apache Parquet** formatına uymak zorunda (https://docs.aws.amazon.com/security-lake/latest/userguide/open-cybersecurity-schema-framework.html). CloudTrail Management Events → `API Activity`, `Authentication` veya `Account Change` sınıflarına maplenıyor. Security Lake şu an `metadata.version` 1.0.0-rc.2 (v1 kaynak) ve 1.1.0 (v2 kaynak) kullanıyor — yani **AWS, OCSF'in en son sürümünün epey gerisinde**; bu, sürüm uyumluluğunu Argus'ta konfigüre edilebilir yapmanız gerektiği anlamına geliyor.
+| Sınıf | Tanımlayıcı |
+|---|---|
+| Hesap değişikliği | 3001 |
+| Kimlik doğrulama | 3002 |
+| Oturum yetkilendirme | 3003 |
+| Varlık yönetimi | 3004 |
+| Kullanıcı erişim yönetimi | 3005 |
+| Grup yönetimi | 3006 |
+| Kullanıcı yönetimi | 3007, 1.9.0'da yenidir |
+| Rol yönetimi | 3008, 1.9.0'da yenidir |
 
-### 1.5 CADF / CEF / LEEF — hâlâ alakalı mı?
+Kimlik doğrulama sınıfının detayı şöyledir: zorunlu alanlar kategori tanımlayıcısı, sınıf tanımlayıcısı, önem tanımlayıcısı, zaman, metadata ile kullanıcıdır; ayrıca hedef uç nokta ya da servisten biri gerekmektedir. Etkinlik tanımlayıcısı giriş, çıkış, kimlik doğrulama bileti, servis bileti isteği, servis bileti yenileme ile hesap değiştirme değerlerini almaktadır. Anahtar alanlar kimlik doğrulama protokolü, giriş tipi, çok faktörlü bayrağı, oturum, aktör, kaynak uç nokta ile durum tanımlayıcısıdır.
 
-- **CADF** (DMTF, https://www.dmtf.org/standards/cadf): DMTF Cloud Management Initiative altında aktif standart. Pratik kullanımı esas olarak **OpenStack Keystone** ile sınırlı (pyCADF kütüphanesi, https://docs.openstack.org/mitaka/config-reference/identity/auditing.html). DSP2038 "OpenStack Profile" mevcut. → **Argus için niş; OpenStack ekosistemine satmıyorsanız görmezden gelin.**
-- **CEF** (ArcSight) / **LEEF** (IBM QRadar) / SEF (McAfee): Query.ai'nin standartlar evrimi analizi (https://www.query.ai/resources/blogs/cybersecurity-event-data-normalization-standards/) — CEF *"was widely adopted... because of its simplicity, readability, log categorization, and easy transferability over syslog"*, ama *"the schema was network security centric and extension mechanism to non-network data was a force-fit. Also, the focus on serialized representation was still on single-line syslog, whereas the rest of the world was moving to JSON."*
-- Vendor şemaları: CIM (Splunk), ECS (Elastic), UDM (Chronicle), ASIM (Microsoft) — hepsi vendor lock-in.
-- **OCSF**, v1.0 BlackHat 2023'te çıktı, topluluk güdümlü halef olarak konumlanmış durumda.
+Bir sürpriz vardır: OCSF 1.9.0'ın kayıt bütünlüğü profili, Argus'un tam olarak yaptığı şeyi standartlaştırmıştır. Profil, olayın kendisi üzerinde bir veya daha fazla kriptografik kanıtlama eklemekte ile alana özgü içerikten bağımsız bütünlük, gerçeklik ile inkâr edilemezlik sağlamaktadır. Seksenden fazla olay sınıfına uygulanabilmektedir. Tek özniteliği bir kanıtlama listesidir.
 
-→ **Karar: OCSF birincil, CEF/LEEF yalnızca opsiyonel çıktı adaptörü (legacy SIEM müşterileri için, 200 satırlık bir formatter).**
+Kanıtlama nesnesinin alanları şunlardır: kanıtlamayı üreten otorite tanımlayıcısı; zincir tanımlayıcısı, ki adli ya da denetim günlüğü gibi yalnızca eklenen bir zincirin tanımlayıcısıdır; parmak izi, ki olayın kanonik serileştirmesinin parmak izidir; önceki olay, ki kurcalama kanıtlı bir zincirdeki bir önceki olaya referanstır; imzalar, ki parmak izi üzerinden hesaplanan bir veya daha fazla dijital imzadır; ile bir benzersiz tanımlayıcı.
 
-### 1.6 NIST SP 800-53 Rev.5 AU ailesi — IdP için hangileri bağlayıcı
+Çoklu kanıtlama desteklenmektedir: yazma anındaki bir üretici ile alım anındaki bir aşağı akış işleyicisi bağımsız kanıtlama ekleyebilmektedir.
 
-(https://csf.tools/reference/nist-sp-800-53/r5/au/)
+Yani Argus'un Merkle denetim noktası modeli, bu profille tel uyumlu olarak ifade edilebilmektedir. Her olayda önceki olay alanını doldurmak zorunlu değildir, isteğe bağlıdır; denetim noktası ayrı bir kanıtlama olarak yayımlanabilir. Bu, Argus'un denetim çıktısını doğrudan güvenlik bilgi ve olay yönetimi sistemlerinin anlayabileceği hâle getirmektedir.
 
-| Kontrol | İçerik | Baseline | Argus'a etkisi |
+Benimseme tarafında AWS Security Lake bu şemayı yerel olarak kullanmakta ile özel kaynaklar şema artı Apache Parquet formatına uymak zorundadır. Yönetim olayları API etkinliği, kimlik doğrulama ya da hesap değişikliği sınıflarına eşlenmektedir. Security Lake şu an daha eski şema sürümlerini kullanmaktadır; yani AWS, standardın en son sürümünün epey gerisindedir. Bu, sürüm uyumluluğunun Argus'ta yapılandırılabilir olması gerektiği anlamına gelmektedir.
+
+### 1.5 CADF, CEF ile LEEF hâlâ alakalı mıdır
+
+CADF, DMTF bulut yönetimi girişimi altında aktif bir standarttır. Pratik kullanımı esas olarak OpenStack kimlik servisiyle sınırlıdır. Bir OpenStack profili mevcuttur. Argus için niştir; OpenStack ekosistemine satılmıyorsa görmezden gelinebilir.
+
+CEF, LEEF ile benzerleri satıcı formatlarıdır. Bir standart evrimi analizine göre CEF basitliği, okunabilirliği, günlük kategorizasyonu ile sistem günlüğü üzerinden kolay aktarılabilirliği nedeniyle yaygın benimsenmiştir; ancak şeması ağ güvenliği merkezliydi ile ağ dışı veriye genişletme mekanizması zorlamaydı. Ayrıca serileştirme odağı hâlâ tek satırlık sistem günlüğündeydi, dünyanın geri kalanı JSON'a geçerken.
+
+Satıcı şemaları, yani Splunk, Elastic, Chronicle ile Microsoft şemaları, satıcıya bağımlılık yaratmaktadır.
+
+OCSF birinci sürümü 2023'te çıkmış ile topluluk güdümlü halef olarak konumlanmıştır.
+
+Karar şudur: OCSF birincil olmalı, CEF ile LEEF yalnızca isteğe bağlı bir çıktı adaptörü olmalıdır; eski güvenlik bilgi ve olay yönetimi müşterileri için yaklaşık 200 satırlık bir biçimlendirici yeterlidir.
+
+### 1.6 NIST SP 800-53 beşinci revizyon denetim ailesi, kimlik sağlayıcı için hangileri bağlayıcıdır
+
+| Kontrol | İçerik | Temel çizgi | Argus'a etkisi |
 |---|---|---|---|
-| **AU-2** Event Logging | Loglama yeteneklerini belirle, hangi olayların loglanacağını *ve sıklığını* tanımla, gerekçelendir, periyodik gözden geçir. Örnek olaylar: *"password changes, failed logons or failed accesses..., security or privacy attribute changes, administrative privilege usage, PIV credential usage, data action changes, query parameters, or external credential usage"* | Low+ | Event tipi kataloğu **konfigüre edilebilir** olmalı; sabit değil |
-| **AU-3** Content | 6 zorunlu eleman: event type, when, where, source, outcome, *"identity of any individuals, subjects, or objects/entities associated with the event"*. AU-3(1) ek bilgi (Moderate+). **AU-3(3) PII sınırlama** (privacy baseline) | Low+ | Şema tasarımının minimum kontratı |
-| **AU-9** Protection | Yetkisiz erişim/değiştirme/silmeden koru; Rev.5'te **tamper olunca alarm** eklendi. AU-9(2) ayrı fiziksel sistem, AU-9(3) **kriptografik bütünlük koruması**, AU-9(4) yetkili alt küme | **Moderate**+ | Merkle/imza tam olarak AU-9(3); ayrık depolama AU-9(2) |
-| **AU-10** Non-repudiation | *"irrefutable evidence that a specific individual or process performed defined actions"* | **YALNIZCA High** | Merkle checkpoint + imza bunu karşılar |
-| **AU-12** Audit Record Generation | Sistemin AU-2'deki olayları üretme yeteneği | Low+ | — |
+| Olay günlükleme | Günlükleme yetenekleri belirlenmeli, hangi olayların ve hangi sıklıkta günlükleneceği tanımlanmalı, gerekçelendirilmeli ile periyodik gözden geçirilmelidir. Örnek olaylar parola değişiklikleri, başarısız girişler ile erişimler, güvenlik ya da mahremiyet özniteliği değişiklikleri, yönetim ayrıcalığı kullanımı, kimlik kartı kullanımı, veri eylem değişiklikleri, sorgu parametreleri ile dış kimlik bilgisi kullanımıdır | Düşük ve üstü | Olay tipi kataloğu yapılandırılabilir olmalıdır, sabit değil |
+| İçerik | Altı zorunlu eleman: olay tipi, ne zaman, nerede, kaynak, sonuç ile olayla ilişkili bireylerin veya varlıkların kimliği. Bir geliştirme ek bilgi istemekte, bir başkası kişisel veriyi sınırlamaktadır | Düşük ve üstü | Şema tasarımının asgari sözleşmesidir |
+| Koruma | Yetkisiz erişim, değiştirme ile silmeden korunmalıdır; beşinci revizyonda kurcalama olunca alarm eklenmiştir. Geliştirmeleri ayrı fiziksel sistem, kriptografik bütünlük koruması ile yetkili alt kümedir | Orta ve üstü | Merkle ile imza tam olarak kriptografik bütünlük geliştirmesidir; ayrık depolama diğeridir |
+| İnkâr edilemezlik | Belirli bir bireyin ya da sürecin tanımlı eylemleri gerçekleştirdiğine dair çürütülemez kanıt gerekmektedir | Yalnızca yüksek | Merkle denetim noktası artı imza bunu karşılamaktadır |
+| Denetim kaydı üretimi | Sistemin tanımlı olayları üretme yeteneğidir | Düşük ve üstü | — |
 
-→ **Bağlayıcılık analizi:** Genel amaçlı bir IdP çoğu müşteride Moderate baseline'a düşer → **AU-9(3) kriptografik bütünlük zaten Moderate'ta**. AU-10 sadece High'da, ama IdP tanım gereği kimlik iddialarının kaynağı olduğu için müşterilerin High sistemleri sizin logunuza dayanacak. **Argus AU-10'u varsayılan olarak karşılamalı** — bu, Merkle checkpoint'in imzalanması gerektiği anlamına gelir (sadece hash yeterli değil, non-repudiation imza ister).
+Bağlayıcılık analizi şudur: genel amaçlı bir kimlik sağlayıcı çoğu müşteride orta temel çizgiye düşmektedir; yani kriptografik bütünlük zaten orta seviyededir. İnkâr edilemezlik yalnızca yüksek seviyededir, ancak kimlik sağlayıcı tanım gereği kimlik iddialarının kaynağı olduğu için müşterilerin yüksek seviyeli sistemleri sizin günlüğünüze dayanacaktır. Argus inkâr edilemezliği varsayılan olarak karşılamalıdır; bu, Merkle denetim noktasının imzalanması gerektiği anlamına gelmektedir, çünkü yalnızca özet yeterli değildir.
 
-### 1.7 PCI DSS v4.0 Requirement 10
+### 1.7 PCI DSS dördüncü sürüm, onuncu gereksinim
 
-(https://pcidssguide.com/pci-dss-requirement-10/, https://www.zengrc.com/blog/what-are-the-pci-audit-log-retention-requirements/)
+Günlüklenecekler şunlardır: tüm kart sahibi verisi erişimi, kök ya da yönetici yetkisiyle yapılan tüm işlemler, denetim izlerine erişim, geçersiz mantıksal erişim denemeleri, kimlik doğrulama mekanizmalarının kullanımı, denetim günlüğünün başlatılması ile sistem seviyesinde nesne oluşturma ve silme.
 
-- **Loglanacaklar:** tüm CHD erişimi, root/admin ile yapılan tüm işlemler, **audit trail'lere erişim**, geçersiz mantıksal erişim denemeleri, kimlik doğrulama mekanizmalarının kullanımı, audit log'un başlatılması, sistem seviyesi nesne oluşturma/silme.
-- **Her kayıt en az 6 eleman:** User ID, event type, date & time, success/failure, event source, etkilenen veri/sistem bileşeni/kaynak kimliği. (AU-3 ile neredeyse birebir.)
-- **Koruma:** görüntülemeyi iş ihtiyacıyla sınırla, dosyaları yetkisiz değişiklikten koru, değiştirilmesi zor merkezî sunucuya yedekle, **file integrity monitoring / change-detection yazılımı ile değişiklikte alarm ver**.
-- **Saklama: en az 12 ay, son 3 ay hemen analize hazır (immediately available).** v4.0.1'de saklama ve gözden geçirme sıklığı hedefli risk analizi ile özelleştirilebilir.
+Her kayıt en az altı eleman içermelidir: kullanıcı kimliği, olay tipi, tarih ile saat, başarı ya da başarısızlık, olay kaynağı ile etkilenen veri, sistem bileşeni veya kaynak kimliği. Bu, denetim içeriği kontrolüyle neredeyse birebirdir.
 
-→ **"Audit trail'lere erişimin kendisi loglanmalı"** maddesi çok kritik ve sıkça atlanıyor: Argus'ta audit log okuma API'si de audit event üretmelidir (meta-audit). Sonsuz döngüye girmemek için: meta-audit olayları ayrı bir chain/stream'de tutulmalı veya rate-limited/coalesced olmalı.
+Koruma tarafında görüntüleme iş ihtiyacıyla sınırlanmalı, dosyalar yetkisiz değişiklikten korunmalı, değiştirilmesi zor merkezî bir sunucuya yedeklenmeli ile dosya bütünlüğü izleme veya değişiklik tespit yazılımıyla değişiklikte alarm verilmelidir.
+
+Saklama en az 12 aydır ile son üç ay hemen analize hazır olmalıdır. 4.0.1 sürümünde saklama ile gözden geçirme sıklığı hedefli bir risk analiziyle özelleştirilebilmektedir.
+
+Denetim izlerine erişimin kendisinin günlüklenmesi maddesi çok kritiktir ile sıkça atlanmaktadır: Argus'ta denetim günlüğü okuma API'si de bir denetim olayı üretmelidir. Sonsuz döngüye girmemek için üst denetim olayları ayrı bir zincirde ya da akışta tutulmalı veya hız sınırlanıp birleştirilmelidir.
 
 ---
 
-## 2. Bütünlük (tamper-evidence) — ölçekte
+## 2. Bütünlük, yani kurcalama kanıtı, ölçekte
 
-### 2.1 Hash chain vs Merkle tree vs transparency log
+### 2.1 Özet zinciri, Merkle ağacı ile şeffaflık günlüğünün karşılaştırması
 
-**RFC 9162 Certificate Transparency v2.0** (https://www.rfc-editor.org/rfc/rfc9162.html) — **Experimental**, Aralık 2021. (Not: "Experimental" statüsü kafa karıştırıcı; ekosistemde fiilen RFC 6962 v1 ve onun halefi **Static CT API** kullanılıyor.)
+RFC 9162, sertifika şeffaflığının ikinci sürümü, deneysel statüdedir, Aralık 2021. Deneysel statüsü kafa karıştırıcıdır; ekosistemde fiilen birinci sürüm ile onun halefi olan statik API kullanılmaktadır.
 
-Teknik özet:
-- Merkle Tree Hash: boş liste → `HASH()`; tek yaprak → `HASH(0x00 || d[0])`; iç düğüm → `HASH(0x01 || left || right)`. **Domain separation (0x00/0x01) second-preimage resistance için zorunlu** — bunu atlamak klasik bir hatadır.
-- Inclusion proof: **O(log n)** düğüm.
-- Consistency proof: **≤ ⌈log₂(n)⌉ + 1** düğüm.
-- **Signed Tree Head (STH):** timestamp + tree size + root hash + extensions, imzalı. *"Each subsequent timestamp MUST be more recent than the timestamp of the previous update."*
-- **Maximum Merge Delay (MMD):** SCT verildikten sonra log'un girdiyi ağaca dahil etme taahhüdü (index tahsis + root hesap + tree head imzala).
+Teknik özeti şöyledir. Merkle ağacı özeti boş liste için doğrudan bir özet, tek yaprak için sıfır bayt önekiyle özet ile iç düğüm için bir bayt önekiyle sol ve sağın birleşiminin özetidir. Alan ayrımı, yani sıfır ile bir bayt önekleri, ikinci ön görüntü direnci için zorunludur; bunu atlamak klasik bir hatadır. Dahil olma kanıtı logaritmik sayıda düğümdür. Tutarlılık kanıtı logaritmanın tavanı artı bir düğümdür. İmzalı ağaç başlığı zaman damgası, ağaç boyutu, kök özeti ile uzantıları taşımakta ve imzalıdır; her sonraki zaman damgası bir öncekinden daha yeni olmak zorundadır. Azami birleştirme gecikmesi, imzalı bir zaman damgası verildikten sonra günlüğün girdiyi ağaca dahil etme taahhüdüdür; indeks tahsisi, kök hesabı ile ağaç başlığının imzalanmasını kapsamaktadır.
 
-→ **MMD kavramı, Argus'un "1 saniyede bir checkpoint" kararının standart karşılığıdır.** Argus için MMD ≈ 1s ilan edilebilir ve bu bir SLA olarak yayınlanabilir.
+Azami birleştirme gecikmesi kavramı, Argus'un saniyede bir denetim noktası kararının standart karşılığıdır. Argus için bu gecikme yaklaşık bir saniye ilan edilebilir ile bir hizmet seviyesi taahhüdü olarak yayımlanabilir.
 
-### 2.2 Tiled logs (tlog) — 2024-2026'nın gerçek dersi
+### 2.2 Döşeli günlükler, 2024 ile 2026'nın gerçek dersi
 
-CT ekosistemi RFC 6962 tarzı "canlı DB + API" modelinden **statik dosya tile'larına** geçti. Bu Argus için doğrudan mimari ders.
+Sertifika şeffaflığı ekosistemi canlı veritabanı ile API modelinden statik dosya döşemelerine geçmiştir. Bu, Argus için doğrudan bir mimari derstir.
 
-**Sunlight / Static CT API** (https://sunlight.dev/, https://words.filippo.io/run-sunlight/):
-- Log'lar *"simple collections of flat files called 'tiles'"* olarak temsil ediliyor.
-- Filippo Valsorda **tek bir sunucuda** bir Sunlight log çalıştırıyor, **yıllık ~$10.000** toplam maliyet.
-- Bant genişliği: Tuscolo log 400-800 Mbps üretiyor; RFC 6962 log'ları 1-2 Gbps. **Static CT bant genişliğini ~%80 azaltıyor.**
+Sunlight ile statik sertifika şeffaflığı API'sinde günlükler döşeme adı verilen düz dosya koleksiyonları olarak temsil edilmektedir. Filippo Valsorda tek bir sunucuda bir Sunlight günlüğü çalıştırmakta ile toplam maliyet yılda yaklaşık 10.000 dolardır. Bant genişliğinde bir döşeli günlük 400 ile 800 megabit üretirken eski nesil günlükler bir ile iki gigabit üretmektedir; statik API bant genişliğini yaklaşık %80 azaltmaktadır.
 
-**Let's Encrypt, "Reflections on a Year of Sunlight"** (11 Haziran 2025, https://letsencrypt.org/2025/06/11/reflections-on-a-year-of-sunlight):
-- *"each log's write side was handled comfortably by just a"* tek makine.
-- **Merge delay fiilen sıfır:** log'lar *"always completely incorporate newly-submitted certificates before returning an SCT to the submitter."* — yani MMD'yi 0'a indirmek mümkün ve tercih edilir.
-- Let's Encrypt'in *kendi ürettiği tüm sertifikaları* (tüm public-trusted hacmin çoğunluğu) işledi.
-- Static CT API log'ları *"substantially lower resource requirements than first-generation CT logs"*.
+Let's Encrypt'in 11 Haziran 2025 tarihli bir yıllık Sunlight değerlendirmesine göre her günlüğün yazma tarafı tek bir makineyle rahatça karşılanmıştır. Birleştirme gecikmesi fiilen sıfırdır: günlükler, gönderene imzalı bir zaman damgası döndürmeden önce yeni gönderilen sertifikaları her zaman tamamen dahil etmektedir. Yani bu gecikmeyi sıfıra indirmek mümkündür ile tercih edilmektedir. Let's Encrypt kendi ürettiği tüm sertifikaları, ki kamuya güvenilir hacmin çoğunluğudur, işlemiştir. Statik API günlükleri birinci nesil günlüklerden belirgin biçimde daha düşük kaynak gereksinimi taşımaktadır.
 
-**Sigstore Rekor v2** (GA 10 Ekim 2025, https://blog.sigstore.dev/rekor-v2-ga/):
-- Trillian → **Trillian-Tessera** (tile-backed, C2SP tlog-tiles layout).
-- *"Rekor v2 batches requests, which enables the higher QPS and witnessing."* Takas: yanıt *"take a few seconds to return"*.
-- Tile'lar immutable, content-addressed, **CDN'den servis edilebilir**.
-- **Yıllık shard:** `log2025-1`, `log2026-1`... Eski shard'lar dondurulup statik tile olarak arşivleniyor.
-- Trillian log server + log signer instance'ları tamamen kapatıldı → altyapı maliyeti ve karmaşıklığı düştü.
-- Basitleştirme: intoto/rekord/helm/tuf/rfc3161/jar/rpm/cose/alpine entry tipleri kaldırıldı, sadece `hashedrekord` + DSSE kaldı.
+Sigstore'un ikinci sürüm kayıt günlüğü 10 Ekim 2025'te genel kullanıma açılmıştır. Trillian'dan döşeme destekli Tessera'ya geçilmiştir. Sürüm istekleri yığınlamakta ile bu, daha yüksek sorgu hızını ile tanıklığı mümkün kılmaktadır; takas yanıtların birkaç saniye sürmesidir. Döşemeler değişmez, içerik adresli ile içerik dağıtım ağından servis edilebilirdir. Yıllık parçalama yapılmakta ile eski parçalar dondurulup statik döşeme olarak arşivlenmektedir. Eski günlük sunucusu ile imzalayıcı örnekleri tamamen kapatılmış; altyapı maliyeti ile karmaşıklığı düşmüştür. Basitleştirme kapsamında birçok girdi tipi kaldırılmış ile yalnızca ikisi bırakılmıştır.
 
-**Trillian Tessera benchmark'ları** (https://github.com/transparency-dev/tessera/blob/main/docs/performance.md) — **Argus için en değerli sayılar**:
+Tessera kıyaslamaları Argus için en değerli sayılardır.
 
-| Backend | Throughput |
+| Arka uç | İş hacmi |
 |---|---|
-| **POSIX / yerel NVMe** | *"sustain around 10,000 write qps, using up to 7 cores for the server"* (antispam açık) |
-| POSIX / yerel SAS HDD | ~2.900 w/s (antispam kapalı), ~1.600 w/s (antispam açık) |
-| GCP Spanner, 100 PU + 1 frontend | >3.000 QPS (antispam yok), >800 QPS (antispam var) |
-| GCP Spanner, 300 PU + 2 frontend | >5.000 QPS (antispam var) |
-| CephFS ağ depolama, 4 node | >1.000 QPS |
-| GCP `e2-micro` free tier + PersistentDisk | >1.500 w/s |
+| Yerel NVMe dosya sistemi | Saniyede yaklaşık 10.000 yazma; sunucu için yedi çekirdeğe kadar kullanılmakta, istenmeyen içerik koruması açıktır |
+| Yerel SAS disk | Koruma kapalıyken saniyede yaklaşık 2.900, açıkken 1.600 yazmadır |
+| GCP Spanner, 100 işlem birimi ile bir ön uç | Korumasız saniyede üç binden fazla, korumalı 800'den fazla sorgudur |
+| GCP Spanner, 300 işlem birimi ile iki ön uç | Korumalı saniyede beş binden fazla sorgudur |
+| CephFS ağ depolama, dört düğüm | Saniyede binden fazla sorgudur |
+| Ücretsiz katman küçük örnek ile kalıcı disk | Saniyede 1.500'den fazla yazmadır |
 
-Mimari: **sequencing** (durable index atama, sıra garantisi yok) ile **integration** (arka planda Merkle ağacına birleştirme) ayrılmış. `WithBatching`, `WithCheckpointInterval`, `WithCheckpointRepublishInterval` konfigürasyonları var. Batch size = 1 mümkün ama *"this will make sequencing expensive"* (https://github.com/transparency-dev/tessera/blob/main/README.md).
+Mimarisi sıralama, yani dayanıklı indeks atama ile sıra garantisi olmadan, ile bütünleştirme, yani arka planda Merkle ağacına birleştirme olarak ayrılmıştır. Yığınlama, denetim noktası aralığı ile yeniden yayımlama aralığı yapılandırılabilmektedir. Yığın boyutu bir olabilmektedir ancak bu sıralamayı pahalı kılmaktadır.
 
-→ ⚠️ **Bu karşılaştırma kaldırıldı (düzeltme, 2. inceleme turu).** Önceden burada "Argus'un 22.440 tps'si Tessera'nın 2 katı" yazıyordu. Bu elmayla armut karşılaştırmasıdır: Tessera'nın 10.000 QPS'i sequencing + integration yapan **tam bir transparency log**'un değeridir; 22.440 ise Merkle'sız, imzasız, uygulama mantığı olmayan **çıplak insert** ölçümüdür (§6 §4.4, 12 sn pgbench). Ayakta kalan sonuç, sayılardan değil yapıdan geliyor: **per-event hash chain seri bağımlılık yaratır, Merkle checkpoint yaratmaz.** Karar bu gerekçeyle doğru.
+Bir karşılaştırma buradan kaldırılmıştır. Önceden burada Argus'un ölçülen işlem hızının Tessera'nın iki katı olduğu yazmaktaydı. Bu bir elmayla armut karşılaştırmasıdır: Tessera'nın saniyede 10.000 sorgusu sıralama ile bütünleştirme yapan tam bir şeffaflık günlüğünün değeridir; karşılaştırılan sayı ise Merkle'sız, imzasız ile uygulama mantığı olmayan çıplak bir ekleme ölçümüdür. Ayakta kalan sonuç sayılardan değil yapıdan gelmektedir: olay başına özet zinciri seri bağımlılık yaratmakta, Merkle denetim noktası yaratmamaktadır. Karar bu gerekçeyle doğrudur.
 
-### 2.3 AWS QLDB — ⚠️ EMEKLİ
+### 2.3 AWS QLDB emekli olmuştur
 
-**QLDB 31 Temmuz 2025'te tamamen destek dışı kaldı.** (https://www.infoq.com/news/2024/07/aws-kill-qldb, https://techcommunity.microsoft.com/blog/azuresqlblog/moving-from-amazon-quantum-ledger-database-qldb/4246237)
+Ürün 31 Temmuz 2025'te tamamen destek dışı kalmıştır.
 
-- Resmî duyuru yapılmadı; sadece dokümantasyon güncellendi ve müşterilere e-posta gönderildi (Temmuz 2024).
-- AWS'in önerdiği göç yolu: **Amazon Aurora PostgreSQL** (ledger benzeri yetenekler extension'larla) — **ancak bu göç kriptografik doğrulanabilirliği kaybettiriyor.**
-- 2018 re:Invent'te duyuruldu, 2019'da GA oldu, ~6 yıl yaşadı.
+Resmî bir duyuru yapılmamış; yalnızca dokümantasyon güncellenmiş ile müşterilere Temmuz 2024'te e-posta gönderilmiştir. AWS'in önerdiği göç yolu Amazon Aurora PostgreSQL'dir, yani defter benzeri yetenekler eklentilerle sağlanmaktadır; ancak bu göç kriptografik doğrulanabilirliği kaybettirmektedir. Ürün 2018'de duyurulmuş, 2019'da genel kullanıma açılmış ile yaklaşık altı yıl yaşamıştır.
 
-→ **Ders (Argus için stratejik):** "Kriptografik olarak doğrulanabilir ledger" bir *managed service kategorisi* olarak ticari başarısızlığa uğradı — çünkü müşteriler ayrı bir veritabanı istemedi, **var olan veritabanlarında bütünlük özelliği** istedi. Bu, Argus'un "Postgres içinde append-only + Merkle checkpoint" kararını doğruluyor: ayrı bir ledger sistemi kurmak yerine, mevcut store'un üzerine ince bir bütünlük katmanı. Ayrıca **QLDB'ye veya benzeri managed ledger'lara bağımlılık kurmayın.**
+Argus için stratejik ders şudur: kriptografik olarak doğrulanabilir defter, bir yönetilen hizmet kategorisi olarak ticari başarısızlığa uğramıştır; çünkü müşteriler ayrı bir veritabanı değil var olan veritabanlarında bir bütünlük özelliği istemiştir. Bu, Argus'un PostgreSQL içinde yalnızca ekleme artı Merkle denetim noktası kararını doğrulamaktadır: ayrı bir defter sistemi kurmak yerine mevcut deponun üzerine ince bir bütünlük katmanı konulmalıdır. Ayrıca yönetilen defter hizmetlerine bağımlılık kurulmamalıdır.
 
-### 2.4 Postgres'te append-only zorlama
+### 2.4 PostgreSQL'de yalnızca ekleme zorlaması
 
-Katman katman savunma (kaynaklar: https://heypinchy.com/blog/day-143-the-hole-in-append-only [10 Tem 2026], https://www.cybertec-postgresql.com/en/row-change-auditing-options-for-postgresql/, https://wiki.postgresql.org/wiki/Audit_trigger_91plus):
+Katman katman savunma şöyledir.
 
-1. **`REVOKE UPDATE, DELETE ON audit_log FROM PUBLIC`** ve uygulama rolüne yalnızca `INSERT` (+ gerekiyorsa `SELECT`). Compliance rejimi DB seviyesinde append-only istiyorsa **her rolden** revoke edin.
-2. **BEFORE UPDATE/DELETE trigger** → `RAISE EXCEPTION`. Ama:
-3. **🔴 TRUNCATE DELİĞİ.** *"TRUNCATE in Postgres is a statement-level operation, not a row-level one, and row-level triggers simply never fire for it."* Row-level trigger'larla korunan bir tablo TRUNCATE ile tamamen boşaltılabilir. **Çözüm: ayrıca bir `BEFORE TRUNCATE` statement-level trigger.** Bu, "append-only" iddiasında en sık kaçırılan açık.
-4. **RLS**: okuma tarafında kiracı izolasyonu için; yazma korumasının yerini tutmaz.
-5. **Temel gerçek:** *"blocking edits is not the same as making edits detectable. While you can reduce changes with permissions, anyone with enough access can still alter history. Tamper-evidence accepts that reality by making changes leave an obvious fingerprint."* → Superuser her zaman kazanır. **Bu yüzden Merkle checkpoint'ler dış tanıklara (witness) yayınlanmalıdır.**
+1. Denetim tablosunda güncelleme ile silme yetkisi herkesten geri alınmalı ile uygulama rolüne yalnızca ekleme, gerekiyorsa okuma verilmelidir. Uyum rejimi veritabanı seviyesinde yalnızca ekleme istiyorsa her rolden geri alınmalıdır.
+2. Güncelleme ile silme öncesi bir tetikleyici istisna fırlatmalıdır. Ancak yeterli değildir.
+3. Kesme deliği vardır. PostgreSQL'de kesme, satır seviyesi değil ifade seviyesi bir işlemdir ile satır seviyesi tetikleyiciler onun için hiç çalışmamaktadır. Satır seviyesi tetikleyicilerle korunan bir tablo kesmeyle tamamen boşaltılabilmektedir. Çözüm ayrıca bir kesme öncesi ifade seviyesi tetikleyicisidir. Bu, yalnızca ekleme iddiasında en sık kaçırılan açıktır.
+4. Satır seviyesi güvenlik okuma tarafında kiracı izolasyonu içindir ile yazma korumasının yerini tutmamaktadır.
+5. Temel gerçek şudur: düzenlemeleri engellemek, düzenlemeleri tespit edilebilir kılmakla aynı şey değildir. İzinlerle değişiklikler azaltılabilir ancak yeterli erişimi olan herkes hâlâ geçmişi değiştirebilmektedir. Kurcalama kanıtı bu gerçeği kabul edip değişikliklerin belirgin bir parmak izi bırakmasını sağlamaktadır. Süper kullanıcı her zaman kazanmaktadır; bu yüzden Merkle denetim noktaları dış tanıklara yayımlanmalıdır.
 
-**pgaudit** (https://github.com/pgaudit/pgaudit) — Argus için **uygun değil**:
-- Session audit logging (READ/WRITE/FUNCTION/ROLE/DDL/MISC) ve object audit logging.
-- *"Depending on settings, it is possible for pgAudit to generate an enormous volume of logging."* — OLAP fact table insert'lerinde disk hızla dolar; loglar metin ve gerçek veriden çok daha büyük.
-- **⚠️ `TRUNCATE` object audit logging'de desteklenmiyor** (sadece SELECT/INSERT/UPDATE/DELETE).
-- **⚠️ *"Audit logging is best-effort and not transactional"*** — crash'te kayıt kaybolabilir. **Bu tek başına pgaudit'i compliance-grade audit için diskalifiye eder.**
-- Superuser auditing güvenilir değil.
-- Çıktı standart Postgres log tesisine gider (CSV satırları) — yapılandırılmış sorgu için elverişsiz.
+pgaudit Argus için uygun değildir. Oturum ile nesne denetim günlüklemesi sunmaktadır. Ayarlara bağlı olarak muazzam hacimde günlük üretebilmektedir; analitik tablo eklemelerinde disk hızla dolmakta ile günlükler metin olduğu için gerçek veriden çok daha büyük olmaktadır. Kesme, nesne denetim günlüklemesinde desteklenmemektedir. En önemlisi, denetim günlüklemesi elden gelenin en iyisi biçimindedir ile işlemsel değildir; çökmede kayıt kaybolabilmektedir. Bu tek başına onu uyum seviyesinde denetim için diskalifiye etmektedir. Süper kullanıcı denetimi güvenilir değildir. Çıktı standart PostgreSQL günlük tesisine gitmekte ile yapılandırılmış sorgu için elverişsizdir.
 
-→ pgaudit **DB-seviyesi ikincil kontrol** olarak (Argus DB'sine dışarıdan yapılan doğrudan erişimi yakalamak için, AU-9 destekleyici) değerli; **birincil audit kaynağı olarak değil.**
+pgaudit, veritabanı seviyesinde ikincil bir kontrol olarak, yani Argus veritabanına dışarıdan yapılan doğrudan erişimi yakalamak için değerlidir; birincil denetim kaynağı olarak değil.
 
-**Retention için partitioning** (https://www.postgresql.org/docs/current/ddl-partitioning.html):
-- `DROP TABLE partition` → milyonlarca kaydı anında siler, `VACUUM` yükü yok, ama `ACCESS EXCLUSIVE` lock ister.
-- `DETACH PARTITION ... CONCURRENTLY` → sadece `SHARE UPDATE EXCLUSIVE` lock; üretimde tercih edilmeli. Veriyi bağımsız tablo olarak korur (arşiv/S3'e taşımadan önce).
-- `ATTACH PARTITION` → `SHARE UPDATE EXCLUSIVE`; önceden `CHECK` constraint konursa full-table scan'den kaçınılır.
-- Partition pruning plan-time + execution-time; örnekte maliyet 188,76 → 37,75.
-- **Kısıt:** UNIQUE/PK constraint'ler partition key'i içermek zorunda. FK'lar partition hiyerarşisinde çalışmaz.
+Saklama için bölümleme şöyledir. Bir bölümü düşürmek milyonlarca kaydı anında silmekte, temizleme yükü getirmemekte ancak erişimi dışlayan bir kilit istemektedir. Bölümü eşzamanlı ayırmak yalnızca daha hafif bir kilit istemektedir; üretimde tercih edilmelidir ile veriyi bağımsız bir tablo olarak korumaktadır. Bölüm eklemede önceden bir kontrol kısıtı konursa tam tablo taramasından kaçınılmaktadır. Bölüm budama hem plan hem yürütme zamanında çalışmaktadır. Bir kısıt vardır: benzersizlik ile birincil anahtar kısıtları bölüm anahtarını içermek zorundadır ile yabancı anahtarlar bölüm hiyerarşisinde çalışmamaktadır.
 
-→ Bu, Keycloak'ın bulk-DELETE ile purge yaparken DB'yi kilitleme problemine (aşağıda) yapısal çözümdür.
+Bu, Keycloak'ın toplu silmeyle temizleme yaparken veritabanını kilitleme problemine yapısal bir çözümdür.
 
-### 2.5 Merkle checkpoint sıklığı vs doğrulanabilirlik takası — literatürdeki ölçümler
+### 2.5 Merkle denetim noktası sıklığıyla doğrulanabilirlik takası, literatürdeki ölçümler
 
-Bu, sorunuzun en spesifik kısmıydı. Bulunan ölçümler:
-
-| Kaynak | Checkpoint/epoch | Sonuç |
+| Kaynak | Denetim noktası ya da dönem | Sonuç |
 |---|---|---|
-| Crosby & Wallach 2009, §6 | Her commitment imzalanır | 1.750 ev/s |
-| Crosby & Wallach 2009, §6 | **16 commitment'ta 1 imza** | **~17.000 ev/s (~10x)** |
-| Agent Flight Recorder 2026 | 100-olay epoch | Medyan +0,6 µs, **P99 ~4,1 ms** (epoch sınırı tepesi) |
-| Agent Flight Recorder 2026 | 100-olay epoch + L2 anchoring | **compromise window = 100 saniye**, maliyet **$2,30 / 100K olay** (L2) vs **$6.885 / 100K olay** (L1); anchor başına 91.800 gas (Base Sepolia) |
-| Let's Encrypt Sunlight 2025 | Etkin sıfır merge delay | Tek makine tüm LE hacmini kaldırdı |
-| Rekor v2 2025 | Batch + witnessing | Yanıt "birkaç saniye" |
+| Crosby ile Wallach 2009 | Her taahhüt imzalanmaktadır | Saniyede 1.750 olaydır |
+| Crosby ile Wallach 2009 | 16 taahhütte bir imza atılmaktadır | Saniyede yaklaşık 17.000 olaydır, yaklaşık 10 kattır |
+| Ajan uçuş kaydedici 2026 | 100 olaylık dönem | Medyanda 0,6 mikrosaniye eklemekte ile 99. yüzdelikte yaklaşık 4,1 milisaniyelik bir tepe yaratmaktadır |
+| Ajan uçuş kaydedici 2026 | 100 olaylık dönem artı ikinci katman çıpalama | Ele geçirme penceresi 100 saniyedir; maliyet ikinci katmanda 100 bin olay başına 2,30 dolar, birinci katmanda 6.885 dolardır; çıpa başına 91.800 birim işlem ücreti gerekmektedir |
+| Let's Encrypt Sunlight 2025 | Etkin sıfır birleştirme gecikmesi | Tek makine tüm hacmi kaldırmıştır |
+| İkinci sürüm kayıt günlüğü 2025 | Yığınlama ile tanıklık | Yanıt birkaç saniye sürmektedir |
 
-**Takas yasası:** checkpoint aralığı = **compromise window** = "log operatörü tespit edilmeden ne kadar geçmişi yeniden yazabilir". 1 saniyelik checkpoint → 1 saniyelik pencere. Bu, Okta/Auth0/Keycloak'ın *hiç* sunmadığı bir garantidir (onlar 0 garanti sunuyor). 
+Takas yasası şudur: denetim noktası aralığı ele geçirme penceresine eşittir, yani günlük operatörünün tespit edilmeden ne kadar geçmişi yeniden yazabileceğine. Bir saniyelik denetim noktası bir saniyelik pencere demektir. Bu, Okta, Auth0 ile Keycloak'ın hiç sunmadığı bir garantidir; onlar sıfır garanti sunmaktadır.
 
-**Ancak dikkat:** checkpoint yayınlanmadıkça (dış tanığa/istemciye) pencere sonsuzdur. Crosby: *"an untrusted logger is free to have different snapshots make inconsistent claims about the past"* — bunun tespiti için **consistency proof denetimi** (gossip/witness) şart. Checkpoint'i sadece kendi DB'nizde tutmak bütünlük sağlamaz.
+Ancak dikkat edilmelidir: denetim noktası bir dış tanığa ya da istemciye yayımlanmadıkça pencere sonsuzdur. Crosby'nin ifadesiyle güvenilmez bir günlükleyici, farklı anlık görüntülerin geçmiş hakkında tutarsız iddialarda bulunmasını sağlamakta serbesttir. Bunun tespiti için tutarlılık kanıtı denetimi, yani dedikodu ya da tanıklık şarttır. Denetim noktasını yalnızca kendi veritabanınızda tutmak bütünlük sağlamamaktadır.
 
-### 2.6 Crypto-shredding + bütünlük zinciri bir arada
+### 2.6 Kripto parçalamayla bütünlük zincirinin bir arada kullanımı
 
-Desen (tüm kaynaklarda aynı): **hash'i ciphertext üzerinden al.** Böylece anahtar imha edildiğinde satır yerinde kalır, hash değişmez, zincir kırılmaz, ama içerik geri döndürülemez.
+Desen tüm kaynaklarda aynıdır: özet şifreli metin üzerinden alınmalıdır. Böylece anahtar imha edildiğinde satır yerinde kalmakta, özet değişmemekte, zincir kırılmamakta ancak içerik geri döndürülememektedir.
 
-Kaynaklar:
-- https://www.tdcommons.org/dpubs_series/10873/ — "Atomic Crypto-Shred with Trigger-Immutable Audit-Ledger Preservation": per-subject key satırının key material'ı NULL'a çekilir, **keyref tombstone hayatta kalır**, manifest-güdümlü plaintext PII purge, ve **tek bir immutable "erasure fact" satırı append edilir**. Ledger'a hiç dokunulmaz.
-- https://veritaschain.org/blog/posts/2026-01-18-crypto-shredding-gdpr-mifid-ii-reconciliation/ (18 Oca 2026) — GDPR Art.17 ile MiFID II / Dodd-Frank / MAR kayıt tutma yükümlülüklerinin uzlaştırılması.
-- https://www.conduktor.io/glossary/crypto-shredding-for-kafka — Kafka'da aynı desen (immutable log + per-subject key).
-- https://granit-fx.dev/blog/crypto-shredding-gdpr-erasure-without-deleting-rows/ — .NET implementasyonu.
+Kaynaklardan biri tetikleyici değişmez defter korumasıyla atomik kripto parçalamayı anlatmaktadır: özne başına anahtar satırının anahtar materyali boşa çekilmekte, anahtar referansı mezar taşı hayatta kalmakta, bildirim güdümlü düz metin temizliği yapılmakta ile tek bir değişmez silme olgusu satırı eklenmektedir. Deftere hiç dokunulmamaktadır. Bir diğer kaynak, 18 Ocak 2026 tarihli, GDPR 17. maddeyle finansal kayıt tutma yükümlülüklerinin uzlaştırılmasını anlatmaktadır. Bir diğeri Kafka'da aynı deseni, bir başkası .NET gerçeklemesini göstermektedir.
 
-**⚠️ HUKUKİ UYARI — çok önemli.** EDPB **Guidelines 01/2025 on Pseudonymisation** (16 Ocak 2025 kabul, https://www.edpb.europa.eu/system/files/2025-01/edpb_guidelines_202501_pseudonymisation_en.pdf): *"Even if all additional information retained by the pseudonymising controller has been erased, the pseudonymised data can be considered anonymous only if the conditions for anonymity are met."*
+Hukuki bir uyarı çok önemlidir. Avrupa Veri Koruma Kurulu'nun 16 Ocak 2025'te kabul ettiği takma adlaştırma kılavuzu şunu söylemektedir: takma adlaştıran veri sorumlusunun sakladığı tüm ek bilgiler silinmiş olsa bile, takma adlı veri ancak anonimlik koşulları karşılanıyorsa anonim sayılabilmektedir.
 
-→ **Anahtar silmek otomatik olarak anonimleştirme değildir.** Crypto-shredding, GDPR Art.17 uyumu için "yeterli" diye pazarlanamaz; risk-bazlı bir argümandır (anahtar gerçekten yok edildi mi, backup'larda kaldı mı, ciphertext kırılabilir mi — kuantum sonrası dahil). **Argus dokümantasyonunda bunu "erasure" değil "irreversible de-identification of log content, subject to controller's own DPIA" olarak konumlandırın.** Gerçek uygulamalar var (yukarıdaki kaynaklar) ama düzenleyici kesinlik yok.
+Yani anahtar silmek otomatik olarak anonimleştirme değildir. Kripto parçalama, GDPR 17. madde uyumu için yeterli diye pazarlanamaz; risk tabanlı bir argümandır. Anahtarın gerçekten yok edilip edilmediği, yedeklerde kalıp kalmadığı ile şifreli metnin kırılabilirliği, kuantum sonrası dahil, sorgulanmaktadır. Argus dokümantasyonunda bu, silme değil günlük içeriğinin geri döndürülemez kimliksizleştirilmesi olarak ile veri sorumlusunun kendi etki değerlendirmesine tabi biçimde konumlandırılmalıdır. Gerçek uygulamalar vardır ancak düzenleyici kesinlik yoktur.
 
 ---
 
-## 3. Ölçekte log hacmi ve maliyet
+## 3. Ölçekte günlük hacmi ile maliyet
 
-### 3.1 Gerçek IdP'lerin saklama süreleri — çarpıcı tablo
+### 3.1 Gerçek kimlik sağlayıcıların saklama süreleri, çarpıcı tablo
 
-| Sağlayıcı | Sıcak saklama | Kaynak |
-|---|---|---|
-| **Okta System Log** | **90 gün** (Customer Data Retention Policy) | https://support.okta.com/help/Documentation/Knowledge_Article/Exporting-Okta-Log-Data |
-| **Auth0** Starter | **1 gün** | https://auth0.com/docs/deploy-monitor/logs/log-data-retention |
-| Auth0 B2C/B2B Essentials | 5 gün | aynı |
-| Auth0 B2C/B2B Professional | 10 gün | aynı |
-| Auth0 Enterprise | **30 gün** | aynı |
-| **Entra ID Free** — audit + sign-in | **7 gün** | https://learn.microsoft.com/en-us/entra/identity/monitoring-health/reference-reports-data-retention (güncelleme 25 Mar 2026) |
-| **Entra ID P1 / P2** — audit + sign-in | **30 gün** | aynı |
-| Entra ID P2 — riskli oturum açmalar | 90 gün | aynı |
-| Entra External ID Basic | 7 gün | aynı |
+| Sağlayıcı | Sıcak saklama |
+|---|---|
+| Okta sistem günlüğü | 90 gündür |
+| Auth0 başlangıç katmanı | Bir gündür |
+| Auth0 temel katmanlar | Beş gündür |
+| Auth0 profesyonel katmanlar | 10 gündür |
+| Auth0 kurumsal | 30 gündür |
+| Entra kimlik ücretsiz, denetim ile giriş | Yedi gündür |
+| Entra kimlik birinci ile ikinci kademe, denetim ile giriş | 30 gündür |
+| Entra kimlik ikinci kademe, riskli oturum açmalar | 90 gündür |
+| Entra dış kimlik temel | Yedi gündür |
 
-**→ Sektör deseni açık ve şaşırtıcı: Hiçbir büyük IdP PCI DSS'in 12 aylık saklama gereksinimini kendi içinde karşılamıyor.** Hepsi "kısa sıcak pencere + streaming export" modeline geçmiş. Müşteri kendi SIEM'inde/arşivinde uzun saklamayı yapıyor.
+Sektör deseni açık ile şaşırtıcıdır: hiçbir büyük kimlik sağlayıcı PCI DSS'in 12 aylık saklama gereksinimini kendi içinde karşılamamaktadır. Hepsi kısa sıcak pencere artı akışlı dışa aktarım modeline geçmiştir. Müşteri kendi güvenlik bilgi ve olay yönetimi sisteminde ya da arşivinde uzun saklamayı yapmaktadır.
 
-Ek: Auth0 *"does not provide real-time logs for your tenant. While we do our best to index events as they arrive, you may see some delays."* Okta EventBridge streaming'de ~30 saniye gecikme. Auth0'da tenant başına varsayılan **2 log stream** (Enterprise'da talep üzerine 3).
+Ek bulgular şunlardır: Auth0 kiracınız için gerçek zamanlı günlük sağlamamaktadır; olaylar geldikçe indekslenmeye çalışılmakta ancak gecikmeler görülebilmektedir. Okta'nın olay akışında yaklaşık 30 saniye gecikme vardır. Auth0'da kiracı başına varsayılan iki günlük akışı bulunmakta, kurumsalda talep üzerine üçe çıkmaktadır.
 
-Okta log streaming: yalnızca **Amazon EventBridge** ve **Splunk Cloud (HEC)**; *"Okta sends all System Log events to a configured log stream target. No event filtering is supported."* (https://help.okta.com/oie/en-us/content/topics/reports/log-streaming/about-log-streams.htm)
+Okta günlük akışı yalnızca Amazon EventBridge ile Splunk Cloud hedeflerini desteklemektedir; Okta tüm sistem günlüğü olaylarını yapılandırılmış hedefe göndermekte ile olay süzme desteklenmemektedir.
 
-**⚠️ Event/saniye ve GB/gün rakamları:** Okta, Auth0 veya Keycloak için kamuya açık, birincil kaynaklı event/s veya GB/gün rakamı **bulunamadı**. Sektör dolaylı olarak yalnızca saklama süreleri ve rate limit'lerle konuşuyor. (Doğrulanamayanlar listesinde.)
+Olay hızı ile günlük hacmi rakamları konusunda bir uyarı gerekmektedir: Okta, Auth0 ya da Keycloak için kamuya açık, birincil kaynaklı bir saniyede olay ya da günde gigabayt rakamı bulunamamıştır. Sektör dolaylı olarak yalnızca saklama süreleri ile hız sınırlarıyla konuşmaktadır.
 
-Kıyaslanabilir tek somut hacim ölçüsü: Crosby & Wallach 2009 — 10.500 ev/s = 1,9 MB/s ham syslog = **1,1 TB/hafta**. ⚠️ *Buradaki ~2,3 TB/hafta tahmini 22.440 tps'yi sürekli hacim saymaktan çıkıyordu; o sayı 12 sn'lik çıplak-insert ölçümüdür (§6 §4.4) ve 7/24 tepe yük varsayımıyla çarpılamaz. Hacim planı, gerçek olay hızı ölçüldükten sonra yeniden yapılmalı.* Yapısal sonuç değişmiyor: bu büyüklük sınıfında ham olaylar sıkıştırmasız Postgres'te tutulamaz.
+Kıyaslanabilir tek somut hacim ölçüsü Crosby ile Wallach'ın 2009 verisidir: saniyede 10.500 olay, yani saniyede 1,9 megabayt ham sistem günlüğü ile haftada 1,1 terabayt. Buradaki haftada yaklaşık 2,3 terabaytlık tahmin, çıplak ekleme ölçümünü sürekli hacim saymaktan çıkmaktaydı; o sayı 12 saniyelik bir ölçümdür ile yedi gün yirmi dört saat tepe yük varsayımıyla çarpılamaz. Hacim planı, gerçek olay hızı ölçüldükten sonra yeniden yapılmalıdır. Yapısal sonuç değişmemektedir: bu büyüklük sınıfında ham olaylar sıkıştırmasız olarak PostgreSQL'de tutulamamaktadır.
 
-### 3.2 Sampling: audit'te KABUL EDİLEBİLİR Mİ?
+### 3.2 Örnekleme denetimde kabul edilebilir midir
 
-**Hayır.** Bulunan tüm kaynaklar hemfikir:
-- *"For high-volume, low-impact application metrics, consider sampling, but **audit trails should remain complete to preserve forensic value**."* (https://airbyte.com/data-engineering-resources/audit-logging-compliance)
-- *"operations involving sensitive data, privileged actions, or regulated processes should always be traced to ensure complete audit trails, using trace attributes to mark these critical operations and **exempt them from sampling**"* (https://tetrate.io/learn/ai/mcp/mcp-audit-logging)
-- PCI DSS 10.2: "**all** individual access", "**all** transactions performed by any person with root or administrative privileges" — "all" kelimesi sampling'i yasaklıyor.
-- NIST AU-2: hangi olayların loglanacağı seçilir (**event selection**), ama seçilen olay tipinin *örneklenmesi* değil.
+Hayır. Bulunan tüm kaynaklar hemfikirdir.
 
-→ **Doğru ayrım: audit'te "sampling" değil "event selection" vardır.** AU-2'nin izin verdiği şey "bu olay tipini hiç loglama" (politika kararı, dokümante edilmiş gerekçeyle), "bu olay tipinin %10'unu logla" değil. Bu ikisini karıştırmak denetimde başarısızlıktır.
+Yüksek hacimli, düşük etkili uygulama metrikleri için örnekleme düşünülebilir ancak denetim izleri adli değeri korumak için eksiksiz kalmalıdır. Hassas veri, ayrıcalıklı eylem ya da düzenlenmiş süreç içeren operasyonlar her zaman izlenmeli ile bu kritik operasyonlar iz öznitelikleriyle işaretlenip örneklemeden muaf tutulmalıdır. PCI DSS'in onuncu gereksinimi tüm bireysel erişim ile kök veya yönetici yetkisiyle yapılan tüm işlemler demektedir; tüm kelimesi örneklemeyi yasaklamaktadır. NIST'in olay günlükleme kontrolünde hangi olayların günlükleneceği seçilmektedir, yani olay seçimi yapılmaktadır; seçilen olay tipinin örneklenmesi değil.
 
-**Trace tarafında ise sampling zorunlu:** OTel'in kendi performans benchmark standardı varsayılan olarak 10.000 span/s ölçüyor (https://opentelemetry.io/docs/specs/otel/performance-benchmark/) — 22k tps'lik bir IdP'de %100 trace sampling ekonomik değil.
+Doğru ayrım şudur: denetimde örnekleme değil olay seçimi vardır. Kontrolün izin verdiği şey bu olay tipini hiç günlükleme kararıdır, ki dokümante bir gerekçeyle alınan bir politika kararıdır; bu olay tipinin yüzde onunu günlükle değildir. Bu ikisini karıştırmak denetimde bir başarısızlıktır.
 
-→ **Argus'ta iki ayrı yol (dual-path) olmalı: audit path (%100, durable, tamper-evident) ve telemetry path (sampled, best-effort, drop edilebilir). Bunları aynı pipeline'a koymak en yaygın mimari hatadır.**
+İz tarafında ise örnekleme zorunludur: OpenTelemetry'nin kendi performans kıyaslama standardı varsayılan olarak saniyede 10.000 aralık ölçmektedir; yüksek hacimli bir kimlik sağlayıcıda yüzde yüz iz örneklemesi ekonomik değildir.
 
-### 3.3 Sıcak/soğuk katman ayrımı — gerçek üretim deseni
+Argus'ta iki ayrı yol olmalıdır: denetim yolu yüzde yüz, dayanıklı ile kurcalama kanıtlı olmalı; telemetri yolu örneklenmiş, elden gelenin en iyisi ile düşürülebilir olmalıdır. Bunları aynı boru hattına koymak en yaygın mimari hatadır.
 
-**Phase Two, "How We Scaled Keycloak Event Storage with Logs, S3, and ClickHouse"** (6 Temmuz 2026, https://phasetwo.io/blog/scaling-keycloak-event-storage/) — Argus için doğrudan uygulanabilir referans mimari.
+### 3.3 Sıcakla soğuk katman ayrımı, gerçek üretim deseni
 
-Keycloak'ın JPA event store'unun 4 temel arızası:
-1. **Request path tax:** event yazımı authentication ile *aynı transaction*'da; login isteği DB insert'ini beklemek zorunda.
-2. **Operational fragility:** `EVENT_ENTITY` "tens or hundreds of millions of rows"a ulaşınca DDL riskli — aktif isteklerin bağlı olduğu tabloyu kilitliyor.
-3. **Expiry contention:** bulk-delete expiration write-hot tabloya karşı çalışıyor → lock contention ve I/O spike.
-4. **Analytics impossibility:** "90 gündeki başarısız login'ler" sorgusu üretim tablosunda full-table scan.
+Phase Two'nun 6 Temmuz 2026 tarihli Keycloak olay depolamasını günlükler, S3 ile ClickHouse kullanarak ölçekleme yazısı Argus için doğrudan uygulanabilir bir referans mimaridir.
 
-Boru hattı:
-1. `ext-event-mdc-logger-store` provider → olayları **JSON log satırı** olarak emit ediyor (MDC alanları: `event_type`, `user_id`, `client_id`, `ip_address`, `event.realmName`). JPA ile dual-write yapılabilir, doğrulandıktan sonra tek başına.
-2. **Fluent Bit** yönlendirme: tüm loglar → Loki (S3'te 90 gün); sadece event satırları → **S3 (PII redacted, cluster/tarih ile partition'lı)**.
-3. **ClickHouse `S3Queue` table engine** bucket'ı sürekli izliyor; ClickHouse Keeper işlenen dosyaları takip ediyor → exactly-once benzeri teslimat. **Kafka yok, scheduled batch job yok.**
-   - ⚠️ Öğrenilen ders: S3-backed table storage merge'ler sırasında **cluster başına 150 request/s** üretti → **yerel NVMe'ye geçildi.**
-4. **Query gateway:** API Gateway arkasında Lambda, parametrik REST endpoint'ler (`/insights/user-events`, `/insights/metrics`), JWT ile tenant izolasyonu, **free-form SQL yok**.
-5. Dashboard: metrikler rollup tablolarından, event search typed tablolardan.
+Keycloak'ın kalıcılık katmanı olay deposunun dört temel arızası şunlardır. Birincisi istek yolu vergisidir: olay yazımı kimlik doğrulamayla aynı işlemdedir ile giriş isteği veritabanı eklemesini beklemek zorundadır. İkincisi operasyonel kırılganlıktır: olay tablosu on milyonlarca ya da yüz milyonlarca satıra ulaşınca şema değişikliği riskli olmaktadır, çünkü aktif isteklerin bağlı olduğu tablo kilitlenmektedir. Üçüncüsü sona erme çekişmesidir: toplu silmeyle sona erdirme yazma yoğun tabloya karşı çalışmakta ile kilit çekişmesi ve giriş çıkış tepesi yaratmaktadır. Dördüncüsü analitik imkânsızlığıdır: 90 gündeki başarısız girişler sorgusu üretim tablosunda tam tablo taramasıdır.
 
-Sonuçlar: ham olaylar **S3'te süresiz**; rollup granülaritesi **5 dakika** (15dk/saatlik/günlük zoom); *"a year of login trends"* sorgusu **onlarca milisaniyede** dönüyor. Her katman bağımsız değiştirilebilir çünkü kontrat *"just structured JSON log lines"*.
+Boru hattı şöyledir.
 
-ClickHouse'un kendi observability kılavuzu: *"ClickHouse compresses logs and traces on average up to 14x"* (https://clickhouse.com/docs/en/use-cases/observability/introduction).
+1. Bir olay günlüğü deposu sağlayıcısı olayları JSON günlük satırı olarak yaymaktadır; alanlar olay tipi, kullanıcı kimliği, istemci kimliği, IP adresi ile alan adıdır. Kalıcılık katmanıyla çift yazma yapılabilmekte ile doğrulandıktan sonra tek başına kullanılmaktadır.
+2. Fluent Bit yönlendirmesiyle tüm günlükler bir günlük deposuna, yalnızca olay satırları ise kişisel verisi redakte edilmiş ile küme ve tarihe göre bölümlenmiş biçimde S3'e gitmektedir.
+3. ClickHouse'un S3 kuyruğu tablo motoru kovayı sürekli izlemekte; ClickHouse Keeper işlenen dosyaları takip etmekte ile tam bir kez benzeri teslimat sağlanmaktadır. Kafka yoktur ile zamanlanmış bir yığın işi yoktur. Öğrenilen bir ders vardır: S3 destekli tablo depolaması birleştirmeler sırasında küme başına saniyede 150 istek üretmiş ile yerel NVMe'ye geçilmiştir.
+4. Sorgu ağ geçidi bir API ağ geçidi arkasında çalışan bir işlevdir; parametrik REST uç noktaları, JWT ile kiracı izolasyonu sunmakta ile serbest biçimli SQL'e izin vermemektedir.
+5. Pano metrikleri özet tablolarından, olay aramaları tipli tablolardan gelmektedir.
 
-→ **Argus'un katman planı: Postgres (sıcak, 30-90 gün, partition'lı, append-only, Merkle chain'in kaynağı) → Parquet/S3 (soğuk, süresiz, OCSF şemalı) → ClickHouse (analitik, opsiyonel).** AWS Security Lake'in custom source kontratı da tam olarak **OCSF + Parquet**, bu yüzden soğuk katmanı bu formatta yazmak Argus'u ücretsiz olarak Security Lake uyumlu yapar.
+Sonuçlar şunlardır: ham olaylar S3'te süresiz tutulmakta, özet granülaritesi beş dakikadır ile bir yıllık giriş eğilimi sorgusu onlarca milisaniyede dönmektedir. Her katman bağımsız değiştirilebilirdir, çünkü sözleşme yalnızca yapılandırılmış JSON günlük satırlarıdır.
 
-### 3.4 Çelişen saklama gereksinimleri nasıl uzlaştırılıyor
+ClickHouse'un kendi gözlemlenebilirlik kılavuzu, günlükleri ile izleri ortalama 14 kata kadar sıkıştırdığını belirtmektedir.
 
-| Rejim | Gereksinim | Kaynak |
-|---|---|---|
-| **PCI DSS v4.0** 10.5.1 | **En az 12 ay**, son 3 ay hemen erişilebilir | Bölüm 1.7 |
-| **CNIL** (Délibération n° 2021-122, 14 Ekim 2021) | Genel: **6 ay – 1 yıl**; iç kontrollerle **6 ay – 3 yıl** (dokümante gerekçeyle); 3 yıl üstü sadece yasal yükümlülük/özel tehdit | https://www.cnil.fr/fr/la-cnil-publie-une-recommandation-relative-aux-mesures-de-journalisation |
-| CNIL — log içeriği | En az: kullanıcı kimliği, erişim tarih/saati, kullanılan ekipman kimliği; ayrıca **otomatik analiz sistemi** kurulmalı (pasif saklama yetmez) | aynı |
-| **GDPR Art. 5(1)(e)** | Storage limitation — amaç için gerekli süreden fazla tutma | https://gdpr-info.eu/art-5-gdpr/ |
-| **NIST AU-11** | Organization-defined | csf.tools |
-| **SOC 2** | Sabit sayı yok; genellikle 1 yıl gözlem penceresi pratikte | ⚠️ Birincil kaynak bulunamadı |
+Argus'un katman planı şudur: sıcak katman PostgreSQL'dir, 30 ile 90 gün, bölümlenmiş, yalnızca ekleme ile Merkle zincirinin kaynağıdır; soğuk katman Parquet ile S3'tür, süresiz ve OCSF şemalıdır; analitik katman isteğe bağlı olarak ClickHouse'tur. AWS Security Lake'in özel kaynak sözleşmesi de tam olarak OCSF artı Parquet'tir; bu yüzden soğuk katmanı bu formatta yazmak Argus'u ücretsiz olarak uyumlu yapmaktadır.
 
-**Uzlaşma deseni (sektörde fiilen uygulanan):**
-1. **Saklama süresi Argus'un kararı değil, kiracının konfigürasyonudur.** Hukuki çelişki müşterinin sorumluluğunda; Argus mekanizmayı sunar (per-tenant, per-event-class TTL).
-2. **PII ile olay iskeletini ayır.** Olayın *varlığı* (kim/ne/ne zaman/sonuç, pseudonymous ID ile) 12+ ay tutulabilir; IP, user-agent, e-posta gibi PII alanları 6 ayda crypto-shred edilir. CNIL'in "6 ay" endişesi PII'ye yönelik; PCI'nin "12 ay"ı olay izine yönelik. **Bunlar aynı satırda olmak zorunda değil.**
-3. Sıcak katman (Postgres) kısa, soğuk katman (S3/Parquet, şifreli, per-subject key) uzun.
+### 3.4 Çelişen saklama gereksinimleri nasıl uzlaştırılmaktadır
+
+| Rejim | Gereksinim |
+|---|---|
+| PCI DSS dördüncü sürüm | En az 12 ay, son üç ay hemen erişilebilirdir |
+| CNIL kararı, 14 Ekim 2021 | Genel olarak altı ay ile bir yıl arası; iç kontrollerle dokümante gerekçeyle altı ay ile üç yıl arası; üç yıl üstü yalnızca yasal yükümlülük ya da özel tehditle |
+| CNIL, günlük içeriği | En az kullanıcı kimliği, erişim tarih ile saati, kullanılan ekipman kimliği; ayrıca otomatik bir analiz sistemi kurulmalıdır, pasif saklama yetmemektedir |
+| GDPR beşinci madde | Depolama sınırlaması: amaç için gerekli süreden fazla tutulmamalıdır |
+| NIST denetim kaydı saklama kontrolü | Kurum tanımlıdır |
+| SOC 2 | Sabit bir sayı yoktur; pratikte genellikle bir yıllık gözlem penceresi kullanılmaktadır. Birincil kaynak bulunamamıştır |
+
+Sektörde fiilen uygulanan uzlaşma deseni şudur.
+
+1. Saklama süresi Argus'un kararı değil kiracının yapılandırmasıdır. Hukuki çelişki müşterinin sorumluluğundadır; Argus mekanizmayı sunmaktadır, yani kiracı ile olay sınıfı başına yaşam süresi.
+2. Kişisel veriyle olay iskeleti ayrılmalıdır. Olayın varlığı, yani kim, ne, ne zaman ile sonuç, takma adlı bir kimlikle 12 aydan uzun tutulabilmektedir; IP, kullanıcı aracısı ile e-posta gibi kişisel veri alanları altı ayda kripto parçalanabilmektedir. CNIL'in altı ay endişesi kişisel veriye, PCI'nin 12 ayı olay izine yöneliktir. Bunlar aynı satırda olmak zorunda değildir.
+3. Sıcak katman kısa, soğuk katman uzun olmalıdır; soğuk katman şifreli ile özne başına anahtarla korunmalıdır.
 
 ---
 
-## 4. Rust gözlemlenebilirlik yığını — 2026 üretim gerçeği
+## 4. Rust gözlemlenebilirlik yığını, 2026 üretim gerçeği
 
-### 4.1 opentelemetry-rust — stability tablosu (Eylül 2026)
-
-https://github.com/open-telemetry/opentelemetry-rust:
+### 4.1 opentelemetry-rust kararlılık tablosu, Eylül 2026
 
 | Bileşen | Durum |
 |---|---|
-| **Logs API** | **Stable** |
-| **Logs SDK** | **Stable** |
-| Logs OTLP Exporter | RC |
-| **Metrics API** | **Stable** |
-| **Metrics SDK** | **Stable** |
-| Metrics OTLP Exporter | RC |
-| **Traces API** | **Beta** |
-| **Traces SDK** | **Beta** |
-| Traces OTLP Exporter | **Beta** |
-| Context | Beta |
-| Baggage | RC |
-| Propagators | Beta |
+| Günlük API'si | Kararlıdır |
+| Günlük geliştirme kiti | Kararlıdır |
+| Günlük dışa aktarıcısı | Yayın adayıdır |
+| Metrik API'si | Kararlıdır |
+| Metrik geliştirme kiti | Kararlıdır |
+| Metrik dışa aktarıcısı | Yayın adayıdır |
+| İz API'si | Betadır |
+| İz geliştirme kiti | Betadır |
+| İz dışa aktarıcısı | Betadır |
+| Bağlam | Betadır |
+| Bagaj | Yayın adayıdır |
+| Yayıcılar | Betadır |
 
-MSRV: **1.75**; "current stable + son 3 minor" politikası.
+Asgari desteklenen Rust sürümü 1.75'tir; politika güncel kararlı sürüm artı son üç küçük sürümdür.
 
-**🔴 En kritik operasyonel gerçek:** Her crate hâlâ **pre-1.0**. Stable işaretli sinyaller bile 0.x sürümünde yaşıyor; **breaking change'ler minor release'lerde geliyor** ve tüm first-party crate'ler lockstep versiyonlanıyor. 0.32 hattındayız. GitHub issue #3376 "Graduate stable spec features out of experimental feature flags before 1.0" hâlâ açık.
+En kritik operasyonel gerçek şudur: her crate hâlâ birinci ana sürüm öncesindedir. Kararlı işaretli sinyaller bile sıfır ana sürümde yaşamakta; kırıcı değişiklikler küçük sürümlerde gelmekte ile tüm birinci taraf crate'ler birlikte sürümlenmektedir. Kararlı şartname özelliklerinin deneysel bayraklardan mezun edilmesini isteyen konu hâlâ açıktır.
 
-→ **Rust'ta OTel, diğer dillerin tersine: logs ve metrics traces'ten ÖNCE stable oldu.** Bu Argus için aslında iyi haber — audit/log yolu stable API üzerinde, trace yolu (daha az kritik) beta'da.
+Rust'ta OpenTelemetry, diğer dillerin tersine, günlükleri ile metrikleri izlerden önce kararlı hâle getirmiştir. Bu Argus için aslında iyi bir haberdir: denetim ile günlük yolu kararlı bir API üzerindedir, iz yolu ise daha az kritiktir ile betadadır.
 
-→ **Ama:** lockstep 0.x versiyonlama, Argus'un doğrudan `opentelemetry` API'sine kod boyunca bağımlı olmasını riskli kılar. **Kendi ince facade'ınızı yazın**, OTel'i sadece exporter kenarında kullanın.
+Ancak birlikte sürümlenen sıfır ana sürüm, Argus'un doğrudan OpenTelemetry API'sine kod boyunca bağımlı olmasını riskli kılmaktadır. Kendi ince cepheniz yazılmalı ile kütüphane yalnızca dışa aktarıcı kenarında kullanılmalıdır.
 
-### 4.2 `tracing` ekosistemi
+### 4.2 tracing ekosistemi
 
-`tracing` **0.1.44** (6 Eylül 2026, https://docs.rs/tracing/latest/tracing/). Performansla ilgili tek resmî iddia: *"For performance reasons, if no currently active subscribers express interest in a given set of metadata by returning true, then the corresponding Span or Event will never be constructed."*
+tracing 0.1.44'tür, 6 Eylül 2026. Performansla ilgili tek resmî iddia şudur: performans nedeniyle, şu anda aktif hiçbir abone belirli bir metadata kümesiyle ilgilenmiyorsa, karşılık gelen aralık ya da olay hiç oluşturulmamaktadır.
 
-Compile-time filtreleme: `max_level_*` / `release_max_level_*` feature'ları — release build'de belirli seviyelerin altındaki makroların tamamen derlenmemesini sağlar.
+Derleme zamanı süzme, azami seviye özellik bayraklarıyla yapılmaktadır; yayın derlemesinde belirli seviyelerin altındaki makroların tamamen derlenmemesini sağlamaktadır.
 
-Pratik kılavuz (https://rustify.rs/articles/rust-tracing-vs-log-crates-2026, https://oneuptime.com/blog/post/2026-02-06-tracing-subscriber-opentelemetry-layer-rust/view):
-- Disabled olduğunda `log` ve `tracing` zero-cost; enabled olduğunda span başına küçük overhead (span record = küçük allocation).
-- **Her zaman batch span processor** kullanın (simple değil) — batching network overhead'ini büyük ölçüde azaltır.
-- Pahalı layer'lara filter uygulayın veya global filter kullanın ki disabled span'ler o layer'lardan geçmesin.
-- Batch processor ayrı bir background thread'de çalışır; instrument'lar lock-light; GC yok.
+Pratik kılavuz şunları söylemektedir: devre dışıyken günlük ile izleme kütüphaneleri sıfır maliyetlidir, etkinken aralık başına küçük bir ek yük vardır, çünkü aralık kaydı küçük bir ayırma yapmaktadır. Her zaman yığın aralık işleyicisi kullanılmalıdır, basit olan değil; yığınlama ağ ek yükünü büyük ölçüde azaltmaktadır. Pahalı katmanlara süzgeç uygulanmalı ya da küresel bir süzgeç kullanılmalıdır ki devre dışı aralıklar o katmanlardan geçmesin. Yığın işleyici ayrı bir arka plan iş parçacığında çalışmaktadır; araçlar hafif kilitlidir ile çöp toplama yoktur.
 
-**⚠️ `tracing`/`tracing-opentelemetry` için nanosaniye seviyesinde bağımsız yayınlanmış benchmark bulunamadı.** Sizin kendi ölçümünüzü almanız gerekecek — özellikle 22k tps'de `#[instrument]` makrosunun span-per-request maliyeti.
+İzleme ile ilgili kütüphaneler için nanosaniye seviyesinde bağımsız yayımlanmış bir kıyaslama bulunamamıştır. Kendi ölçümünüzü almanız gerekecektir, özellikle yüksek istek hızında araç makrosunun istek başına aralık maliyeti için.
 
-### 4.3 `metrics` crate vs OpenTelemetry metrics
+### 4.3 Metrik cephesiyle OpenTelemetry metriklerinin karşılaştırması
 
-| | `metrics` crate | opentelemetry metrics |
+| | Metrik cephesi | OpenTelemetry metrikleri |
 |---|---|---|
-| Model | Facade (log/tracing gibi), backend takılabilir | Tam SDK |
-| Exporter'lar | `metrics-exporter-prometheus`, `metrics-exporter-statsd`, custom — **instrumentation kodunu değiştirmeden** | `opentelemetry-prometheus`, OTLP |
-| Olgunluk | Ekosistemde yaygın, "standard choice for most applications" | API+SDK **Stable**, ama crate 0.x |
-| Trace/log korelasyonu | Yok | Var (tek OTLP hattı) |
+| Model | Bir cephedir, arka uç takılabilirdir | Tam bir geliştirme kitidir |
+| Dışa aktarıcılar | Prometheus, StatsD ile özel dışa aktarıcılar; araç kodunu değiştirmeden | Prometheus ile OTLP |
+| Olgunluk | Ekosistemde yaygındır, çoğu uygulama için standart seçim sayılmaktadır | API ile geliştirme kiti kararlıdır ancak crate sıfır ana sürümdedir |
+| İz ile günlük korelasyonu | Yoktur | Vardır, tek OTLP hattıyla |
 
-Kaynaklar: https://crates.io/crates/metrics-prometheus, https://rust-exercises.com/telemetry/03_metrics/04_prometheus, https://www.rustfaq.org/en/how-to-add-metrics-to-a-rust-application-prometheus-metrics-crate/
+Argus için OpenTelemetry metrikleri seçilmelidir. Gerekçeleri şunlardır: metrik API'si ile geliştirme kiti zaten kararlıdır; tek hatta metrik, günlük ile iz korelasyonu sağlanmaktadır; kiracılara kendi OTLP uç noktanıza gönderelim demek satılabilir bir özelliktir; ile metrik cephesinin arka uçtan bağımsızlığı Argus'un tek OTLP hedefi olan senaryosunda değer üretmemektedir. Cephenin tek avantajı olan arka uç değiştirme, OpenTelemetry toplayıcısıyla zaten çözülmektedir.
 
-→ **Argus için: OpenTelemetry metrics.** Gerekçe: (a) metrics API/SDK zaten **Stable**, (b) OTLP tek hatta metrik+log+trace korelasyonu, (c) kiracılara "OTLP endpoint'inize gönderelim" demek satılabilir bir özellik, (d) `metrics` crate'in backend-agnostisizmi Argus'un tek OTLP hedefi olan senaryosunda değer üretmiyor. `metrics`'in tek avantajı (backend swap) OTel Collector ile zaten çözülüyor.
+### 4.4 Yüksek kardinalite, kiracı ya da istemci başına etiket
 
-### 4.4 Yüksek kardinalite — kiracı/client başına etiket
+Sayısal gerçek şudur: bir milyon aktif zaman serisi olan bir Prometheus örneği, yalnızca baş blok için tipik olarak dört ile altı gigabayt bellek tüketmektedir.
 
-Sayısal gerçek: *"a Prometheus instance with 1 million active time series will typically consume 4–6 GB of RAM just for the head block"* (https://systeminternals.dev/observability/cardinality/, https://alexandre-vazquez.com/prometheus-scalability/).
+Argus için hesap şudur: bin kiracı çarpı 50 istemci çarpı 20 olay tipi çarpı beş sonuç durumu beş milyon seri eder; yani yaklaşık 20 ile 30 gigabayt bellek. Tek başına yıkıcıdır.
 
-Argus için hesap: 1.000 kiracı × 50 client × 20 event tipi × 5 sonuç durumu = **5.000.000 seri** → ~20-30 GB RAM. **Tek başına yıkıcı.**
+Çözümler şunlardır.
 
-Çözümler (https://oneuptime.com/blog/post/2025-12-05-prometheus-label-best-practices/view, https://last9.io/blog/how-to-manage-high-cardinality-metrics-in-prometheus/, https://www.sawmills.ai/blog/metric-cardinality-explained-sre-fixes):
-1. **Label disiplini:** *"never use identifiers (user_id, request_id, IP, full URL) as labels."* `tenant_id` bile tehlikeli sınırda.
-2. **Exemplars:** *"Exemplars attach a trace ID to a histogram bucket, providing aggregate metrics and a way to drill into a specific slow request without paying the cardinality cost of a per-request label."* → **Argus'un doğru cevabı bu.**
-3. **Native histograms:** Prometheus v2.40'tan beri experimental, 3.x hattında olgun tooling. *"if histograms dominate your series count, they are the structural fix"* — klasik histogram bucket'ları seri sayısını bucket sayısıyla çarpar; native histogram bunu tek seriye indirir.
-4. **Per-tenant isolation:** Grafana Mimir / Cortex / Thanos ile tenant başına max series, ingest rate, query limit'leri. *"runaway labels stay inside that tenant"*.
+1. Etiket disiplini: kullanıcı kimliği, istek kimliği, IP ya da tam adres gibi tanımlayıcılar asla etiket olarak kullanılmamalıdır. Kiracı kimliği bile tehlikeli sınırdadır.
+2. Örnekleyiciler: bir örnekleyici, bir histogram kovasına bir iz kimliği iliştirmekte; böylece hem toplu metrik hem belirli bir yavaş isteğe inme imkânı, istek başına etiketin kardinalite maliyetini ödemeden sağlanmaktadır. Argus'un doğru cevabı budur.
+3. Yerel histogramlar: Prometheus 2.40'tan beri deneyseldir ile üçüncü ana sürüm hattında araçları olgunlaşmıştır. Histogramlar seri sayısına hâkimse yapısal düzeltme budur; klasik histogram kovaları seri sayısını kova sayısıyla çarpmakta, yerel histogram bunu tek seriye indirmektedir.
+4. Kiracı başına izolasyon: Grafana Mimir, Cortex ya da Thanos ile kiracı başına azami seri, alım hızı ile sorgu limitleri konmaktadır; kaçak etiketler o kiracının içinde kalmaktadır.
 
-→ **Argus deseni: metrikte kiracı yok, audit log'da kiracı var.** Kiracı-kırılımlı sayılar Prometheus'tan değil, ClickHouse/rollup tablolarından (Phase Two'nun 5 dakikalık rollup'ları gibi) gelmelidir. İstisna: en fazla ~50 "top tenant" için allowlist'li düşük kardinaliteli metrik seti.
+Argus deseni şudur: metrikte kiracı yoktur, denetim günlüğünde kiracı vardır. Kiracı kırılımlı sayılar Prometheus'tan değil analitik katmandaki özet tablolarından gelmelidir. İstisna en fazla yaklaşık 50 en büyük kiracı için izin listeli, düşük kardinaliteli bir metrik setidir.
 
-### 4.5 Structured logging'de PII/sır sızıntısı
+### 4.5 Yapılandırılmış günlüklemede kişisel veri ile sır sızıntısı
 
-**`secrecy` v0.10.3** (https://docs.rs/secrecy/latest/secrecy/):
-- `SecretBox<T>`, `SecretString`, `SecretSlice` — `Display`/`Debug` **implement etmez**.
-- Erişim için `ExposeSecret` / `ExposeSecretMut` trait'i üzerinden **açık** çağrı gerekir (`expose_secret()`).
-- Drop'ta `zeroize` ile bellekten silinir.
-- **Serde:** `SecretBox` **varsayılan olarak serialize edilemez** (veri sızıntısını engellemek için); deserialize desteklenir; serialize için `SerializableSecret`'ı elle implement etmek gerekir. — Bu, JSON logging'de kazara sızıntıyı yapısal olarak engeller.
-- `no_std` uyumlu, `forbid(unsafe_code)`.
-- `mlock(2)` gibi ileri bellek korumaları **kastî olarak yok**; onlar için `secrets` crate'i öneriliyor.
-- Alternatifler: `redact`, `sec`, `secret-box` (hepsi Debug redaction + zeroize).
+`secrecy` crate'inin 0.10.3 sürümü şunları sağlamaktadır: sır kutusu, sır dizgi ile sır dilim tipleri görüntüleme ile hata ayıklama arayüzlerini gerçeklememektedir. Erişim için sırrı açığa çıkar arayüzü üzerinden açık bir çağrı gerekmektedir. Düşürmede bellek sıfırlanmaktadır. Serde tarafında sır kutusu varsayılan olarak serileştirilememektedir; veri sızıntısını engellemek içindir. Seri durumdan çıkarma desteklenmekte ile serileştirme için ayrı bir arayüzün elle gerçeklenmesi gerekmektedir. Bu, JSON günlüklemede kazara sızıntıyı yapısal olarak engellemektedir. Kütüphane standart kütüphanesiz ortamlarla uyumludur ile güvensiz kod yasaklıdır. Bellek kilitleme gibi ileri korumalar kasten yoktur; onlar için başka bir crate önerilmektedir. Alternatifleri redaksiyon ile sıfırlama sunan birkaç crate'tir.
 
-**Rust'a özgü tuzak:** `#[derive(Debug)]` bir struct'ta *bütün alanları* basar. `tracing`'in `field::debug()` / `?value` sözdizimi bu `Debug`'ı çağırır. Bir struct'a sonradan bir `password_hash` veya `refresh_token` alanı eklendiğinde, hiçbir log satırını değiştirmeseniz bile o an sızıntı başlar. Derive'ın sessiz genişlemesi = zamanla artan risk.
+Rust'a özgü bir tuzak vardır: türetilmiş hata ayıklama bir yapıdaki bütün alanları basmaktadır. İzleme kütüphanesinin hata ayıklama sözdizimi bu gerçeklemeyi çağırmaktadır. Bir yapıya sonradan bir parola özeti ya da yenileme token'ı alanı eklendiğinde, hiçbir günlük satırı değiştirilmese bile o an sızıntı başlamaktadır. Türetmenin sessiz genişlemesi zamanla artan bir risktir.
 
-→ **Argus kuralı: PII/secret taşıyan hiçbir tipte `#[derive(Debug)]` olmayacak.** Elle yazılmış `Debug`, ya da `secrecy` sarmalayıcıları. Bunu CI'da `clippy` lint'i / custom lint ile zorunlu kılın (`missing_debug_implementations` ters yönde çalışır, kendi kuralınızı yazmanız gerekir).
+Argus kuralı şudur: kişisel veri ya da sır taşıyan hiçbir tipte türetilmiş hata ayıklama olmayacaktır. Elle yazılmış bir gerçekleme ya da sır sarmalayıcıları kullanılacaktır. Bu, sürekli tümleştirmede bir denetim kuralıyla zorunlu kılınmalıdır; standart kural ters yönde çalıştığı için kendi kuralınızı yazmanız gerekmektedir.
 
-**Zeroize'ın sınırı:** RUSTSEC-2024-0342 (vodozemac, https://osv.dev/vulnerability/RUSTSEC-2024-0342) — bir dependency değişikliği "more memory copies of encryption secrets" yarattı. Advisory'nin kendi notu: *"inherent limitations of Rust regarding absolute zeroization reduce the practical severity."* → Zeroize best-effort'tur, garanti değil (move semantics, optimizer, swap).
+Sıfırlamanın bir sınırı vardır: bir güvenlik danışmanlığında bir bağımlılık değişikliğinin şifreleme sırlarının bellekte daha fazla kopyasını yarattığı bildirilmiştir. Danışmanlığın kendi notu şudur: mutlak sıfırlama konusunda Rust'ın doğasından gelen sınırlar pratik şiddeti azaltmaktadır. Yani sıfırlama elden gelenin en iyisidir, bir garanti değildir; taşıma semantiği, optimize edici ile takas alanı nedeniyle.
 
 ---
 
-## 5. Denetim logu bir güvenlik ürünü olarak
+## 5. Denetim günlüğü bir güvenlik ürünü olarak
 
-### 5.1 SSF/CAEP transmitter — Argus'un asıl farklılaştırıcısı
+### 5.1 Paylaşılan sinyal vericisi, Argus'un asıl farklılaştırıcısı
 
-**CAEP 1.0 ve SSF 1.0, Final Specification olarak onaylandı ve 2 Eylül 2025'te yayımlandı** (oylama: 85 kabul, 1 ret, 25 çekimser; 433 üyeden 111 oy, %20 kuorumun üstünde). https://openid.net/three-shared-signals-final-specifications-approved/
+CAEP 1.0 ile paylaşılan sinyaller çerçevesi 1.0, nihai şartname olarak onaylanmış ile 2 Eylül 2025'te yayımlanmıştır. Oylama 85 kabul, bir ret ile 25 çekimserdir; 433 üyeden 111 oy kullanılmış ile %20 yeter sayısı aşılmıştır.
 
-**CAEP 1.0'ın 8 event tipi** (https://openid.net/specs/openid-caep-1_0-final.html, 29 Ağu 2025 tarihli, base URI `https://schemas.openid.net/secevent/caep/event-type/`):
+CAEP 1.0'ın sekiz olay tipi ile Argus'un iç denetim olayı karşılıkları şöyledir.
 
-| # | Event | Argus'un iç denetim olayı karşılığı |
+| Sıra | Olay | Argus karşılığı |
 |---|---|---|
-| 1 | `session-established` | Login başarılı → oturum oluşturuldu |
-| 2 | `session-presented` | *"Confirms the session was actively observed at the Transmitter"* — token yenileme / SSO re-use |
-| 3 | `session-revoked` | Logout, admin session kill, global sign-out |
-| 4 | `credential-change` | Şifre değişimi, MFA enroll/unenroll, passkey ekleme/silme, recovery code üretimi |
-| 5 | `assurance-level-change` | Step-up auth, AAL/ACR değişimi |
-| 6 | `token-claims-change` | Rol/grup/claim değişimi (SCIM patch sonrası) |
-| 7 | `device-compliance-change` | Cihaz posture entegrasyonu (varsa) |
-| 8 | `risk-level-change` | Risk motoru skoru değişimi |
+| 1 | Oturum kuruldu | Giriş başarılıdır ile oturum oluşturulmuştur |
+| 2 | Oturum sunuldu | Oturumun vericide etkin olarak gözlemlendiğini teyit etmektedir; token yenileme ya da çoklu oturum açma yeniden kullanımıdır |
+| 3 | Oturum iptal edildi | Çıkış, yönetici oturum sonlandırma ya da küresel çıkıştır |
+| 4 | Kimlik bilgisi değişti | Parola değişimi, çok faktörlü kayıt ya da kaldırma, geçiş anahtarı ekleme veya silme ile kurtarma kodu üretimidir |
+| 5 | Güvence seviyesi değişti | Yükseltilmiş kimlik doğrulama ile bağlam sınıfı değişimidir |
+| 6 | Token iddiaları değişti | Rol, grup ya da iddia değişimidir, SCIM yaması sonrası |
+| 7 | Cihaz uyumluluğu değişti | Varsa cihaz duruşu tümleştirmesidir |
+| 8 | Risk seviyesi değişti | Risk motoru skoru değişimidir |
 
-**Eşleme analizi:** Argus'un iç denetim olay evreninin **büyük çoğunluğu bu 8 tipe düşmüyor.** CAEP olayları *durum değişikliği bildirimleridir* (relying party'nin aksiyon alması için); denetim olayları *olgu kayıtlarıdır*. Örnek: "başarısız login denemesi" CAEP'te karşılığı yok (session kurulmadı, credential değişmedi). "Admin bir client secret'ı rotate etti" karşılığı yok.
+Eşleme analizi şudur: Argus'un iç denetim olay evreninin büyük çoğunluğu bu sekiz tipe düşmemektedir. CAEP olayları durum değişikliği bildirimleridir, yani bağlı tarafın aksiyon alması içindir; denetim olayları ise olgu kayıtlarıdır. Örneğin başarısız bir giriş denemesinin CAEP'te karşılığı yoktur, çünkü oturum kurulmamış ile kimlik bilgisi değişmemiştir. Bir yöneticinin istemci sırrını döndürmesinin de karşılığı yoktur.
 
-→ **Doğru mimari: iki ayrı yayın kanalı, tek kaynaktan.**
-- **CAEP stream** (8 tip): gerçek zamanlı, relying party'lere, aksiyon odaklı, düşük hacim.
-- **Audit stream** (tam taksonomi, OCSF/SET): SIEM'lere, arşive, yüksek hacim.
-- İkisi de aynı iç event bus'tan beslenir, aynı `txn` ile korele edilir.
+Doğru mimari iki ayrı yayın kanalı, tek kaynaktan şeklindedir. CAEP akışı sekiz tiptir; gerçek zamanlıdır, bağlı taraflara gider, aksiyon odaklıdır ile düşük hacimlidir. Denetim akışı tam taksonomidir; güvenlik bilgi ve olay yönetimi sistemlerine ve arşive gider ile yüksek hacimlidir. İkisi de aynı iç olay yolundan beslenmeli ile aynı işlem tanımlayıcısıyla korele edilmelidir.
 
-**SSF 1.0 stream yönetimi** (https://openid.net/specs/openid-sharedsignals-framework-1_0-final.html, 29 Ağu 2025):
-- **Push delivery (RFC 8935):** Receiver `endpoint_url` verir, Transmitter POST eder; Receiver authorization header sağlayabilir.
-- **Poll delivery (RFC 8936):** Transmitter `endpoint_url` verir; **delivery method belirtilmezse varsayılan budur.**
-- **Configuration Endpoint:** POST (stream oluştur, `events_requested`/`delivery`/`description`), GET, PATCH (kısmi), PUT (tam replace), DELETE. Başarılı oluşturma → `201 Created` + `stream_id`, `iss`, `aud`, `events_delivered`.
-- **Subject management:** Add/Remove Subject endpoint'leri; `verified` boolean'ı receiver'ın subject sahipliğini doğruladığını belirtir. Simple Subject → tam eşleşme; Complex Subject → wildcard semantiği (tanımsız alan = joker).
-- **Verification events:** heartbeat + uçtan uca doğrulama; `https://schemas.openid.net/secevent/ssf/event-type/verification`, opak `state` echo edilir. *"The `id` of the value MUST be the `stream_id`"*; stream'i tanımlayan subject **implicitly eklenir ve kaldırılamaz**.
-- **Sıralama ve dayanıklılık — Argus için kritik normatif metin:** Pause durumunda *"The Transmitter SHOULD hold any events it would have transmitted while paused, and SHOULD transmit them when the stream's status becomes 'enabled'."* Ve: *"If a Transmitter holds successive events that affect the same Subject Principal, then the Transmitter MUST make sure that those events are transmitted in the order of time that they were generated OR the Transmitter MUST send only the last events that do not require the previous events affecting the same Subject Principal to be processed."*
-  - → **Per-subject sıralama garantisi ZORUNLU.** Global sıralama değil. Bu, Argus'un yayın kuyruğunu **subject ID ile partition'lamasını** gerektirir (Kafka-benzeri key-based partitioning).
-- `inactivity_timeout`: receiver aktivitesi yoksa stream pause/disable/delete edilebilir.
-- **Genel sıralama garantisi yok:** *"Event Receivers MUST NOT depend on the Verification Event being transmitted synchronously or in any particular order relative to the current queue of events."*
+Paylaşılan sinyaller çerçevesinin akış yönetimi şöyledir. İtmeli teslimde alıcı bir uç nokta adresi vermekte ile verici gönderi yapmaktadır; alıcı bir yetkilendirme başlığı sağlayabilmektedir. Yoklamalı teslimde verici uç nokta adresini vermektedir; teslim yöntemi belirtilmezse varsayılan budur. Yapılandırma uç noktası oluşturma, okuma, kısmi güncelleme, tam değiştirme ile silmeyi desteklemektedir; başarılı oluşturma 201 ile akış kimliği, veren, izleyici kitle ile teslim edilen olayları döndürmektedir. Özne yönetiminde ekleme ile çıkarma uç noktaları bulunmakta; doğrulanmış bayrağı alıcının özne sahipliğini teyit ettiğini belirtmektedir. Basit özne tam eşleşme, karmaşık özne joker semantiği kullanmaktadır. Doğrulama olayları hem kalp atışı hem uçtan uca doğrulama sağlamakta; opak bir durum değeri yankılanmaktadır. Değerin kimliği akış kimliği olmak zorundadır ile akışı tanımlayan özne örtük olarak eklenmekte ve kaldırılamamaktadır.
 
-### 5.2 SIEM entegrasyonu — IdP'ler ne gönderiyor
+Sıralama ile dayanıklılık konusunda Argus için kritik normatif metin şudur: duraklatma durumunda verici, duraklamışken ileteceği olayları tutmalı ile akışın durumu etkine dönünce iletmelidir. Ayrıca verici aynı özneyi etkileyen ardışık olayları tutuyorsa, bu olayların üretildikleri zaman sırasına göre iletilmesini sağlamak zorundadır ya da yalnızca aynı özneyi etkileyen önceki olayların işlenmesini gerektirmeyen son olayları göndermek zorundadır.
 
-| Hedef | Format / mekanizma | Kaynak |
-|---|---|---|
-| Okta → Splunk Cloud | HTTP Event Collector (HEC), ham System Log JSON | help.okta.com log-streaming |
-| Okta → AWS | Amazon EventBridge, ~30 sn gecikme, **filtreleme yok** | aynı |
-| AWS Security Lake | **OCSF + Apache Parquet** (custom source için zorunlu) | docs.aws.amazon.com/security-lake |
-| Auth0 | Log Streams (tenant başına 2-3), Marketplace connector'ları | auth0.com/docs |
-| Entra ID | Azure Monitor / Log Analytics / Event Hub / Storage Account | learn.microsoft.com |
-| Legacy | CEF (ArcSight), LEEF (QRadar), syslog | query.ai analizi |
+Yani özne başına sıralama garantisi zorunludur, küresel sıralama değil. Bu, Argus'un yayın kuyruğunu özne kimliğiyle bölümlemesini gerektirmektedir.
 
-Vendor normalize şemaları: **CIM** (Splunk), **ECS** (Elastic), **UDM** (Chronicle), **ASIM** (Microsoft Sentinel) — hepsi vendor-specific, lock-in yaratıyor.
+Etkinsizlik zaman aşımı vardır: alıcı etkinliği yoksa akış duraklatılabilir, devre dışı bırakılabilir ya da silinebilir.
 
-→ **Argus'un çıktı stratejisi:** 1 canonical iç format (OCSF-uyumlu) + adaptörler: OCSF/Parquet→S3, SET/JWS→SSF push/poll, OTLP logs, HEC, syslog+CEF. Her adaptör < 500 satır. **Canonical formatı OCSF yapmak, adaptör sayısını minimize eder** çünkü hem Security Lake hem Sentinel hem Splunk OCSF ingest'i destekliyor.
+Genel bir sıralama garantisi yoktur: olay alıcıları, doğrulama olayının senkron olarak ya da mevcut olay kuyruğuna göre belirli bir sırada iletileceğine bağımlı olmamalıdır.
 
-### 5.3 Okta System Log API ve taksonomisi
+### 5.2 Güvenlik bilgi ve olay yönetimi tümleştirmesi, kimlik sağlayıcılar ne göndermektedir
 
-**1.178 event tipi** (https://developer.okta.com/docs/reference/api/event-types/ — katalog sayısı doğrudan sayfadan).
+| Hedef | Format ya da mekanizma |
+|---|---|
+| Okta'dan Splunk Cloud'a | HTTP olay toplayıcısı, ham sistem günlüğü JSON'ı |
+| Okta'dan AWS'e | Amazon EventBridge, yaklaşık 30 saniye gecikme, süzme yoktur |
+| AWS Security Lake | Özel kaynak için zorunlu OCSF artı Apache Parquet |
+| Auth0 | Günlük akışları, kiracı başına iki ya da üç, artı pazar yeri bağlayıcıları |
+| Entra kimlik | Azure izleme, günlük analizi, olay merkezi ya da depolama hesabı |
+| Eski sistemler | CEF, LEEF ile sistem günlüğü |
 
-Naming: hiyerarşik, nokta ayrık `parent.sublevel.action`:
-- `access.request.*`, `access.review.*`
-- `user.lifecycle.*`, `user.account.*`, `user.authentication.*`, `user.session.*`
-- `app.oauth2.*`, `app.saml.*`, `application.lifecycle.*`
-- `policy.sign_on.*`, `policy.rule.*`
-- `device.enrollment.*`, `device.lifecycle.*`
-- `system.*`, `account.org.*`
+Satıcı normalize şemaları Splunk, Elastic, Chronicle ile Microsoft şemalarıdır; hepsi satıcıya özgüdür ile bağımlılık yaratmaktadır.
 
-Event'lerde metadata tag'leri: `event-hook-eligible` (event hook uyumlu), `changeDetails` (değişiklik takibi içerir), `oie-only` (yalnızca Okta Identity Engine).
+Argus'un çıktı stratejisi şudur: bir kanonik iç format, yani OCSF uyumlu, artı adaptörler. Adaptörler OCSF ile Parquet'ten S3'e, güvenlik olayı belirteci ile imzasından itmeli ve yoklamalı akışa, OTLP günlüklerine, HTTP olay toplayıcısına ile sistem günlüğü ve CEF'e yazmalıdır. Her adaptör 500 satırdan azdır. Kanonik formatı OCSF yapmak adaptör sayısını asgariye indirmektedir, çünkü Security Lake, Sentinel ile Splunk bu şemayı almaktadır.
 
-Tam katalog CSV olarak indirilebilir. System Log tablosu UI'dan CSV export edilebilir (https://help.okta.com/en-us/content/topics/reports/reports_syslog.htm).
+### 5.3 Okta sistem günlüğü API'si ile taksonomisi
 
-→ **Argus için ders:** 1.178 sayısı, olgun bir IdP'nin denetim taksonomisinin gerçek büyüklüğüdür. Ama bu sayı **20 yıllık organik büyümenin** ürünü. Argus sıfırdan yazıldığı için: (a) `<parent>.<sublevel>.<action>` hiyerarşisini benimseyin (sorgu ve okunabilirlik için), (b) **her event tipini bir enum + registry'de tanımlayın** ve OCSF class'ına + CAEP tipine (varsa) statik olarak mapleyin, (c) `event-hook-eligible` benzeri **capability tag'leri** ekleyin — hangi event'in webhook/SSF'e uygun olduğunu şemadan okuyun, (d) katalogu **makine okunabilir olarak yayınlayın** (Okta'nın CSV'si gibi) — bu bir uyum artefaktıdır ve AU-2'nin "hangi olayları logluyoruz" gerekçelendirmesini otomatikleştirir.
+Katalogda 1.178 olay tipi bulunmaktadır; sayı doğrudan sayfadandır.
 
-### 5.4 Keycloak Event SPI — bilinen sınırlamalar
+Adlandırma hiyerarşiktir ile nokta ayrıklıdır: üst, alt seviye ile eylem şeklindedir. Örnekler erişim isteği ile incelemesi, kullanıcı yaşam döngüsü, hesabı, kimlik doğrulaması ile oturumu, uygulama OAuth ile SAML olayları, uygulama yaşam döngüsü, politika oturum açma ile kural olayları, cihaz kaydı ile yaşam döngüsü, sistem olayları ile kuruluş hesabı olaylarıdır.
 
-Keycloak resmî dokümantasyonu (https://www.keycloak.org/docs/latest/server_admin/, "Configuring auditing to track events"): user events + admin events, `EventListenerProvider` SPI, DB'de saklama, konfigüre edilebilir expiration.
+Olaylarda metadata etiketleri bulunmaktadır: olay kancasına uygun, değişiklik detayı içerir ile yalnızca yeni kimlik motorunda geçerli.
 
-**Evet — DB'ye yazma bir performans sorunu.** Kanıtlar:
+Tam katalog CSV olarak indirilebilmektedir. Sistem günlüğü tablosu arayüzden CSV olarak dışa aktarılabilmektedir.
 
-Phase Two (6 Tem 2026): *"Event writes ride the request transaction"* — event yazımı authentication ile aynı transaction'da, login isteği insert'i bekliyor. `EVENT_ENTITY` "tens or hundreds of millions of rows"da DDL riskli. Expiry bulk-delete write-hot tabloya karşı → lock contention + I/O spike. Analytics için full-table scan.
+Argus için ders şudur: 1.178 sayısı olgun bir kimlik sağlayıcının denetim taksonomisinin gerçek büyüklüğüdür. Ancak bu sayı 20 yıllık organik büyümenin ürünüdür. Argus sıfırdan yazıldığı için şunlar yapılmalıdır. Üst, alt seviye ile eylem hiyerarşisi benimsenmelidir; sorgu ile okunabilirlik içindir. Her olay tipi bir sıralama ile bir kayıt defterinde tanımlanmalı ile OCSF sınıfına ve varsa CAEP tipine statik olarak eşlenmelidir. Yetenek etiketleri eklenmelidir; hangi olayın kancaya ya da sinyal akışına uygun olduğu şemadan okunmalıdır. Katalog makine okunabilir olarak yayımlanmalıdır; bu bir uyum artefaktıdır ile hangi olayları günlüklüyoruz gerekçelendirmesini otomatikleştirmektedir.
 
-Phase Two, "User Events in Keycloak" (1 Ağu 2025, https://phasetwo.io/blog/user-events-in-keycloak/): purge sırasında büyük hacimlerin aynı anda silinmesi *"can cause performance issues or even downtime"* ve *"effectively locks up the database and can lead to massive latency issues."* Önerilen: küçük batch'lerle manuel purge scripti veya retention penceresini yavaşça daraltma.
+### 5.4 Keycloak olay arayüzü, bilinen sınırlamalar
 
-Diğer bulgular (skycloak.io, docs.redhat.com):
-- `EVENT_ENTITY` tablosunda **sınırlı indeksleme**; uzun zaman aralığı veya karmaşık filtre kombinasyonlarında sorgu performansı tablo büyüdükçe bozuluyor.
-- **Bütünlük yok:** *"Anyone with database access can modify or delete rows, which is not acceptable for compliance evidence."*
-- Öneri: DB event store'u **7-30 günlük operasyonel lookup** için kullan, uzun saklama/compliance için harici sistem.
+Keycloak resmî dokümantasyonu kullanıcı ile yönetici olaylarını, bir olay dinleyici arayüzünü, veritabanında saklamayı ile yapılandırılabilir sona ermeyi anlatmaktadır.
 
-→ **Bu, Argus'un en somut rekabet avantajı.** Keycloak'ın audit'i: (a) request path'te senkron, (b) tamper-evident değil, (c) purge'ü DB'yi kilitliyor, (d) analitik yapılamıyor. Argus dördünü de yapısal olarak çözebilir.
+Veritabanına yazma bir performans sorunudur. Kanıtlar şunlardır.
+
+Phase Two'nun 6 Temmuz 2026 tarihli yazısına göre olay yazımları istek işlemine binmektedir; olay yazımı kimlik doğrulamayla aynı işlemdedir ile giriş isteği eklemeyi beklemektedir. Olay tablosu on milyonlarca ya da yüz milyonlarca satırda şema değişikliğini riskli kılmaktadır. Sona erdirme toplu silmesi yazma yoğun tabloya karşı çalışmakta ile kilit çekişmesi ve giriş çıkış tepesi yaratmaktadır. Analitik için tam tablo taraması gerekmektedir.
+
+Aynı şirketin 1 Ağustos 2025 tarihli kullanıcı olayları yazısına göre temizleme sırasında büyük hacimlerin aynı anda silinmesi performans sorunlarına ya da kesintiye yol açabilmekte ile veritabanını fiilen kilitleyip devasa gecikme sorunları yaratabilmektedir. Önerilen küçük yığınlarla elle bir temizleme betiği ya da saklama penceresini yavaşça daraltmaktır.
+
+Diğer bulgular şunlardır: olay tablosunda sınırlı indeksleme vardır; uzun zaman aralığı ya da karmaşık süzgeç kombinasyonlarında sorgu performansı tablo büyüdükçe bozulmaktadır. Bütünlük yoktur: veritabanı erişimi olan herkes satırları değiştirebilmekte ya da silebilmektedir, ki uyum kanıtı için kabul edilemezdir. Öneri veritabanı olay deposunu yedi ile 30 günlük operasyonel arama için kullanmak, uzun saklama ile uyum için harici bir sistem kullanmaktır.
+
+Bu, Argus'un en somut rekabet avantajıdır. Keycloak'ın denetimi istek yolunda senkrondur, kurcalama kanıtlı değildir, temizlemesi veritabanını kilitlemektedir ile analitik yapılamamaktadır. Argus dördünü de yapısal olarak çözebilir.
 
 ---
 
-## 6. Kullanıcıya görünen denetim (user-facing audit)
+## 6. Kullanıcıya görünen denetim
 
 ### 6.1 Büyük sağlayıcıların yaklaşımı
 
-**Google** (https://support.google.com/accounts/answer/3067630): "Devices" sayfası *"computers, phones, and other devices where you are or were signed in to your Google Account recently"* — **"son birkaç hafta"**. Gösterilen alanlar: cihaz tipi/adı, oturum bilgisi, son iletişim zaman damgası (*"the last time there was communication between the device or session and Google's systems"* — dikkat: bu login zamanı DEĞİL), oturum durumu (Signed out), yaklaşık konum. Aksiyonlar: cihaz detayı görüntüle, **sign out**, aynı cihazdaki birden fazla oturumu ayrı yönet.
+Google'ın cihazlar sayfası, kullanıcının Google hesabına yakın zamanda giriş yaptığı ya da yapmış olduğu bilgisayarları, telefonları ile diğer cihazları göstermektedir; kapsam son birkaç haftadır. Gösterilen alanlar cihaz tipi ile adı, oturum bilgisi, son iletişim zaman damgası, ki dikkat edilmelidir, bu giriş zamanı değil cihaz veya oturumla Google sistemleri arasındaki son iletişim zamanıdır, oturum durumu ile yaklaşık konumdur. Aksiyonlar cihaz detayını görüntüleme, çıkış yapma ile aynı cihazdaki birden fazla oturumu ayrı yönetmedir.
 
-**GitHub** (https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/security-log-events): kullanıcı hesabı **security log**'u — login/logout, başarısız kimlik doğrulama, şifre ve SSH key değişiklikleri, 2FA olayları, OAuth token grant/revoke. Naming: `<category>.<operation>` (örn. `repo.create`). Kategoriler: authentication & access, account management, repository operations, collaboration, security features, GitHub Actions, billing & sponsors, apps & integrations, gists/pages/codespaces/projects. Organizasyon/enterprise **audit log** ayrı bir şey (kim ayarları/izinleri/üyelikleri değiştirdi).
-- ⚠️ Kullanıcı security log'unun **retention süresi ve export seçeneği dokümante edilmemiş.**
+GitHub'ın kullanıcı hesabı güvenlik günlüğü giriş ile çıkışı, başarısız kimlik doğrulamayı, parola ile SSH anahtarı değişikliklerini, iki faktörlü olayları ile OAuth belirteci verme ve iptallerini kapsamaktadır. Adlandırma kategori ile operasyon şeklindedir. Kategorileri kimlik doğrulama ile erişim, hesap yönetimi, depo operasyonları, iş birliği, güvenlik özellikleri, eylemler, faturalama ile sponsorluklar, uygulamalar ile tümleştirmeler ve çeşitli ürün alanlarıdır. Organizasyon ile kurumsal denetim günlüğü ayrı bir şeydir; kimin ayarları, izinleri ya da üyelikleri değiştirdiğini göstermektedir. Kullanıcı güvenlik günlüğünün saklama süresi ile dışa aktarım seçeneği dokümante edilmemiştir.
 
-**Apple:** ⚠️ Kullanıcıya gösterilen giriş geçmişi için birincil kaynak **doğrulanamadı**.
+Apple'ın kullanıcıya gösterilen giriş geçmişi için birincil kaynak doğrulanamamıştır.
 
-**Ortak desen (Google + GitHub):**
-1. **Aksiyon odaklı, arşiv değil.** Google "son birkaç hafta" gösteriyor ve yanına "Sign out" butonu koyuyor. Amaç adli değil, **hesap kurtarma/tepki**.
-2. Alan seti minimal: ne / ne zaman / nereden (yaklaşık) / hangi cihaz.
-3. **Konum yaklaşık** — tam IP gösterilmiyor (Google'da); GitHub gösteriyor.
-4. Ayrı iki sistem: kullanıcı security log ≠ org audit log.
+Ortak desen şudur.
 
-### 6.2 GDPR Md. 15 / Md. 20 ile ilişkisi — önemli bir düzeltme
+1. Aksiyon odaklıdır, bir arşiv değildir. Google son birkaç haftayı göstermekte ile yanına bir çıkış düğmesi koymaktadır. Amaç adli değil hesap kurtarma ile tepkidir.
+2. Alan seti asgaridir: ne, ne zaman, nereden yaklaşık olarak ile hangi cihaz.
+3. Konum yaklaşıktır; Google tam IP göstermemekte, GitHub göstermektedir.
+4. İki ayrı sistem vardır: kullanıcı güvenlik günlüğü organizasyon denetim günlüğünden farklıdır.
 
-**Art. 15 (erişim hakkı)** (https://gdpr-info.eu/art-15-gdpr/): işleme amaçları, **ilgili kişisel veri kategorileri**, alıcılar/alıcı kategorileri (özellikle üçüncü ülkeler), saklama süresi, haklar, şikâyet yolu, verinin kaynağı, otomatik karar verme. Elektronik talepte *"the information shall be provided in a commonly used electronic form."*
-- Giriş geçmişi Art. 15'te ayrı bir kategori olarak sayılmıyor, ama işleniyorsa **"ilgili kişisel veri kategorileri"** altına girer.
+### 6.2 GDPR 15. ile 20. maddeleriyle ilişkisi, önemli bir düzeltme
 
-**Art. 20 (taşınabilirlik)** (https://gdpr-info.eu/art-20-gdpr/): kapsam *"personal data concerning him or her, which he or she has **provided to** a controller"*, koşullar: (a) rıza veya sözleşme temelli, (b) otomatik araçlarla. Format: **structured, commonly used, machine-readable**. Teknik olarak mümkünse doğrudan controller-to-controller transfer.
+On beşinci madde, yani erişim hakkı, işleme amaçlarını, ilgili kişisel veri kategorilerini, alıcıları ile alıcı kategorilerini, özellikle üçüncü ülkeleri, saklama süresini, hakları, şikâyet yolunu, verinin kaynağını ile otomatik karar vermeyi kapsamaktadır. Elektronik bir talepte bilgi yaygın kullanılan elektronik bir biçimde sağlanmalıdır. Giriş geçmişi bu maddede ayrı bir kategori olarak sayılmamakta ancak işleniyorsa ilgili kişisel veri kategorileri altına girmektedir.
 
-**🔴 Kritik nüans — "provided by" observed data'yı KAPSAR.** WP29 **WP251rev.01** "Guidelines on Automated individual decision-making and Profiling" (3 Ekim 2017 kabul, 6 Şubat 2018 revize; PDF indirilip metin çıkarıldı, https://ec.europa.eu/newsroom/article29/items/612053/en) açıkça diyor:
+Yirminci madde, yani taşınabilirlik, kişinin bir veri sorumlusuna sağladığı kişisel veriyi kapsamaktadır; koşulları rıza ya da sözleşme temelli olması ile otomatik araçlarla işlenmesidir. Format yapılandırılmış, yaygın kullanılan ile makine okunabilir olmalıdır. Teknik olarak mümkünse doğrudan veri sorumlusundan veri sorumlusuna transfer yapılmalıdır.
 
-> *"This differs from the right to data portability under Article 20 where the controller only needs to communicate the data **provided by the data subject or observed by the controller** and not the profile itself."*
+Kritik nüans şudur: sağladığı ifadesi gözlemlenen veriyi kapsamaktadır. Çalışma grubunun otomatik bireysel karar verme ile profilleme kılavuzu, 3 Ekim 2017'de kabul edilmiş ile 6 Şubat 2018'de revize edilmiştir; PDF indirilip metni çıkarılmıştır ile açıkça şunu söylemektedir.
 
-Aynı belge veri kategorilerini üçe ayırıyor: (1) *"data provided directly by the individuals concerned (such as responses to a questionnaire)"*, (2) *"data observed about the individuals (such as location data collected via an application)"*, (3) *"derived or inferred data such as a profile of the individual that has already been created (e.g. a credit score)"*.
+> *"This differs from the right to data portability under Article 20 where the controller only needs to communicate the data provided by the data subject or observed by the controller and not the profile itself."*
 
-→ **Giriş geçmişi = observed data = Art. 20 kapsamında.** Sizin daha önceki tespitiniz doğru ve şimdi birincil (WP29/EDPB) kaynakla desteklendi. **Türetilmiş veri (risk skoru, davranışsal profil) kapsam dışı.**
+Aynı belge veri kategorilerini üçe ayırmaktadır: doğrudan ilgili kişilerce sağlanan veri, kişiler hakkında gözlemlenen veri ile türetilmiş veya çıkarımsal veri.
 
-→ **Argus'ta bunun karşılığı:** ham denetim olayları (login zamanı, IP, cihaz, sonuç) taşınabilir; **risk skorları ve anomali sinyalleri taşınabilir DEĞİL** ve kullanıcıya da gösterilmemeli (tersine mühendislik riski). Bu ayrımı şemada `portability: included|excluded` bayrağıyla kodlayın.
+Yani giriş geçmişi gözlemlenen veridir ile yirminci madde kapsamındadır. Daha önceki tespit doğrudur ile şimdi birincil bir kaynakla desteklenmiştir. Türetilmiş veri, yani risk skoru ile davranışsal profil, kapsam dışıdır.
 
-### 6.3 Kullanıcıya gösterilen vs SOC'a gösterilen — fark tablosu
+Argus'ta bunun karşılığı şudur: ham denetim olayları, yani giriş zamanı, IP, cihaz ile sonuç taşınabilirdir; risk skorları ile anomali sinyalleri taşınabilir değildir ve kullanıcıya da gösterilmemelidir, çünkü tersine mühendislik riski taşımaktadır. Bu ayrım şemada bir taşınabilirlik bayrağıyla kodlanmalıdır.
 
-| Boyut | Kullanıcıya (self-service) | SOC/SIEM'e |
+### 6.3 Kullanıcıya gösterilenle güvenlik operasyonlarına gösterilenin farkı
+
+| Boyut | Kullanıcıya, kendin yap | Güvenlik operasyonlarına |
 |---|---|---|
-| Zaman penceresi | Son 30-90 gün (Google: "birkaç hafta") | Tam retention (12+ ay) |
-| Olay kapsamı | Kendi hesabı; başarılı + başarısız kimlik doğrulama, credential değişimi, oturum | Tüm kiracı; ayrıca admin, config, policy, token, meta-audit |
-| Konum | Şehir/ülke düzeyi (Google) | Tam IP, ASN, geo, TOR/proxy sinyalleri |
-| Risk sinyalleri | **Gösterilme** (tersine mühendislik) | Tam |
-| Diğer kullanıcılar | Asla | Kiracı kapsamında hepsi |
-| Aksiyon | Sign out, credential revoke, "bu ben değildim" | Sorgulama, korelasyon, export |
-| Format | İnsan okunabilir UI + Art.20 export (JSON) | OCSF/SET/Parquet |
-| Rate limit | Sıkı (enumeration/scraping) | Gevşek, API key ile |
-| Gecikme | Yakın-gerçek-zaman kabul edilebilir | Yakın-gerçek-zaman istenir |
-| Erişimin kendisi loglanır mı | **Evet** (PCI 10.2: audit trail'lere erişim) | **Evet** |
+| Zaman penceresi | Son 30 ile 90 gündür; Google'da birkaç haftadır | Tam saklama süresidir, 12 ay ve üstü |
+| Olay kapsamı | Kendi hesabıdır; başarılı ile başarısız kimlik doğrulama, kimlik bilgisi değişimi ile oturumdur | Tüm kiracıdır; ayrıca yönetici, yapılandırma, politika, token ile üst denetim olaylarıdır |
+| Konum | Şehir ya da ülke düzeyindedir | Tam IP, otonom sistem numarası, coğrafya ile vekil sinyalleridir |
+| Risk sinyalleri | Gösterilmemektedir; tersine mühendislik riskidir | Tamdır |
+| Diğer kullanıcılar | Asla gösterilmemektedir | Kiracı kapsamında hepsidir |
+| Aksiyon | Çıkış yapma, kimlik bilgisi iptali ile bu ben değildim bildirimidir | Sorgulama, korelasyon ile dışa aktarımdır |
+| Format | İnsan okunabilir arayüz artı taşınabilirlik dışa aktarımıdır | OCSF, güvenlik olayı belirteci ile Parquet'tir |
+| Hız sınırı | Sıkıdır; numaralandırma ile kazımaya karşıdır | Gevşektir, API anahtarıyladır |
+| Gecikme | Yakın gerçek zaman kabul edilebilirdir | Yakın gerçek zaman istenmektedir |
+| Erişimin kendisi günlüklenir mi | Evet | Evet |
 
-**Ek güvenlik notu:** kullanıcı-görünür audit'in kendisi bir saldırı yüzeyidir. IP/konum göstermek, hesabı ele geçirmiş saldırgana kurbanın hareketlerini gösterir. Google'ın yaklaşık konum kullanması muhtemelen bilinçli. **Argus: kullanıcı görünümünde IP'yi maskele (/24 veya sadece şehir), tam IP'yi yalnızca Art.15 SAR export'unda ver.**
+Ek bir güvenlik notu gerekmektedir: kullanıcıya görünen denetimin kendisi bir saldırı yüzeyidir. IP ile konum göstermek, hesabı ele geçirmiş bir saldırgana kurbanın hareketlerini göstermektedir. Google'ın yaklaşık konum kullanması muhtemelen bilinçlidir. Argus'ta kullanıcı görünümünde IP maskelenmeli, yani yalnızca alt ağ ya da şehir gösterilmeli; tam IP yalnızca erişim hakkı dışa aktarımında verilmelidir.
 
 ---
 
 ## 7. Argus için somut tasarım kararları
 
-**K1 — Düz append-only + ~1 sn Merkle checkpoint kararı DOĞRU; per-event hash chain'i tamamen bırakın.** Crosby & Wallach Tablo 2: commitment imzalama insert maliyetinin **%83,3**'ü, tek başına 2.100 ev/s tavanı; 16'da 1 imza ile 1.750 → ~17.000 ev/s (**~10x**). Agent Flight Recorder: hash chain medyan gecikmeyi 6 µs → 48 µs (8x) çıkarıyor, Merkle batching üstüne sadece +0,6 µs ekliyor. *(https://static.usenix.org/event/sec09/tech/full_papers/crosby.pdf; https://arxiv.org/html/2609.01931)*
+K1. Düz yalnızca ekleme artı yaklaşık bir saniyelik Merkle denetim noktası kararı doğrudur; olay başına özet zinciri tamamen bırakılmalıdır. Crosby ile Wallach'ın tablosunda taahhüt imzalama ekleme maliyetinin %83,3'üdür ile tek başına saniyede 2.100 olay tavanı getirmektedir; 16'da bir imzayla saniyede 1.750'den yaklaşık 17.000'e çıkılmaktadır. Ajan uçuş kaydedici özet zincirinin medyan gecikmeyi altı mikrosaniyeden 48 mikrosaniyeye çıkardığını, Merkle yığınlamanın üstüne yalnızca 0,6 mikrosaniye eklediğini göstermektedir.
 
-**K2 — Checkpoint aralığını "Maximum Merge Delay" olarak ilan edin ve SLA yapın.** RFC 9162'nin MMD kavramı: log, SCT verdikten sonra girdiyi ağaca dahil etmeyi taahhüt eder. Argus: "MMD ≤ 1s". Let's Encrypt Sunlight bunu fiilen 0'a indirdi (*"always completely incorporate newly-submitted certificates before returning an SCT"*) — Argus da yüksek değerli olaylar (admin, credential change) için sync-checkpoint modu sunabilir. *(https://www.rfc-editor.org/rfc/rfc9162.html; https://letsencrypt.org/2025/06/11/reflections-on-a-year-of-sunlight)*
+K2. Denetim noktası aralığı azami birleştirme gecikmesi olarak ilan edilmeli ile bir hizmet seviyesi taahhüdü yapılmalıdır. RFC 9162'nin kavramına göre günlük, imzalı bir zaman damgası verdikten sonra girdiyi ağaca dahil etmeyi taahhüt etmektedir. Argus için bu bir saniye ya da altı olmalıdır. Let's Encrypt bunu fiilen sıfıra indirmiştir; Argus da yüksek değerli olaylar, yani yönetici ile kimlik bilgisi değişimi için senkron denetim noktası modu sunabilir.
 
-**K3 — Hash chain yerine history tree / tlog yapısı: proof boyutu için.** Hash chain'de incremental ve membership proof O(n−k); history tree'de O(log²n). 80M olaylı log'da rastgele bir olayın kanıtı: hash chain **800 MB**, history tree **3 KB**. Argus'un doğrulama API'si (`GET /audit/{id}/proof`) ancak logaritmik yapıyla kullanılabilir. *(Crosby & Wallach §3.4)*
+K3. Özet zinciri yerine geçmiş ağacı ya da döşeli günlük yapısı kullanılmalıdır; kanıt boyutu içindir. Özet zincirinde artımlı ile üyelik kanıtı doğrusal, geçmiş ağacında logaritmanın karesi mertebesindedir. 80 milyon olaylı bir günlükte rastgele bir olayın kanıtı özet zincirinde 800 megabayt, geçmiş ağacında üç kilobayttır. Argus'un doğrulama API'si ancak logaritmik bir yapıyla kullanılabilirdir.
 
-**K4 — Sequencing ile integration'ı ayırın (Tessera modeli).** Sequencing durable index atar (batch içinde sıra garantisi yok), integration arka planda Merkle'a birleştirir. `WithBatching` + `WithCheckpointInterval` eşdeğeri konfigürasyonlar. Tessera POSIX/NVMe **10.000 write QPS @ 7 çekirdek** — bu, sequencing + integration yapan tam bir tlog'un değeri ve Argus için gerçekçi bir hedef büyüklüğü. ⚠️ *Önceden burada 22.440 ile karşılaştırma yapılıyordu; o çıplak-insert ölçümü bu rakamla kıyaslanabilir değil (§6 §4.4).* Taşınan sonuç: sequencing/integration ayrımı checkpoint eklemenin throughput'u öldürmediğini gösteriyor. *(https://github.com/transparency-dev/tessera/blob/main/docs/performance.md)*
+K4. Sıralama ile bütünleştirme ayrılmalıdır, yani Tessera modeli. Sıralama dayanıklı bir indeks atamakta, bütünleştirme arka planda Merkle'a birleştirmektedir. Yerel NVMe üzerinde Tessera saniyede 10.000 yazma sorgusunu yedi çekirdekle karşılamaktadır; bu, sıralama ile bütünleştirme yapan tam bir döşeli günlüğün değeridir ile Argus için gerçekçi bir hedef büyüklüğüdür. Önceden burada çıplak ekleme ölçümüyle bir karşılaştırma yapılmaktaydı; o ölçüm bu rakamla kıyaslanabilir değildir. Taşınan sonuç şudur: sıralama ile bütünleştirme ayrımı, denetim noktası eklemenin iş hacmini öldürmediğini göstermektedir.
 
-**K5 — İmzalamayı ayrı çekirdeğe/HSM'e offload edin, insert path'inden çıkarın.** Crosby: imza offload edilince 1.750 → 10.500 ev/s. Argus: checkpoint imzalama ayrı bir task/thread'de; insert path'i asla imza beklemez. *(aynı)*
+K5. İmzalama ayrı bir çekirdeğe ya da donanım güvenlik modülüne devredilmeli ile ekleme yolundan çıkarılmalıdır. Crosby'ye göre imza devredilince saniyede 1.750'den 10.500 olaya çıkılmaktadır. Argus'ta denetim noktası imzalama ayrı bir görevde olmalı ile ekleme yolu asla imza beklememelidir.
 
-**K6 — Checkpoint'leri DIŞARI yayınlayın (witness/gossip), yoksa bütünlük iddiası boştur.** *"an untrusted logger is free to have different snapshots make inconsistent claims about the past"* (Crosby §2). Ayrıca Postgres superuser her koruma katmanını aşabilir (*"anyone with enough access can still alter history"*). Yayın hedefleri: müşteri webhook'u, S3 WORM/Object Lock, opsiyonel public transparency log. **Bu, Keycloak'ın "anyone with database access can modify or delete rows" zaafına verilen doğrudan cevaptır.** *(https://heypinchy.com/blog/day-143-the-hole-in-append-only; https://phasetwo.io/blog/scaling-keycloak-event-storage/)*
+K6. Denetim noktaları dışarı yayımlanmalıdır, yani tanıklara ya da dedikodu ağına; yoksa bütünlük iddiası boştur. Crosby'nin ifadesiyle güvenilmez bir günlükleyici, farklı anlık görüntülerin geçmiş hakkında tutarsız iddialarda bulunmasını sağlamakta serbesttir. Ayrıca PostgreSQL süper kullanıcısı her koruma katmanını aşabilmektedir. Yayın hedefleri müşteri kancası, nesne kilitli S3 ile isteğe bağlı bir açık şeffaflık günlüğüdür. Bu, Keycloak'ın veritabanı erişimi olan herkesin satırları değiştirebilmesi zaafına verilen doğrudan cevaptır.
 
-**K7 — Postgres append-only'yi 3 katmanda zorlayın; `BEFORE TRUNCATE` trigger'ı UNUTMAYIN.** (a) `REVOKE UPDATE, DELETE` her rolden, (b) `BEFORE UPDATE OR DELETE` row-level trigger, (c) **`BEFORE TRUNCATE` statement-level trigger** — row-level trigger'lar TRUNCATE'te ateşlenmez, bu "append-only" iddiasındaki en yaygın sessiz delik. *(https://heypinchy.com/blog/day-143-the-hole-in-append-only, 10 Tem 2026)*
+K7. PostgreSQL yalnızca ekleme üç katmanda zorlanmalı ile kesme öncesi tetikleyici unutulmamalıdır: güncelleme ile silme yetkisi her rolden geri alınmalı, güncelleme ile silme öncesi satır seviyesi bir tetikleyici konulmalı ile kesme öncesi ifade seviyesi bir tetikleyici eklenmelidir. Satır seviyesi tetikleyiciler kesmede ateşlenmemektedir; bu, yalnızca ekleme iddiasındaki en yaygın sessiz deliktir.
 
-**K8 — Audit'in PAHALI İŞİNİ request transaction'ından çıkarın; KABULÜNÜ çıkarmayın.** Keycloak'ın 1 numaralı arızası doğru teşhis: *"Event writes ride the request transaction"* — login isteği DB insert'ini bekliyor.
+K8. Denetimin pahalı işi istek işleminden çıkarılmalı ancak kabulü çıkarılmamalıdır. Keycloak'ın birinci arızası doğru bir teşhistir: olay yazımları istek işlemine binmekte ile giriş isteği eklemeyi beklemektedir.
 
-> ⚠️ **Düzeltme (2. inceleme turu) — bu maddenin önceki hâli yanlıştı.** Önceden şöyle diyordu: *"audit olayı bounded, backpressure'lı bir in-memory kuyruğa yazılır; kuyruk dolarsa isteği reddet."* Kuyruğu sınırlamak taşmayı önler ama **süreç çökmesini karşılamaz:** iş değişikliği commit olur, kullanıcı başarılı yanıt alır, olay bellekte beklerken süreç ölürse **değişiklik kalıcıdır ama denetim kaydı yoktur.** AU-12/PCI 10.2'nin "all" gereği tam olarak bunu yasaklar. Ayrıca bu, hemen üstteki **K4** ile çelişiyordu: K4 Tessera modelini benimserken *"sequencing **durable** index atar"* diyor.
->
-> **Doğrusu — iki aşamayı ayır:**
-> 1. **Kalıcı kabul (aynı transaction).** İş değişikliğiyle **atomik** olarak minimal bir `audit_outbox` satırı yazılır. Ya ikisi de olur ya hiçbiri. Maliyeti tek bir küçük insert'tir, Merkle veya imza değil.
-> 2. **Pahalı işleme (arka plan).** Merkle birleştirme, checkpoint imzalama ve dışa yayın kuyruk üzerinden, request path'in dışında yürür. Bu kuyruk bellekte olabilir — çünkü kaybı yalnızca *gecikme* yaratır, kayıt kaybı yaratmaz.
->
-> **Ayrıca tanımlanması gereken:** başarısız giriş gibi **commit edilmiş bir iş değişikliği bulunmayan** olayların kalıcılığı ayrı bir kuraldır — atomik bağlanacağı bir transaction yoktur. Bu olaylar için kabul noktası açıkça seçilmeli.
+Bu maddenin önceki hâli yanlıştı. Önceden denetim olayının sınırlı ile geri basınçlı bir bellek içi kuyruğa yazılacağı, kuyruk dolarsa isteğin reddedileceği söylenmekteydi. Kuyruğu sınırlamak taşmayı önlemekte ancak süreç çökmesini karşılamamaktadır: iş değişikliği kalıcılaşmakta, kullanıcı başarılı yanıt almakta ile olay bellekte beklerken süreç ölürse değişiklik kalıcı olmakta ancak denetim kaydı bulunmamaktadır. İlgili kontrollerin tümünü kapsama gereği tam olarak bunu yasaklamaktadır. Ayrıca bu, hemen üstteki K4 ile çelişmekteydi; K4 sıralamanın dayanıklı bir indeks attığını söylemektedir.
 
-*(https://phasetwo.io/blog/scaling-keycloak-event-storage/; karar satırı: §1 §1 madde 23; statü: §1 §10.3 A1)*
+Doğrusu iki aşamayı ayırmaktır. Birincisi kalıcı kabuldür ile aynı işlemdedir: iş değişikliğiyle atomik olarak asgari bir giden kutusu satırı yazılmalıdır. Ya ikisi de olmalı ya hiçbiri. Maliyeti tek bir küçük eklemedir, Merkle ya da imza değildir. İkincisi pahalı işlemedir ile arka plandadır: Merkle birleştirme, denetim noktası imzalama ile dışa yayın kuyruk üzerinden, istek yolunun dışında yürümelidir. Bu kuyruk bellekte olabilir, çünkü kaybı yalnızca gecikme yaratmakta, kayıt kaybı yaratmamaktadır.
 
-**K9 — Retention'ı partition DROP/DETACH ile yapın, asla bulk DELETE ile değil.** Keycloak'ın purge'ü *"effectively locks up the database and can lead to massive latency issues."* Argus: günlük/haftalık range partition; `DETACH PARTITION ... CONCURRENTLY` (yalnızca `SHARE UPDATE EXCLUSIVE`) → S3'e arşivle → `DROP`. *(https://phasetwo.io/blog/user-events-in-keycloak/; https://www.postgresql.org/docs/current/ddl-partitioning.html)*
+Ayrıca tanımlanması gereken bir nokta vardır: başarısız giriş gibi kalıcılaşmış bir iş değişikliği bulunmayan olayların kalıcılığı ayrı bir kuraldır, çünkü atomik bağlanacağı bir işlem yoktur. Bu olaylar için kabul noktası açıkça seçilmelidir. Karar satırı §1'in birinci bölümündeki 23. maddedir; statüsü §1'in 10.3 bölümündedir.
 
-**K10 — Katmanlama: Postgres (sıcak 30-90 gün) → OCSF+Parquet/S3 (soğuk, süresiz) → ClickHouse (analitik, opsiyonel).** Phase Two'nun kanıtlanmış boru hattı; ClickHouse ~14x sıkıştırma; "bir yıllık login trendi" sorgusu **onlarca ms**. ⚠️ Onların öğrendiği ders: ClickHouse tablo depolamasını S3'te tutmayın (merge'ler cluster başına 150 req/s üretti) — **yerel NVMe**. *(https://phasetwo.io/blog/scaling-keycloak-event-storage/; https://clickhouse.com/docs/en/use-cases/observability/introduction)*
+K9. Saklama, bölüm düşürme ya da ayırmayla yapılmalı, asla toplu silmeyle yapılmamalıdır. Keycloak'ın temizlemesi veritabanını fiilen kilitlemekte ile devasa gecikme sorunlarına yol açmaktadır. Argus'ta günlük ya da haftalık aralık bölümleri kullanılmalı, eşzamanlı ayırmayla ayrılmalı, S3'e arşivlenmeli ile sonra düşürülmelidir.
 
-**K11 — Soğuk katmanı OCSF + Parquet yazın; bedavaya AWS Security Lake uyumu kazanın.** Security Lake custom source kontratı tam olarak bu. Ayrıca OCSF, Splunk/Sentinel/Query gibi platformlarda ingest ediliyor. ⚠️ Sürüm uyumluluğunu konfigüre edilebilir yapın: Security Lake hâlâ 1.0.0-rc.2 / 1.1.0 kullanıyor, OCSF ise 1.9.0'da. *(https://docs.aws.amazon.com/security-lake/latest/userguide/open-cybersecurity-schema-framework.html)*
+K10. Katmanlama şöyle olmalıdır: PostgreSQL sıcak katman, 30 ile 90 gün; OCSF ile Parquet biçiminde S3 soğuk katman, süresiz; ile isteğe bağlı ClickHouse analitik katmanı. Phase Two'nun kanıtlanmış boru hattıdır; ClickHouse yaklaşık 14 kat sıkıştırmakta ile bir yıllık giriş eğilimi sorgusu onlarca milisaniyede dönmektedir. Onların öğrendiği ders şudur: ClickHouse tablo depolaması S3'te tutulmamalıdır, çünkü birleştirmeler küme başına saniyede 150 istek üretmiştir; yerel NVMe kullanılmalıdır.
 
-**K12 — OCSF `record_integrity` profilini (1.9.0) benimseyin — Merkle modeliniz için hazır wire format.** `attestation` nesnesi: `chain_uid` (*"Identifier of the append-only chain, such as a forensic or audit log"*), `fingerprint` (*"fingerprint of this event's canonical serialization"*), `prev_event`, `signatures`, `authority_uid`. Çoklu attestation destekleniyor (write-time producer + ingest-time processor). **Argus'un checkpoint'i, olayın kendisine gömülü per-event chain yerine ayrı bir attestation olarak ifade edilebilir.** *(https://schema.ocsf.io/1.9.0/profiles/record_integrity; https://raw.githubusercontent.com/ocsf/ocsf-schema/main/objects/attestation.json)*
+K11. Soğuk katman OCSF ile Parquet biçiminde yazılmalı ile bedavaya AWS Security Lake uyumu kazanılmalıdır. Özel kaynak sözleşmesi tam olarak budur. Ayrıca bu şema birçok platformda alınmaktadır. Sürüm uyumluluğu yapılandırılabilir yapılmalıdır: Security Lake hâlâ eski şema sürümlerini kullanmaktadır.
 
-**K13 — Canonical iç şema = OCSF IAM sınıfları (3001-3008); SET yalnızca egress.** Authentication [3002] zorunlu alanları (`time`, `metadata`, `severity_id`, `user`, + `dst_endpoint`|`service`) minimum kontrat; `activity_id`, `auth_protocol_id`, `is_mfa`, `logon_type_id`, `status_id` doğrudan Argus alanlarına maplenir. **SET'i depolama formatı yapmayın** — JWT/JWS base64 overhead'i ve per-event imzası (K1'in reddettiği şey) getirir. *(https://schema.ocsf.io/1.7.0/classes/authentication; https://www.rfc-editor.org/rfc/rfc8417.html)*
+K12. OCSF kayıt bütünlüğü profili benimsenmelidir; Merkle modeliniz için hazır bir tel formatıdır. Kanıtlama nesnesi zincir tanımlayıcısı, parmak izi, önceki olay, imzalar ile otorite tanımlayıcısı alanlarını taşımaktadır. Çoklu kanıtlama desteklenmektedir. Argus'un denetim noktası, olaya gömülü bir olay başına zincir yerine ayrı bir kanıtlama olarak ifade edilebilmektedir.
 
-**K14 — `jti` + `txn` + `toe` üçlüsünü şemada birinci sınıf yapın.** RFC 8417: `jti` idempotency/dedup (*"MAY be used by clients to track whether a particular SET has already been received"*), `txn` korelasyon, **`toe` olayın gerçekleşme zamanı — `iat` (kayıt zamanı) ile karıştırılmamalı**. Argus'ta üç farklı zaman damgası olmalı: `occurred_at` (toe), `recorded_at` (iat), `checkpoint_at`. Adli analizde bu ayrım kritiktir. *(https://www.rfc-editor.org/rfc/rfc8417.html)*
+K13. Kanonik iç şema OCSF kimlik ile erişim yönetimi sınıfları olmalı; güvenlik olayı belirteci yalnızca dışa yayın için kullanılmalıdır. Kimlik doğrulama sınıfının zorunlu alanları asgari sözleşmedir; etkinlik, protokol, çok faktörlü bayrağı, giriş tipi ile durum alanları doğrudan Argus alanlarına eşlenmektedir. Belirteç bir depolama formatı yapılmamalıdır; base64 ek yükü ile olay başına imza getirmektedir, ki K1'in reddettiği şeydir.
 
-**K15 — SET yayınında per-subject sıralama garantisi ZORUNLU.** SSF 1.0: *"the Transmitter MUST make sure that those events are transmitted in the order of time that they were generated OR the Transmitter MUST send only the last events..."* → Yayın kuyruğunu **subject ID ile partition'layın**; global sıralama gerekmez (ve maliyetlidir). *(https://openid.net/specs/openid-sharedsignals-framework-1_0-final.html)*
+K14. Benzersiz tanımlayıcı, işlem tanımlayıcısı ile olay gerçekleşme zamanı üçlüsü şemada birinci sınıf yapılmalıdır. RFC 8417'ye göre benzersiz tanımlayıcı etkisizleştirme ile tekilleştirme içindir, işlem tanımlayıcısı korelasyon içindir ile gerçekleşme zamanı kayıt zamanıyla karıştırılmamalıdır. Argus'ta üç farklı zaman damgası olmalıdır: gerçekleşme, kayıt ile denetim noktası zamanı. Adli analizde bu ayrım kritiktir.
 
-**K16 — İki ayrı yayın kanalı: CAEP stream (8 tip, aksiyon) + Audit stream (tam taksonomi, kayıt).** CAEP 1.0 Final'in 8 tipi (`session-established/presented/revoked`, `credential-change`, `assurance-level-change`, `token-claims-change`, `device-compliance-change`, `risk-level-change`) Argus'un iç olay evreninin küçük bir alt kümesini kapsar — "başarısız login" veya "admin client secret rotate etti" karşılığı yok. Aynı bus, iki adaptör, ortak `txn`. Poll delivery (RFC 8936) varsayılan olmalı (SSF'in kendi varsayılanı). *(https://openid.net/specs/openid-caep-1_0-final.html; 2 Eyl 2025 Final)*
+K15. Belirteç yayınında özne başına sıralama garantisi zorunludur. Şartnameye göre verici, aynı özneyi etkileyen olayları üretildikleri sıraya göre iletmek ya da yalnızca son olayları göndermek zorundadır. Yayın kuyruğu özne kimliğiyle bölümlenmelidir; küresel sıralama gerekmemektedir ile maliyetlidir.
 
-**K17 — Audit'te SAMPLING YASAK; yalnızca EVENT SELECTION var.** PCI DSS 10.2 "**all** individual access", "**all** transactions... with root or administrative privileges". NIST AU-2 olay tipi *seçimine* izin verir (gerekçelendirilmiş, periyodik gözden geçirilen), olay tipinin örneklenmesine değil. Telemetry path'te sampling serbest ve zorunlu. **İki path'i asla aynı pipeline'a koymayın.** *(https://pcidssguide.com/pci-dss-requirement-10/; https://csf.tools/reference/nist-sp-800-53/r5/au/au-2/)*
+K16. İki ayrı yayın kanalı olmalıdır: sekiz tipli, aksiyon odaklı CAEP akışı ile tam taksonomili, kayıt odaklı denetim akışı. CAEP'in sekiz tipi Argus'un iç olay evreninin küçük bir alt kümesini kapsamaktadır; başarısız girişin ya da bir yöneticinin istemci sırrını döndürmesinin karşılığı yoktur. Aynı olay yolu, iki adaptör ile ortak işlem tanımlayıcısı kullanılmalıdır. Yoklamalı teslim varsayılan olmalıdır, ki şartnamenin kendi varsayılanıdır.
 
-**K18 — Audit log'a ERİŞİM de audit event üretmeli (meta-audit).** PCI DSS 10.2: "Access to all audit trails" loglanmalı. Sonsuz döngü riskine karşı: meta-audit ayrı bir chain_uid'de, coalesced (sorgu başına 1 kayıt, sonuç satırı başına değil). En sık atlanan gereksinim. *(aynı)*
+K17. Denetimde örnekleme yasaktır; yalnızca olay seçimi vardır. PCI DSS tüm bireysel erişimi ile tüm ayrıcalıklı işlemleri istemektedir. NIST olay tipi seçimine izin vermektedir, ki gerekçelendirilmiş ile periyodik gözden geçirilendir; olay tipinin örneklenmesine değil. Telemetri yolunda örnekleme serbest ile zorunludur. İki yol asla aynı boru hattına konulmamalıdır.
 
-**K19 — Kriptografik bütünlük Moderate baseline'da zaten zorunlu; AU-10'u varsayılan yapın.** AU-9(3) (kriptografik bütünlük koruması) Moderate+ baseline'da; AU-9 Rev.5 tamper alarmı ekledi; AU-10 (non-repudiation) High'da. IdP tanım gereği High sistemlerin kimlik kaynağıdır → **checkpoint'ler yalnızca hash'lenmemeli, İMZALANMALI** (non-repudiation imza gerektirir). *(https://csf.tools/reference/nist-sp-800-53/r5/au/au-9/, .../au-10/)*
+K18. Denetim günlüğüne erişim de bir denetim olayı üretmelidir. PCI DSS tüm denetim izlerine erişimin günlüklenmesini istemektedir. Sonsuz döngü riskine karşı üst denetim ayrı bir zincirde ile birleştirilmiş olmalıdır, yani sorgu başına bir kayıt, sonuç satırı başına değil. En sık atlanan gereksinimdir.
 
-**K20 — AU-3 + PCI 10.3 birleşik minimum alan seti şemanın değişmez çekirdeği olsun.** event type, when, where (event location), source, outcome (success/failure), identity of subject/object, affected resource id. AU-3(3) (privacy baseline) PII'yi sınırlamayı emrediyor → **her alanı `pii: yes|no` + `retention_class` ile etiketleyin**, K22'yi mümkün kılmak için. *(https://csf.tools/reference/nist-sp-800-53/r5/au/au-3/)*
+K19. Kriptografik bütünlük orta temel çizgide zaten zorunludur; inkâr edilemezlik varsayılan yapılmalıdır. İlgili geliştirme orta ve üstü temel çizgidedir; beşinci revizyon kurcalama alarmı eklemiştir; inkâr edilemezlik yüksek seviyededir. Kimlik sağlayıcı tanım gereği yüksek seviyeli sistemlerin kimlik kaynağıdır; dolayısıyla denetim noktaları yalnızca özetlenmemeli imzalanmalıdır.
 
-**K21 — Saklama süresi Argus'un değil, kiracının kararı; mekanizmayı per-tenant + per-event-class sunun.** Çelişki gerçek: PCI 12 ay (son 3 ay hemen erişilebilir) vs CNIL 6 ay-1 yıl (iç kontrolle 3 yıla kadar, Délibération 2021-122, 14 Eki 2021) vs GDPR Art.5(1)(e) storage limitation. Sektör deseni: Okta 90 gün, Entra P1/P2 30 gün, Auth0 1-30 gün — **hiçbir büyük IdP PCI'ın 12 ayını kendi içinde karşılamıyor**, hepsi streaming export'a devrediyor. Argus da bu modeli benimsemeli ama daha uzun sıcak pencere sunarak farklılaşabilir. *(https://www.cnil.fr/fr/la-cnil-publie-une-recommandation-relative-aux-mesures-de-journalisation; sağlayıcı retention tablosu §3.1)*
+K20. Denetim içeriği ile PCI'nin birleşik asgari alan seti şemanın değişmez çekirdeği olmalıdır: olay tipi, ne zaman, nerede, kaynak, sonuç, özne ile nesne kimliği ile etkilenen kaynak kimliği. Mahremiyet temel çizgisi kişisel veriyi sınırlamayı emretmektedir; bu yüzden her alan kişisel veri mi değil mi ile saklama sınıfı etiketleriyle işaretlenmelidir, ki K22'yi mümkün kılsın.
 
-**K22 — Olay iskeletini PII'den ayırın: iskelet uzun, PII kısa yaşasın.** PCI'ın 12 ayı olay *izine*, CNIL'in 6 ayı *PII'ye* yönelik. Argus: `audit_event` (pseudonymous subject id, event type, outcome, timestamp — 12+ ay) + `audit_event_pii` (IP, UA, e-posta — per-subject key ile şifreli, 6 ayda crypto-shred). **İkisi de aynı Merkle ağacında, hash ciphertext üzerinden.** Bu, K23'ün ön şartıdır.
+K21. Saklama süresi Argus'un değil kiracının kararıdır; mekanizma kiracı ile olay sınıfı başına sunulmalıdır. Çelişki gerçektir: PCI 12 ay, CNIL altı ay ile bir yıl arası, GDPR depolama sınırlaması. Sektör deseni Okta'da 90 gün, Entra'da 30 gün ile Auth0'da bir ile 30 gündür; hiçbir büyük kimlik sağlayıcı PCI'nin 12 ayını kendi içinde karşılamamakta ile hepsi akışlı dışa aktarıma devretmektedir. Argus da bu modeli benimsemeli ancak daha uzun bir sıcak pencere sunarak farklılaşabilir.
 
-**K23 — Crypto-shredding: hash ciphertext üzerinden; ama "GDPR erasure" diye PAZARLAMAYIN.** Desen doğru ve uygulanıyor: per-subject key, key material NULL'a çekilir, keyref tombstone kalır, tek bir immutable "erasure fact" satırı append edilir, ledger'a dokunulmaz. **⚠️ Ama EDPB Guidelines 01/2025 (16 Oca 2025): *"the pseudonymised data can be considered anonymous only if the conditions for anonymity are met"* — anahtar silmek otomatik anonimleştirme değildir.** Dokümantasyonda "irreversible de-identification of log content, subject to the controller's own DPIA" olarak konumlandırın. *(https://www.tdcommons.org/dpubs_series/10873/; https://www.edpb.europa.eu/system/files/2025-01/edpb_guidelines_202501_pseudonymisation_en.pdf)*
+K22. Olay iskeleti kişisel veriden ayrılmalıdır: iskelet uzun, kişisel veri kısa yaşamalıdır. PCI'nin 12 ayı olay izine, CNIL'in altı ayı kişisel veriye yöneliktir. Argus'ta bir denetim olayı tablosu takma adlı özne kimliği, olay tipi, sonuç ile zaman damgasını 12 aydan uzun tutmalı; bir denetim olayı kişisel veri tablosu IP, kullanıcı aracısı ile e-postayı özne başına anahtarla şifreli tutup altı ayda kripto parçalamalıdır. İkisi de aynı Merkle ağacında olmalı ile özet şifreli metin üzerinden alınmalıdır. Bu, K23'ün ön şartıdır.
 
-**K24 — Rust yığını: `tracing` (0.1.44) facade + opentelemetry-rust logs/metrics (Stable) + traces (Beta, dikkatli).** Logs API/SDK ve Metrics API/SDK **Stable**; Traces API/SDK **Beta**; OTLP exporter'lar RC (logs/metrics) ve Beta (traces). MSRV 1.75. **🔴 Hepsi pre-1.0, lockstep versiyonlanıyor, breaking change'ler minor'da geliyor → OTel'i kod tabanına yaymayın, kendi ince facade'ınızın arkasına koyun.** *(https://github.com/open-telemetry/opentelemetry-rust)*
+K23. Kripto parçalamada özet şifreli metin üzerinden alınmalı ancak bu GDPR silmesi diye pazarlanmamalıdır. Desen doğrudur ile uygulanmaktadır: özne başına anahtar, anahtar materyalinin boşa çekilmesi, anahtar referansı mezar taşının kalması, tek bir değişmez silme olgusu satırının eklenmesi ile deftere dokunulmaması. Ancak kurul kılavuzuna göre takma adlı veri ancak anonimlik koşulları karşılanıyorsa anonim sayılabilmektedir; anahtar silmek otomatik anonimleştirme değildir. Dokümantasyonda bu, günlük içeriğinin geri döndürülemez kimliksizleştirilmesi ile veri sorumlusunun kendi etki değerlendirmesine tabi olarak konumlandırılmalıdır.
 
-**K25 — Metrik için OpenTelemetry metrics seçin (`metrics` crate'i değil).** Metrics API/SDK zaten Stable; OTLP tek hatta log/metrik/trace korelasyonu; kiracıya "kendi OTLP endpoint'inize gönderelim" demek satılabilir bir özellik. `metrics` crate'in tek avantajı olan backend-swap, OTel Collector ile zaten çözülüyor. *(aynı; https://crates.io/crates/metrics-prometheus)*
+K24. Rust yığını izleme cephesi artı OpenTelemetry günlükleri ve metrikleri, ki kararlıdır, artı izler, ki betadır ve dikkatli kullanılmalıdır, şeklinde olmalıdır. Asgari desteklenen Rust sürümü 1.75'tir. Hepsi birinci ana sürüm öncesidir, birlikte sürümlenmektedir ile kırıcı değişiklikler küçük sürümlerde gelmektedir; kütüphane kod tabanına yayılmamalı ile kendi ince cephenizin arkasına konulmalıdır.
 
-**K26 — Metrikte kiracı etiketi YOK; kiracı kırılımı ClickHouse rollup'larından.** 1M aktif seri ≈ **4-6 GB RAM sadece head block için**. 1.000 kiracı × 50 client × 20 event × 5 durum = 5M seri = 20-30 GB → yıkıcı. Çözüm: (a) **exemplars** ile histogram bucket'ına trace ID iliştir (per-request label maliyeti ödemeden drill-down), (b) **native histograms** (Prometheus 3.x'te olgun) seri sayısını yapısal olarak düşürür, (c) kiracı kırılımı 5 dakikalık rollup tablolarından, (d) en fazla ~50 "top tenant" için allowlist'li metrik. *(https://systeminternals.dev/observability/cardinality/; https://last9.io/blog/how-to-manage-high-cardinality-metrics-in-prometheus/)*
+K25. Metrik için OpenTelemetry metrikleri seçilmelidir, metrik cephesi değil. Metrik API'si ile geliştirme kiti zaten kararlıdır; tek hatta günlük, metrik ile iz korelasyonu sağlanmaktadır; kiracıya kendi uç noktanıza gönderelim demek satılabilir bir özelliktir. Cephenin tek avantajı olan arka uç değiştirme, toplayıcıyla zaten çözülmektedir.
 
-**K27 — PII/secret taşıyan hiçbir tipte `#[derive(Debug)]` olmayacak; CI'da zorunlu kılın.** `secrecy` v0.10.3: `SecretBox`/`SecretString`, `Display`/`Debug` yok, `expose_secret()` zorunlu, drop'ta zeroize, **serde ile varsayılan olarak serialize edilemez**. Rust'a özgü tuzak: derive'lı `Debug`, struct'a sonradan eklenen bir `refresh_token` alanını hiçbir log satırı değişmeden sızdırır. ⚠️ Zeroize best-effort'tur, garanti değil (RUSTSEC-2024-0342: *"inherent limitations of Rust regarding absolute zeroization"*). *(https://docs.rs/secrecy/latest/secrecy/; https://osv.dev/vulnerability/RUSTSEC-2024-0342)*
+K26. Metrikte kiracı etiketi olmamalı ile kiracı kırılımı analitik katmanın özet tablolarından gelmelidir. Bir milyon aktif seri yalnızca baş blok için dört ile altı gigabayt bellek demektir; varsayılan kırılım beş milyon seriye, yani 20 ile 30 gigabayta çıkmaktadır ki yıkıcıdır. Çözümler örnekleyicilerle histogram kovasına iz kimliği iliştirmek, yerel histogramlarla seri sayısını yapısal düşürmek, kiracı kırılımını beş dakikalık özet tablolarından almak ile en fazla yaklaşık 50 büyük kiracı için izin listeli bir metrik seti tutmaktır.
 
-**K28 — Telemetride `enduser.pseudo.id`, audit'te gerçek `user.id`.** OTel semconv 1.44: `enduser.id` (aktif, Development, "contains sensitive PII"), `enduser.pseudo.id` (aktif, Development, "random non-linked"), `enduser.role`→`user.roles` deprecated, `enduser.scope` deprecated (yerine geçen yok). Tüm `user.*` alanları Development. **Semconv'a hard bağımlılık kurmayın — mapping katmanı koyun.** *(https://opentelemetry.io/docs/specs/semconv/registry/attributes/enduser/, .../user/)*
+K27. Kişisel veri ya da sır taşıyan hiçbir tipte türetilmiş hata ayıklama olmamalı ile bu sürekli tümleştirmede zorunlu kılınmalıdır. Sır kütüphanesi görüntüleme ile hata ayıklama arayüzlerini gerçeklememekte, açık bir çağrı istemekte, düşürmede belleği sıfırlamakta ile varsayılan olarak serileştirilememektedir. Rust'a özgü tuzak şudur: türetilmiş hata ayıklama, yapıya sonradan eklenen bir yenileme token'ı alanını hiçbir günlük satırı değişmeden sızdırmaktadır. Sıfırlama elden gelenin en iyisidir, bir garanti değildir.
 
-**K29 — Kendi event taksonomisini kurun; OTel'de kimlik/auth convention YOK.** Semconv 1.44'te HTTP, DB, messaging, GenAI, CI/CD, FaaS var; **authentication/identity/IAM/security yok.** Argus: Okta'nın `<parent>.<sublevel>.<action>` hiyerarşisini benimseyin (Okta'da **1.178 event tipi** var — olgun bir IdP'nin gerçek büyüklüğü), her tipi enum+registry'de tanımlayıp OCSF class'ı ve (varsa) CAEP tipiyle statik mapleyin, `event-hook-eligible` benzeri capability tag'leri ekleyin, ve **katalogu makine okunabilir yayınlayın** — bu AU-2'nin "hangi olayları logluyoruz ve neden" gerekçelendirmesini otomatikleştiren bir uyum artefaktıdır. OTel Event kuralı: *"Event names MUST NOT include dynamic values."* *(https://opentelemetry.io/docs/specs/semconv/; https://developer.okta.com/docs/reference/api/event-types/)*
+K28. Telemetride takma kullanıcı kimliği, denetimde gerçek kullanıcı kimliği kullanılmalıdır. Anlamsal sözleşmelerin 1.44 sürümünde ilgili alanların durumu değişkendir ile bazıları kullanımdan kaldırılmıştır. Sözleşmelere sabit bağımlılık kurulmamalı ile bir eşleme katmanı konulmalıdır.
 
-**K30 — Kullanıcı-görünür audit: aksiyon odaklı, 30-90 gün, IP maskeli, risk sinyali yok.** Google "son birkaç hafta" + "Sign out" butonu; GitHub `<category>.<operation>` ile login/2FA/key/OAuth olayları. Kullanıcı görünümünde IP'yi maskeleyin (/24 veya şehir) — hesabı ele geçirmiş saldırgana kurbanın hareketlerini göstermeyin. Risk skorları hiç gösterilmez (tersine mühendislik). *(https://support.google.com/accounts/answer/3067630; https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/security-log-events)*
+K29. Kendi olay taksonominiz kurulmalıdır; OpenTelemetry'de kimlik ile kimlik doğrulama sözleşmesi yoktur. Okta'nın üç parçalı hiyerarşisi benimsenmeli, ki Okta'da 1.178 olay tipi vardır ve olgun bir kimlik sağlayıcının gerçek büyüklüğüdür; her tip bir sıralama ile kayıt defterinde tanımlanıp OCSF sınıfına ve varsa CAEP tipine statik eşlenmeli; yetenek etiketleri eklenmeli; ile katalog makine okunabilir yayımlanmalıdır. Bu, hangi olayları neden günlüklüyoruz gerekçelendirmesini otomatikleştiren bir uyum artefaktıdır. Olay adları dinamik değer içermemelidir.
 
-**K31 — Art. 20 export'unda observed data DAHİL, derived data HARİÇ; şemada bayrakla kodlayın.** WP29 WP251rev.01 (3 Eki 2017 / 6 Şub 2018): *"the right to data portability under Article 20 where the controller only needs to communicate the data provided by the data subject **or observed by the controller** and not the profile itself."* → Giriş geçmişi (observed) taşınabilir; risk skoru/profil (derived) taşınabilir değil. Format: structured + commonly used + machine-readable (Art. 20(1)) → JSON, tercihen OCSF. Her audit alanına `portability: included|excluded` bayrağı koyun. *(https://ec.europa.eu/newsroom/article29/items/612053/en; https://gdpr-info.eu/art-20-gdpr/)*
+K30. Kullanıcıya görünen denetim aksiyon odaklı, 30 ile 90 günlük, IP maskeli ile risk sinyalsiz olmalıdır. Google son birkaç haftayı ile bir çıkış düğmesini, GitHub kategori ile operasyon adlandırmasıyla giriş, iki faktörlü, anahtar ile OAuth olaylarını göstermektedir. Kullanıcı görünümünde IP maskelenmelidir; hesabı ele geçirmiş bir saldırgana kurbanın hareketleri gösterilmemelidir. Risk skorları hiç gösterilmemelidir.
 
-**K32 — pgaudit'i birincil audit kaynağı YAPMAYIN; ikincil DB-seviyesi kontrol olarak kullanın.** *"Audit logging is best-effort and not transactional"* — crash'te kayıt kaybolur, bu tek başına compliance-grade audit için diskalifiye edicidir. Ayrıca: object audit logging'de **TRUNCATE desteklenmiyor**, superuser auditing güvenilmez, *"possible for pgAudit to generate an enormous volume of logging"*. Değeri: Argus DB'sine **uygulama dışından** yapılan doğrudan erişimi yakalamak (AU-9 destekleyici kontrol). *(https://github.com/pgaudit/pgaudit)*
+K31. Taşınabilirlik dışa aktarımında gözlemlenen veri dahil, türetilmiş veri hariç olmalı ile bu şemada bir bayrakla kodlanmalıdır. Çalışma grubu kılavuzuna göre veri sorumlusu yalnızca veri öznesinin sağladığı ya da kendisinin gözlemlediği veriyi iletmek zorundadır, profilin kendisini değil. Giriş geçmişi gözlemlenen veridir ile taşınabilirdir; risk skoru ile profil türetilmiştir ile taşınabilir değildir. Format yapılandırılmış, yaygın kullanılan ile makine okunabilir olmalıdır; JSON, tercihen OCSF.
 
-**K33 — Managed ledger servislerine bağımlılık kurmayın.** AWS QLDB **31 Temmuz 2025'te destek dışı**, resmî duyuru bile yapılmadan (dokümantasyon güncellemesi + müşteri e-postası, Temmuz 2024). AWS'in önerdiği Aurora PostgreSQL göçü **kriptografik doğrulanabilirliği kaybettiriyor**. Ders: "kriptografik ledger" ayrı bir ürün kategorisi olarak ticari başarısızlık; müşteriler ayrı DB değil, **mevcut DB'de bütünlük özelliği** istiyor. Argus'un "Postgres + ince Merkle katmanı" kararı bu dersle uyumlu. *(https://www.infoq.com/news/2024/07/aws-kill-qldb; https://techcommunity.microsoft.com/blog/azuresqlblog/moving-from-amazon-quantum-ledger-database-qldb/4246237)*
+K32. pgaudit birincil denetim kaynağı yapılmamalı ile ikincil bir veritabanı seviyesi kontrolü olarak kullanılmalıdır. Denetim günlüklemesi elden gelenin en iyisidir ile işlemsel değildir; çökmede kayıt kaybolmaktadır, bu tek başına uyum seviyesinde denetim için diskalifiye edicidir. Ayrıca kesme desteklenmemekte, süper kullanıcı denetimi güvenilmez olmakta ile muazzam hacimde günlük üretebilmektedir. Değeri Argus veritabanına uygulama dışından yapılan doğrudan erişimi yakalamaktır.
 
-**K34 — Yıllık log shard'ları + statik tile arşivi (Rekor v2 deseni).** Rekor v2 (GA 10 Eki 2025): yıl başına yeni shard (`log2025-1`), eski shard dondurulup statik tile olarak arşivleniyor, tile'lar immutable + content-addressed + **CDN-cacheable**. Bu, hem Merkle ağacının sınırsız büyümesini hem doğrulama maliyetini sınırlar. Argus: kiracı × yıl shard'ı; dondurulmuş shard'ın son checkpoint'i sonsuza dek doğrulanabilir kalır. *(https://blog.sigstore.dev/rekor-v2-ga/)*
+K33. Yönetilen defter hizmetlerine bağımlılık kurulmamalıdır. AWS QLDB 31 Temmuz 2025'te, resmî bir duyuru bile yapılmadan destek dışı kalmıştır. Önerilen göç yolu kriptografik doğrulanabilirliği kaybettirmektedir. Ders şudur: kriptografik defter ayrı bir ürün kategorisi olarak ticari bir başarısızlıktır; müşteriler ayrı bir veritabanı değil mevcut veritabanında bir bütünlük özelliği istemektedir. Argus'un kararı bu dersle uyumludur.
 
-**K35 — Tek canonical format + ince adaptörler; her adaptör < 500 satır.** Hedefler: OCSF/Parquet→S3, SET/JWS→SSF push (RFC 8935) & poll (RFC 8936), OTLP logs, Splunk HEC, syslog+CEF (legacy). CEF/LEEF ölmedi ama *"network security centric... force-fit"* ve single-line syslog odaklı; OCSF halef. **Canonical'ı OCSF yapmak adaptör sayısını ve dönüşüm kaybını minimize eder.** ⚠️ Okta'nın "no event filtering is supported" kısıtını tekrarlamayın — Argus stream'lerinde event tipi filtresi olsun. *(https://www.query.ai/resources/blogs/cybersecurity-event-data-normalization-standards/; https://help.okta.com/oie/en-us/content/topics/reports/log-streaming/about-log-streams.htm)*
+K34. Yıllık günlük parçaları ile statik döşeme arşivi kullanılmalıdır, yani ikinci sürüm kayıt günlüğü deseni. Yıl başına yeni bir parça açılmakta, eski parça dondurulup statik döşeme olarak arşivlenmekte ile döşemeler değişmez, içerik adresli ve içerik dağıtım ağından önbeleklenebilir olmaktadır. Bu, hem Merkle ağacının sınırsız büyümesini hem doğrulama maliyetini sınırlamaktadır. Argus'ta kiracı çarpı yıl parçalaması yapılmalı ile dondurulmuş parçanın son denetim noktası sonsuza dek doğrulanabilir kalmalıdır.
 
-**K36 — Merkle domain separation'ı doğru yapın: leaf `0x00`, node `0x01`.** RFC 9162: `MTH({d})= HASH(0x00 || d)`, iç düğüm `HASH(0x01 || left || right)`. Bu prefix'ler second-preimage resistance için **zorunlu**; atlamak leaf/node karıştırma saldırısına açar. Ayrıca STH kuralı: *"Each subsequent timestamp MUST be more recent than the timestamp of the previous update."* *(https://www.rfc-editor.org/rfc/rfc9162.html)*
+K35. Tek bir kanonik format ile ince adaptörler kullanılmalıdır; her adaptör 500 satırdan az olmalıdır. Hedefler S3'e OCSF ve Parquet, itmeli ile yoklamalı sinyal akışına belirteç ve imza, OTLP günlükleri, HTTP olay toplayıcısı ile eski sistemler için sistem günlüğü ve CEF'tir. CEF ölmemiştir ancak ağ güvenliği merkezli ile tek satır odaklıdır; OCSF haleftir. Kanonik formatı OCSF yapmak adaptör sayısını ile dönüşüm kaybını asgariye indirmektedir. Okta'nın olay süzmesi desteklenmiyor kısıtı tekrarlanmamalıdır; Argus akışlarında olay tipi süzgeci bulunmalıdır.
 
-**K37 — Proof üretiminde locality'yi mimarinin merkezine koyun.** Crosby Tablo 2: membership proof **8.600/s (locality ile) vs 32/s (locality yok)** — **269x fark**. Bu, Merkle düğümlerinin disk yerleşiminin (post-order traversal, sabit boyutlu düğüm, direct access) proof API'sinin kullanılabilirliğini tek başına belirlediği anlamına gelir. Değişken boyutlu olay içeriği ayrı bir write-once append-only value store'da, ağaç yaprakları offset tutar. *(Crosby & Wallach §3.3, §5)*
+K36. Merkle alan ayrımı doğru yapılmalıdır: yaprak sıfır bayt, düğüm bir bayt önekiyle. Bu önekler ikinci ön görüntü direnci için zorunludur; atlamak yaprakla düğümü karıştırma saldırısına açmaktadır. Ayrıca imzalı ağaç başlığı kuralı şudur: her sonraki zaman damgası bir öncekinden daha yeni olmak zorundadır.
 
-**K38 — Bütünlük anchor'ı için blockchain'e GEREK YOK; witness yeterli.** Agent Flight Recorder ölçümü: L2 anchoring **$2,30/100K olay**, L1 **$6.885/100K olay**, anchor başına 91.800 gas. ⚠️ *Önceki hesap 22.440 tps'yi sürekli hacim sayıp ≈1,94 milyar olay/gün türetiyordu; o sayı 12 sn'lik çıplak-insert ölçümüdür (§6 §4.4) ve böyle çarpılamaz.* Yön yine de sağlam: olay başına on-chain anchoring maliyeti, herhangi bir ciddi IdP hacminde witness/S3 Object Lock alternatifinin yanında kabul edilemez kalır. **Alternatif: checkpoint'i müşteri webhook'una + S3 Object Lock'a + opsiyonel üçüncü taraf witness'a yayınlayın.** Compromise window aynı, maliyet ~sıfır. *(https://arxiv.org/html/2609.01931)*
+K37. Kanıt üretiminde yerellik mimarinin merkezine konulmalıdır. Crosby'nin tablosunda üyelik kanıtı yerellikle saniyede 8.600, yerelliksiz 32'dir; 269 kat farktır. Bu, Merkle düğümlerinin disk yerleşiminin, yani son sıra gezinme, sabit boyutlu düğüm ile doğrudan erişimin, kanıt API'sinin kullanılabilirliğini tek başına belirlediği anlamına gelmektedir. Değişken boyutlu olay içeriği ayrı bir tek yazımlık, yalnızca ekleme değer deposunda tutulmalı ile ağaç yaprakları bir uzaklık taşımalıdır.
+
+K38. Bütünlük çıpası için blok zincirine gerek yoktur; tanık yeterlidir. Ölçüme göre ikinci katman çıpalama 100 bin olay başına 2,30 dolar, birinci katman 6.885 dolardır. Önceki hesap çıplak ekleme ölçümünü sürekli hacim sayıp günde milyarlarca olay türetmekteydi; o sayı böyle çarpılamaz. Yön yine de sağlamdır: olay başına zincir üstü çıpalama maliyeti, herhangi bir ciddi kimlik sağlayıcı hacminde tanık ya da nesne kilidi alternatifinin yanında kabul edilemez kalmaktadır. Alternatif denetim noktasını müşteri kancasına, nesne kilitli S3'e ile isteğe bağlı üçüncü taraf bir tanığa yayımlamaktır. Ele geçirme penceresi aynı, maliyet yaklaşık sıfırdır.
 
 ---
 
-## 8. ⚠️ DOĞRULANAMAYANLAR
+## 8. Doğrulanamayanlar
 
-1. **⚠️ DOĞRULANMADI — Büyük IdP'lerin gerçek log hacimleri.** Okta, Auth0, Keycloak veya Entra ID için kamuya açık, birincil kaynaklı **event/saniye veya GB/gün** rakamı bulunamadı. Sektör yalnızca saklama süreleri üzerinden konuşuyor. Tek somut kıyas Crosby & Wallach 2009 (10.500 ev/s = 1,9 MB/s = 1,1 TB/hafta) ve o da 2009 syslog'u.
-
-2. **⚠️ DOĞRULANMADI — Okta System Log API (`/api/v1/logs`) rate limit'leri.** Okta dokümantasyonu bunları "Rate Limit Dashboard"a havale ediyor; sayısal RPM değerleri kamuya açık sayfalarda bulunamadı.
-
-3. **⚠️ DOĞRULANMADI — GitHub kullanıcı security log'unun retention süresi ve export seçeneği.** Dokümantasyon event kategorilerini listeliyor ama saklama süresi veya kişisel hesap için export yolu belirtmiyor.
-
-4. **⚠️ DOĞRULANMADI — Apple'ın kullanıcıya gösterdiği giriş/hesap etkinliği geçmişi.** Birincil Apple Support kaynağı bu oturumda getirilemedi. Google ve GitHub deseni üzerinden genelleme yapıldı.
-
-5. **⚠️ DOĞRULANMADI — Splunk CIM Authentication data model'in tam alan listesi ve tag'leri.** docs.splunk.com iki farklı URL'de HTTP 403 döndürdü.
-
-6. **⚠️ DOĞRULANMADI — SOC 2'nin sayısal log saklama gereksinimi.** Birincil AICPA kaynağı bulunamadı. Pratikte "1 yıl gözlem penceresi" yaygın ama bu bir denetim uygulaması, normatif bir eşik değil.
-
-7. **⚠️ DOĞRULANMADI — `tracing` / `tracing-opentelemetry` için nanosaniye seviyesinde yayınlanmış bağımsız benchmark.** Yalnızca niteliksel iddialar var ("zero-cost when disabled", "small overhead per span"). Argus'un 22k tps'sinde `#[instrument]` maliyeti **kendiniz ölçmelisiniz**.
-
-8. **⚠️ DOĞRULANMADI — Tessera'nın varsayılan batch size ve checkpoint interval değerleri.** README ve performance.md konfigürasyon adlarını (`WithBatching`, `WithCheckpointInterval`, `WithCheckpointRepublishInterval`) veriyor ama varsayılanları belirtmiyor.
-
-9. **⚠️ DOĞRULANMADI — Rekor v2'nin somut maliyet düşüş yüzdesi ve QPS rakamları.** GA blog'u yalnızca niteliksel ("cheaper to run", "higher QPS") ifadeler kullanıyor; sayı vermiyor.
-
-10. **⚠️ DOĞRULANMADI — OCSF v1.9.0'ın tam release notes'u.** GitHub `releases/tag/v1.9.0` sayfası 404 döndü; bilgi releases liste sayfası ve şema/profil dosyalarından (`record_integrity.json`, `attestation.json`, schema.ocsf.io 1.9.0) derlendi. Sürüm ve tarih (3 Ağustos 2026) releases listesinden doğrulandı.
-
-11. **⚠️ KISMEN DOĞRULANMADI — WP242rev.01'in (portability guidelines) doğrudan metni.** İndirme denemesi başka bir belgeye (WP251rev.01) yönlendi. Ancak WP251rev.01 aynı hukuki noktayı açıkça ifade ediyor (*"data provided by the data subject or observed by the controller"*), bu yüzden K31'in dayanağı birincil ve geçerlidir — sadece WP242'nin "activity logs / search history" örneklerini içeren spesifik paragrafı alıntılanamadı.
-
-12. **⚠️ DOĞRULANMADI — CNIL Délibération 2021-122'nin tam metni.** CNIL'in resmî duyuru sayfası (tarih, 6 ay–1 yıl / 3 yıl kademeleri, minimum log içeriği, otomatik analiz zorunluluğu, 8 haftalık istişare / 43 katkı) doğrulandı; délibération PDF'inin kendisi getirilmedi.
-
-13. **⚠️ DOĞRULANMADI — PCI DSS v4.0.1'in resmî metni.** PCI SSC'nin kendi PDF'i (kayıt gerektirir) getirilemedi; 10.2/10.3/10.5/10.7 içeriği ikincil ama tutarlı kaynaklardan (pcidssguide, ZenGRC, KirkpatrickPrice) derlendi. Sayısal eşikler (12 ay / 3 ay) birden fazla bağımsız kaynakta tutarlı.
-
-14. **⚠️ DOĞRULANMADI — CADF'in 2025-2026'daki güncel benimseme durumu.** DMTF sayfaları standardın varlığını gösteriyor; OpenStack dışında güncel bir kullanıcı veya son yıllara ait bir güncelleme kanıtı bulunamadı.
+1. Büyük kimlik sağlayıcıların gerçek günlük hacimleri doğrulanamamıştır. Okta, Auth0, Keycloak ya da Entra kimlik için kamuya açık, birincil kaynaklı bir saniyede olay ya da günde gigabayt rakamı bulunamamıştır. Sektör yalnızca saklama süreleri üzerinden konuşmaktadır. Tek somut kıyas 2009 tarihli çalışmadır ile o da o dönemin sistem günlüğüdür.
+2. Okta sistem günlüğü API'sinin hız sınırları doğrulanamamıştır; dokümantasyon bunları panoya havale etmektedir.
+3. GitHub kullanıcı güvenlik günlüğünün saklama süresi ile dışa aktarım seçeneği doğrulanamamıştır.
+4. Apple'ın kullanıcıya gösterdiği giriş ile hesap etkinliği geçmişi doğrulanamamıştır; birincil kaynak bu oturumda getirilememiştir. Google ile GitHub deseni üzerinden genelleme yapılmıştır.
+5. Splunk kimlik doğrulama veri modelinin tam alan listesi ile etiketleri doğrulanamamıştır; ilgili doküman iki farklı adreste 403 döndürmüştür.
+6. SOC 2'nin sayısal günlük saklama gereksinimi doğrulanamamıştır; birincil kaynak bulunamamıştır. Pratikte bir yıllık gözlem penceresi yaygındır ancak bu bir denetim uygulamasıdır, normatif bir eşik değildir.
+7. İzleme kütüphaneleri için nanosaniye seviyesinde yayımlanmış bağımsız bir kıyaslama doğrulanamamıştır; yalnızca niteliksel iddialar vardır. Argus'un hedef hızında araç makrosunun maliyeti kendiniz ölçülmelidir.
+8. Tessera'nın varsayılan yığın boyutu ile denetim noktası aralığı değerleri doğrulanamamıştır; dokümanlar yapılandırma adlarını vermekte ancak varsayılanları belirtmemektedir.
+9. İkinci sürüm kayıt günlüğünün somut maliyet düşüş yüzdesi ile sorgu hızı rakamları doğrulanamamıştır; duyuru yalnızca niteliksel ifadeler kullanmaktadır.
+10. OCSF 1.9.0'ın tam sürüm notları doğrulanamamıştır; ilgili sayfa 404 döndürmüş ile bilgi liste sayfasından ve şema dosyalarından derlenmiştir. Sürüm ile tarih listeden doğrulanmıştır.
+11. Taşınabilirlik kılavuzunun doğrudan metni kısmen doğrulanamamıştır; indirme denemesi başka bir belgeye yönlenmiştir. Ancak o belge aynı hukuki noktayı açıkça ifade etmektedir, bu yüzden K31'in dayanağı birincil ile geçerlidir; yalnızca etkinlik günlükleri ile arama geçmişi örneklerini içeren spesifik paragraf alıntılanamamıştır.
+12. CNIL kararının tam metni doğrulanamamıştır; resmî duyuru sayfası doğrulanmış ancak kararın PDF'i getirilememiştir.
+13. PCI DSS 4.0.1'in resmî metni doğrulanamamıştır; kurumun kendi PDF'i kayıt gerektirdiği için getirilememiş ile içerik ikincil ancak tutarlı kaynaklardan derlenmiştir. Sayısal eşikler birden fazla bağımsız kaynakta tutarlıdır.
+14. CADF'in 2025 ile 2026'daki güncel benimseme durumu doğrulanamamıştır; standardın varlığı görülmekte ancak OpenStack dışında güncel bir kullanıcı ya da son yıllara ait bir güncelleme kanıtı bulunamamıştır.
 
 ---
 
 ## Kaynaklar
 
-**Standartlar / RFC'ler**
-- [RFC 8417 — Security Event Token (SET)](https://www.rfc-editor.org/rfc/rfc8417.html)
-- [RFC 9967 — SCIM Profile for Security Event Tokens](https://www.rfc-editor.org/rfc/rfc9967.html)
-- [RFC 9162 — Certificate Transparency Version 2.0](https://www.rfc-editor.org/rfc/rfc9162.html)
-- [OpenID CAEP 1.0 (Final)](https://openid.net/specs/openid-caep-1_0-final.html)
-- [OpenID Shared Signals Framework 1.0 (Final)](https://openid.net/specs/openid-sharedsignals-framework-1_0-final.html)
-- [Three Shared Signals Final Specifications Approved — OpenID Foundation](https://openid.net/three-shared-signals-final-specifications-approved/)
+Standartlar ile RFC'ler şunlardır: RFC 8417 güvenlik olayı belirteci; RFC 9967 güvenlik olayı belirteçleri için SCIM profili; RFC 9162 sertifika şeffaflığı ikinci sürümü; OpenID CAEP 1.0 nihai sürümü; OpenID paylaşılan sinyaller çerçevesi 1.0 nihai sürümü; ile OpenID Foundation'ın üç paylaşılan sinyal şartnamesinin onaylandığına dair duyurusu.
 
-**OCSF**
-- [OCSF Schema 1.9.0 — Categories](https://schema.ocsf.io/1.9.0/categories?extensions=)
-- [OCSF Authentication [3002]](https://schema.ocsf.io/1.7.0/classes/authentication)
-- [OCSF record_integrity profile](https://schema.ocsf.io/1.9.0/profiles/record_integrity?extensions=)
-- [OCSF attestation object (raw)](https://raw.githubusercontent.com/ocsf/ocsf-schema/main/objects/attestation.json)
-- [OCSF releases](https://github.com/ocsf/ocsf-schema/releases)
-- [OCSF in AWS Security Lake](https://docs.aws.amazon.com/security-lake/latest/userguide/open-cybersecurity-schema-framework.html)
+OCSF kaynakları şunlardır: schema.ocsf.io üzerindeki 1.9.0 kategorileri, kimlik doğrulama sınıfı ile kayıt bütünlüğü profili sayfaları; ocsf-schema deposundaki ham kanıtlama nesnesi tanımı ile sürüm listesi; ile AWS Security Lake dokümanındaki şema sayfası.
 
-**Uyum / regülasyon**
-- [NIST SP 800-53 Rev.5 — AU-2](https://csf.tools/reference/nist-sp-800-53/r5/au/au-2/), [AU-3](https://csf.tools/reference/nist-sp-800-53/r5/au/au-3/), [AU-9](https://csf.tools/reference/nist-sp-800-53/r5/au/au-9/), [AU-10](https://csf.tools/reference/nist-sp-800-53/r5/au/au-10/)
-- [PCI DSS Requirement 10](https://pcidssguide.com/pci-dss-requirement-10/), [PCI log retention](https://www.zengrc.com/blog/what-are-the-pci-audit-log-retention-requirements/)
-- [CNIL — Recommandation journalisation (Délibération 2021-122)](https://www.cnil.fr/fr/la-cnil-publie-une-recommandation-relative-aux-mesures-de-journalisation)
-- [EDPB Guidelines 01/2025 on Pseudonymisation (PDF)](https://www.edpb.europa.eu/system/files/2025-01/edpb_guidelines_202501_pseudonymisation_en.pdf)
-- [GDPR Art. 15](https://gdpr-info.eu/art-15-gdpr/), [Art. 20](https://gdpr-info.eu/art-20-gdpr/)
-- [WP29 WP251rev.01 — Automated decision-making & Profiling](https://ec.europa.eu/newsroom/article29/items/612053/en)
+Uyum ile mevzuat kaynakları şunlardır: NIST SP 800-53 beşinci revizyonun denetim ailesi kontrolleri; PCI DSS onuncu gereksinim ile günlük saklama analizleri; CNIL'in günlükleme tedbirleri tavsiyesi; Avrupa Veri Koruma Kurulu'nun 01/2025 sayılı takma adlaştırma kılavuzu; GDPR'ın 15. ile 20. maddeleri; ile çalışma grubunun otomatik karar verme ve profilleme kılavuzu.
 
-**Bütünlük / transparency log**
-- [Crosby & Wallach, Efficient Data Structures for Tamper-Evident Logging (USENIX Sec 2009, PDF)](https://static.usenix.org/event/sec09/tech/full_papers/crosby.pdf)
-- [Agent Flight Recorder (arXiv:2609.01931)](https://arxiv.org/html/2609.01931)
-- [Trillian Tessera — performance](https://github.com/transparency-dev/tessera/blob/main/docs/performance.md), [README](https://github.com/transparency-dev/tessera/blob/main/README.md)
-- [Sigstore Rekor v2 GA](https://blog.sigstore.dev/rekor-v2-ga/)
-- [Let's Encrypt — Reflections on a Year of Sunlight](https://letsencrypt.org/2025/06/11/reflections-on-a-year-of-sunlight)
-- [Filippo Valsorda — You Should Run a Certificate Transparency Log](https://words.filippo.io/run-sunlight/)
-- [AWS kills QLDB (InfoQ)](https://www.infoq.com/news/2024/07/aws-kill-qldb), [Microsoft — Moving from QLDB](https://techcommunity.microsoft.com/blog/azuresqlblog/moving-from-amazon-quantum-ledger-database-qldb/4246237)
-- [The Hole in Append-Only (TRUNCATE)](https://heypinchy.com/blog/day-143-the-hole-in-append-only)
-- [pgaudit](https://github.com/pgaudit/pgaudit), [PostgreSQL — Table Partitioning](https://www.postgresql.org/docs/current/ddl-partitioning.html)
-- [Atomic Crypto-Shred with Immutable Audit-Ledger Preservation](https://www.tdcommons.org/dpubs_series/10873/), [Crypto-Shredding: GDPR & MiFID II](https://veritaschain.org/blog/posts/2026-01-18-crypto-shredding-gdpr-mifid-ii-reconciliation/)
+Bütünlük ile şeffaflık günlüğü kaynakları şunlardır: Crosby ile Wallach'ın USENIX Security 2009 makalesi; ajan uçuş kaydedici çalışması; Tessera'nın performans ile genel bakış dokümanları; ikinci sürüm kayıt günlüğü duyurusu; Let's Encrypt'in bir yıllık değerlendirmesi; Filippo Valsorda'nın şeffaflık günlüğü çalıştırma yazısı; QLDB'nin kapanışına dair haberler; yalnızca ekleme deliği yazısı; pgaudit deposu ile PostgreSQL bölümleme dokümanı; ile kripto parçalama üzerine iki çalışma.
 
-**IdP / ölçek / SIEM**
-- [Phase Two — Scaling Keycloak Event Storage](https://phasetwo.io/blog/scaling-keycloak-event-storage/), [User Events in Keycloak](https://phasetwo.io/blog/user-events-in-keycloak/)
-- [Keycloak Server Admin Guide](https://www.keycloak.org/docs/latest/server_admin/index.html)
-- [Okta Event Types catalog](https://developer.okta.com/docs/reference/api/event-types/), [Okta System Log retention](https://support.okta.com/help/Documentation/Knowledge_Article/Exporting-Okta-Log-Data), [Okta Log Streaming](https://help.okta.com/oie/en-us/content/topics/reports/log-streaming/about-log-streams.htm)
-- [Auth0 Log Data Retention](https://auth0.com/docs/deploy-monitor/logs/log-data-retention)
-- [Microsoft Entra data retention](https://learn.microsoft.com/en-us/entra/identity/monitoring-health/reference-reports-data-retention)
-- [Query.ai — Cybersecurity Event Data Normalization Standards](https://www.query.ai/resources/blogs/cybersecurity-event-data-normalization-standards/)
-- [DMTF CADF](https://www.dmtf.org/standards/cadf), [OpenStack — Auditing with CADF](https://docs.openstack.org/mitaka/config-reference/identity/auditing.html)
-- [ClickHouse — Observability](https://clickhouse.com/docs/en/use-cases/observability/introduction)
-- [Airbyte — Audit Logging Compliance](https://airbyte.com/data-engineering-resources/audit-logging-compliance), [Tetrate — MCP Audit Logging](https://tetrate.io/learn/ai/mcp/mcp-audit-logging)
+Kimlik sağlayıcı, ölçek ile güvenlik bilgi ve olay yönetimi kaynakları şunlardır: Phase Two'nun iki yazısı; Keycloak sunucu yönetim kılavuzu; Okta olay tipi kataloğu, saklama ile günlük akışı sayfaları; Auth0 günlük saklama sayfası; Microsoft Entra veri saklama sayfası; Query.ai'nin normalizasyon standartları analizi; DMTF ile OpenStack denetim sayfaları; ClickHouse gözlemlenebilirlik kılavuzu; ile denetim günlükleme üzerine iki yazı.
 
-**Rust / OpenTelemetry**
-- [opentelemetry-rust](https://github.com/open-telemetry/opentelemetry-rust), [issue #3376](https://github.com/open-telemetry/opentelemetry-rust/issues/3376)
-- [OTel Semantic Conventions 1.44.0](https://opentelemetry.io/docs/specs/semconv/), [enduser attributes](https://opentelemetry.io/docs/specs/semconv/registry/attributes/enduser/), [user attributes](https://opentelemetry.io/docs/specs/semconv/registry/attributes/user/), [Events](https://opentelemetry.io/docs/specs/semconv/general/events/), [semconv issue #1104](https://github.com/open-telemetry/semantic-conventions/issues/1104)
-- [OTel Performance Benchmark spec](https://opentelemetry.io/docs/specs/otel/performance-benchmark/)
-- [tracing 0.1.44](https://docs.rs/tracing/latest/tracing/), [secrecy 0.10.3](https://docs.rs/secrecy/latest/secrecy/), [RUSTSEC-2024-0342](https://osv.dev/vulnerability/RUSTSEC-2024-0342)
-- [metrics-prometheus](https://crates.io/crates/metrics-prometheus), [Rust telemetry workshop — Prometheus](https://rust-exercises.com/telemetry/03_metrics/04_prometheus)
-- [High-Cardinality Metrics — The TSDB Killer](https://systeminternals.dev/observability/cardinality/), [Last9 — High cardinality in Prometheus](https://last9.io/blog/how-to-manage-high-cardinality-metrics-in-prometheus/), [Prometheus label best practices](https://oneuptime.com/blog/post/2025-12-05-prometheus-label-best-practices/view)
+Rust ile OpenTelemetry kaynakları şunlardır: opentelemetry-rust deposu ile ilgili konu; anlamsal sözleşmeler sitesi ile ilgili öznitelik, olay ve konu sayfaları; performans kıyaslama şartnamesi; izleme ile sır kütüphanelerinin dokümanları ile ilgili güvenlik danışmanlığı; metrik cephesi ile Prometheus alıştırmaları; ile yüksek kardinalite üzerine üç yazı.
 
-**Kullanıcıya görünen audit**
-- [Google — Devices & recent security activity](https://support.google.com/accounts/answer/3067630)
-- [GitHub — Security log events](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/security-log-events)
+Kullanıcıya görünen denetim kaynakları Google'ın cihazlar ile son güvenlik etkinliği sayfası ile GitHub'ın güvenlik günlüğü olayları sayfasıdır.

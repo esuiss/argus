@@ -1,806 +1,599 @@
-# 9. Anahtar ve sır yönetimi
+# §9 — Anahtar ve sır yönetimi
 
-> `ARGUS.md` §9'den taşındı. Numaralandırma korundu; bu dosyanın
-> içindeki `§9 §X` referansları aynı anlamda.
+## Özet
 
-
-
----
-
-### ÖZET — Tek Cümlelik Sonuç
-
-**Her JWT imzası için bir KMS/HSM çağrısı yapan bir IdP, hesap/bölge başına ~1.000 token/sn tavanına çarpar ve aylık ~39.000 USD öder.** Argus'un istediği ölçekte tek çalışan mimari, C bölümünde anlatılan **hibrit (envelope) model**dir: kök anahtar KMS/HSM'de, kısa ömürlü ara imzalama anahtarı bellekte. Bunun kanıtı aşağıdaki gerçek sayılarda.
+Her JWT imzası için bir KMS veya HSM çağrısı yapan bir IdP, hesap ve bölge başına yaklaşık 1.000 token/sn tavanına çarpar ve aylık yaklaşık 39.000 USD öder. Argus'un hedeflediği ölçekte çalışan tek mimari, C bölümünde anlatılan hibrit envelope modelidir: kök anahtar KMS veya HSM'de, kısa ömürlü ara imzalama anahtarı bellekte. Bunun kanıtı aşağıdaki gerçek sayılardadır.
 
 ---
 
-## A) PKCS#11 / HSM — Rust Tarafı
+## A. PKCS#11 ve HSM: Rust tarafı
 
-### A.1 `cryptoki` crate — olgunluk ve durum (2026)
+### A.1 `cryptoki` crate'inin olgunluğu ve durumu
 
-crates.io API'sinden bugün çekilen kesin veriler:
+crates.io API'sinden 8 Eylül 2026'da çekilen veriler:
 
 | Crate | Sürüm | Son güncelleme | Toplam indirme | Son 90 gün |
 |---|---|---|---|---|
-| `cryptoki` | **0.12.0** | 2026-01-22 | 2.554.577 | 1.225.938 |
-| `cryptoki-sys` | 0.5.0 | 2025-12-19 | 2.875.734 | 1.454.145 |
-| `pkcs11` (eski) | 0.5.0 | **2020-04-20** | 760.201 | 49.567 |
-| `r2d2-cryptoki` | 0.5.0 | 2026-08-14 | 136.646 | 28.305 |
-| `yubihsm` | 0.42.1 | **2023-08-15** | 1.277.973 | 137.886 |
+| `cryptoki` | 0.12.0 | 22 Ocak 2026 | 2.554.577 | 1.225.938 |
+| `cryptoki-sys` | 0.5.0 | 19 Aralık 2025 | 2.875.734 | 1.454.145 |
+| `pkcs11` (eski) | 0.5.0 | 20 Nisan 2020 | 760.201 | 49.567 |
+| `r2d2-cryptoki` | 0.5.0 | 14 Ağustos 2026 | 136.646 | 28.305 |
+| `yubihsm` | 0.42.1 | 15 Ağustos 2023 | 1.277.973 | 137.886 |
 
-Kaynak: `https://crates.io/api/v1/crates/{cryptoki,cryptoki-sys,pkcs11,r2d2-cryptoki,yubihsm}` (2026-09-08 çekildi). Crate 2021-03-18'de yayınlanmış, 18 sürüm, Apache-2.0.
+Crate 18 Mart 2021'de yayımlanmıştır, 18 sürümü vardır ve Apache-2.0 lisanslıdır.
 
-**Değerlendirme:** `cryptoki` gerçek ve canlı bir projedir. Çeyrek yılda bir sürüm ritmi var, 3 ayda 1,2 milyon indirme. Parsec topluluğu (Arm kökenli) tarafından sürdürülüyor. README'de üretim-hazırlığı beyanı yok ama sürüm/indirme profili olgun.
-Kaynak: https://github.com/parallaxsecond/rust-cryptoki (README), https://crates.io/crates/cryptoki
+**Değerlendirme.** `cryptoki` gerçek ve canlı bir projedir. Çeyrek yılda bir sürüm ritmi vardır ve üç ayda 1,2 milyon indirme almaktadır. Arm kökenli Parsec topluluğu tarafından sürdürülmektedir. README'de üretim hazırlığı beyanı yoktur ancak sürüm ve indirme profili olgundur.
 
-#### CHANGELOG'dan kritik noktalar
-Kaynak: https://github.com/parallaxsecond/rust-cryptoki/blob/main/CHANGELOG.md
+**CHANGELOG'dan kritik noktalar.** v0.12.0 (Ocak 2026) ile oturumlar `Send` hâline gelmiş ve thread sınırlarını geçebilmeye başlamıştır; bu Argus için doğrudan ilgilidir, çünkü öncesinde oturumu bir tokio task'ına taşımak sorunluydu. v0.11.0 (Aralık 2025) ile `Session`'ın ömrü `Pkcs11` nesnesinden ayrılmıştır; bu havuzlamayı çok kolaylaştıran bir değişikliktir. PKCS#11 3.0 desteği kapsamında mesaj tabanlı şifreleme ile şifre çözme ve çok parçalı işlemler eklenmiştir. PKCS#11 3.2 kapsamında profile ve validation objeleri ile SLH-DSA post-quantum mekanizmaları desteklenmektedir. Ayrıca NIST SP800-108 KDF, HKDF, SHA anahtar üretimi ile vendor tanımlı mekanizma ve öznitelikler eklenmiştir. `paste` bağımlılığı RUSTSEC-2024-0436 nedeniyle kaldırılmıştır; bu güvenlik hijyeni açısından iyi bir sinyaldir. `get_attribute_info_map` artık slice almaktadır ve bu kırıcı bir değişikliktir.
 
-- **v0.12.0 (Ocak 2026): "Make Session Send"** — oturumlar artık thread sınırlarını geçebiliyor. Argus için doğrudan ilgili: bundan önce oturumu bir tokio task'ına taşımak sorunluydu.
-- **v0.11.0 (Aralık 2025):** `Session`'ın ömrü `Pkcs11` nesnesinden ayrıldı. Bu, havuzlama (pooling) yapmayı çok kolaylaştıran bir değişiklik.
-- **PKCS#11 3.0 desteği:** "Add support for message-based encryption and decryption (PKCS#11 3.0)" — mesaj tabanlı API ve çok-parçalı (multi-part) işlemler eklendi.
-- **PKCS#11 3.2:** profile objects ve validation objects desteği; SLH-DSA mekanizmaları (post-kuantum).
-- NIST SP800-108 KDF, HKDF, SHA key generation, vendor-defined mechanisms/attributes.
-- `paste` bağımlılığı kaldırıldı (RUSTSEC-2024-0436 nedeniyle) — güvenlik hijyeni açısından iyi sinyal.
-- `get_attribute_info_map` artık slice alıyor (kırıcı değişiklik).
+PKCS#11 3.0 Rust'ta desteklenmekte ve aktif olarak genişletilmektedir. Bu, Rust ekosisteminde PKCS#11 3.x için pratikte tek ciddi seçenektir.
 
-**PKCS#11 3.0 durumu (Rust):** Destekleniyor ve aktif genişletiliyor. Bu, Rust ekosisteminde PKCS#11 3.x için pratikte tek ciddi seçenek.
+**PIN yönetimi.** crates.io feature listesinde `"serde": ["secrecy/serde"]` görünmektedir; crate PIN'i `secrecy::SecretString` içinde tutmaktadır. Tartışma github.com/parallaxsecond/rust-cryptoki/issues/50 adresindedir.
 
-#### Önemli detay: `cryptoki` PIN için `secrecy` kullanıyor
-crates.io feature listesinde `"serde": ["secrecy/serde"]` görünüyor — yani crate, PIN'i `secrecy::SecretString` içinde tutuyor. PIN handling tartışması: https://github.com/parallaxsecond/rust-cryptoki/issues/50
+**`cryptoki-rustcrypto` mevcut değildir.** crates.io API'sinde `cryptoki-rustcrypto` veya `cryptoki_rustcrypto` bulunamamıştır. Workspace üyeleri yalnızca `cryptoki` ve `cryptoki-sys`'tir. crates.io'da "cryptoki" araması `cryptoki`, `cryptoki-sys`, `r2d2-cryptoki`, `sequoia-cryptoki` (0.1.1, 5 Temmuz 2026), `sequoia-keystore-cryptoki` (0.1.0, 5 Temmuz 2026), `sq-cryptoki`, `esteid-cryptoki`, `oxicrypto-adapter-pkcs11` ve `oxitls-adapter-pkcs11` döndürmektedir. Sonuç olarak yayımlanmış bir `cryptoki-rustcrypto` crate'i yoktur; RustCrypto `signature::Signer` trait köprüsünü Argus'un kendisi yazmalıdır ve bu yaklaşık 200 satırlık bir iştir.
 
-#### `cryptoki-rustcrypto` — **[DOĞRULANMADI / MUHTEMELEN YOK]**
-- crates.io API'sinde `cryptoki-rustcrypto` / `cryptoki_rustcrypto` **bulunamadı**.
-- `https://raw.githubusercontent.com/parallaxsecond/rust-cryptoki/main/Cargo.toml` workspace üyeleri: **sadece `cryptoki` ve `cryptoki-sys`**.
-- crates.io'da "cryptoki" araması sonuçları: `cryptoki`, `cryptoki-sys`, `r2d2-cryptoki`, `sequoia-cryptoki` (0.1.1, 2026-07-05), `sequoia-keystore-cryptoki` (0.1.0, 2026-07-05), `sq-cryptoki`, `esteid-cryptoki`, `oxicrypto-adapter-pkcs11`, `oxitls-adapter-pkcs11`.
-
-**Sonuç:** Yayınlanmış bir `cryptoki-rustcrypto` crate'i yok. RustCrypto `signature::Signer` trait köprüsünü Argus'un kendisi yazmalı (zaten ~200 satırlık iş).
-
-#### Alternatif: `kryptering` (Kushal Das)
-Signer/Verifier/Decryptor/Encryptor/KeyWrapper/KeyAgreement trait'leri ile hem yazılım (RustCrypto) hem PKCS#11 (SoftHSM2, Kryoptic, gerçek HSM) arka ucu sunuyor. Argus'un istediği soyutlamanın referans tasarımı.
-Kaynak: https://github.com/kushaldas/kryptering
+**Alternatif: `kryptering` (Kushal Das).** Signer, Verifier, Decryptor, Encryptor, KeyWrapper ve KeyAgreement trait'leriyle hem yazılım (RustCrypto) hem PKCS#11 (SoftHSM2, Kryoptic, gerçek HSM) arka ucu sunar. Argus'un istediği soyutlamanın referans tasarımıdır (github.com/kushaldas/kryptering).
 
 ### A.2 Pratik entegrasyon zorlukları
 
-#### Oturum yönetimi ve thread güvenliği — çözülmüş problem
-**`r2d2-cryptoki` (spruceid, v0.5.0, 2026-08-14)** — r2d2 bağlantı havuzu adaptörü. PIN doğrulaması ve thread-safe oturum yönetimi hazır geliyor. 90 günde 28.305 indirme.
-Kaynak: https://github.com/spruceid/r2d2-cryptoki , https://docs.rs/r2d2-cryptoki/latest/r2d2_cryptoki/
+**Oturum yönetimi ve thread güvenliği çözülmüş bir problemdir.** `r2d2-cryptoki` (spruceid, v0.5.0, 14 Ağustos 2026) bir r2d2 bağlantı havuzu adaptörüdür; PIN doğrulaması ve thread güvenli oturum yönetimi hazır gelir ve 90 günde 28.305 indirme almıştır. `CInitializeFlags::OS_LOCKING_OK` bayrağı ile PKCS#11 kütüphanesinin kendi kilitlemesini işletim sistemine devretmesi sağlanır.
 
-`CInitializeFlags::OS_LOCKING_OK` bayrağı ile PKCS#11 kütüphanesinin kendi kilitlemesini OS'a devretmesi sağlanıyor.
+**Argus için mimari kural.** HSM oturumu asla `async fn` içinde doğrudan tutulmaz. Ayrı bir blocking thread havuzu (`tokio::task::spawn_blocking` veya adanmış bir signer thread) ile r2d2 havuzu kullanılır. `Session: Send` (v0.12.0) bunu mümkün kılar ancak `Sync` değildir; her thread kendi oturumunu almalıdır.
 
-**Argus için mimari kural:** HSM oturumu asla `async fn` içinde doğrudan tutulmamalı. Ayrı bir blocking thread pool (`tokio::task::spawn_blocking` veya adanmış bir signer thread) + r2d2 havuzu. `Session: Send` (v0.12.0) bunu mümkün kılıyor ama `Sync` değil — her thread kendi oturumunu almalı.
+**Mekanizma desteği.**
 
-#### Mekanizma desteği — algoritma matrisi
-| Sağlayıcı | ECDSA P-256 | Ed25519/EdDSA | RSA-PSS |
+| Sağlayıcı | ECDSA P-256 | Ed25519 ve EdDSA | RSA-PSS |
 |---|---|---|---|
-| SoftHSMv2 | Evet | Evet (derleme sırasında `--enable-eddsa`) | **[DOĞRULANMADI]** |
-| YubiHSM 2 | Evet | Evet (EdDSA-25519) | Evet |
-| AWS CloudHSM | Evet | HashEdDSA sadece `hsm2m.medium` ve **non-FIPS** modda | Evet |
-| Azure Managed HSM | P-256/P-256K/P-384/P-521 | **Listede yok** | Evet |
-| AWS KMS | Evet | **Evet** (ECC_NIST_EDWARDS25519) | Evet |
+| SoftHSMv2 | Evet | Evet; derleme sırasında `--enable-eddsa` | Doğrulanamamıştır |
+| YubiHSM 2 | Evet | Evet; EdDSA-25519 | Evet |
+| AWS CloudHSM | Evet | HashEdDSA yalnızca `hsm2m.medium` ve FIPS dışı modda | Evet |
+| Azure Managed HSM | P-256, P-256K, P-384, P-521 | Listede yoktur | Evet |
+| AWS KMS | Evet | Evet; ECC_NIST_EDWARDS25519 | Evet |
 
-SoftHSMv2: OpenDNSSEC kökenli, Botan 2.0+ veya OpenSSL 1.0+ gerektiriyor, ECC/EdDSA/SHA3 derleme opsiyonlu. Sadece test için değil, üretimde de kullanılıyor (OpenDNSSEC).
-Kaynak: https://github.com/softhsm/SoftHSMv2
+SoftHSMv2 OpenDNSSEC kökenlidir, Botan 2.0 ve üstü veya OpenSSL 1.0 ve üstü gerektirir ve ECC, EdDSA ile SHA3 derleme opsiyonludur. Yalnızca test için değil, üretimde de kullanılmaktadır; OpenDNSSEC örneğidir.
 
-**AWS CloudHSM HashEdDSA kısıtı çok önemli:** FIPS modunda EdDSA yok. Argus "en güvenli" iddiasındaysa FIPS 140-3 Level 3 + EdDSA aynı anda olmuyor — ES256'ya (P-256) düşmek zorundasınız.
-Kaynak: https://docs.aws.amazon.com/cloudhsm/latest/userguide/cloudhsm_cli-crypto-sign-ed25519ph.html
+> **AWS CloudHSM HashEdDSA kısıtı önemlidir.** FIPS modunda EdDSA yoktur. Argus en güvenli iddiasındaysa FIPS 140-3 Level 3 ile EdDSA aynı anda mümkün değildir; ES256'ya, yani P-256'ya düşmek gerekir.
 
-#### Test altyapısı
-- **SoftHSMv2** — CI için standart. https://github.com/softhsm/SoftHSMv2
-- **Kryoptic** — daha yeni, Rust-tabanlı PKCS#11 token (kryptering tarafından destekleniyor)
-- **MockHSM** — `yubihsm` crate'inde donanımsız test için. Uyarı: gerçek YubiHSM2'ye karşı testler **YIKICI** ("DO NOT RUN THEM AGAINST A YUBIHSM2 WHICH CONTAINS KEYS YOU CARE ABOUT"). Kaynak: https://lib.rs/crates/yubihsm
+**Test altyapısı.** SoftHSMv2 CI için standarttır. Kryoptic daha yenidir ve Rust tabanlı bir PKCS#11 token'ıdır; `kryptering` tarafından desteklenir. MockHSM `yubihsm` crate'inde donanımsız test için bulunur; uyarısı gerçek bir YubiHSM2'ye karşı çalıştırılan testlerin yıkıcı olduğu ve önem verilen anahtarlar içeren bir cihazda koşulmaması gerektiğidir.
 
-#### `yubihsm` crate riski
-Son sürüm **2023-08-15** — 3 yıldır sürüm yok. Yubico'nun resmi projesi değil ("This is NOT an official Yubico project"). Tony Arcieri (iqlusion) sürdürüyor, MSRV 1.67. 90 günde 138k indirme var ama bakımsız. **Argus için tavsiye: `yubihsm` crate yerine `cryptoki` + YubiHSM'in PKCS#11 modülü kullanın.**
+**`yubihsm` crate'i riskleri.** Son sürüm 15 Ağustos 2023 tarihlidir; üç yıldır sürüm çıkmamıştır. Yubico'nun resmî projesi değildir; Tony Arcieri (iqlusion) sürdürmektedir ve MSRV 1.67'dir. 90 günde 138.000 indirme almaktadır ancak bakımsızdır. Argus için tavsiye `yubihsm` crate'i yerine `cryptoki` ile YubiHSM'in PKCS#11 modülünün kullanılmasıdır.
 
-#### Nesne handle'ları ve yeniden bağlanma
-PKCS#11'de `CK_OBJECT_HANDLE` **oturuma özeldir ve oturum kapandığında geçersizleşir**. Argus tasarımında: anahtarları her zaman `CKA_LABEL` / `CKA_ID` ile arayın, handle'ı önbelleklemeyin ya da önbelleklerseniz oturum yeniden kurulduğunda tam geçersizleştirme yapın. `C_FindObjects` maliyeti her imzaya eklenmemeli — bu yüzden havuzdaki her oturum, kendi handle'ını oturum ömrü boyunca cache'lemeli.
+**Nesne handle'ları ve yeniden bağlanma.** PKCS#11'de `CK_OBJECT_HANDLE` oturuma özeldir ve oturum kapandığında geçersizleşir. Argus tasarımında anahtarlar her zaman `CKA_LABEL` veya `CKA_ID` ile aranır; handle önbelleklenmez veya önbelleklenirse oturum yeniden kurulduğunda tam geçersizleştirme yapılır. `C_FindObjects` maliyeti her imzaya eklenmemelidir; bu nedenle havuzdaki her oturum kendi handle'ını oturum ömrü boyunca önbellekler.
 
-#### HSM'ler arası failover
-PKCS#11 standardı failover tanımlamaz. AWS CloudHSM istemcisi kümeyi kendi yönetir (yük dengeleme + yeniden deneme). Thales Luna ve Utimaco için HA grupları sağlayıcı kütüphanesinde. **Argus, kendi failover'ını yazarsa: her HSM için ayrı `Pkcs11` instance + ayrı havuz + circuit breaker.**
+**HSM'ler arası failover.** PKCS#11 standardı failover tanımlamaz. AWS CloudHSM istemcisi kümeyi kendisi yönetir ve yük dengeleme ile yeniden deneme sağlar. Thales Luna ve Utimaco için HA grupları sağlayıcı kütüphanesindedir. Argus kendi failover'ını yazarsa her HSM için ayrı bir `Pkcs11` instance'ı, ayrı havuz ve circuit breaker kullanır.
 
-### A.3 HSM İMZALAMA PERFORMANSI — GERÇEK SAYILAR
+### A.3 HSM imzalama performansı
 
-#### YubiHSM 2 (Yubico resmi dokümantasyonu)
-Boştaki bir cihazda ortalama gecikmeler:
+**YubiHSM 2** (Yubico resmî dokümantasyonu). Boştaki bir cihazda ortalama gecikmeler:
 
 | İşlem | Süre | İmza/sn |
 |---|---|---|
-| **ECDSA-P256-SHA256** | **~73 ms** | **~13,7** |
-| ECDSA-P384-SHA384 | ~120 ms | ~8,3 |
-| ECDSA-P521-SHA512 | ~210 ms | ~4,8 |
-| **EdDSA-25519 (32 B)** | **~105 ms** | **~9,5** |
-| EdDSA-25519 (64 B) | ~121 ms | ~8,3 |
-| EdDSA-25519 (128 B) | ~137 ms | ~7,3 |
-| EdDSA-25519 (256 B) | ~168 ms | ~6,0 |
-| EdDSA-25519 (512 B) | ~229 ms | ~4,4 |
-| EdDSA-25519 (1024 B) | ~353 ms | ~2,8 |
-| **RSA-2048** | **~139 ms** | **~7** |
+| ECDSA-P256-SHA256 | Yaklaşık 73 ms | Yaklaşık 13,7 |
+| ECDSA-P384-SHA384 | Yaklaşık 120 ms | Yaklaşık 8,3 |
+| ECDSA-P521-SHA512 | Yaklaşık 210 ms | Yaklaşık 4,8 |
+| EdDSA-25519 (32 B) | Yaklaşık 105 ms | Yaklaşık 9,5 |
+| EdDSA-25519 (64 B) | Yaklaşık 121 ms | Yaklaşık 8,3 |
+| EdDSA-25519 (128 B) | Yaklaşık 137 ms | Yaklaşık 7,3 |
+| EdDSA-25519 (256 B) | Yaklaşık 168 ms | Yaklaşık 6,0 |
+| EdDSA-25519 (512 B) | Yaklaşık 229 ms | Yaklaşık 4,4 |
+| EdDSA-25519 (1024 B) | Yaklaşık 353 ms | Yaklaşık 2,8 |
+| RSA-2048 | Yaklaşık 139 ms | Yaklaşık 7 |
 
-**Kritik mimari kısıt:** Cihaz en fazla **16 eşzamanlı oturum** destekler, ancak **tek thread'lidir** — oturumlar arasında işlemleri **seri** yürütür. Yani 16 oturum açmak throughput'u artırmaz.
+**Kritik mimari kısıt.** Cihaz en fazla 16 eşzamanlı oturum destekler ancak tek thread'lidir ve oturumlar arasında işlemleri seri yürütür. 16 oturum açmak throughput'u artırmaz.
 
-Kaynak: https://support.yubico.com/hc/en-us/articles/360021202780-YubiHSM-2-A-load-balanced-design-for-heavy-traffic-environments (doğrudan fetch Yubico portalının CSS hatası nedeniyle başarısız oldu; sayılar Yubico'nun bu resmi destek makalesinin arama indeksinden alındı — **teyit için sayfayı bir tarayıcıda açıp doğrulayın**). Ayrıca teknik veri sayfası: https://docs.yubico.com/hardware/yubihsm-2/datasheet/_static/YubiHSM_2_Technical_Data_Sheet.pdf
+> **Kaynak notu.** Yubico'nun ilgili destek makalesinin doğrudan çekilmesi portalın CSS hatası nedeniyle başarısız olmuştur; sayılar bu resmî destek makalesinin arama indeksinden alınmıştır ve sayfanın bir tarayıcıda açılarak teyit edilmesi gerekir. Teknik veri sayfası docs.yubico.com üzerindedir.
 
-**Argus için anlamı:** Bir YubiHSM 2, saniyede **~14 JWT** imzalayabilir. Bu bir IdP için tamamen yetersizdir. YubiHSM 2 sadece **kök/ara anahtar** rolü için uygundur (hibrit model).
+Argus için anlamı şudur: bir YubiHSM 2 saniyede yaklaşık 14 JWT imzalayabilir. Bu bir IdP için tamamen yetersizdir. YubiHSM 2 yalnızca kök veya ara anahtar rolü için, yani hibrit modelde uygundur.
 
-#### AWS CloudHSM (AWS resmi performans sayfası)
-Kaynak: https://docs.aws.amazon.com/cloudhsm/latest/userguide/performance.html
+**AWS CloudHSM** (AWS resmî performans sayfası).
 
-**hsm1.medium:**
+hsm1.medium:
+
 | İşlem | 2 HSM | 3 HSM | 6 HSM |
 |---|---|---|---|
 | RSA-2048 sign | 2.000/sn | 3.000/sn | 5.000/sn |
 | EC P-256 sign | 500/sn | 750/sn | 1.500/sn |
 
-**hsm2m.medium:**
+hsm2m.medium:
+
 | İşlem | 2 HSM | 3 HSM | 6 HSM |
 |---|---|---|---|
 | RSA-2048 sign | 2.000/sn | 3.000/sn | 5.000/sn |
-| **EC P-256 sign** | **3.000/sn** | **4.500/sn** | **7.000/sn** |
+| EC P-256 sign | 3.000/sn | 4.500/sn | 7.000/sn |
 
-Ölçüm koşulu: Java çok-thread'li uygulama, tek `c4.large` EC2 instance üzerinde. AWS "kümenizi yük testine tabi tutun ve bir HSM daha ekleyin" diyor. Aşıldığında "HSMs are busy or throttled" hatası.
+Ölçüm koşulu tek bir `c4.large` EC2 instance'ı üzerinde çalışan çok thread'li bir Java uygulamasıdır. AWS kümenin yük testine tabi tutulmasını ve bir HSM daha eklenmesini önermektedir. Kapasite aşıldığında HSM'lerin meşgul veya throttle edilmiş olduğu hatası döner.
 
-**hsm2m.medium ile P-256'da 6× iyileşme (500→3.000)** — yeni nesil donanım. Bu, gerçekten HSM'de imzalamak isteyen bir IdP için tek makul on-prem/bulut-HSM seçeneği.
+hsm2m.medium ile P-256'da 500'den 3.000'e altı kat iyileşme vardır; bu yeni nesil donanımdır. Gerçekten HSM'de imzalamak isteyen bir IdP için tek makul on-prem veya bulut HSM seçeneğidir.
 
-**hsm2m.medium bilinen sorun:** FIPS 140-3 Level 3 uyumu nedeniyle **login gecikmesi arttı**. Kaynak: https://docs.aws.amazon.com/cloudhsm/latest/userguide/ki-hsm2m-medium.html — Argus'un HSM'e yeniden bağlanma senaryolarında bu ciddi bir tail-latency kaynağı.
+> **hsm2m.medium bilinen sorunu.** FIPS 140-3 Level 3 uyumu nedeniyle login gecikmesi artmıştır. Argus'un HSM'e yeniden bağlanma senaryolarında bu ciddi bir tail latency kaynağıdır.
 
-#### Azure Managed HSM (Microsoft resmi ölçekleme kılavuzu)
-Kaynak: https://learn.microsoft.com/en-us/azure/key-vault/managed-hsm/scaling-guidance (ms.date: 2025-12-03, güncelleme: 2026-06-12)
+**Azure Managed HSM** (Microsoft resmî ölçekleme kılavuzu; ms.date 3 Aralık 2025, güncelleme 12 Haziran 2026). Ölçüm yöntemi tek partition'lı bir Managed HSM havuzuna karşı, her istekte aynı anahtar kullanılarak beş dakika boyunca sürdürülen ortalama işlem/sn'dir.
 
-Ölçüm yöntemi: "tek partition'lı Managed HSM havuzuna karşı, her istekte aynı anahtar, 5 dakika boyunca sürdürülen ortalama ops/sn."
+RSA (işlem/sn, HSM instance başına, bir partition):
 
-**RSA (işlem/sn, HSM instance başına, 1 partition):**
 | İşlem | 2048 | 3072 | 4096 |
 |---|---|---|---|
-| **Sign** | **900** | **340** | **150** |
+| Sign | 900 | 340 | 150 |
 | Verify | 3400 | 3400 | 3700 |
 | Decrypt | 1100 | 360 | 160 |
-| **Create Key** | **1** | **1** | **1** |
+| Create Key | 1 | 1 | 1 |
 
-**EC (işlem/sn):**
+EC (işlem/sn):
+
 | İşlem | P-256 | P-256K | P-384 | P-521 |
 |---|---|---|---|---|
-| **Sign** | **330** | **330** | **160** | **200** |
+| Sign | 330 | 330 | 160 | 200 |
 | Verify | 130 | 130 | 82 | 28 |
 | Create Key | 1 | 1 | 1 | 1 |
 
-**Mimari:** Her Managed HSM instance **3 yük-dengeli partition**tan oluşur. Tablodaki sayılar **en az 1 partition** varsayımıyla. Hepsi ayaktaysa **3×'e kadar** çıkabilir. Microsoft "kapasite planlamasında 2 partition varsayın; garanti gerekiyorsa 1 partition ile planlayın" diyor. Abonelik/bölge başına **max 5 HSM instance**, instance başına **5000 anahtar**, anahtar başına **100 versiyon**.
+Her Managed HSM instance'ı üç yük dengeli partition'dan oluşur. Tablodaki sayılar en az bir partition varsayımıyladır; hepsi ayaktaysa üç katına kadar çıkabilir. Microsoft kapasite planlamasında iki partition varsayılmasını, garanti gerekiyorsa bir partition ile planlanmasını önermektedir. Abonelik ve bölge başına en fazla beş HSM instance'ı, instance başına 5.000 anahtar ve anahtar başına 100 versiyon sınırı vardır.
 
-**Dikkat çekici:** Managed HSM kripto işlemlerinde **throttle etmiyor** — donanımın doğal limitine kadar çalışıyor. Ama `Create Key = 1/sn` — **anahtar rotasyonu için ciddi bir darboğaz**.
+Dikkat çekici nokta şudur: Managed HSM kripto işlemlerinde throttle uygulamaz ve donanımın doğal limitine kadar çalışır. Ancak `Create Key` saniyede bir işlemdir ve bu anahtar rotasyonu için ciddi bir darboğazdır.
 
-#### Azure Key Vault (standart vault, Managed HSM DEĞİL) — kötü şöhretli limitler
-Kaynak: https://learn.microsoft.com/en-us/azure/key-vault/general/service-limits (ms.date: 2025-07-20, güncelleme: 2026-06-12)
+**Azure Key Vault** (standart vault, Managed HSM değil). Limitler 10 saniyede, vault başına ve bölge başınadır:
 
-**10 saniyede, vault başına, bölge başına:**
-
-| Anahtar tipi | HSM: CREATE/RELEASE | HSM: diğer tüm işlemler | Yazılım: CREATE | Yazılım: diğer |
+| Anahtar tipi | HSM: CREATE ve RELEASE | HSM: diğer tüm işlemler | Yazılım: CREATE | Yazılım: diğer |
 |---|---|---|---|---|
-| RSA-2048 | 10 | **2.000** (=200 TPS) | 20 | 4.000 (=400 TPS) |
-| RSA-3072 | 10 | **500** (=50 TPS) | 20 | 1.000 |
-| RSA-4096 | 10 | **250** (=25 TPS) | 20 | 500 |
-| ECC P-256 | 10 | **2.000** (=200 TPS) | 20 | 4.000 |
-| ECC P-384/P-521/secp256k1 | 10 | 2.000 | 20 | 4.000 |
+| RSA-2048 | 10 | 2.000 (200 TPS) | 20 | 4.000 (400 TPS) |
+| RSA-3072 | 10 | 500 (50 TPS) | 20 | 1.000 |
+| RSA-4096 | 10 | 250 (25 TPS) | 20 | 500 |
+| ECC P-256 | 10 | 2.000 (200 TPS) | 20 | 4.000 |
+| ECC P-384, P-521, secp256k1 | 10 | 2.000 | 20 | 4.000 |
 
-Kotalar **ağırlıklıdır ve toplamları üzerinden uygulanır**: "RSA-4096 HSM anahtarı kullanmak RSA-2048'e göre 8 kat pahalıdır (2000/250 = 8)". Aşınca **HTTP 429**.
+Kotalar ağırlıklıdır ve toplamları üzerinden uygulanır: RSA-4096 HSM anahtarı kullanmak RSA-2048'e göre sekiz kat pahalıdır (2000 bölü 250). Aşıldığında HTTP 429 döner. Abonelik geneli limit vault limitinin beş katıdır. Secret CREATE, Certificate IMPORT ve Key IMPORT birlikte 10 saniyede 300 ile sınırlıdır.
 
-**Abonelik geneli limit = vault limitinin 5 katı.**
-**Secret CREATE / Certificate IMPORT / Key IMPORT: birlikte 300 / 10 sn.**
+Argus için sonuç: Azure Key Vault standart sürümü HSM anahtarıyla vault başına en fazla 200 imza/sn, abonelik genelinde beş vault ile 1.000 imza/sn verir. Bu kesinlikle yetersizdir.
 
-**Argus için:** Azure Key Vault (standart) HSM anahtarıyla en fazla **200 imza/sn per vault**, abonelik genelinde **1.000/sn** (5 vault). Kesinlikle yetersiz.
+**Karşılaştırma noktası: yazılımda imzalama.** Cloudflare'in yayımlanmış ölçümü AWS c5.xlarge (4 vCPU, 3,0 GHz Intel Xeon Platinum) üzerinde alınmıştır:
 
-#### Karşılaştırma noktası: YAZILIMDA imzalama (Cloudflare'in yayınlanmış ölçümü)
-Kaynak: https://developers.cloudflare.com/ssl/keyless-ssl/reference/scaling-and-benchmarking/
-
-Donanım: **AWS c5.xlarge** (4 vCPU, 3.0 GHz Intel Xeon Platinum)
-
-| Algoritma | Çekirdek başına | 4 çekirdek toplam (60 sn) | Ortalama işlem süresi |
+| Algoritma | Çekirdek başına | Dört çekirdek toplam (60 sn) | Ortalama işlem süresi |
 |---|---|---|---|
-| **ECDSA** | **>10.000 imza/sn** | 2.661.570 işlem ≈ **44.359/sn** | **22,543 µs** |
-| RSA | ~200 imza/sn | 46.560 işlem ≈ 776/sn | 1,288659 ms |
+| ECDSA | 10.000'den fazla imza/sn | 2.661.570 işlem, yaklaşık 44.359/sn | 22,543 µs |
+| RSA | Yaklaşık 200 imza/sn | 46.560 işlem, yaklaşık 776/sn | 1,288659 ms |
 
-Cloudflare tavsiyesi: beklenen yükün **2 katını** karşılayacak kadar key server dağıtın.
+Cloudflare beklenen yükün iki katını karşılayacak kadar key server dağıtılmasını önermektedir.
 
-### A.4 Karşılaştırma Tablosu — İMZA/SN
+### A.4 Karşılaştırma tablosu
 
 | Yöntem | ECDSA P-256 imza/sn | Kaynak |
 |---|---|---|
-| **Rust/Go bellek içi (c5.xlarge, 4 vCPU)** | **~44.000** | Cloudflare |
-| AWS CloudHSM hsm2m 6-HSM | 7.000 | AWS |
-| AWS CloudHSM hsm2m 2-HSM | 3.000 | AWS |
-| Azure Managed HSM (3 partition) | ~990 | Microsoft (330×3) |
-| AWS KMS (ECC kotası) | 1.000 (hesap+bölge) | AWS |
+| Rust veya Go bellek içi (c5.xlarge, 4 vCPU) | Yaklaşık 44.000 | Cloudflare |
+| AWS CloudHSM hsm2m, altı HSM | 7.000 | AWS |
+| AWS CloudHSM hsm2m, iki HSM | 3.000 | AWS |
+| Azure Managed HSM (üç partition) | Yaklaşık 990 | Microsoft; 330 × 3 |
+| AWS KMS (ECC kotası) | 1.000; hesap ve bölge başına | AWS |
 | Azure Key Vault HSM (vault başına) | 200 | Microsoft |
-| GCP Cloud KMS HSM asimetrik | 50 (bölge başına, eski model) | Google |
-| **YubiHSM 2** | **~14** | Yubico |
+| GCP Cloud KMS HSM asimetrik | 50; bölge başına, eski model | Google |
+| YubiHSM 2 | Yaklaşık 14 | Yubico |
 
-**Fark: 3 büyüklük mertebesi (1000×).** Bu tablo tek başına Argus'un mimari kararını belirler.
+Fark üç büyüklük mertebesidir, yani bin kattır. Bu tablo tek başına Argus'un mimari kararını belirler.
 
 ### A.5 Alternatifler: KMIP, Tink, yerel SDK'lar
-- **KMIP:** Rust'ta olgun bir KMIP istemcisi bulamadım. **[DOĞRULANMADI]** — KMIP zaten anahtar *yönetimi* protokolü, yüksek hacimli imzalama için tasarlanmadı. Argus için uygun değil.
-- **Tink:** Google'ın kütüphanesi; Rust portu (`rust-tink`) topluluk çabası ve bakımı zayıf **[DOĞRULANMADI]**. Tink'in KMS envelope soyutlaması iyi bir *tasarım referansı* ama Rust'ta bağımlılık olarak almayın.
-- **Yerel vendor SDK'ları:** Thales Luna, Utimaco'nun C SDK'ları PKCS#11'den daha hızlı olabilir ama Rust FFI + vendor kilidi. `cryptoki` üzerinden PKCS#11 doğru seçim.
+
+KMIP için Rust'ta olgun bir istemci bulunamamıştır. KMIP zaten bir anahtar yönetimi protokolüdür ve yüksek hacimli imzalama için tasarlanmamıştır; Argus için uygun değildir.
+
+Tink Google'ın kütüphanesidir; Rust portu (`rust-tink`) topluluk çabasıdır ve bakımı zayıftır, bu doğrulanamamıştır. Tink'in KMS envelope soyutlaması iyi bir tasarım referansıdır ancak Rust'ta bağımlılık olarak alınmamalıdır.
+
+Yerel vendor SDK'ları — Thales Luna ve Utimaco'nun C SDK'ları — PKCS#11'den daha hızlı olabilir ancak Rust FFI ve vendor kilidi getirir. `cryptoki` üzerinden PKCS#11 doğru seçimdir.
 
 ---
 
-## B) BULUT KMS ile İMZALAMA — Kotalar, Fiyat, Gecikme
+## B. Bulut KMS ile imzalama: kotalar, fiyat, gecikme
 
-### B.1 AWS KMS — Kotalar (kesin sayılar)
-Kaynak: https://docs.aws.amazon.com/kms/latest/developerguide/requests-per-second.html
+### B.1 AWS KMS kotaları
 
 | Kota | Varsayılan (istek/sn) |
 |---|---|
-| Simetrik kripto işlemleri | 10.000 (paylaşımlı); **20.000**: us-east-2, ap-southeast-1/2, ap-northeast-1, eu-central-1, eu-west-2; **100.000**: us-east-1, us-west-2, eu-west-1 |
-| **RSA kripto işlemleri (Sign/Verify dahil)** | **1.000 (paylaşımlı)** |
-| **ECC ve SM2 (Sign/Verify dahil)** | **1.000 (paylaşımlı)** |
-| ML-DSA (Sign/Verify) | 1.000 (paylaşımlı) |
-| CloudHSM key store | **1.800 — AYARLANAMAZ** |
-| External key store | **1.800 — AYARLANAMAZ** |
+| Simetrik kripto işlemleri | 10.000 (paylaşımlı); us-east-2, ap-southeast-1, ap-southeast-2, ap-northeast-1, eu-central-1 ve eu-west-2'de 20.000; us-east-1, us-west-2 ve eu-west-1'de 100.000 |
+| RSA kripto işlemleri (Sign ve Verify dahil) | 1.000 (paylaşımlı) |
+| ECC ve SM2 (Sign ve Verify dahil) | 1.000 (paylaşımlı) |
+| ML-DSA (Sign ve Verify) | 1.000 (paylaşımlı) |
+| CloudHSM key store | 1.800; ayarlanamaz |
+| External key store | 1.800; ayarlanamaz |
 | GenerateDataKeyPair ECC_NIST_P256 | 100 |
 | GenerateDataKeyPair ECC_NIST_EDWARDS25519 | 100 |
 | GenerateDataKeyPair RSA_2048 | 20 |
 | GenerateDataKeyPair RSA_3072 | 4 |
-| GenerateDataKeyPair RSA_4096 | **1** |
+| GenerateDataKeyPair RSA_4096 | 1 |
 | GetPublicKey | 2.000 |
 | DescribeKey | 2.000 |
 | CreateKey | 5 |
 | EnableKeyRotation | 15 |
 
-**Kritik notlar:**
-1. **Kota hesap + bölge genelindedir**, tüm principal'lar ve AWS servislerinin sizin adınıza yaptığı çağrılar dahil.
-2. **Sign ve Verify aynı kotayı paylaşır.** Argus hem imzalar hem doğrularsa aynı 1.000'i böler.
-3. **CloudHSM key store'un 1.800 kotası ayarlanamaz** — "en güvenli" için CloudHSM-backed KMS key seçerseniz, tavan sabittir.
-4. Tüm diğer kotalar Service Quotas ile artırılabilir ama AWS üst sınırı yayınlamıyor.
-5. **AWS'nin kendi dokümanında tutarsızlık var:** Tablo ECC için 1.000 derken, Singapur örnek paragrafında "up to 500 additional calls per second with RSA asymmetric... plus up to 300 additional with ECC" diyor. Argus planlamasında **muhafazakâr olan (300-500)** rakamı varsayın veya AWS'ye teyit ettirin.
+Kritik notlar şunlardır. Kota hesap ve bölge genelindedir; tüm principal'lar ve AWS servislerinin sizin adınıza yaptığı çağrılar dahildir. Sign ve Verify aynı kotayı paylaşır; Argus hem imzalar hem doğrularsa aynı 1.000'i böler. CloudHSM key store'un 1.800'lük kotası ayarlanamaz; en güvenli seçenek için CloudHSM destekli KMS anahtarı seçilirse tavan sabittir. Diğer tüm kotalar Service Quotas ile artırılabilir ancak AWS üst sınırı yayımlamamaktadır.
 
-### B.2 AWS KMS — Desteklenen imza algoritmaları
-Kaynak: https://docs.aws.amazon.com/kms/latest/developerguide/asymmetric-key-specs.html
+> **AWS dokümantasyonundaki tutarsızlık.** Tablo ECC için 1.000 derken Singapur örnek paragrafında RSA asimetrik ile saniyede 500'e kadar ek çağrı ve ECC ile 300'e kadar ek çağrıdan söz edilmektedir. Argus planlamasında muhafazakâr olan 300-500 rakamı varsayılmalı veya AWS'ye teyit ettirilmelidir.
+
+### B.2 AWS KMS'in desteklediği imza algoritmaları
 
 | Key spec | İmza algoritması |
 |---|---|
-| RSA_2048/3072/4096 | RSASSA_PSS_SHA_256/384/512 (**tercih edilen**), RSASSA_PKCS1_V1_5_SHA_256/384/512 |
+| RSA_2048, RSA_3072, RSA_4096 | RSASSA_PSS_SHA_256/384/512 (tercih edilen), RSASSA_PKCS1_V1_5_SHA_256/384/512 |
 | ECC_NIST_P256 | ECDSA_SHA_256 |
 | ECC_NIST_P384 | ECDSA_SHA_384 |
 | ECC_NIST_P521 | ECDSA_SHA_512 |
 | ECC_SECG_P256K1 | ECDSA_SHA_256 |
-| **ECC_NIST_EDWARDS25519** | **ED25519_SHA_512** (MessageType:**RAW**), ED25519_PH_SHA_512 (MessageType:DIGEST) |
-| ML_DSA_44/65/87 | ML_DSA_SHAKE_256 (post-kuantum, FIPS 204) |
+| ECC_NIST_EDWARDS25519 | ED25519_SHA_512 (MessageType RAW), ED25519_PH_SHA_512 (MessageType DIGEST) |
+| ML_DSA_44, ML_DSA_65, ML_DSA_87 | ML_DSA_SHAKE_256; post-quantum, FIPS 204 |
 
-**Argus için iki önemli sonuç:**
-1. **AWS KMS artık Ed25519/EdDSA destekliyor** (RFC 8037 `EdDSA` JWS alg'i). Modern bir IdP için doğru seçim.
-2. **ED25519_SHA_512 `MessageType:RAW` gerektiriyor** — yani ön-hash yapamazsınız, **tüm JWT signing input'unu (header.payload)** ağ üzerinden KMS'e göndermek zorundasınız. Büyük claim setlerinde bu, hem gecikme hem bant genişliği maliyeti. ECDSA'da ise digest gönderebilirsiniz (32 bayt). Bu, **EdDSA'yı KMS-per-signature modelinde ECDSA'dan daha pahalı yapar.**
-3. ED25519_PH_SHA_512 + DIGEST kullanırsanız **girdi iki kez hash'lenir** (siz bir kez, KMS bir kez) — AWS bunu açıkça uyarıyor.
+Argus için üç sonuç çıkar. AWS KMS artık Ed25519 ve EdDSA desteklemektedir, yani RFC 8037'deki `EdDSA` JWS algoritması kullanılabilir; modern bir IdP için doğru seçimdir. ED25519_SHA_512 `MessageType: RAW` gerektirir, yani ön hash yapılamaz ve tüm JWT imzalama girdisi (header ve payload) ağ üzerinden KMS'e gönderilmek zorundadır; büyük claim setlerinde bu hem gecikme hem bant genişliği maliyetidir. ECDSA'da ise 32 baytlık digest gönderilebilir, dolayısıyla EdDSA imza başına KMS modelinde ECDSA'dan daha pahalıdır. ED25519_PH_SHA_512 ile DIGEST kullanılırsa girdi iki kez hash'lenir; AWS bunu açıkça uyarmaktadır.
 
-### B.3 AWS KMS — Fiyatlandırma
-Kaynak: https://aws.amazon.com/kms/pricing/
+### B.3 AWS KMS fiyatlandırması
 
-- Her KMS anahtarı: **$1/ay** (saatlik orantılı)
-- Standart işlemler: **$0,03 / 10.000 istek**
-- **Asimetrik imzalama: $0,15 / 10.000 istek**
+Her KMS anahtarı ayda 1 USD'dir ve saatlik orantılanır. Standart işlemler 10.000 istek başına 0,03 USD'dir. Asimetrik imzalama 10.000 istek başına 0,15 USD'dir.
 
-**[KISMEN DOĞRULANDI]** — Fiyat sayfasının tam per-key-spec tablosunu çıkaramadım; yukarıdaki iki rakam sayfadaki örneklerden alındı (S3 örneği $0,03; dosya imzalama örneği $0,15). RSA-2048 ile diğer asimetrik spec'ler arasında fiyat farkı olabilir — **satın alma öncesi Pricing Calculator ile teyit edin.**
+> **Kısmen doğrulanmıştır.** Fiyat sayfasının key spec başına tam tablosu çıkarılamamıştır; yukarıdaki iki rakam sayfadaki örneklerden alınmıştır (S3 örneği 0,03 USD, dosya imzalama örneği 0,15 USD). RSA-2048 ile diğer asimetrik spec'ler arasında fiyat farkı olabilir; satın alma öncesi Pricing Calculator ile teyit edilmelidir.
 
-#### Maliyet matematiği (Argus senaryosu)
-Her JWT = 1 KMS Sign çağrısı, $0,15/10.000:
+Maliyet matematiği: her JWT bir KMS Sign çağrısı ve 10.000 istek başına 0,15 USD varsayımıyla:
 
 | Token/sn | Günlük istek | Günlük maliyet | Aylık maliyet |
 |---|---|---|---|
-| 100 | 8.640.000 | $129,60 | **~$3.888** |
-| 500 | 43.200.000 | $648 | **~$19.440** |
-| **1.000 (AWS ECC kota tavanı)** | **86.400.000** | **$1.296** | **~$38.880** |
+| 100 | 8.640.000 | 129,60 USD | Yaklaşık 3.888 USD |
+| 500 | 43.200.000 | 648 USD | Yaklaşık 19.440 USD |
+| 1.000 (AWS ECC kota tavanı) | 86.400.000 | 1.296 USD | Yaklaşık 38.880 USD |
 
-Karşılaştırma: **Hibrit modelde** 15 dakikalık ara anahtar ömrü ile günde 96 KMS Sign çağrısı → **ayda ~$0,004**. Yani **10 milyon kat** daha ucuz.
+Karşılaştırma: hibrit modelde 15 dakikalık ara anahtar ömrüyle günde 96 KMS Sign çağrısı yapılır ve aylık maliyet yaklaşık 0,004 USD'dir, yani on milyon kat daha ucuzdur.
 
-### B.4 GCP Cloud KMS — Kotalar (2026'da model değişti!)
-Kaynak: https://docs.cloud.google.com/kms/quotas
+### B.4 GCP Cloud KMS kotaları
 
-**16 Şubat 2026 ÖNCESİ (eski model):**
+16 Şubat 2026 öncesindeki eski model:
+
 | Koruma seviyesi | Kota |
 |---|---|
-| Software-backed | 60.000 QPM = **1.000 QPS** (çağıran proje) |
-| HSM simetrik | **500 QPS** / bölge (barındıran proje) |
-| **HSM asimetrik** | **50 QPS** / bölge |
-| External (Cloud EKM) | 100 QPS / bölge |
+| Software-backed | 60.000 QPM, yani 1.000 QPS; çağıran proje |
+| HSM simetrik | Bölge başına 500 QPS; barındıran proje |
+| HSM asimetrik | Bölge başına 50 QPS |
+| External (Cloud EKM) | Bölge başına 100 QPS |
 
-**16 Şubat 2026 SONRASI (token tabanlı model):**
+16 Şubat 2026 sonrasındaki token tabanlı model:
+
 | Kota | Değer | Uygulama |
 |---|---|---|
-| Software usage | 6.000.000 TPM | **soft** |
-| HSM usage | 3.000.000 TPM | **soft** |
-| External KMS usage | 10.000 TPS | **hard** |
+| Software kullanımı | 6.000.000 TPM | Yumuşak |
+| HSM kullanımı | 3.000.000 TPM | Yumuşak |
+| External KMS kullanımı | 10.000 TPS | Katı |
 
-**Asimetrik imzalama token maliyeti (HSM anahtarları):**
+HSM anahtarlarında asimetrik imzalama token maliyetleri:
+
 | Anahtar tipi | HSM token / işlem |
 |---|---|
 | RSA-2048 | 1.500 |
 | RSA-3072 | 3.500 |
 | RSA-4096 | 14.000 |
-| **EC P-224 / P-256 / secp256k1** | **4.500** |
-| EC P-384 / P-521 | 7.000 |
+| EC P-224, P-256, secp256k1 | 4.500 |
+| EC P-384, P-521 | 7.000 |
 
-**Benim türetmem [HESAPLAMA — Google'ın yayınladığı ops/sn rakamı değil]:**
-- EC P-256: 3.000.000 TPM ÷ 4.500 = **666 imza/dakika ≈ 11 imza/sn**
-- RSA-2048: 3.000.000 ÷ 1.500 = **2.000/dakika ≈ 33 imza/sn**
-- RSA-4096: 3.000.000 ÷ 14.000 = **214/dakika ≈ 3,6 imza/sn**
+Bu değerlerden türetilen hesaplama şudur; bunlar Google'ın yayımladığı işlem/sn rakamları değildir. EC P-256 için 3.000.000 bölü 4.500 dakikada 666 imza, yani saniyede yaklaşık 11 imza eder. RSA-2048 için 3.000.000 bölü 1.500 dakikada 2.000 imza, yani saniyede yaklaşık 33 imza eder. RSA-4096 için 3.000.000 bölü 14.000 dakikada 214 imza, yani saniyede yaklaşık 3,6 imza eder.
 
-Bu kota **soft-enforced** (yumuşak uygulanır) ve artırılabilir. Ama sıfır noktası korkunç derecede düşük.
+Bu kota yumuşak uygulanır ve artırılabilir; ancak başlangıç noktası çok düşüktür.
 
-**GCP fiyatlandırması: [DOĞRULANAMADI]** — `cloud.google.com/kms/pricing` sayfası fetch sırasında kesildi. Manuel kontrol gerekiyor.
+GCP fiyatlandırması doğrulanamamıştır; `cloud.google.com/kms/pricing` sayfası çekilirken kesilmiştir ve manuel kontrol gerekmektedir.
 
-**GCP Cloud HSM vs Software:** Software koruma seviyesi 6× daha yüksek token bütçesi ve zaten 1.000 QPS eski limit. HSM'e geçmek Argus için throughput'u ~20× düşürür.
+Cloud HSM ile software karşılaştırması: software koruma seviyesi altı kat daha yüksek token bütçesine sahiptir ve eski modelde zaten 1.000 QPS limiti vardı. HSM'e geçmek Argus için throughput'u yaklaşık yirmi kat düşürür.
 
-### B.5 Azure — B.A.3'te verildi
-Özet: Key Vault (vault) HSM ECC = **200 TPS/vault**, abonelik geneli 1.000 TPS. Managed HSM P-256 = **330/sn/partition**, gerçekçi olarak 660-990/sn per instance, max 5 instance = ~3.300-4.950/sn.
+### B.5 Azure
 
-### B.6 GECİKME (LATENCY) — p50/p99
+Özet A.3'te verilmiştir: Key Vault'ta HSM ECC vault başına 200 TPS, abonelik genelinde 1.000 TPS'tir. Managed HSM'de P-256 partition başına 330/sn, gerçekçi olarak instance başına 660-990/sn, en fazla beş instance ile yaklaşık 3.300-4.950/sn'dir.
 
-#### **[BULUNAMADI — UYDURMUYORUM]**
-AWS, GCP veya Azure'un asimetrik `Sign` API'si için **yayınlanmış p50/p99 gecikme rakamı bulamadım.** Yaptığım aramalar:
-- AWS Security Blog "How to verify AWS KMS signatures in decoupled architectures at scale" (**2021-05-19**, https://aws.amazon.com/blogs/security/how-to-verify-aws-kms-signatures-in-decoupled-architectures-at-scale/) — **hiçbir gecikme/throughput sayısı vermiyor.**
-- AWS re:Post sorusu "KMS Signing performance with Asymmetric ECC_NIST_P256 key is slow" (https://repost.aws/questions/QUPEubdAqrSnSLm-38Vjyqpw/) — sayfa HTTP 403 döndü, içerik alınamadı. **Başlık kendi başına bir sinyal: müşteriler ECC_NIST_P256 imzalamayı yavaş buluyor.**
+### B.6 Gecikme
 
-#### Ne söyleyebilirim (kaynaklı)
-1. **AWS'nin kendi argümanı:** Yukarıdaki blog, KMS API'sinin şu durumlarda pratik olmadığını açıkça söylüyor: "Your system has low latency or high throughput requirements for signature verification, exceeding AWS KMS API request quotas" ve "You want to optimize costs by minimizing AWS KMS API calls." Önerdiği çözüm: **bir kez KMS'te imzala, public key'i dağıt, yerelde doğrula.**
-2. **Cloudflare'in uzak anahtar sunucusu argümanı:** "the additional latency cost corresponds to the round-trip time from the server to the key server, which can be as much as a second if the key server is on the other side of the world." Kaynak: https://blog.cloudflare.com/keyless-delegation/
-3. **Bilinen alt sınır:** KMS Sign en iyi ihtimalle bir VPC-içi HTTPS RPC + HSM işlem süresidir. Azure MHSM'in P-256 için 330 ops/sn/partition'ı, tam boru hatlı çalışmada ~3 ms HSM-tarafı servis süresi ima eder (**bu throughput'tan türetilmiş bir alt sınır, gecikme ölçümü DEĞİL** — ikisini karıştırmayın).
+AWS, GCP ve Azure'un asimetrik `Sign` API'si için yayımlanmış p50 veya p99 gecikme rakamı bulunamamıştır. Yapılan aramalar şunlardır: AWS Security Blog'un "How to verify AWS KMS signatures in decoupled architectures at scale" yazısı (19 Mayıs 2021) hiçbir gecikme veya throughput sayısı vermemektedir. AWS re:Post'taki "KMS Signing performance with Asymmetric ECC_NIST_P256 key is slow" başlıklı soru sayfası HTTP 403 döndürmüş ve içerik alınamamıştır; başlığın kendisi bir sinyaldir, müşteriler ECC_NIST_P256 imzalamayı yavaş bulmaktadır.
 
-**Argus için eylem maddesi:** Kendi bölgenizde, kendi VPC'nizde, `hey`/`vegeta`/`k6` ile 60 saniyelik bir KMS Sign yükü koşturup p50/p95/p99'u ölçün. Bu, mimari kararı vermeden önce yapılacak ilk iştir.
+Kaynaklı olarak söylenebilecekler şunlardır. AWS'nin kendi argümanına göre KMS API'si imza doğrulama için düşük gecikme veya yüksek throughput gereksinimi olan ve AWS KMS API istek kotalarını aşan sistemlerde ve AWS KMS API çağrılarını en aza indirerek maliyet optimize etmek isteyenlerde pratik değildir; önerilen çözüm bir kez KMS'te imzalamak, public key'i dağıtmak ve yerelde doğrulamaktır. Cloudflare'in uzak anahtar sunucusu argümanına göre ek gecikme maliyeti sunucudan key server'a gidiş dönüş süresine karşılık gelir ve key server dünyanın diğer ucundaysa bir saniyeye kadar çıkabilir. Bilinen alt sınır şudur: KMS Sign en iyi ihtimalle bir VPC içi HTTPS RPC ile HSM işlem süresidir. Azure Managed HSM'in P-256 için partition başına 330 işlem/sn değeri, tam boru hatlı çalışmada yaklaşık 3 ms'lik HSM tarafı servis süresi ima eder; bu throughput'tan türetilmiş bir alt sınırdır, gecikme ölçümü değildir ve ikisi karıştırılmamalıdır.
 
-### B.7 SONUÇ: KMS-Per-Signature ile Ulaşılabilir Token Hızı
+**Argus için eylem maddesi.** Kendi bölgemizde, kendi VPC'mizde `hey`, `vegeta` veya `k6` ile 60 saniyelik bir KMS Sign yükü koşturulup p50, p95 ve p99 ölçülür. Bu, mimari karar verilmeden önce yapılacak ilk iştir.
 
-#### Gerçek matematik
+### B.7 Sonuç: imza başına KMS ile ulaşılabilir token hızı
 
-**Senaryo A — Her JWT için bir AWS KMS Sign (ECC P-256):**
-- Tavan: **1.000 token/sn** (hesap+bölge, Sign+Verify+DeriveSharedSecret paylaşımlı, ayarlanabilir)
-- Bu 1.000/sn, aynı hesaptaki **tüm** ECC KMS anahtar kullanımıyla paylaşılır.
-- Maliyet: **~$38.880/ay**
-- Token endpoint p99'una **bir tam ağ RTT + HSM süresi** eklenir (ölçülmemiş).
-- KMS bölge-içi bir bağımlılıktır → Argus'un availability'si KMS'in availability'sinin altına düşer.
+**Senaryo A: her JWT için bir AWS KMS Sign (ECC P-256).** Tavan 1.000 token/sn'dir; hesap ve bölge başınadır, Sign, Verify ve DeriveSharedSecret ile paylaşılır ve ayarlanabilir. Bu 1.000/sn aynı hesaptaki tüm ECC KMS anahtar kullanımıyla paylaşılır. Maliyet aylık yaklaşık 38.880 USD'dir. Token endpoint'inin p99'una bir tam ağ gidiş dönüşü ve HSM süresi eklenir; bu ölçülmemiştir. KMS bölge içi bir bağımlılıktır, dolayısıyla Argus'un erişilebilirliği KMS'in erişilebilirliğinin altına düşer.
 
-**Senaryo B — GCP Cloud KMS HSM:**
-- **~11-50 token/sn** (yeni token modelinden türetildi / eski model). Kota artırımı gerekir.
-- Software koruma seviyesinde: 1.000 QPS.
+**Senaryo B: GCP Cloud KMS HSM.** Yeni token modelinden türetildiğinde yaklaşık 11 token/sn, eski modelde 50 token/sn'dir ve kota artırımı gerekir. Software koruma seviyesinde 1.000 QPS'tir.
 
-**Senaryo C — Azure Managed HSM:**
-- **~660-990 token/sn** per instance (P-256, 2-3 partition), max 5 instance → ~3.300-4.950/sn.
-- En iyi bulut-KMS seçeneği ama 5-instance limitinde sabit tavan.
+**Senaryo C: Azure Managed HSM.** P-256 ile iki veya üç partition'da instance başına yaklaşık 660-990 token/sn, en fazla beş instance ile yaklaşık 3.300-4.950 token/sn'dir. En iyi bulut KMS seçeneğidir ancak beş instance limitinde sabit bir tavanı vardır.
 
-**Senaryo D — AWS CloudHSM hsm2m.medium doğrudan (KMS değil):**
-- 6-HSM küme: **7.000 token/sn** (EC P-256). Maliyet: 6 × hsm2m.medium saatlik ücreti — **[fiyat DOĞRULANMADI]**.
-- Ama: FIPS modda EdDSA yok, login gecikmesi yüksek.
+**Senaryo D: AWS CloudHSM hsm2m.medium doğrudan, KMS olmadan.** Altı HSM'lik küme EC P-256 ile 7.000 token/sn verir. Maliyet altı adet hsm2m.medium'un saatlik ücretidir ve bu fiyat doğrulanmamıştır. Ancak FIPS modunda EdDSA yoktur ve login gecikmesi yüksektir.
 
-**Senaryo E — HİBRİT (Argus'un yapması gereken):**
-- İmzalama CPU'da: Cloudflare'in ölçümüne göre **~44.000 ECDSA imza/sn / c5.xlarge (4 vCPU)**, ortalama 22,5 µs.
-- Gerçekçi JWT serileştirme + tahsis yükü ile bunun **%10-20'si** → düğüm başına **4.000-9.000 token/sn**, yatay ölçeklenebilir.
-- KMS çağrısı: sadece ara anahtar rotasyonunda (günde ~100). Kota sorunu yok, maliyet sıfır.
-- Token endpoint p99'undan ağ RTT'si **tamamen kalkar**.
+**Senaryo E: hibrit model, Argus'un yapması gereken.** İmzalama CPU'da yapılır; Cloudflare'in ölçümüne göre c5.xlarge (4 vCPU) üzerinde yaklaşık 44.000 ECDSA imza/sn ve ortalama 22,5 µs'dir. Gerçekçi JWT serileştirme ve tahsis yüküyle bunun %10-20'si alınır, yani düğüm başına 4.000-9.000 token/sn elde edilir ve yatay ölçeklenir. KMS çağrısı yalnızca ara anahtar rotasyonunda yapılır, günde yaklaşık 100 çağrıdır; kota sorunu yoktur ve maliyet sıfıra yakındır. Token endpoint'inin p99'undan ağ gidiş dönüşü tamamen kalkar.
 
-**Karar: Hibrit model, 40-4.000× throughput avantajı ve 10⁶× maliyet avantajı sağlar. Tartışma yok.**
+Karar şudur: hibrit model 40 ile 4.000 kat arası throughput avantajı ve milyon kat maliyet avantajı sağlar.
 
 ---
+## C. Hibrit model: kim gerçekten yapıyor
 
-## C) HİBRİT MODEL — Kim Gerçekten Yapıyor?
+Bu, Argus'un en kritik mimari sorusudur. İyi haber şudur: bu tam olarak yerleşik bir endüstri kalıbıdır.
 
-Bu, Argus'un en kritik mimari sorusu. İyi haber: bu tam olarak **yerleşik bir endüstri kalıbı**.
+### C.1 Cloudflare Delegated Credentials for TLS
 
-### C.1 Cloudflare Delegated Credentials for TLS — En Yakın Analog
-Kaynak: https://blog.cloudflare.com/keyless-delegation/
+Bu, Argus'un yapmak istediğinin TLS bağlamındaki birebir karşılığıdır.
 
-**Bu, Argus'un yapmak istediği şeyin birebir aynısı, TLS bağlamında.**
+Sertifika sahibi kısa ömürlü bir anahtar üretir ve onu bir servise delege eder; Cloudflare bunu bir vekaletname metaforuyla anlatır ve sunucunun kendi sunucularına sınırlı bir süre için TLS sonlandırma yetkisi verdiğini söyler. Azami geçerlilik 24 saattir; gerekçe açıkça belirtilmiştir, bir anahtara geçici erişim, çok ileri tarihte başlayan çok sayıda delegated credential imzalanmasına imkân verebilir. Tasarım motivasyonu doğrudan gecikmedir: Keyless SSL'in pull tabanlı modeli her handshake'te uzak key server'a RPC gerektiriyordu; Delegated Credentials push tabanlıdır ve kısa ömürlü bir yetkilendirme anahtarı periyodik olarak sunucuya gönderilip handshake'ler için kullanılır. Mekanizma bir X.509 uzantısıyla opt-in'dir; bu, kısa süreli anahtar erişimi olan bir saldırganın kötüye kullanmasını engeller. Standart, blog yazıldığında `draft-ietf-tls-subcerts-04` idi.
 
-- Sertifika sahibi **kısa ömürlü bir anahtar** üretir ve onu bir servise **delege eder** ("vekaletname" metaforu): "your server authorizes our server to terminate TLS for a limited time."
-- **Maksimum geçerlilik: 24 saat.** Gerekçe açıkça belirtilmiş: "temporary access to a key can enable signing lots of delegated credentials which start far in the future."
-- **Tasarım motivasyonu doğrudan gecikmedir:** Keyless SSL'in pull-tabanlı modeli her handshake'te uzak key server'a RPC gerektiriyordu. Delegated Credentials **push-tabanlı**: "periodically push a short-lived authorization key to the server and use that for handshakes."
-- X.509 uzantısı ile **opt-in** — kısa süreli anahtar erişimi olan bir saldırganın kötüye kullanmasını engelliyor.
-- Standart: `draft-ietf-tls-subcerts-04` (blog yazıldığında).
-
-**Argus'a doğrudan uyarlama:**
-| Cloudflare DC | Argus karşılığı |
+| Cloudflare Delegated Credentials | Argus karşılığı |
 |---|---|
-| Uzun ömürlü sertifika anahtarı (HSM'de) | Kök imzalama anahtarı (KMS/HSM'de) |
-| Delegated Credential (≤24 saat) | Ara JWT imzalama anahtarı (bellekte) |
-| DC'yi imzalayan long-term key | KMS Sign ile ara anahtarı imzalama/attest etme |
-| Edge sunucusu handshake'i yerel yapar | Argus düğümü JWT'yi yerel imzalar |
-| Max 24 saat kuralı | Ara anahtar TTL üst sınırı |
+| Uzun ömürlü sertifika anahtarı, HSM'de | Kök imzalama anahtarı, KMS veya HSM'de |
+| Delegated Credential, 24 saat veya daha kısa | Ara JWT imzalama anahtarı, bellekte |
+| Delegated Credential'ı imzalayan uzun ömürlü anahtar | KMS Sign ile ara anahtarın imzalanması ve attest edilmesi |
+| Edge sunucusunun handshake'i yerel yapması | Argus düğümünün JWT'yi yerel imzalaması |
+| Azami 24 saat kuralı | Ara anahtar TTL üst sınırı |
 
-### C.2 HashiCorp Vault Seal/Unseal — Envelope Kalıbının Referans Uygulaması
-Kaynak: https://developer.hashicorp.com/vault/docs/concepts/seal
+### C.2 HashiCorp Vault seal ve unseal: envelope kalıbının referans uygulaması
 
-Üç katmanlı hiyerarşi:
-1. **Encryption Key (keyring)** — storage'daki verinin çoğunu şifreler
-2. **Root Key** — keyring'i şifreler
-3. **Unseal Key** — root key'i şifreler
+Üç katmanlı bir hiyerarşi vardır. Encryption key, yani keyring, storage'daki verinin çoğunu şifreler. Root key keyring'i şifreler. Unseal key root key'i şifreler.
 
-**Auto-unseal ile KMS:** KMS **root key'i şifreler ve saklar**. Vault başlarken **bir kez** KMS'e bağlanıp root key'i çözer. Sonrasında tüm kripto işlemleri **yerel keyring** ile yapılır.
+Auto-unseal ile KMS root key'i şifreler ve saklar. Vault başlarken bir kez KMS'e bağlanıp root key'i çözer; sonrasında tüm kripto işlemleri yerel keyring ile yapılır. Dokümantasyona göre KMS, şifre çözmeyi sunucu başlangıcında ve recovery key yetkilendirmesi gerektiren işlemler sırasında (örneğin root token üretiminde) gerçekleştirir.
 
-> "KMS performs decryption during server startup and when operations requiring recovery key authorization occur (like generating root tokens)."
+Bu tam olarak Argus'un istediği desendir: KMS başlangıçta ve rotasyonda çağrılır, istek başına değil.
 
-**Bu tam olarak Argus'un istediği desendir:** KMS başlangıçta/rotasyonda çağrılır, istek başına değil.
+Shamir seal varsayılandır; unseal key Shamir Secret Sharing ile paylaşılır ve operatörler eşik değere kadar pay girer. Auto-unseal'de operatörler recovery key alır. Seal Wrap (Enterprise) hassas değerler için ek bir şifreleme katmanıdır ve storage kompromizasyonuna karşı derinlemesine savunma sağlar.
 
-Shamir seal (varsayılan): unseal key Shamir Secret Sharing ile paylaşılır; operatörler threshold'a kadar pay girer. Auto-unseal'de operatörler **recovery key** alır.
+### C.3 SPIFFE ve SPIRE KeyManager: karşı örnek
 
-**Seal Wrap** (Enterprise): hassas değerler için ek şifreleme katmanı — storage kompromizasyonuna karşı derinlemesine savunma.
+Argus bu deseni uygulamamalıdır.
 
-### C.3 SPIFFE/SPIRE KeyManager — Karşı Örnek (Argus bunu YAPMAMALI)
-Kaynak: https://github.com/spiffe/spire/tree/main/doc
+Mevcut plugin'ler şunlardır: yerel disk, bellek, AWS KMS, GCP KMS, Azure Key Vault ve HashiCorp Vault.
 
-Mevcut plugin'ler:
-- `plugin_server_keymanager_disk.md` — yerel disk
-- `plugin_server_keymanager_memory.md` — bellek
-- `plugin_server_keymanager_aws_kms.md`
-- `plugin_server_keymanager_gcp_kms.md`
-- `plugin_server_keymanager_azure_key_vault.md`
-- `plugin_server_keymanager_hashicorp_vault.md`
+aws_kms plugin tasarımında anahtar çiftleri KMS'te CMK olarak yaratılır ve tutulur; özel anahtar KMS'ten hiç çıkmaz. SVID'ler ihtiyaç oldukça imzalanır, yani her SVID için bir KMS Sign çağrısı yapılır. Desteklenen tipler `rsa-2048`, `rsa-4096`, `ec-p256` ve `ec-p384`'tür. Anahtar hijyeni disiplini şöyledir: açıklama formatı `SPIRE_SERVER/{TRUST_DOMAIN}`'dir; alias'sız ve 48 saatten eski anahtarlar silinir; `LastUpdatedDate` değeri iki haftadan eski alias'lar anahtarlarıyla birlikte budanır; aktif anahtarlarda altı saatte bir liveness sinyali yenilenir.
 
-**aws_kms plugin tasarımı** (https://github.com/spiffe/spire/blob/main/doc/plugin_server_keymanager_aws_kms.md):
-- Anahtar çiftleri KMS'te CMK olarak yaratılır ve tutulur; "the private key never leaving KMS"
-- **"sign SVIDs as needed"** → **her SVID için bir KMS Sign çağrısı**
-- Desteklenen tipler: `rsa-2048`, `rsa-4096`, `ec-p256`, `ec-p384`
-- Anahtar hijyeni: Description formatı `SPIRE_SERVER/{TRUST_DOMAIN}`; alias'sız ve **48 saatten eski** anahtarlar silinir; `LastUpdatedDate`'i **2 haftadan eski** alias'lar anahtarlarıyla birlikte budanır; aktif anahtarlarda **6 saatte bir** liveness sinyali yenilenir.
+Ders şudur: SPIRE işlem başına KMS modelini seçmiştir. SVID üretim hızında, yani workload attestation başına dakikalar veya saatler ölçeğinde, bu kabul edilebilirdir. JWT issuance hızında değildir. Argus SPIRE'ın bu kararını kopyalarsa B bölümündeki duvara çarpar.
 
-**Ders:** SPIRE, KMS-per-operation seçti. SVID üretim hızında (workload attestation başına, dakikalar/saatler ölçeğinde) bu kabul edilebilir. **JWT issuance hızında değil.** Argus, SPIRE'ın bu kararını kopyalarsa B bölümündeki duvara çarpar.
+Buna karşılık SPIRE'ın anahtar budama disiplini — 48 saatlik orphan temizliği, altı saatlik liveness ve iki haftalık alias budaması — doğrudan kopyalanmalıdır; üretim kalitesinde bir anahtar yaşam döngüsü yönetimidir.
 
-Ancak SPIRE'ın **anahtar budama disiplinini** (48 saat orphan cleanup, 6 saatlik liveness, 2 haftalık alias budama) doğrudan kopyalayın — üretim-kalitesi anahtar yaşam döngüsü yönetimi.
+### C.4 Sigstore Fulcio: ara CA kalıbı
 
-### C.4 Sigstore Fulcio — Ara CA Kalıbı
-Kaynaklar: https://github.com/sigstore/fulcio/blob/main/docs/setup.md , https://docs.sigstore.dev/about/security/
+Fulcio, offline bir root CA'ya zincirlenen bir ara CA olarak çalışır; dokümantasyona göre KMS imzalama arka ucu öncelikle ara CA olarak kullanılmak üzere tasarlanmıştır. Ara sertifika `pathlen:0` Basic Constraints taşır, yani yalnızca end-entity sertifika verebilir ve sık rotasyon gerektirmemesi için yaklaşık üç yıl ömürlüdür. Fulcio kısa ömürlü kod imzalama sertifikaları verir ve efemer anahtarı OIDC kimliğine bağlar. Root anahtar materyali TUF deposu üzerinden yönetilir (`sigstore-root-signing`); GCP KMS timestamping anahtarı `projects/sigstore-root-signing/locations/global/keyRings/root/cryptoKeys/timestamp` yolundadır. Anahtar kısa ömürlü olduğu için, anahtarın ve onunla ilişkili sertifikanın artefakt imzalandığı anda geçerli olduğunu attest edecek bir mekanizma gerekir; bu mekanizma transparency log'dur, yani Rekor'dur.
 
-- Fulcio, **offline bir root CA'ya zincirlenen ara CA** olarak çalışır. "The KMS signing backend is primarily meant to be used as an intermediate CA."
-- Ara sertifika: **pathlen:0** Basic Constraints (sadece end-entity sertifika verebilir), **~3 yıl ömür** (sık rotasyon gerektirmesin diye).
-- Kısa ömürlü code-signing sertifikaları verir, efemer anahtarı OIDC kimliğine bağlar.
-- Root anahtar materyali TUF deposu üzerinden yönetilir (`sigstore-root-signing`); GCP KMS timestamping anahtarı: `projects/sigstore-root-signing/locations/global/keyRings/root/cryptoKeys/timestamp`
-- "Since the key is short-lived, something is needed to attest that the key and the certificate associated with it was valid at the time the artifact was signed" → **transparency log** (Rekor).
+Argus'a dersi şudur: kısa ömürlü anahtar kullanılıyorsa o anda geçerli olduğuna dair bir kanıt gerekir. JWKS'te geçmiş `kid` değerlerinin tutulması ve isteğe bağlı bir transparency log bunu sağlar.
 
-**Argus'a ders:** Kısa ömürlü anahtar kullanıyorsanız, **"o anda geçerliydi" kanıtına** ihtiyacınız var. JWKS'te geçmiş `kid`'leri tutmak + isteğe bağlı bir transparency log bunu sağlar.
+### C.5 Let's Encrypt ve Boulder: anahtar töreni
 
-### C.5 Let's Encrypt / Boulder — Anahtar Töreni (Key Ceremony)
-Kaynak: https://github.com/letsencrypt/boulder/tree/main/cmd/ceremony , https://github.com/letsencrypt/boulder/blob/main/cmd/ceremony/README.md
+`ceremony` aracı sertifikaları ve anahtarlarını üretir. Anahtarlar HSM içinde üretilir; PKCS#11 modülü ve slot ile erişilir ve object label ile tanımlanır, örneğin "intermediate signing key"; hem public hem private nesne bu label ile saklanır. CSR, HSM'deki anahtarla imzalanır. Anahtar tipi RSA (exponent 65537, `rsa-mod-length` ile modül uzunluğu) veya ECDSA'dır (`ecdsa-curve`). Fiziksel erişim ve tüm HSM yönetim işlemleri çok kişili kontrol gerektirir; ayrıntı CCS 2019 makalesindedir.
 
-- `ceremony` aracı sertifikaları ve anahtarlarını üretir.
-- Anahtarlar **HSM içinde** üretilir; PKCS#11 modülü + slot ile erişilir; **object label** ile tanımlanır (ör. `"intermediate signing key"` — hem public hem private nesne bu label'la saklanır).
-- CSR, HSM'deki anahtarla imzalanır.
-- Anahtar tipi: RSA (exponent 65537, `rsa-mod-length` ile modül uzunluğu) veya ECDSA (`ecdsa-curve`).
-- Fiziksel erişim ve tüm HSM yönetim işlemleri **çok kişili kontrol** gerektirir. Kaynak: https://jhalderm.com/pub/papers/letsencrypt-ccs19.pdf (CCS 2019 makalesi)
+Argus'a dersi şudur: kök anahtar töreni için `boulder/cmd/ceremony`'nin config formatı referans alınır; yıllardır bir kamu CA'sında üretimde çalışan tek açık kaynak tören aracıdır.
 
-**Argus'a ders:** Kök anahtar töreni için `boulder/cmd/ceremony`'nin config formatını referans alın — yıllardır bir kamu CA'sında üretimde çalışan tek açık kaynak tören aracı.
+### C.6 Cloudflare Keyless SSL: pull modelinin maliyeti
 
-### C.6 Cloudflare Keyless SSL — Pull Modelinin Maliyeti
-Kaynaklar: https://developers.cloudflare.com/ssl/keyless-ssl/reference/scaling-and-benchmarking/ , https://blog.cloudflare.com/geo-key-manager-how-it-works/
+Key server bir worker havuzu modeli kullanır: her istemci bağlantısının kendi reader ve writer goroutine çifti vardır, kripto iş ise global havuzdan çekilen ayrı worker goroutine'lerde yapılır. Hedef gecikmeyi en aza indirirken saniyedeki imzalama işlemini azamiye çıkarmaktır. ECDSA ve RSA için ayrı worker havuzları bulunur, çünkü RSA bir mertebe daha pahalıdır. ECDSA gecikmeyi düşürmek için önceden hesaplanmış rastgele değerler kullanır. Gecikme maliyeti yalnızca ilk handshake'tedir; TLS Session Resumption özel anahtar gerektirmez.
 
-- Key server: worker pool modeli — her istemci bağlantısı kendi reader/writer goroutine çiftine sahip, kripto iş global havuzdan çekilen ayrı worker goroutine'lerde. Hedef: "minimize latency while maximizing signing operations per second."
-- ECDSA ve RSA için **ayrı worker havuzları** (RSA bir mertebe daha pahalı olduğu için).
-- ECDSA **önceden hesaplanmış rastgele değerler** kullanıyor (gecikmeyi düşürmek için).
-- Gecikme maliyeti **sadece ilk handshake'te**; TLS Session Resumption private key gerektirmiyor.
+Argus'a dersi şudur: ayrı bir imzalama servisi kurulursa Cloudflare'in worker havuzu, algoritma başına havuz ve önceden hesaplama deseni kopyalanır. Ancak JWT'lerde session resumption analoğu yoktur; her token yeni bir imzadır. Bu nedenle uzak imza servisi TLS'ten daha kötü bir uyumdur.
 
-**Argus'a ders:** Eğer bir "signing service" ayırırsanız (Argus düğümleri → imza servisi), Cloudflare'in worker-pool + algoritma-başına-havuz + önceden-hesaplama desenini kopyalayın. Ama **JWT'lerde session resumption analoğu yok** — her token yeni imza. Bu yüzden uzak imza servisi TLS'ten daha kötü bir uyum.
+### C.7 AWS Encryption SDK: data key caching
 
-### C.7 AWS Encryption SDK — Data Key Caching (Standart Envelope Kalıbı)
-Kaynak: https://docs.aws.amazon.com/encryption-sdk/latest/developer-guide/data-key-caching.html
+Caching CMM (cryptographic materials manager) ile yerel bir cache birlikte çalışır ve güvenlik eşikleri uygular.
 
-- **Caching CMM** (cryptographic materials manager) + local cache, **güvenlik eşikleri** (security thresholds) uygular.
-- AWS'nin açık uyarısı: *"Data key caching is an optional feature of the AWS Encryption SDK that you should use cautiously. By default, the AWS Encryption SDK generates a new data key for every encryption operation... In general, use data key caching only when it is required to meet your performance goals. Then, use the data key caching security thresholds to ensure that you use the minimum amount of caching required to meet your cost and performance goals."*
-- Güvenlik eşikleri (https://docs.aws.amazon.com/encryption-sdk/latest/developer-guide/thresholds.html): **max age**, **max messages encrypted**, **max bytes encrypted**.
-- Modern alternatif: **AWS KMS Hierarchical keyring** — ve **AWS Encryption SDK for Rust 1.x** bunu destekliyor. Rust ekosisteminde referans implementasyon olarak incelemeye değer.
-- Derin tartışma: https://aws.amazon.com/blogs/security/aws-encryption-sdk-how-to-decide-if-data-key-caching-is-right-for-your-application/
+AWS'nin açık uyarısı şudur: data key caching, AWS Encryption SDK'nın dikkatle kullanılması gereken opsiyonel bir özelliğidir. Varsayılan olarak SDK her şifreleme işlemi için yeni bir data key üretir. Genel olarak data key caching yalnızca performans hedeflerini karşılamak için gerektiğinde kullanılmalı ve maliyet ile performans hedeflerini karşılayacak asgari miktarda caching yapıldığından emin olmak için güvenlik eşikleri kullanılmalıdır.
 
-**Argus'a doğrudan uyarlama:** Ara imzalama anahtarınıza **üç eşik birden** koyun:
-1. `max_age` — ör. 15 dakika
-2. `max_signatures` — ör. 5.000.000 imza
-3. Herhangi biri aşılırsa **zorunlu rotasyon**
+Güvenlik eşikleri azami yaş, şifrelenen azami mesaj sayısı ve şifrelenen azami bayttır. Modern alternatif AWS KMS Hierarchical keyring'dir ve AWS Encryption SDK for Rust 1.x bunu desteklemektedir; Rust ekosisteminde referans implementasyon olarak incelemeye değerdir.
 
-Bu, AWS'nin tam olarak önerdiği disiplindir ve "sadece zaman tabanlı rotasyon"dan daha güvenlidir.
+Argus'a doğrudan uyarlaması şudur: ara imzalama anahtarına üç eşik birden konur. `max_age` örneğin 15 dakikadır. `max_signatures` örneğin 5.000.000 imzadır. Herhangi biri aşılırsa rotasyon zorunlu olur. Bu, AWS'nin tam olarak önerdiği disiplindir ve yalnızca zaman tabanlı rotasyondan daha güvenlidir.
 
-### C.8 Argus için Somut Hibrit Tasarım
+### C.8 Argus için somut hibrit tasarım
 
-#### Anahtar hiyerarşisi
+**Anahtar hiyerarşisi.**
+
 ```
-[Kök Anahtar]  — KMS / HSM'de, ASLA dışarı çıkmaz
+[Kök Anahtar]  — KMS / HSM'de, dışarı çıkmaz
       │              (ECC_NIST_P256 veya ECC_NIST_EDWARDS25519)
       │  KMS Sign  (günde ~96 çağrı)
       ▼
 [Ara İmzalama Anahtarı]  — bellekte üretilir, 15 dk ömür
-      │                     kök tarafından imzalanmış bir "attestation" ile
+      │                     kök tarafından imzalanmış bir attestation ile
       │  yerel imza (22,5 µs)
       ▼
 [JWT'ler]  — saniyede binlerce
 ```
 
-#### Ne kadar kısa yaşamalı?
+**Ne kadar kısa yaşamalı.** Karar için üç girdi vardır: bellekten anahtar çalma riski penceresi için kısa olması iyidir; KMS bağımlılığı ve kesinti toleransı için uzun olması iyidir, çünkü KMS 30 dakika down olursa Argus çalışmaya devam etmelidir; JWKS yayın gecikmesi E bölümündeki matematiğe bağlıdır.
 
-Karar için üç girdi:
-1. **Bellekten anahtar çalma riski penceresi** — kısa iyi
-2. **KMS bağımlılığı / kesinti toleransı** — uzun iyi (KMS 30 dk down olursa Argus çalışmaya devam etmeli)
-3. **JWKS yayın gecikmesi** — E bölümündeki matematik
+Öneri 15 dakika üretim ömrü ve 60 dakika hard cap'tir. On beş dakika, saatte dört rotasyon ve günde 24 saat ile lineage başına 96 KMS çağrısı eder. Bu, Cloudflare'in 24 saatlik delegated credential üst sınırından çok daha muhafazakârdır. KMS 45 dakika kesinti yaşasa bile mevcut anahtarın hard cap'ine kadar Argus token vermeye devam eder.
 
-**Önerim: 15 dakika üretim ömrü, 60 dakika hard cap.**
-- 15 dk × 4 rotasyon/saat × 24 = 96 KMS çağrısı/gün/lineage
-- Cloudflare'in 24 saatlik DC üst sınırından çok daha muhafazakâr
-- KMS 45 dakika kesinti yaşasa bile (mevcut anahtarın hard cap'ine kadar) Argus token vermeye devam eder
-- **Kritik kural:** Ara anahtar TTL'i **her zaman** verilen access token TTL'inden uzun olmalı, yoksa henüz geçerli tokenlar için doğrulama anahtarı JWKS'ten kalkar.
+> **Kritik kural.** Ara anahtar TTL'i her zaman verilen access token TTL'inden uzun olmalıdır; aksi hâlde hâlâ geçerli token'lar için doğrulama anahtarı JWKS'ten kalkar.
 
-#### JWKS'te nasıl yayınlanır / attest edilir?
+**JWKS'te nasıl yayınlanır ve attest edilir.**
 
-**Seçenek 1 (basit, önerilen):** Ara anahtarın public kısmı doğrudan JWKS'e `kid` ile eklenir. Kök anahtar JWKS'te **görünmez** — sadece bir out-of-band trust anchor.
-- Artı: standart OIDC, hiçbir istemci değişikliği gerekmez
-- Eksi: kök anahtarın delegasyonu doğrulanamaz; JWKS endpoint'i kompromize olursa saldırgan kendi anahtarını ekleyebilir
+Birinci seçenek basittir ve önerilir: ara anahtarın public kısmı doğrudan JWKS'e bir `kid` ile eklenir. Kök anahtar JWKS'te görünmez; yalnızca bant dışı bir güven çıpasıdır. Artısı standart OIDC olması ve hiçbir istemci değişikliği gerektirmemesidir. Eksisi kök anahtarın delegasyonunun doğrulanamamasıdır; JWKS endpoint'i kompromize olursa saldırgan kendi anahtarını ekleyebilir.
 
-**Seçenek 2 (Cloudflare DC benzeri, "en güvenli"):** JWKS girdisine, kök anahtarla imzalanmış bir delegation attestation eklenir (`x5c` zinciri veya özel bir `x-argus-delegation` alanı):
+İkinci seçenek Cloudflare delegated credentials benzeridir ve en güvenli olandır: JWKS girdisine kök anahtarla imzalanmış bir delegation attestation eklenir; bu bir `x5c` zinciri veya `x-argus-delegation` gibi özel bir alan olabilir.
+
 ```
 attestation = KMS.Sign(root_key, CBOR{ kid, jwk_thumbprint, not_before, not_after, issuer })
 ```
-- Artı: JWKS endpoint kompromizasyonu tek başına yetmez; istemci kök anahtara pin'lenebilir
-- Eksi: standart-dışı; genel istemciler yok sayar. **Ama zarar vermez** ve yüksek-güvenlikli istemciler (kendi SDK'nız) doğrulayabilir.
 
-**Argus "en güvenli" iddiasındaysa Seçenek 2'yi ekleyin — Seçenek 1'in üstüne, kırıcı olmayan bir alan olarak.**
+Artısı JWKS endpoint kompromizasyonunun tek başına yetmemesi ve istemcinin kök anahtara pinlenebilmesidir. Eksisi standart dışı olmasıdır; genel istemciler yok sayar, ancak bu zarar vermez ve yüksek güvenlikli istemciler, örneğin Argus'un kendi SDK'sı, doğrulayabilir.
 
-#### Anahtar töreni (key ceremony)
-- Kök anahtar KMS/HSM içinde üretilir, asla export edilmez (`boulder/cmd/ceremony` deseni)
-- Çok kişili kontrol (AWS: KMS key policy + MFA'lı ayrı IAM principal'lar; HSM: M-of-N kartlar)
-- Töreni videoya kaydedin, tanık imzalı tutanak tutun (Let's Encrypt/WebTrust pratiği)
-- Kök anahtar rotasyonu: yılda 1 veya hiç (Fulcio ara CA'sı 3 yıl)
+Argus en güvenli iddiasındaysa ikinci seçenek birincinin üstüne, kırıcı olmayan bir alan olarak eklenir.
 
-#### Hata modları ve karşılıkları
+**Anahtar töreni.** Kök anahtar KMS veya HSM içinde üretilir ve asla export edilmez; `boulder/cmd/ceremony` deseni izlenir. Çok kişili kontrol uygulanır; AWS'de KMS key policy ile MFA'lı ayrı IAM principal'ları, HSM'de M-of-N kartlar kullanılır. Tören videoya kaydedilir ve tanık imzalı tutanak tutulur; bu Let's Encrypt ve WebTrust pratiğidir. Kök anahtar rotasyonu yılda bir kez yapılır veya hiç yapılmaz; Fulcio ara CA'sı üç yıl ömürlüdür.
+
+**Hata modları ve karşılıkları.**
 
 | Hata modu | Sonuç | Karşılık |
 |---|---|---|
-| **KMS erişilemez, rotasyon zamanı geldi** | Yeni ara anahtar üretilemez | Hard cap'e kadar mevcut anahtarla devam; hard cap yaklaşırken alarm; degraded mode'da uzatılmış TTL ile ikinci bir önceden-imzalanmış anahtar hazır tut |
-| **Argus düğümü çöker, ara anahtar kaybolur** | Bellekteki anahtar gider | Sorun değil — yeniden başlarken yeni anahtar üretir. **Ama** düğümler arası anahtar paylaşımı yapıyorsanız (aynı kid), koordinasyon gerekir |
-| **Her düğüm kendi ara anahtarını üretir** | JWKS'te N × anahtar | Kabul edilebilir ve aslında **daha güvenli** (blast radius küçülür). JWKS boyutunu izleyin; 50+ anahtar olmasın |
-| **Ara anahtar bellekten çalınır** | Saldırgan TTL boyunca sahte token üretir | TTL'i kısaltmak tek savunma. + F/G bölümü |
-| **Saat kayması** | `not_before`/`not_after` hataları | NTP zorunlu; attestation'da ±5 dk tolerans |
-| **Split-brain: iki düğüm aynı kid'i üretir** | Doğrulama kaosu | `kid` = JWK thumbprint (RFC 7638) → çakışma matematiksel olarak imkânsız |
-| **JWKS yayını yeni anahtardan geç kalır** | `kid` bilinmiyor → doğrulama hatası | **Publish-before-use kuralı** (E bölümü) |
-| **Rotasyon fırtınası** (tüm düğümler aynı anda) | KMS throttle | Rotasyon zamanına jitter ekleyin (±%20) |
+| KMS erişilemez ve rotasyon zamanı gelmiştir | Yeni ara anahtar üretilemez | Hard cap'e kadar mevcut anahtarla devam edilir; hard cap yaklaşırken alarm üretilir; degraded mode için uzatılmış TTL'li ikinci bir önceden imzalanmış anahtar hazır tutulur |
+| Argus düğümü çöker ve ara anahtar kaybolur | Bellekteki anahtar gider | Sorun değildir; yeniden başlarken yeni anahtar üretilir. Ancak düğümler arası anahtar paylaşımı yapılıyorsa, yani aynı `kid` kullanılıyorsa, koordinasyon gerekir |
+| Her düğüm kendi ara anahtarını üretir | JWKS'te N kat anahtar bulunur | Kabul edilebilirdir ve aslında daha güvenlidir, çünkü blast radius küçülür. JWKS boyutu izlenir; 50'den fazla anahtar olmamalıdır |
+| Ara anahtar bellekten çalınır | Saldırgan TTL boyunca sahte token üretir | Tek savunma TTL'i kısaltmaktır; ayrıca F ve G bölümleri uygulanır |
+| Saat kayması | `not_before` ve `not_after` hataları | NTP zorunludur; attestation'da artı eksi beş dakika tolerans tanınır |
+| Split-brain: iki düğüm aynı `kid`'i üretir | Doğrulama tutarsızlığı | `kid` değeri JWK thumbprint'tir (RFC 7638) ve çakışma matematiksel olarak imkânsızdır |
+| JWKS yayını yeni anahtardan geç kalır | `kid` bilinmez ve doğrulama hatası oluşur | Publish-before-use kuralı uygulanır; E bölümü |
+| Rotasyon fırtınası, tüm düğümler aynı anda | KMS throttle eder | Rotasyon zamanına artı eksi %20 jitter eklenir |
 
 ---
 
-## D) HashiCorp Vault Transit Engine
+## D. HashiCorp Vault Transit engine
 
-### D.1 IdP için uygun mu?
+### D.1 IdP için uygun mu
 
-**Kısa cevap: Ara anahtar sarmalayıcı (wrapper) olarak evet, per-JWT imzalayıcı olarak hayır.**
+Kısa cevap şudur: ara anahtar sarmalayıcı olarak evet, JWT başına imzalayıcı olarak hayır.
 
 ### D.2 Yetenekler
-Kaynak: https://developer.hashicorp.com/vault/docs/secrets/transit , https://developer.hashicorp.com/vault/api-docs/secret/transit
 
-**Desteklenen imza anahtarı tipleri:**
-- **Ed25519** ("supports signing, signature verification, and key derivation")
-- **ECDSA P-256, P-384, P-521**
-- **RSA-2048, RSA-3072, RSA-4096**
-- ML-DSA, hibrit algoritmalar, SLH-DSA (**sadece Enterprise**)
+Desteklenen imza anahtarı tipleri Ed25519 (imzalama, imza doğrulama ve anahtar türetme destekler), ECDSA P-256, P-384 ve P-521, RSA-2048, RSA-3072 ve RSA-4096'dır. ML-DSA, hibrit algoritmalar ve SLH-DSA yalnızca Enterprise sürümündedir.
 
-**`batch_input` desteği — kritik throughput kaldıracı:**
+`batch_input` desteği kritik bir throughput kaldıracıdır:
+
 ```json
 { "batch_input": [
     {"input": "adba32==", "context": "abcd", "reference": "jwt-1"},
     {"input": "aGVsbG8=", "context": "efgh", "reference": "jwt-2"}
 ]}
 ```
-Sonuçlar `batch_results` dizisinde **giriş sırası korunarak** döner. `reference` alanı ile eşleme yapılır. Bu, HTTP + auth overhead'ini N imzaya amorti eder — Argus bir token-endpoint batch'i topluyorsa gerçek bir kazanç.
 
-**Versiyonlama / rotasyon yerleşik:**
-- `key_version` (int, 0 = latest); `>= min_encryption_version` olmalı
-- `min_encryption_version` / `min_decryption_version` key config endpoint'inde
-- Vault uyarısı: *"frequent rotation may lead to a storage entry size for the archive that is larger than the storage backend can handle"* (Raft/Paxos gibi backend'lerde) — çözüm olarak **zaman-tabanlı anahtar isimlendirme** öneriliyor.
+Sonuçlar `batch_results` dizisinde giriş sırası korunarak döner ve `reference` alanıyla eşleme yapılır. Bu, HTTP ve auth overhead'ini N imzaya amorti eder; Argus bir token endpoint batch'i topluyorsa gerçek bir kazançtır.
 
-**Diğer limitler:** Max HTTP request boyutu **32 MB** (DoS önlemi).
+Versiyonlama ve rotasyon yerleşiktir: `key_version` tamsayıdır ve 0 en güncel anlamına gelir, değer `min_encryption_version` değerinden büyük veya ona eşit olmalıdır; `min_encryption_version` ve `min_decryption_version` key config endpoint'indedir. Vault'un uyarısına göre sık rotasyon, arşiv için storage backend'in kaldıramayacağı kadar büyük bir storage girdisi boyutuna yol açabilir; bu Raft ve Paxos gibi backend'lerde geçerlidir ve çözüm olarak zaman tabanlı anahtar isimlendirme önerilir.
+
+Azami HTTP istek boyutu DoS önlemi olarak 32 MB'dir.
 
 ### D.3 Gerçek benchmark sayıları
 
-#### HashiCorp'un resmi benchmark blogu (2026-07-16)
-Kaynak: https://www.hashicorp.com/en/blog/understanding-vault-performance-benchmarks-from-real-world-workloads
-
-**Ortam:** AWS us-west-2, **Vault Enterprise v1.17.3+ent**, integrated Raft storage, yük aracı **k6**, metrikler **Datadog**.
+**HashiCorp'un resmî benchmark blogu (16 Temmuz 2026).** Ortam AWS us-west-2, Vault Enterprise v1.17.3+ent, integrated Raft storage, yük aracı k6 ve metrikler Datadog'dur.
 
 | Bulgu | Sayı |
 |---|---|
-| PKI sertifika verme, tek kullanıcı baseline | **~560 ms** |
-| PKI knee point | ~25 eşzamanlı kullanıcı |
-| PKI revocation timeout başlangıcı | 100+ eşzamanlı kullanıcı |
-| SSH-CA **RSA-2048** knee point | ~100 sanal kullanıcı (VU) |
-| SSH-CA RSA-2048 doygunlukta CPU | **%92-96** |
-| SSH-CA RSA-2048 doygunluk | ~250 VU |
-| SSH-CA **ED25519** knee point | **~200 VU** |
-| SSH-CA ED25519 doygunlukta CPU | **%40-42** |
-| PKI algoritma karşılaştırması | "minimal performance differences across RSA, ED25519, and ECDSA" |
+| PKI sertifika verme, tek kullanıcı baseline'ı | Yaklaşık 560 ms |
+| PKI knee point | Yaklaşık 25 eşzamanlı kullanıcı |
+| PKI revocation timeout başlangıcı | 100'den fazla eşzamanlı kullanıcı |
+| SSH-CA RSA-2048 knee point | Yaklaşık 100 sanal kullanıcı |
+| SSH-CA RSA-2048 doygunlukta CPU | %92-96 |
+| SSH-CA RSA-2048 doygunluk | Yaklaşık 250 sanal kullanıcı |
+| SSH-CA Ed25519 knee point | Yaklaşık 200 sanal kullanıcı |
+| SSH-CA Ed25519 doygunlukta CPU | %40-42 |
+| PKI algoritma karşılaştırması | RSA, Ed25519 ve ECDSA arasında asgari performans farkı |
 
-**HashiCorp bu blogda transit sign için ops/sn YAYINLAMIYOR.** Bunu açıkça belirtiyorum.
+HashiCorp bu blogda transit sign için işlem/sn yayımlamamaktadır ve bu açıkça belirtilmelidir.
 
-**Ama PKI'nin 560 ms'lik tek-kullanıcı baseline'ı çok şey söylüyor:** Vault'un HTTP + policy + audit + storage yolu ağır. Transit sign daha hafif olsa da, **22,5 µs'lik yerel ECDSA imzayla kıyaslanamaz** — en az 3 büyüklük mertebesi fark.
+Ancak PKI'nin 560 ms'lik tek kullanıcı baseline'ı çok şey söyler: Vault'un HTTP, policy, audit ve storage yolu ağırdır. Transit sign daha hafif olsa da 22,5 µs'lik yerel ECDSA imzayla kıyaslanamaz; en az üç büyüklük mertebesi fark vardır.
 
-**ED25519'un RSA'ya göre 2× concurrency ve yarı CPU avantajı** — Argus Vault kullanacaksa Ed25519 seçmeli.
+Ed25519'un RSA'ya göre iki kat eşzamanlılık ve yarı CPU avantajı vardır; Argus Vault kullanacaksa Ed25519 seçmelidir.
 
-#### "37k ops/sn" iddiası — **[DOĞRULANMADI]**
-Bu rakam Stenio Ferreira'nın (HashiCorp Solutions Engineer) Medium yazısında geçiyor: https://medium.com/hashicorp-engineering/hashicorp-vault-performance-benchmark-13d0ea7b703f — **sayfa fetch sırasında HTTP 403 döndürdü, doğrulayamadım.** Ayrıca arama snippet'ine göre bu "highly favorable test environment"da transit **genel** (muhtemelen encrypt/decrypt) içindi, **sign değil.** Argus planlamasında bu sayıyı kullanmayın.
+**37.000 işlem/sn iddiası doğrulanamamıştır.** Bu rakam Stenio Ferreira'nın (HashiCorp Solutions Engineer) Medium yazısında geçmektedir; sayfa çekilirken HTTP 403 dönmüş ve doğrulanamamıştır. Ayrıca arama snippet'ine göre bu, çok elverişli bir test ortamında transit'in genel kullanımı içindi, muhtemelen encrypt ve decrypt için, sign için değil. Argus planlamasında bu sayı kullanılmamalıdır.
 
-#### Benchmark araçları
-- **`vault-benchmark`** (HashiCorp resmi, açık kaynak): auth method'ları ve secrets engine'leri yükler; HTTP isteklerini **Vegeta** kütüphanesiyle üretir; throughput/latency/success rate ölçer.
-  - Repo: https://github.com/hashicorp/vault-benchmark , DeepWiki: https://deepwiki.com/hashicorp/vault-benchmark
-  - Tutorial: https://developer.hashicorp.com/vault/tutorials/operations/benchmark-vault
-- Topluluk: `wrk` tabanlı transit throughput testi — https://github.com/jdfriedma/Vault-Transit-Load-Testing
-- HashiCorp Raft tuning: https://support.hashicorp.com/hc/en-us/articles/4406933742099-Initial-Research-for-Vault-Integrated-Storage-Performance-Tuning
+**Benchmark araçları.** `vault-benchmark` HashiCorp'un resmî ve açık kaynak aracıdır; auth metotlarını ve secrets engine'leri yükler, HTTP isteklerini Vegeta kütüphanesiyle üretir ve throughput, gecikme ile başarı oranını ölçer. Topluluk tarafında `wrk` tabanlı bir transit throughput testi mevcuttur. HashiCorp'un Raft tuning notları destek portalındadır.
 
-**Vault dokümanının kendi uyarısı:** *"The transit secret engine (encryption as a service) is one of the most taxing operations on a Vault server, since it requires the server to run the encryption algorithm."*
+Vault dokümantasyonunun kendi uyarısı şudur: transit secret engine, yani şifreleme servisi, Vault sunucusundaki en yorucu işlemlerden biridir, çünkü sunucunun şifreleme algoritmasını çalıştırmasını gerektirir.
 
-### D.4 HA
-Vault HA: aktif/standby (integrated Raft). Performance Standby (Enterprise) okuma ölçekler. **Transit sign bir yazma değil ama aktif node'a gider** [DOĞRULANMADI — Performance Standby'ların transit sign'ı servis edip edemediğini teyit edemedim]. Argus için: tek aktif node darboğazı riski var.
+### D.4 Yüksek erişilebilirlik
+
+Vault HA aktif ve standby düğümlerden oluşur; integrated Raft kullanılır. Performance Standby (Enterprise) okumayı ölçekler. Transit sign bir yazma değildir ancak aktif node'a gider; Performance Standby'ların transit sign'ı servis edip edemediği doğrulanamamıştır. Argus için tek aktif node darboğazı riski vardır.
 
 ### D.5 Lisans değişimi ve OpenBao
 
-**Vault → BUSL 1.1, Ağustos 2023.** OpenBao, Vault'un OSS sürümünün topluluk fork'u olarak 2023'te yaratıldı ve **Linux Foundation'a bağışlandı** (açık yönetişim). **Haziran 2025'te OpenSSF sandbox projesi** oldu.
+Vault Ağustos 2023'te BUSL 1.1'e geçmiştir. OpenBao, Vault'un açık kaynak sürümünün topluluk fork'u olarak 2023'te yaratılmış ve Linux Foundation'a bağışlanmıştır, yani açık yönetişim altındadır. Haziran 2025'te OpenSSF sandbox projesi olmuştur.
 
-#### OpenBao 2026 durumu — gerçek sürüm verisi
-Kaynak: https://github.com/openbao/openbao/releases
+OpenBao'nun 2026 sürüm verisi:
 
 | Sürüm | Tarih |
 |---|---|
-| **v2.6.2** | **2026-08-18** (güvenlik düzeltmeleri + hata düzeltmeleri) |
-| v2.6.1 | 2026-07-22 |
-| v2.6.0 | 2026-07-14 (namespace sealing, workflow desteği) |
-| v2.6.0-beta | 2026-06-22 |
-| v2.5.5 | 2026-06-17 (çoklu güvenlik açığı düzeltmesi) |
+| v2.6.2 | 18 Ağustos 2026; güvenlik ve hata düzeltmeleri |
+| v2.6.1 | 22 Temmuz 2026 |
+| v2.6.0 | 14 Temmuz 2026; namespace sealing ve workflow desteği |
+| v2.6.0-beta | 22 Haziran 2026 |
+| v2.5.5 | 17 Haziran 2026; çoklu güvenlik açığı düzeltmesi |
 
-- 2.0 "production-ready" sürümü: **Eylül 2024**
-- **Namespaces** ve **horizontal read scalability** eklendi — Vault Enterprise'ın ücretli özelliklerini açık kaynağa taşıyor
-- **8 şirket** ticari destek sunuyor (ControlPlane dahil)
-- **NVIDIA OpenBao'yu benimsedi** — Kaynak: https://www.techtarget.com/searchitoperations/news/366644831/Nvidia-adopts-OpenBao-open-source-fork-of-HashiCorps-Vault
+2.0 üretime hazır sürümü Eylül 2024'te çıkmıştır. Namespaces ve yatay okuma ölçeklenebilirliği eklenmiş, yani Vault Enterprise'ın ücretli özellikleri açık kaynağa taşınmıştır. Sekiz şirket ticari destek sunmaktadır, aralarında ControlPlane bulunur. NVIDIA OpenBao'yu benimsemiştir.
 
-**Değerlendirme:** OpenBao 2026'da **canlı ve ciddi** bir proje. Aylık sürüm ritmi, LF yönetişimi, NVIDIA gibi bir referans, Vault'un kapalı özelliklerini açıyor. Argus için Vault yerine OpenBao makul — özellikle Argus kendisi açık kaynaksa BUSL bulaşmasından kaçınmak için.
+**Değerlendirme.** OpenBao 2026'da canlı ve ciddi bir projedir: aylık sürüm ritmi, Linux Foundation yönetişimi, NVIDIA gibi bir referans ve Vault'un kapalı özelliklerini açması. Argus için Vault yerine OpenBao makuldür, özellikle Argus kendisi açık kaynaksa BUSL bulaşmasından kaçınmak için. Ancak üçüncü taraf araç ekosistemi hâlâ Vault'un gerisindedir. Ayrıca Argus'un asıl ihtiyacı ara anahtar sarmalama olduğu için her ikisi de opsiyonel bir bileşendir; bulut KMS zaten yeterlidir.
 
-**Ama:** Üçüncü parti araç ekosistemi hâlâ Vault'un gerisinde. Ve Argus'un asıl ihtiyacı ara anahtar sarmalama olduğu için **her ikisi de opsiyonel bir bileşen** — bulut KMS zaten yeter.
+### D.6 Argus'ta Vault ve OpenBao'nun yeri
 
-### D.6 Argus'ta Vault/OpenBao'nun yeri
-
-| Kullanım | Uygun mu? |
+| Kullanım | Uygun mu |
 |---|---|
-| Her JWT için transit sign | **HAYIR** — 3 mertebe yavaş, tek node darboğazı |
-| Ara anahtarı sarmalama/açma (envelope) | **EVET** — dakikada birkaç çağrı |
-| DB şifreleri, OAuth client secret'ları saklama | **EVET** — klasik kullanım |
-| Argus'un TLS sertifikaları (PKI engine) | **EVET** ama 560 ms baseline'a dikkat, önceden verin |
-| Argus düğümlerinin kimlik doğrulaması (AppRole/K8s auth) | **EVET** |
+| Her JWT için transit sign | Hayır; üç mertebe yavaştır ve tek node darboğazı vardır |
+| Ara anahtarı sarmalama ve açma (envelope) | Evet; dakikada birkaç çağrıdır |
+| Veritabanı şifreleri ve OAuth client secret'larını saklama | Evet; klasik kullanımdır |
+| Argus'un TLS sertifikaları (PKI engine) | Evet, ancak 560 ms baseline'a dikkat edilir ve sertifikalar önceden verilir |
+| Argus düğümlerinin kimlik doğrulaması (AppRole veya K8s auth) | Evet |
 
 ---
 
-## E) ANAHTAR ROTASYONU (JWKS)
+## E. Anahtar rotasyonu (JWKS)
 
 ### E.1 Standart dayanağı
 
-**RFC 7517 (JWK) §4.5 — `kid` parametresi:**
-> "The 'kid' (key ID) parameter is used to match a specific key. This is used, for instance, **to choose among a set of keys within a JWK Set during key rollover**."
+**RFC 7517 (JWK) §4.5, `kid` parametresi.** `kid` parametresi belirli bir anahtarı eşleştirmek için kullanılır; örneğin anahtar geçişi sırasında bir JWK Set içindeki anahtarlar arasından seçim yapmak için. Bir JWK Set içinde `kid` değerleri kullanıldığında, set içindeki farklı anahtarların farklı `kid` değerleri kullanması önerilir. `kid` büyük küçük harf duyarlıdır ve opsiyoneldir; Argus için zorunlu yapılmalıdır. JWS ve JWE'deki `kid` header parametresiyle eşleşir.
 
-> "When 'kid' values are used within a JWK Set, **different keys within the JWK Set SHOULD use distinct 'kid' values**."
+Öneri şudur: `kid` değeri RFC 7638 JWK Thumbprint (SHA-256) olur. Böylece çakışma imkânsızdır, değer deterministiktir ve anahtar materyalinden türetildiği için ayrı bir kayıt tutmaya gerek kalmaz.
 
-`kid` büyük/küçük harf duyarlıdır ve **opsiyoneldir** (ama Argus için zorunlu yapın). JWS/JWE'deki `kid` header parametresiyle eşleşir.
-Kaynak: https://datatracker.ietf.org/doc/html/rfc7517
+**OpenID Connect Core §10.1.1, asimetrik imzalama anahtarlarının rotasyonu.** RP, ID Token doğrularken `kid` header'ına bakar; anahtar yerel önbellekte yoksa `jwks_uri` yeniden çekilir. Bu, kesintisiz rotasyonun temel mekanizmasıdır.
 
-**Öneri:** `kid` = **RFC 7638 JWK Thumbprint** (SHA-256). Böylece çakışma imkânsız, deterministik, ve anahtar materyalinden türetildiği için ayrı bir kayıt tutmaya gerek yok.
+> **Kaynak notu.** Bu bölümün tam metni çekilememiştir; sayfa kesilmiştir. Yukarıdaki, ikincil kaynaklardan yapılmış bir özettir ve spec metni doğrudan doğrulanmalıdır.
 
-**OpenID Connect Core §10.1.1 "Rotation of Asymmetric Signing Keys":** RP, ID Token doğrularken `kid` header'ına bakar; anahtar yerel cache'de yoksa `jwks_uri`'yi **yeniden çeker**. Bu, kesintisiz rotasyonun temel mekanizmasıdır.
-Kaynak: https://openid.net/specs/openid-connect-core-1_0.html **[Bu bölümün tam metnini fetch edemedim — sayfa kesildi. Yukarıdaki, ikincil kaynaklardan yapılmış bir özettir; spec metnini doğrudan doğrulayın.]**
+### E.2 Gerçek sağlayıcılar ne yapıyor
 
-### E.2 Gerçek sağlayıcılar ne yapıyor?
+**Okta.** Yayımlanmış rotasyon periyodu yılda dört kez, yani üç ayda birdir ve bildirimsiz değişebilir. Yeni anahtarlar normalde rotasyondan birkaç hafta önce üretilir; böylece downstream müşteri önbellekleme mekanizmalarının güncellenmesi sağlanır. İstemciler `jwks_uri` yanıtını standart HTTP Cache-Control header'larındaki yönergelere göre önbelleklemelidir. Okta önbellek süresini rotasyona olan yakınlığa göre dinamik olarak ayarlamaktadır. Anahtarların rotasyondan sonra JWKS'te tam olarak ne kadar kaldığını yayımlamamaktadır.
 
-#### Okta — yayınlanmış rotasyon periyodu
-Kaynak: https://developer.okta.com/docs/concepts/key-rotation/
+Öne çıkan nokta şudur: Okta yeni anahtarı kullanmadan haftalar önce yayımlamaktadır; bu publish-before-use kuralının en muhafazakâr uygulamasıdır.
 
-> **"The current Okta key rotation schedule is four times a year, but can change without notice."** (üç ayda bir)
+**Auth0: üç anahtar modeli.** OIDC discovery dokümanı her zaman hem geçerli anahtarı hem sonraki anahtarı içerir; önceki anahtar henüz iptal edilmemişse onu da içerebilir. Aynı anda tek anahtarla imzalanır. Önceki anahtarla imzalanmış tüm token'lar, o anahtar açıkça iptal edilene kadar geçerli kalır. Otomatik rotasyon aralığı belirtilmemiştir; manuel rotasyon vurgulanmaktadır.
 
-> **"New keys are normally generated a few weeks before the rotation occurs to ensure that downstream customer caching mechanisms are updated."**
+Bu model Argus için doğrudan kopyalanabilir: JWKS içeriği önceki (opsiyonel), geçerli ve sonraki anahtardan oluşur.
 
-> İstemciler `jwks_uri` yanıtını **"following the directives in the standard HTTP Cache-Control headers"** cache'lemeli.
+**Keycloak: aktif ve pasif.** Bir anda tek bir aktif anahtar çifti ve birden çok pasif anahtar bulunur. Aktif anahtar yeni imzalar üretir, pasif anahtar önceki imzaları doğrular ve rotasyon kesintisiz olur. Provider'lar Priority alanıyla sıralanır; aktif anahtar sağlayabilen en yüksek öncelikli provider seçilir. Eski anahtarlar süreleri dolana kadar JWKS endpoint'inde kalır. Varsayılan anahtar ömrü doğrulanamamıştır; erişilen kaynaklarda `rsa-generated` provider'ının varsayılan lifespan değeri bulunmamaktadır.
 
-Okta cache süresini rotasyona olan yakınlığa göre **dinamik olarak ayarlıyor**. Anahtarların JWKS'te rotasyondan sonra tam olarak ne kadar kaldığını yayınlamıyor.
+**Google: canlı gözlem.** 8 Eylül 2026'da `googleapis.com/oauth2/v3/certs` çekilmiştir; hepsi RSA ve RS256 olmak üzere dört anahtar bulunmuştur:
 
-**Öne çıkan:** Okta, yeni anahtarı kullanmadan **haftalar önce** yayınlıyor. Bu, "publish-before-use" kuralının en muhafazakâr uygulaması.
-
-#### Auth0 — 3-anahtar modeli
-Kaynak: https://auth0.com/docs/get-started/tenant-settings/signing-keys/rotate-signing-keys
-
-> "The OIDC discovery document will always include both the **current key** and the **next key**, and it may also include the **previous key** if the previous key has not yet been revoked."
-
-- Aynı anda **tek anahtarla** imzalanır
-- Önceki anahtarla imzalanmış tüm token'lar, **siz onu açıkça revoke edene kadar** geçerli kalır
-- Otomatik rotasyon aralığı belirtilmemiş; manuel rotasyon vurgulanmış
-
-**Bu, Argus için doğrudan kopyalanabilir bir model:** JWKS = `{previous?, current, next}`.
-
-#### Keycloak — active/passive
-Kaynak: https://github.com/keycloak/keycloak/blob/main/docs/documentation/server_admin/topics/realms/keys.adoc
-
-- **Bir anda tek aktif** anahtar çifti, **birden çok pasif** anahtar
-- Aktif anahtar yeni imzalar üretir; pasif anahtar önceki imzaları doğrular → **kesintisiz rotasyon**
-- Provider'lar **Priority** alanıyla sıralanır; en yüksek öncelikli, aktif anahtar sağlayabilen provider seçilir
-- Eski anahtarlar süreleri dolana kadar JWKS endpoint'inde kalır
-- **Varsayılan anahtar ömrü: [DOĞRULANMADI]** — eriştiğim kaynaklarda `rsa-generated` provider'ın varsayılan lifespan'ı yoktu
-
-#### Google — canlı kanıt
-Bugün (2026-09-08) `https://www.googleapis.com/oauth2/v3/certs` çekildi: **4 anahtar**, hepsi RSA / RS256:
 ```
 a8f80b512469959cdc1eeba44b066c2f79944779
 ca622895d4d408c1b1089f874a0fa07bbc04b55e
 943a3a5d7d919625a454e489b75c29adab57acba
 f10f87405a979c1df36df26606734f33cd85c271
 ```
-Google aynı anda **4 anahtar** yayınlıyor — geniş bir overlap penceresi tutuyorlar. (Google'ın rotasyon periyodunu yayınlamadığını not edeyim; bu sadece anlık gözlem.)
 
-#### Duende IdentityServer — timing önerisi
-Kaynak: https://duendesoftware.com/blog/20260113-why-signing-key-rotation-matters-in-openid-connect-and-duende-identityserver (2026-01-13)
+Google aynı anda dört anahtar yayımlamaktadır ve geniş bir overlap penceresi tutmaktadır. Google rotasyon periyodunu yayımlamamaktadır; bu yalnızca anlık bir gözlemdir.
 
-Yeni anahtar JWKS'e eklenir ama **henüz imzalamada kullanılmaz** → istemciler keşfedip cache'ler → **duyuru periyodu (genelde 24-48 saat)** sonra yeni anahtarla imzalamaya başlanır → eski anahtar doğrulama için kalır.
+**Duende IdentityServer: zamanlama önerisi.** Yeni anahtar JWKS'e eklenir ancak henüz imzalamada kullanılmaz; istemciler onu keşfedip önbelleğe alır; genellikle 24-48 saatlik bir duyuru periyodundan sonra yeni anahtarla imzalamaya başlanır ve eski anahtar doğrulama için kalır.
 
-#### Zalando — rotasyon formülü
-Kaynak: https://engineering.zalando.com/posts/2025/01/automated-json-web-key-rotation.html
+**Zalando: rotasyon formülü.** Anahtarın emekliye ayrılma zamanına azami token ömrü ve ek güvenlik süresi eklenerek public key'in düşürüleceği zaman bulunur. Süreç şudur: yeni anahtar çifti üretilir, public key JWK endpoint'inde yayımlanır, istemci önbellek yenilemesi için bir grace period beklenir, yeni anahtar aktif imzalayıcı yapılır, önceki aktif anahtar emekliye ayrılır ancak yayında kalır ve azami token ömrü kadar sonra JWKS'ten kaldırılır. Vurgu cache control header'larının önemli olduğu ve JWT'lerde `kid` ile hangi anahtarın kullanıldığının takip edildiğidir.
 
-> **"Time of key retirement + Maximum token lifespan + Extra safety time = Time to drop the public key"**
+### E.3 Zamanlama matematiği
 
-Süreç:
-1. Yeni anahtar çifti üret
-2. Public key'i JWK endpoint'inde yayınla
-3. İstemci cache yenilemesi için **grace period**
-4. Yeni anahtarı **aktif imzalayıcı** yap
-5. Önceki aktif anahtarı **emekliye ayır** (yayında kalır)
-6. **Max token ömrü** kadar sonra JWKS'ten kaldır
+**Tanımlar.** `T_token` verilen en uzun token TTL'idir; access token ve ID token dahildir. `T_cache` `jwks_uri` üzerindeki `Cache-Control: max-age` değeridir. `T_client` en yavaş istemcinin JWKS yenileme periyodudur ve kontrolümüz dışındadır. `T_safety` güvenlik marjıdır. `T_sign` bir anahtarın aktif imzalama süresidir, Argus'ta ara anahtar TTL'idir.
 
-Vurgu: **"cache control headers matter!"** ve JWT'lerde `kid` ile hangi anahtarın kullanıldığı takip ediliyor.
+**Kural 1: publish-before-use.**
 
-### E.3 Kesin Zamanlama Matematiği (Argus için)
-
-#### Tanımlar
-- `T_token` = verilen en uzun token TTL'i (access token; ID token dahil)
-- `T_cache` = `jwks_uri` üzerindeki `Cache-Control: max-age` değeri
-- `T_client` = en yavaş istemcinin JWKS yenileme periyodu (kontrolünüz dışında!)
-- `T_safety` = güvenlik marjı
-- `T_sign` = bir anahtarın aktif imzalama süresi (Argus'ta ara anahtar TTL'i)
-
-#### Kural 1 — PUBLISH-BEFORE-USE (yayınla, sonra kullan)
 ```
 T_publish_lead ≥ T_cache + T_client + T_safety
 ```
-Yeni `kid` ile **ilk token imzalanmadan önce**, o anahtarın JWKS'te bu kadar süre bulunmuş olması gerekir.
 
-**Ama Argus'ta ara anahtar 15 dakikada bir dönüyor.** Bu, klasik "48 saat önce yayınla" yaklaşımıyla **uyumsuz**. Çözüm iki katmanlı:
+Yeni `kid` ile ilk token imzalanmadan önce, o anahtarın JWKS'te bu kadar süre bulunmuş olması gerekir.
 
-#### Argus'un iki katmanlı rotasyon şeması
+Ancak Argus'ta ara anahtar 15 dakikada bir döner ve bu, klasik "48 saat önce yayınla" yaklaşımıyla uyumsuzdur. Çözüm iki katmanlıdır.
 
-**Katman 1 — Ara anahtarlar (hızlı, 15 dk):**
-`T_publish_lead`'i sağlamak imkânsız (15 dk < tipik cache TTL'leri). Bu yüzden:
-- `jwks_uri` üzerinde **`Cache-Control: max-age=300, must-revalidate`** (5 dk) — kısa tutun
-- **`ETag`** verin, `If-None-Match` ile 304 dönün (bant genişliği maliyeti neredeyse sıfır)
-- İstemcilere **"unknown kid → refetch"** davranışını zorunlu kılın (OIDC §10.1.1 zaten bunu söylüyor). Argus kendi SDK'sını yayınlıyorsa bunu SDK'da uygulayın.
-- **Yeni ara anahtarı, kullanmaya başlamadan `T_cache + T_safety` = 5 + 5 = 10 dakika önce JWKS'e ekleyin.** Yani anahtar üretimi ile ilk kullanım arasında 10 dakikalık bir "warm-up" penceresi olur. 15 dakikalık rotasyon periyoduyla bu, **her zaman 2-3 anahtarın JWKS'te olduğu** anlamına gelir.
-- **Kaldırma zamanı:** `T_sign_end + T_token + T_safety`. `T_token` = 15 dk (kısa access token) ise: son imzadan 15 + 5 = **20 dakika sonra** JWKS'ten çıkar.
-- **JWKS'teki toplam anahtar sayısı ≈ (10 dk warm-up + 15 dk aktif + 20 dk drain) / 15 dk ≈ 3 anahtar** — makul.
+**Katman 1: ara anahtarlar, 15 dakikalık hızlı döngü.** `T_publish_lead` sağlanamaz, çünkü 15 dakika tipik önbellek TTL'lerinden kısadır. Bu nedenle `jwks_uri` üzerinde `Cache-Control: max-age=300, must-revalidate` kullanılır, yani beş dakika, kısa tutulur. `ETag` verilir ve `If-None-Match` ile 304 dönülür; bant genişliği maliyeti neredeyse sıfırdır. İstemcilere bilinmeyen `kid` görüldüğünde yeniden çekme davranışı zorunlu kılınır; OIDC §10.1.1 zaten bunu söyler ve Argus kendi SDK'sını yayımlıyorsa bunu SDK'da uygular. Yeni ara anahtar, kullanılmaya başlanmadan `T_cache + T_safety` kadar, yani 5 artı 5 eşittir 10 dakika önce JWKS'e eklenir; anahtar üretimi ile ilk kullanım arasında 10 dakikalık bir ısınma penceresi olur. On beş dakikalık rotasyon periyoduyla bu, her zaman iki veya üç anahtarın JWKS'te bulunduğu anlamına gelir. Kaldırma zamanı son imzadan sonra `T_token + T_safety` kadardır; `T_token` 15 dakika ise son imzadan 20 dakika sonra JWKS'ten çıkarılır. JWKS'teki toplam anahtar sayısı 10 dakika ısınma, 15 dakika aktif ve 20 dakika drenaj toplamının 15 dakikaya bölümüdür, yani yaklaşık üç anahtardır; bu makuldür.
 
-**Katman 2 — Kök anahtar (yavaş, yıllık):**
-- Okta/Duende modeli: yeni kök anahtarı **haftalar önce** yayınla (delegation attestation'ı doğrulayan istemciler için)
-- Fulcio deseni: 3 yıl ömür, sık rotasyon gerektirmeyen
+**Katman 2: kök anahtar, yıllık yavaş döngü.** Okta ve Duende modeli izlenerek yeni kök anahtar haftalar önce yayımlanır; bu, delegation attestation'ı doğrulayan istemciler içindir. Fulcio deseni izlenerek üç yıllık ömür verilir ve sık rotasyon gerekmez.
 
-#### Kural 2 — Kaldırma (drop) zamanı
+**Kural 2: kaldırma zamanı.**
+
 ```
 T_drop = T_last_signature_with_key + T_token_max + T_safety
 ```
-Zalando'nun formülü. **`T_token_max`'ı kesinlikle bilmeniz gerekir** — Argus'ta refresh token'lar imzalıysa onlar da sayılır!
 
-#### Kural 3 — En yavaş doğrulayıcıya göre planla
-> "If one service refreshes every 5 minutes, another every hour, and a mobile client every app launch, the grace period has to reflect the slowest verifier."
+Bu Zalando'nun formülüdür. `T_token_max` değeri kesinlikle bilinmelidir; Argus'ta refresh token'lar imzalıysa onlar da sayılır.
 
-**Argus için:** `T_client`'ı bilemezsiniz. Bu yüzden **"unknown kid → refetch"** davranışını zorunlu kılan negatif-cache'li bir tasarım şart. Ayrıca `jwks_uri`'ye **rate limit** koyun (kötü niyetli refetch fırtınası DoS'a döner) ama 429 yerine stale-while-revalidate verin.
+**Kural 3: en yavaş doğrulayıcıya göre planlama.** Bir servis beş dakikada bir, diğeri saatte bir ve bir mobil istemci her uygulama açılışında yeniliyorsa, grace period en yavaş doğrulayıcıyı yansıtmalıdır. Argus için `T_client` bilinemez; bu nedenle bilinmeyen `kid` görüldüğünde yeniden çekme davranışını zorunlu kılan, negatif önbellekli bir tasarım şarttır. Ayrıca `jwks_uri` üzerine rate limit konur, çünkü kötü niyetli bir yeniden çekme fırtınası DoS'a döner; ancak 429 yerine stale-while-revalidate verilir.
 
-#### Kural 4 — Token TTL'i, ara anahtar TTL'inden KISA olmalı
+**Kural 4: token TTL'i ara anahtar TTL'inden kısa olmalıdır.**
+
 ```
 T_token < T_sign
 ```
-Aksi halde bir token, imzalandığı anahtar JWKS'ten kalkmadan önce süresi dolmaz. Argus'ta: 15 dk anahtar → access token **≤ 10 dakika** olmalı (marjla).
 
-#### Cache-Control önerisi (Argus)
+Aksi hâlde bir token, imzalandığı anahtar JWKS'ten kalkmadan önce süresi dolmaz. Argus'ta 15 dakikalık anahtar için access token marjla birlikte 10 dakika veya daha kısa olmalıdır.
+
+**Cache-Control önerisi.**
+
 ```
 Cache-Control: public, max-age=300, stale-while-revalidate=600, stale-if-error=86400
 ETag: "<jwks-set-hash>"
 ```
-- `stale-if-error=86400`: Argus'un JWKS endpoint'i çökerse istemciler 24 saat eski setle çalışır → **availability kazancı**
-- `stale-while-revalidate`: arka planda yenileme, istemci gecikmesi yok
 
-### E.4 Otomatik Rotasyon Tasarımı — Argus State Machine
+`stale-if-error=86400` ile Argus'un JWKS endpoint'i çökerse istemciler 24 saat eski setle çalışır ve erişilebilirlik kazancı sağlanır. `stale-while-revalidate` arka planda yenileme yapar ve istemci gecikmesi oluşmaz.
 
-Her ara anahtar için durum makinesi:
+### E.4 Otomatik rotasyon tasarımı
+
+Her ara anahtar için durum makinesi şudur:
+
 ```
 PENDING ──(JWKS'e eklendi)──► PUBLISHED ──(warm-up 10dk doldu)──► ACTIVE
                                                                      │
@@ -813,305 +606,204 @@ PENDING ──(JWKS'e eklendi)──► PUBLISHED ──(warm-up 10dk doldu)─�
                                                                   DROPPED
 ```
 
-- **Aynı anda tam 1 ACTIVE anahtar** (düğüm başına veya küme başına — karar verin)
-- **PUBLISHED ve RETIRING anahtarlar JWKS'te**, ACTIVE olan da
-- **DROPPED anahtar materyali `zeroize` edilir** (F bölümü)
-- Geçişler bir **audit log**'a yazılır (kid, thumbprint, timestamps, KMS attestation id)
-- Her geçişte metrik: `argus_jwks_keys{state="active|published|retiring"}`
+Aynı anda tam olarak bir ACTIVE anahtar bulunur; bunun düğüm başına mı küme başına mı olduğu karara bağlanır. PUBLISHED ve RETIRING anahtarlar da ACTIVE ile birlikte JWKS'tedir. DROPPED anahtar materyali `zeroize` edilir (F bölümü). Geçişler bir denetim kaydına yazılır: `kid`, thumbprint, zaman damgaları ve KMS attestation kimliği. Her geçişte `argus_jwks_keys{state="active|published|retiring"}` metriği güncellenir.
 
-**Küme-genelinde tek anahtar mı, düğüm başına mı?**
+**Küme geneli tek anahtar mı, düğüm başına mı.**
 
-| | Küme-geneli tek anahtar | Düğüm başına anahtar |
+| | Küme geneli tek anahtar | Düğüm başına anahtar |
 |---|---|---|
-| JWKS boyutu | 3 anahtar | 3 × N düğüm |
-| Koordinasyon | Gerekli (leader election / etcd) | **Yok** |
-| Blast radius | Tüm küme | **Tek düğüm** |
-| KMS çağrısı | 96/gün | 96 × N/gün |
-| Karmaşıklık | Yüksek | **Düşük** |
+| JWKS boyutu | Üç anahtar | Düğüm sayısı çarpı üç |
+| Koordinasyon | Gereklidir; leader election veya etcd | Gerekmez |
+| Blast radius | Tüm küme | Tek düğüm |
+| KMS çağrısı | Günde 96 | Düğüm başına günde 96 |
+| Karmaşıklık | Yüksek | Düşük |
 
-**Önerim: Düğüm başına anahtar.** N=10 düğümde JWKS'te ~30 anahtar olur; bu bir sorun değil (JWKS ~10 KB). Koordinasyon yokluğu ve küçük blast radius, "en güvenli" hedefiyle uyumlu. N büyürse (>30 düğüm) shard başına anahtara geçin.
+Öneri düğüm başına anahtardır. On düğümde JWKS'te yaklaşık 30 anahtar olur ve bu bir sorun değildir; JWKS yaklaşık 10 KB'dir. Koordinasyon yokluğu ve küçük blast radius en güvenli hedefiyle uyumludur. Düğüm sayısı 30'u aşarsa shard başına anahtara geçilir.
 
 ---
+## F. Rust'ta bellek içi sır hijyeni
 
-## F) RUST'TA BELLEK-İÇİ SIR HİJYENİ
+### F.1 `zeroize`: mekanizma ve gerçek garantiler
 
-### F.1 `zeroize` — mekanizma ve GERÇEK garantiler
+Sürüm 1.9.0'dır; crates.io `updated_at` değeri 12 Haziran 2026'dır. Toplam 672.831.052 indirme, son 90 günde 168.883.175 indirme almıştır. docs.rs sayfası 3 Eylül 2026'da yayımlandığını göstermektedir ve bu crates.io API'siyle çelişmektedir; crates.io esas alınır. `zeroize_derive` 1.5.0 sürümündedir ve 90 günde 64.227.400 indirme almıştır.
 
-**Sürüm: 1.9.0**, crates.io `updated_at: 2026-06-12`. **672.831.052 toplam indirme, son 90 günde 168.883.175.** (Not: docs.rs sayfası "released September 3, 2026" gösteriyor — crates.io API'siyle çelişiyor; crates.io'yu esas alın.) `zeroize_derive` 1.5.0, 90 günde 64.227.400 indirme.
-Kaynaklar: https://docs.rs/zeroize/latest/zeroize/ , https://crates.io/api/v1/crates/zeroize , https://github.com/RustCrypto/utils/tree/master/zeroize
+**Nasıl çalışır.** `core::ptr::write_volatile` ve `core::sync::atomic` bellek bariyerleri kullanılır. Saf Rust'tır; FFI ve assembly yoktur. Tüm çekirdek sayı tiplerinde ve bunların slice'larında çalışır.
 
-#### Nasıl çalışır
-- `core::ptr::write_volatile` + `core::sync::atomic` bellek bariyerleri
-- **Saf Rust** — FFI yok, assembly yok
-- Tüm core sayı tiplerinde ve slice'larında
+**Ne garanti eder.** Sıfırlama işleminin derleyici tarafından optimize edilip kaldırılamayacağı garanti edilir; bu LLVM'in volatile semantiğiyle sağlanır. Volatile ve volatile olmayan erişimleri karıştırmanın tanımsız davranış olup olmadığı endişesi Unsafe Code Guidelines Working Group içinde tartışılmış ve bu crate'teki kullanım deseni iyi tanımlanmış kabul edilmiştir.
 
-#### NE GARANTİ EDER
-> "the zeroing operation **can't be 'optimized away' by the compiler**, as ensured by LLVM's volatile semantics."
+**Ne garanti etmez.** docs.rs'deki açık ifadeler şunlardır. Mikromimari saldırılarda Spectre ve Meltdown benzeri saldırıların sıfırlanmış sırları örtülü kanallar üzerinden sızdırma potansiyeli hâlâ vardır; crate bu kanallar üzerinden sızıntı olmayacağına dair garanti vermez, çünkü bunlar altta yatan donanımın kusurlarıdır. `Vec`, `String` ve `CString` için backing buffer'ın tüm kapasitesi sıfırlanır, ancak önceki yeniden tahsislerin bıraktığı kopyalar garanti edilemez; bu nedenle doğru kapasiteyle initialize edilmeli ve sonradan yeniden tahsis engellenmelidir. Stack spilling söz konusudur: heap verisi Rust move semantiği üzerinden stack'te geçici kopyalar bırakabilir. Register temizleme kapsam dışıdır ve inline assembly veya rustc desteği gerektirir.
 
-Volatile ve non-volatile erişimleri karıştırmanın UB olup olmadığı endişesi **Unsafe Code Guidelines Working Group** içinde tartışıldı ve bu crate'teki kullanım deseni **well-defined** kabul edildi.
+`Zeroizing<Z>` `Deref` ve `DerefMut` implement eden generic bir sarmalayıcıdır ve drop anında `zeroize()` çağırır; içinde sır tutan rastgele tipler için kullanılır.
 
-#### NE GARANTİ ETMEZ (docs.rs'deki açık ifadeler)
-1. **Mikromimari saldırılar:** "There is still potential for microarchitectural attacks (ala Spectre/Meltdown) to leak 'zeroized' secrets through covert channels... this crate makes no guarantees that zeroized values cannot be leaked through such channels, as they represent flaws in the underlying hardware."
-2. **`Vec`/`String`/`CString`:** Backing buffer'ın **tüm kapasitesini** sıfırlar, **ama önceki yeniden-tahsislerin (reallocation) kopyalarını garanti edemez.** → **Doğru kapasiteyle initialize edin ve sonradan realloc'u engelleyin.**
-3. **Stack spilling:** "heap data may leave temporary copies on stack via Rust move semantics"
-4. **Register temizleme:** **Kapsam dışı** — "requires inline ASM or rustc support"
+`#[derive(ZeroizeOnDrop)]` bir marker trait ve custom derive'dır; her zaman sır içeren ve karmaşık invariant bakımı gerektiren tipler için önerilir.
 
-#### `Zeroizing<Z>`
-`Deref`/`DerefMut` implement eden generic wrapper; drop'ta `zeroize()` çağırır. İçinde sır tutan **rastgele tipler** için.
+### F.2 Assembly seviyesinde doğrulama
 
-#### `#[derive(ZeroizeOnDrop)]`
-Marker trait + custom derive. "Recommended for types always containing secrets that need complex invariant maintenance."
+CipherStash'in 9 Ocak 2024 tarihli blog yazısı Rust zeroize'ın assembly ile, portable SIMD dahil, doğrulanmasını anlatır.
 
-### F.2 Assembly-seviyesinde doğrulama — somut kanıt
+Bulguları şunlardır. `#[derive(Zeroize, ZeroizeOnDrop)]` ile ARM64 disassembly'sinde `strb wzr`, yani sıfır yazma komutları doğrulanmıştır; zeroize gerçekten çalışmaktadır. Elle yazılmış naif bir `Drop` implementasyonunda `[u8; 4]` için derleyici sıfırlama kodunu tamamen silmiştir; yazarın ifadesiyle derleyici bir nedenle sıfırlama kodunu gereksiz bulup optimize etmiştir. Aynı kod `[u32; 4]` için çalışmıştır; yani tip değişikliği optimizasyon davranışını değiştirmekte ve elle sıfırlama öngörülemez olmaktadır. Portable SIMD'de (`Simd<u16, 8>`) durum daha kötüdür: derleyici Drop implementasyonunu tamamen yok saymıştır ve zeroize crate'inin o tarihte portable SIMD desteği yoktu. Çözüm `ptr::write_volatile()` ile `compiler_fence()` kullanmaktır; ironik biçimde bellek güvenliği için `unsafe` gerekmektedir.
 
-CipherStash blog yazısı, **2024-01-09**: "Verifying Rust Zeroize with Assembly...including portable SIMD"
-Kaynak: https://cipherstash.com/blog/verifying-rust-zeroize-with-assembly-including-portable-simd
+Argus için ders şudur: elle sıfırlama asla yazılmaz. `zeroize` kullanılır ve SIMD tipleri içeren yapılarda ekstra dikkat gösterilir.
 
-**Bulgular:**
-1. `#[derive(Zeroize, ZeroizeOnDrop)]` ile ARM64 disassembly'de `strb wzr` (sıfır yazma) komutları **doğrulandı** — zeroize gerçekten çalışıyor.
-2. **Elle yazılmış naif `Drop` implementasyonu:** `[u8; 4]` için derleyici **sıfırlama kodunu tamamen sildi** ("For some reason the compiler decided that our code to zeroize was irrelevant and optimized it away"). **Aynı kod `[u32; 4]` için çalıştı.** → Tip değişikliği optimizasyon davranışını değiştiriyor; elle zeroization öngörülemez.
-3. **Portable SIMD (`Simd<u16, 8>`):** Durum daha kötü — derleyici Drop implementasyonunu **tamamen yok saydı**. zeroize crate'inin (o tarihte) portable SIMD desteği yoktu.
-4. Çözüm: `ptr::write_volatile()` + `compiler_fence()`. İronik olarak "bellek güvenliği için `unsafe` gerekiyor".
+### F.3 `secrecy`: ne yapar, ne yapmaz
 
-**Argus için ders:** **Asla elle zeroization yazmayın.** `zeroize` kullanın ve SIMD tipleri içeren yapılarda ekstra dikkatli olun.
+Sürüm 0.10.3'tür; crates.io `updated_at` değeri 9 Ekim 2024'tür. Toplam 156.698.098, son 90 günde 37.989.495 indirme almıştır.
 
-### F.3 `secrecy` — ne yapar, ne yapmaz
+**Sağladıkları.** `SecretBox<T>` çekirdek sarmalayıcıdır ve parolalar, kripto anahtarlar ile access token'lar için kullanılır. `SecretString` `SecretBox<str>` için bir type alias'tır. `SecretSlice<T>` bulunur. `ExposeSecret` ve `ExposeSecretMut` trait'leri sır erişimini açık ve kolay denetlenebilir kılar. Redakte eden bir `Debug` implementasyonu kazara debug loglamayı engeller.
 
-**Sürüm: 0.10.3**, crates.io `updated_at: 2024-10-09`. **156.698.098 toplam, 37.989.495 son 90 gün.**
-Kaynak: https://docs.rs/secrecy/latest/secrecy/
+**Açıkça yapmadıkları.** Crate basit, `no_std` dostu ve `forbid(unsafe_code)` temelli güvenli bir implementasyonu tercih ettiğini ve `mlock(2)` ile `mprotect(2)` gibi daha gelişmiş bellek koruma mekanizmalarını sağlamadığını belirtir. Dokümantasyon gelişmiş koruma için `secrets` crate'ine yönlendirir.
 
-#### Sağladıkları
-- **`SecretBox<T>`** — çekirdek wrapper (parolalar, kripto anahtarlar, access token'lar)
-- **`SecretString`** = `SecretBox<str>` type alias
-- **`SecretSlice<T>`**
-- **`ExposeSecret` / `ExposeSecretMut`** trait'leri — "make secret access explicit and easy-to-audit"
-- **Redakte eden `Debug` impl** — kazara debug loglamayı engeller
+Crate `zeroize ^1.6`'ya bağımlıdır ve opsiyonel `serde` desteği sunar; bu sır deserialization içindir.
 
-#### AÇIKÇA YAPMADIKLARI
-> "this crate favors a simple, `no_std`-friendly, safe i.e. **`forbid(unsafe_code)`**-based implementation and **does not provide more advanced memory protection mechanisms e.g. ones based on `mlock(2)`/`mprotect(2)`**."
+**0.10.0 kırıcı değişiklikleri** (17 Eylül 2024; 0.9.0 atlanmıştır). Kaldırılanlar: generic `Secret<T>` kaldırılmış ve yerine `SecretBox<T>` gelmiştir; `alloc` özelliği kaldırılmış ve zorunlu bağımlılık hâline gelmiştir; `bytes` crate entegrasyonu kaldırılmıştır; `DebugSecret` trait'i kaldırılmıştır; stack tabanlı depolamanın kaldırılmasının sonucu olarak `SecretVec` kaldırılmıştır. Eklenenler: `SecretBox` artık type alias değil bir newtype'tır; `SecretSlice<T>` eklenmiştir; `SecretBox::init_with`, `try_init_with` ve `init_with_mut` eklenmiştir; MSRV 1.60 ve Rust 2021 edition'a geçilmiştir; `SecretString` `SecretBox<str>` type alias'ı olmuştur.
 
-Dokümanı gelişmiş koruma için **`secrets` crate'ine** yönlendiriyor.
+En önemli mimari değişiklik sırların artık stack'te değil heap'te saklanmasıdır; bu heapless `no_std` desteğini sonlandırmıştır. Ancak bu güvenlik açısından iyidir: heap'teki sır, move semantiğiyle stack'te kopya bırakmaz, yalnızca pointer taşınır.
 
-`zeroize ^1.6`'ya bağımlı; opsiyonel `serde` desteği (sır deserialization için).
+Argus için `secrecy 0.10.x` kullanılır. `cryptoki`'nin de PIN için bunu kullandığı unutulmamalı ve sürüm çakışması yaşanmamalıdır.
 
-#### 0.10.0 kırıcı değişiklikleri (2024-09-17) — 0.9.0 atlandı
-Kaynak: https://github.com/iqlusioninc/crates/blob/main/secrecy/CHANGELOG.md
+### F.4 Gerçek limitler: neden `zeroize` ve `secrecy` yeterli değil
 
-**Kaldırılanlar:**
-- **Generic `Secret<T>` kaldırıldı** → `SecretBox<T>` kullanın
-- `alloc` feature'ı kaldırıldı (artık zorunlu bağımlılık)
-- `bytes` crate entegrasyonu kaldırıldı
-- **`DebugSecret` trait'i kaldırıldı**
-- **`SecretVec` kaldırıldı** (stack-tabanlı depolamanın kaldırılmasının sonucu)
-
-**Eklenenler:**
-- `SecretBox` artık **type alias değil, newtype**
-- `SecretSlice<T>`
-- `SecretBox::init_with`, `try_init_with`, `init_with_mut`
-- MSRV 1.60, Rust 2021 edition
-- `SecretString` = `SecretBox<str>` type alias
-
-**En önemli mimari değişiklik:** Sırlar artık **stack'te değil heap'te** saklanıyor → heapless `no_std` desteği bitti. Ama bu aslında **güvenlik açısından iyi**: heap'teki sır, move semantiği ile stack'te kopya bırakmaz (sadece pointer taşınır).
-
-**Argus için:** `secrecy 0.10.x` kullanın. `cryptoki`'nin de PIN için bunu kullandığını unutmayın — sürüm çakışması olmasın.
-
-### F.4 GERÇEK LİMİTLER — Neden `zeroize` + `secrecy` Yeterli Değil
-
-Bu, Argus'un "en güvenli" iddiası için en dürüst bölüm.
+Bu, Argus'un en güvenli iddiası için en dürüst bölümdür.
 
 | # | Sızıntı vektörü | Neden zeroize çözmez | Gerçek karşılık |
 |---|---|---|---|
-| 1 | **Derleyici optimizasyonu değeri kopyalar/taşır** | Volatile write sadece **son** yazmayı korur; ara kopyalar korunmaz | Heap'te tut (`SecretBox`), `Copy` implement etme, fonksiyonlar arası referansla geçir |
-| 2 | **Rust move semantiği kopya bırakır** | `let b = a;` byte-wise kopyadır; derleyici eski konumu temizlemez | Heap indirection — move sadece pointer'ı taşır. **`SecretBox`'ın 0.10'daki heap-only kararının gerçek gerekçesi budur** |
-| 3 | **`Vec` yeniden tahsisi eski buffer'ı bırakır** | zeroize dokümanında açıkça belirtilmiş | `Vec::with_capacity(exact)` + asla `push` etme, veya sabit boyutlu array |
-| 4 | **`String` büyümesi** | Aynı — realloc eski byte'ları arkada bırakır | Aynı; `SecretString` ile `str` (büyüyemez) kullanın |
-| 5 | **`mem::forget` / kasıtlı leak** | `Drop` çalışmaz → zeroize çalışmaz | Kod incelemesi; `#[deny]` lint'i (**[araç DOĞRULANMADI]**) |
-| 6 | **Panic / unwinding** | Unwind sırasında Drop **çalışır** (iyi haber) — ama `panic = "abort"` ile **ÇALIŞMAZ** | Argus'ta `panic = "unwind"` bırakın veya abort öncesi signal handler'da temizleyin (güvenilmez) |
-| 7 | **Process kill (SIGKILL) / abort** | Hiçbir Drop çalışmaz | Sadece OS-seviyesi koruma (mlock + memfd_secret) |
-| 8 | **Core dump'lar** | Heap tamamen diske yazılır | `PR_SET_DUMPABLE=0`, `RLIMIT_CORE=0`, `MADV_DONTDUMP` (G bölümü) |
-| 9 | **Swap** | Sayfa diske yazılır, zeroize sonrası bile eski kopya swap'te kalır | `mlock` / `memfd_secret` |
-| 10 | **Hibernation (S4)** | Tüm RAM diske yazılır | `memfd_secret` aktif kullanıcı varken **hibernation engellenir** (G bölümü) |
-| 11 | **DMA / cold boot** | RAM'e doğrudan erişim | IOMMU, memory encryption (AMD SME/SEV, Intel TME/TDX) |
-| 12 | **Hypervisor snapshot / live migration** | Tüm bellek imajı kopyalanır | Confidential computing (SEV-SNP, TDX, Nitro Enclaves). **Bulutta çalışıyorsanız bu gerçek bir tehdittir ve zeroize'ın hiçbir katkısı yoktur** |
-| 13 | **Mikromimari (Spectre/Meltdown)** | zeroize dokümanında **açıkça kapsam dışı** | Mikrokod + kernel mitigations |
-| 14 | **CPU register'ları** | zeroize **kapsam dışı** — "requires inline ASM or rustc support" | Yok. Kabul edilmiş risk |
+| 1 | Derleyici optimizasyonu değeri kopyalar veya taşır | Volatile write yalnızca son yazmayı korur, ara kopyalar korunmaz | Heap'te tutulur (`SecretBox`), `Copy` implement edilmez ve fonksiyonlar arası referansla geçirilir |
+| 2 | Rust move semantiği kopya bırakır | `let b = a;` bayt düzeyinde bir kopyadır ve derleyici eski konumu temizlemez | Heap indirection kullanılır; move yalnızca pointer'ı taşır. `SecretBox`'ın 0.10'daki heap-only kararının gerçek gerekçesi budur |
+| 3 | `Vec` yeniden tahsisi eski buffer'ı bırakır | zeroize dokümantasyonunda açıkça belirtilmiştir | `Vec::with_capacity(exact)` kullanılır ve hiç `push` edilmez, veya sabit boyutlu dizi tercih edilir |
+| 4 | `String` büyümesi | Aynı; yeniden tahsis eski baytları arkada bırakır | Aynı; `SecretString` ile büyüyemeyen `str` kullanılır |
+| 5 | `mem::forget` veya kasıtlı leak | `Drop` çalışmaz, dolayısıyla zeroize çalışmaz | Kod incelemesi yapılır; `#[deny]` lint'i düşünülür ancak araç doğrulanmamıştır |
+| 6 | Panic ve unwinding | Unwind sırasında Drop çalışır, bu iyi haberdir; ancak `panic = "abort"` ile çalışmaz | Argus'ta `panic = "unwind"` bırakılır veya abort öncesi signal handler'da temizlenir, bu güvenilmezdir |
+| 7 | Süreç öldürme (SIGKILL) veya abort | Hiçbir Drop çalışmaz | Yalnızca işletim sistemi seviyesi koruma: mlock ve memfd_secret |
+| 8 | Core dump'lar | Heap tamamen diske yazılır | `PR_SET_DUMPABLE=0`, `RLIMIT_CORE=0` ve `MADV_DONTDUMP`; G bölümü |
+| 9 | Swap | Sayfa diske yazılır ve zeroize sonrasında bile eski kopya swap'te kalır | `mlock` veya `memfd_secret` |
+| 10 | Hibernation (S4) | Tüm RAM diske yazılır | `memfd_secret` aktif kullanıcı varken hibernation engellenir; G bölümü |
+| 11 | DMA ve cold boot | RAM'e doğrudan erişim sağlanır | IOMMU ve bellek şifrelemesi: AMD SME ve SEV, Intel TME ve TDX |
+| 12 | Hipervizör snapshot'ı ve canlı göç | Tüm bellek imajı kopyalanır | Confidential computing: SEV-SNP, TDX, Nitro Enclaves. Bulutta çalışılıyorsa bu gerçek bir tehdittir ve zeroize'ın hiçbir katkısı yoktur |
+| 13 | Mikromimari saldırılar (Spectre ve Meltdown) | zeroize dokümantasyonunda açıkça kapsam dışıdır | Mikrokod ve kernel azaltmaları |
+| 14 | CPU register'ları | zeroize kapsamı dışındadır; inline assembly veya rustc desteği gerekir | Yoktur; kabul edilmiş risktir |
 
-### F.5 Derleyici desteği var mı?
+### F.5 Derleyici desteği
 
-- **Bugün: HAYIR.** zeroize dokümanı register temizliğinin "inline ASM or rustc support" gerektirdiğini ve kapsam dışı olduğunu söylüyor.
-- `#[no_sanitize]`: sanitizer'lar için, sır tipleri için değil.
-- **Rust'ta "secret types" için kabul edilmiş bir RFC bulamadım — [DOĞRULANMADI].** Arama bütçem tükendiği için bu konuda kesin konuşamıyorum; `rust-lang/rfcs` deposunda "secret" araması yapmanızı öneririm. Bildiğim kadarıyla konu tartışılmış ama stabil bir özellik yok.
-- İlgili literatür: "constant-time" / "secret-independent" tip sistemleri akademik olarak var (FaCT, Jasmin, HACL*) ama Rust'ta değil.
+Bugün için derleyici desteği yoktur. zeroize dokümantasyonu register temizliğinin inline assembly veya rustc desteği gerektirdiğini ve kapsam dışı olduğunu söyler. `#[no_sanitize]` sanitizer'lar içindir, sır tipleri için değildir. Rust'ta secret types için kabul edilmiş bir RFC bulunamamıştır; arama bütçesi tükendiği için bu konuda kesin konuşulamaz ve `rust-lang/rfcs` deposunda arama yapılması önerilir. Bilinen kadarıyla konu tartışılmıştır ancak stabil bir özellik yoktur. İlgili literatürde sabit zamanlı ve gizli bağımsız tip sistemleri akademik olarak mevcuttur (FaCT, Jasmin, HACL*) ancak Rust'ta değildir.
 
-**Argus'un pozisyonu:** Kritik sabit-zaman kodu (imza, karşılaştırma) için `subtle` crate'ini ve zaten sabit-zaman garantisi veren kütüphaneleri (ed25519-dalek, p256) kullanın. Kendi kripto ilkelinizi yazmayın.
+Argus'un pozisyonu şudur: kritik sabit zaman kodu için, yani imza ve karşılaştırma için, `subtle` crate'i ve zaten sabit zaman garantisi veren kütüphaneler (ed25519-dalek, p256) kullanılır. Kendi kripto ilkeli yazılmaz.
 
-### F.6 Crate karşılaştırması — Argus için karar
+### F.6 Crate karşılaştırması
 
-| Crate | Sürüm | Son güncelleme | 90g indirme | Ne yapar | Argus'ta yeri |
+| Crate | Sürüm | Son güncelleme | 90 gün indirme | Ne yapar | Argus'taki yeri |
 |---|---|---|---|---|---|
-| **`zeroize`** | 1.9.0 | 2026-06-12 | **168.883.175** | Volatile sıfırlama | **ZORUNLU** — her sır tipinde |
-| **`secrecy`** | 0.10.3 | 2024-10-09 | **37.989.495** | Tip-seviyesi kapsülleme + redakte Debug | **ZORUNLU** — API sınırlarında |
-| `secrets` | 1.3.0 | 2026-04-13 | 9.661 | mlock + guard pages + canary + core dump kapatma | **Sadece ara imzalama anahtarı için** |
-| `memsec` | 0.7.0 | 2024-06-06 | 542.675 | libsodium/utils portu; `memfd_secret` dahil | Alternatif düşük seviye |
-| `memsafe` | 1.0.2 | 2026-07-05 | 1.847 | Cross-platform güvenli wrapper | Çok yeni, adoption düşük |
-| `memsecurity` | 3.5.2 | 2024-01-05 | 4.958 | Cross-protection-boundary koruma | Bakımsız görünüyor |
-| `region` | 4.0.0 | 2026-08-07 | 2.410.207 | Cross-platform sanal bellek API | mprotect için low-level |
+| `zeroize` | 1.9.0 | 12 Haziran 2026 | 168.883.175 | Volatile sıfırlama | Zorunludur; her sır tipinde |
+| `secrecy` | 0.10.3 | 9 Ekim 2024 | 37.989.495 | Tip seviyesi kapsülleme ve redakte Debug | Zorunludur; API sınırlarında |
+| `secrets` | 1.3.0 | 13 Nisan 2026 | 9.661 | mlock, guard page, canary ve core dump kapatma | Yalnızca ara imzalama anahtarı için |
+| `memsec` | 0.7.0 | 6 Haziran 2024 | 542.675 | libsodium utils portu; `memfd_secret` dahil | Alternatif düşük seviye |
+| `memsafe` | 1.0.2 | 5 Temmuz 2026 | 1.847 | Cross-platform güvenli sarmalayıcı | Çok yenidir, benimsenmesi düşüktür |
+| `memsecurity` | 3.5.2 | 5 Ocak 2024 | 4.958 | Koruma sınırları arası koruma | Bakımsız görünmektedir |
+| `region` | 4.0.0 | 7 Ağustos 2026 | 2.410.207 | Cross-platform sanal bellek API'si | mprotect için düşük seviye |
 
-**Adoption uyarısı:** `zeroize` ve `secrecy` fiilen standarttır (yüz milyonlarca indirme). `secrets`/`memsafe`/`memsecurity` **çok düşük adoption**'a sahip (10k altı) — bu, az gözden geçirilmiş kod anlamına gelir. **"En güvenli" hedefi ile "az denenmiş bağımlılık" arasında bir gerilim var.** `secrets` crate'ini kullanacaksanız kaynağını okuyun (1.3.0, 2026-04-13'te güncellenmiş — en azından bakımlı).
+> **Benimsenme uyarısı.** `zeroize` ve `secrecy` fiilen standarttır; yüz milyonlarca indirme almışlardır. `secrets`, `memsafe` ve `memsecurity` çok düşük benimsenmeye sahiptir (10.000 altı) ve bu, az gözden geçirilmiş kod anlamına gelir. En güvenli hedefi ile az denenmiş bağımlılık arasında bir gerilim vardır. `secrets` crate'i kullanılacaksa kaynağı okunmalıdır; 1.3.0 sürümü 13 Nisan 2026'da güncellenmiştir, yani en azından bakımlıdır.
 
 ---
 
-## G) MLOCK / MEMFD_SECRET / CORE DUMP
+## G. mlock, memfd_secret ve core dump
 
-### G.1 `memfd_secret(2)` — En güçlü Linux mekanizması
+### G.1 `memfd_secret(2)`: en güçlü Linux mekanizması
 
-Kaynaklar: https://www.man7.org/linux/man-pages//man2/memfd_secret.2.html , https://lwn.net/Articles/865256/ , https://www.phoronix.com/news/Linux-5.14-memfd_secret , https://cateee.net/lkddb/web-lkddb/SECRETMEM.html
+**Ne garanti eder.** Bellek alanları yalnızca dosya tanıtıcısına sahip süreçlerin sayfa tablosunda eşlenir. Alan kernel direct map'ten kaldırılır, yani kernel'in kendisi bile normal yoldan erişemez. `mlock` gibi davranır: bellekte kalır ve asla swap'e gitmez. `RLIMIT_MEMLOCK`'a tabidir. Sayfalar `mmap()` sırasında değil, fault anında talep üzerine tahsis edilir. `FD_CLOEXEC` davranışı gereği `execve(2)` çağrısında bölge süreçten kaldırılır. Aktif bir `memfd_secret()` kullanıcısı varken hibernation engellenir; bu, hibernation imajı üzerinden sızıntıyı önlemek içindir.
 
-#### Ne garanti eder
-- Bellek alanları **sadece FD'ye sahip proseslerin sayfa tablosunda** map'lenir
-- **Kernel direct map'ten kaldırılır** → kernel'in kendisi bile normal yoldan erişemez
-- **`mlock` gibi davranır**: bellekte kalır, **asla swap'e gitmez**
-- **`RLIMIT_MEMLOCK`'a tabidir**
-- Sayfalar `mmap()` sırasında değil, **fault'ta talep üzerine** tahsis edilir
-- **`FD_CLOEXEC`**: `execve(2)`'de bölge prosesten kaldırılır
-- **Hibernation, aktif `memfd_secret()` kullanıcısı varken ENGELLENIR** — hibernation imajı üzerinden sızıntıyı önlemek için
+> **Dürüst uyarı.** Man sayfasının kendi ifadesine göre, kernel'in `memfd_secret()` ile desteklenen bellek alanlarına hiçbir koşulda erişemeyeceğine dair yüzde yüz bir garanti yoktur. Kanıt github.com/JonathonReinhart/nosecmem deposudur; `memfd_secret()` verisinin kernel'den okunabildiğini göstermektedir.
 
-#### DÜRÜST UYARI (man sayfasından, birebir)
-> **"There is no 100% guarantee that kernel won't be able to access memory ranges backed by memfd_secret() in any circumstances."**
+**Varsayılan olarak açık mı.** Çoğu sistemde değildir. Özellik Linux 5.14'te eklenmiştir. Linux 6.5'ten önce varsayılan olarak kapalıdır ve `secretmem.enable=y` kernel komut satırı parametresi gerekir; aksi hâlde `ENOSYS` döner, yani ya mimari desteklememektedir ya da kernel komut satırında açılmamıştır. `CONFIG_SECRETMEM` bir derleme seçeneğidir. Kapalı olma gerekçesi direct map'in parçalanmasının sistem performansını düşüreceği ve gizli belleği RAM'e kilitlemenin sorun yaratacağı endişesidir.
 
-Kanıt: https://github.com/JonathonReinhart/nosecmem — "Demonstrate ability to read memfd_secret() data from the kernel"
+**Rust desteği.** Adanmış ve yaygın bir `memfd-secret` crate'i bulunamamıştır. Mevcut yol `memsec` crate'idir; Linux'ta `alloc_memfd_secret` ve `free_memfd_secret` fonksiyonları sunar ve bunlar alloc ile free'ye benzer ancak memfd_secret ile desteklenir. Alternatif `libc::syscall(SYS_memfd_secret, 0)` ile doğrudan çağrı ve ardından `mmap`'tir.
 
-#### Varsayılan olarak açık mı? **HAYIR (çoğu sistemde)**
-- **Linux 5.14**'te eklendi
-- **Linux 6.5'ten ÖNCE varsayılan KAPALI** — `secretmem.enable=y` kernel cmdline parametresi gerekli
-- Aksi halde **`ENOSYS`** (ya mimari desteklemiyor ya da kernel cmdline'da açılmamış)
-- `CONFIG_SECRETMEM` derleme opsiyonu
-- Kapalı olma gerekçesi: direct map'i parçalamanın sistem performansını düşüreceği ve secret memory'yi RAM'e kilitlemenin sorun yaratacağı korkusu
+**Pratik kullanılabilirlik.**
 
-#### Rust desteği
-**Adanmış, yaygın bir `memfd-secret` crate'i bulamadım.** Mevcut yol:
-- **`memsec`** crate'i: Linux'ta **`alloc_memfd_secret` / `free_memfd_secret`** fonksiyonları — "implementations similar to alloc/free but backed by memfd_secret"
-  Kaynak: https://docs.rs/memsec/ , https://github.com/quininer/memsec
-- Alternatif: `libc::syscall(SYS_memfd_secret, 0)` ile doğrudan çağrı + `mmap`
-
-#### Pratik kullanılabilirlik — Argus için gerçekçi değerlendirme
-| Ortam | memfd_secret çalışır mı? |
+| Ortam | memfd_secret çalışır mı |
 |---|---|
-| Kendi bare-metal sunucunuz (kernel cmdline kontrolü var) | **Evet** — `secretmem.enable=y` ekleyin |
-| Kendi kernel'inizi seçtiğiniz VM | **Evet** |
-| Managed Kubernetes (EKS/GKE/AKS) | **Muhtemelen hayır** — node kernel cmdline'ına erişemezsiniz **[DOĞRULANMADI]** |
-| Linux 6.5+ node | Varsayılan açık olmalı |
+| Kendi bare-metal sunucumuz; kernel komut satırı kontrolü var | Evet; `secretmem.enable=y` eklenir |
+| Kendi kernel'imizi seçtiğimiz VM | Evet |
+| Yönetilen Kubernetes (EKS, GKE, AKS) | Muhtemelen hayır; node kernel komut satırına erişilemez, bu doğrulanmamıştır |
+| Linux 6.5 ve üstü node | Varsayılan açık olmalıdır |
 
-**Tavsiye:** `memfd_secret`'i **opsiyonel bir sertleştirme (hardening) katmanı** olarak uygulayın. Başlangıçta deneyin; `ENOSYS` gelirse `mlock`'a düşün ve **bunu bir startup log satırı + metrik olarak raporlayın** (`argus_secret_memory_backend{type="memfd_secret|mlock|none"}`). Argus'un güvenlik duruşu şeffaf olmalı.
+**Tavsiye.** `memfd_secret` opsiyonel bir sertleştirme katmanı olarak uygulanır. Başlangıçta denenir; `ENOSYS` gelirse `mlock`'a düşülür ve bu bir başlangıç log satırı ile metrik olarak raporlanır (`argus_secret_memory_backend{type="memfd_secret|mlock|none"}`). Argus'un güvenlik duruşu şeffaf olmalıdır.
 
-### G.2 `mlock` / `mlockall`
+### G.2 `mlock` ve `mlockall`
 
-#### Rust'tan
-- **`memsec::mlock` / `memsec::munlock`** — cross-platform
-- **`region`** crate (4.0.0, 90 günde 2.410.207 indirme) — cross-platform sanal bellek API
-- Ham `libc::mlock` / `libc::mlockall`
-- **`secrets`** crate mlock'u zaten içinde yapıyor
+Rust'tan erişim yolları `memsec::mlock` ile `memsec::munlock` (cross-platform), `region` crate'i (4.0.0, 90 günde 2.410.207 indirme; cross-platform sanal bellek API'si), ham `libc::mlock` ile `libc::mlockall` ve mlock'u zaten içinde yapan `secrets` crate'idir.
 
-#### `RLIMIT_MEMLOCK`
-`memsafe` dokümantasyonundan (https://lib.rs/crates/memsafe):
-> "Each secret occupies a full page (typically 4 KiB) and counts against `RLIMIT_MEMLOCK`, so **the number of live secrets is bounded**."
-> "Construction requires about **five syscalls** and every guard cycle uses **two mprotect calls**."
+**`RLIMIT_MEMLOCK`.** `memsafe` dokümantasyonuna göre her sır tam bir sayfa, tipik olarak 4 KiB, kaplar ve `RLIMIT_MEMLOCK`'a sayılır; dolayısıyla canlı sırların sayısı sınırlıdır. Yapılandırma yaklaşık beş syscall gerektirir ve her guard döngüsü iki `mprotect` çağrısı kullanır.
 
-**Argus için önemli:** Her ara anahtar 4 KiB sayfa tüketir. 3-anahtar overlap × N düğüm başına, sorun değil. Ama sırları gelişigüzel `secrets::SecretBox` içine sararsanız `RLIMIT_MEMLOCK`'a çarparsınız.
+Argus için önemi şudur: her ara anahtar 4 KiB sayfa tüketir. Düğüm başına üç anahtarlık overlap ile bu sorun değildir. Ancak sırlar gelişigüzel `secrets::SecretBox` içine sarılırsa `RLIMIT_MEMLOCK`'a çarpılır.
 
-#### Container etkileri — **[DOĞRULANMADI]**
-Docker/Kubernetes varsayılan `RLIMIT_MEMLOCK` değerini yetkili bir kaynakla doğrulayamadım (arama bütçesi tükendi). Bildiğim genel durum:
-- Container'larda `memlock` limiti çoğu zaman düşüktür (tarihsel olarak 64 KB) ve **`CAP_IPC_LOCK`** yeteneği veya yükseltilmiş `ulimit -l` gerektirir
-- Docker: `--ulimit memlock=-1:-1`
-- Kubernetes: `securityContext.capabilities.add: ["IPC_LOCK"]` ve/veya node-level ulimit
+**Container etkileri doğrulanamamıştır.** Docker ve Kubernetes'in varsayılan `RLIMIT_MEMLOCK` değeri yetkili bir kaynakla doğrulanamamıştır; arama bütçesi tükenmiştir. Bilinen genel durum şudur: container'larda memlock limiti çoğu zaman düşüktür, tarihsel olarak 64 KB'dir ve `CAP_IPC_LOCK` yeteneği veya yükseltilmiş `ulimit -l` gerektirir. Docker'da `--ulimit memlock=-1:-1`, Kubernetes'te `securityContext.capabilities.add: ["IPC_LOCK"]` ve node seviyesinde ulimit kullanılır.
 
-**Eylem:** Argus'un başlangıç kodunda `getrlimit(RLIMIT_MEMLOCK)` okuyup loglayın ve yetersizse **açıkça uyarın**. Bunu belgeleyin — deployment dokümanında "IPC_LOCK gerekiyor" yazın.
+**Eylem.** Argus'un başlangıç kodunda `getrlimit(RLIMIT_MEMLOCK)` okunup loglanır ve yetersizse açıkça uyarı verilir. Bu belgelenir; dağıtım dokümanında IPC_LOCK gerektiği yazılır.
 
-### G.3 Guard pages / libsodium tarzı koruma
+### G.3 Guard page'ler ve libsodium tarzı koruma
 
-**`secrets` crate 1.3.0** (crates.io: 2026-04-13, 9.661 dl/90g)
-Kaynak: https://docs.rs/secrets/latest/secrets/
+`secrets` crate'i 1.3.0 (crates.io: 13 Nisan 2026, 90 günde 9.661 indirme) şunları sağlar: tahsisin öncesinde ve sonrasında guard page'ler, yani buffer overflow ve underflow yakalama; underflow canary'si, yani guard page'e ulaşmadan önce underflow tespiti; free anında otomatik sıfırlama; `mlock(2)` entegrasyonu; UNIX release build'lerinde varsayılan olarak kapalı core dump'lar, `allow-coredumps` özelliğiyle açılabilir. Tipleri `Secret` (stack, sabit uzunluk), `SecretBox` (heap, sabit) ve `SecretVec`'tir (heap, değişken). Erişim closure'lar üzerinden yapılır ve sırın görünürlüğü dar bir kapsama kısıtlanır.
 
-Sağladıkları:
-- **Tahsisin öncesinde ve sonrasında guard pages** (buffer overflow/underflow yakalar)
-- **Underflow canary** (guard page'e ulaşmadan önce underflow tespiti)
-- **Free'de otomatik sıfırlama**
-- **`mlock(2)`** entegrasyonu
-- **UNIX release build'lerinde core dump'lar varsayılan olarak KAPALI** (`allow-coredumps` feature ile açılabilir)
-- Tipler: `Secret` (stack, sabit uzunluk), `SecretBox` (heap, sabit), `SecretVec` (heap, değişken)
-- Erişim **closure'lar** üzerinden — sırın görünürlüğü dar bir kapsama kısıtlanır
+Bu, libsodium'un `sodium_malloc` ve `sodium_mprotect_noaccess` deseninin Rust karşılığıdır.
 
-Bu, libsodium'un `sodium_malloc`/`sodium_mprotect_noaccess` deseninin Rust karşılığıdır.
-
-**`memsafe` alternatifi:** `MADV_DONTDUMP` de kullanıyor — core dump'tan sadece o sayfaları çıkarır (tüm core dump'ı kapatmadan). Bu **daha iyi bir denge** olabilir.
+`memsafe` alternatifi `MADV_DONTDUMP` de kullanır ve core dump'tan yalnızca ilgili sayfaları çıkarır, tüm core dump'ı kapatmadan. Bu daha iyi bir denge olabilir.
 
 ### G.4 Core dump'ları kapatma
 
-#### `prctl(PR_SET_DUMPABLE, 0)`
-Kaynak: https://man7.org/linux/man-pages/man2/PR_SET_DUMPABLE.2const.html
+**`prctl(PR_SET_DUMPABLE, 0)`.** Man sayfasına göre bu çağrı dumpable özniteliğinin durumunu ayarlar; öznitelik, varsayılan davranışı core dump üretmek olan bir sinyal teslim edildiğinde çağıran süreç için core dump üretilip üretilmeyeceğini belirler.
 
-> "Set the state of the 'dumpable' attribute, which determines whether core dumps are produced for the calling process upon delivery of a signal whose default behavior is to produce a core dump."
+`SUID_DUMP_DISABLE` (değer 0) ayarlandığında üç şey olur: süreç core dump üretmez; `/proc/[pid]` dizinindeki dosyaların sahipliği `root:root` olarak değişir ve erişim kısıtlanır; sürece `ptrace(2)` ile `PTRACE_ATTACH` yapılamaz.
 
-**`SUID_DUMP_DISABLE` (değer `0L`)** ayarlandığında:
-1. Proses **core dump üretmez**
-2. **`/proc/[pid]` dizinindeki dosyaların sahipliği değişir** → `root:root` (kısıtlı erişim)
-3. **`ptrace(2)` `PTRACE_ATTACH` ile bağlanılamaz**
+Bu üçü birlikte Argus için çok değerlidir: `/proc/<pid>/environ`, `/proc/<pid>/maps` ve `/proc/<pid>/mem` aynı UID'deki saldırgana kapanır ve debugger attach engellenir.
 
-Bu üçü birden Argus için **çok değerli**: `/proc/<pid>/environ`, `/proc/<pid>/maps`, `/proc/<pid>/mem` aynı-UID saldırgana kapanır ve debugger attach engellenir.
+**Diğer katmanlar.** `RLIMIT_CORE = 0` için `setrlimit(RLIMIT_CORE, {0,0})` kullanılır. `/proc/sys/kernel/core_pattern` sistem genelindedir; core'u bir pipe'a yönlendiriyorsa (systemd-coredump, apport) `RLIMIT_CORE` bazı durumlarda bypass edilebilir, bu nedenle `PR_SET_DUMPABLE` daha güvenilirdir. `madvise(MADV_DONTDUMP)` yalnızca belirli sayfaları core dump'tan çıkarır; `memsafe` bunu yapmaktadır.
 
-#### Diğer katmanlar
-- **`RLIMIT_CORE = 0`** — `setrlimit(RLIMIT_CORE, {0,0})`
-- **`/proc/sys/kernel/core_pattern`** — sistem geneli; core'u bir pipe'a yönlendiriyorsa (systemd-coredump, apport) `RLIMIT_CORE` bazı durumlarda **bypass edilebilir** → bu yüzden `PR_SET_DUMPABLE` daha güvenilirdir
-- **`madvise(MADV_DONTDUMP)`** — sadece belirli sayfaları core dump'tan çıkarır (`memsafe` bunu yapıyor)
-
-#### Debuggability maliyeti — dürüst muhasebe
+**Debuggability maliyeti.**
 
 | Kaybedilen | Etki | Telafi |
 |---|---|---|
-| Core dump / post-mortem analiz | Prod crash'ini offline inceleyemezsiniz | Yapılandırılmış panic handler + backtrace log'u (`std::backtrace`), sırlar HARİÇ |
-| `gdb` / `lldb` attach | Canlı debug imkânsız | `tokio-console`, metrics, tracing spans |
-| `perf` / profiler'lar | Bazıları ptrace kullanır | eBPF tabanlı profiler'lar (`parca`, `pyroscope`) `PTRACE_ATTACH` gerektirmeyebilir **[DOĞRULANMADI]** |
-| Sentry/minidump crash reporting | Heap dump gitmez (bu **iyi**) | Sadece stack trace + mesaj gönderin |
-| `strace` | Çalışmaz | Uygulama-seviyesi audit log |
+| Core dump ve post-mortem analiz | Üretim çökmesi offline incelenemez | Yapılandırılmış panic handler ve `std::backtrace` ile backtrace log'u; sırlar hariç tutulur |
+| `gdb` ve `lldb` attach | Canlı debug imkânsızdır | `tokio-console`, metrikler ve tracing span'leri |
+| `perf` ve profiler'lar | Bazıları ptrace kullanır | eBPF tabanlı profiler'lar (`parca`, `pyroscope`) `PTRACE_ATTACH` gerektirmeyebilir; doğrulanmamıştır |
+| Sentry ve minidump crash reporting | Heap dump gitmez; bu iyidir | Yalnızca stack trace ve mesaj gönderilir |
+| `strace` | Çalışmaz | Uygulama seviyesi denetim kaydı |
 
-**Argus için önerim — kademeli yaklaşım:**
+**Argus için kademeli yaklaşım.**
+
 ```
 ARGUS_HARDENING=paranoid   → PR_SET_DUMPABLE=0 + RLIMIT_CORE=0 + mlock + memfd_secret
-ARGUS_HARDENING=balanced   → MADV_DONTDUMP (sadece sır sayfaları) + RLIMIT_CORE=0 + mlock
-ARGUS_HARDENING=dev        → hiçbiri, uyarı logla
+ARGUS_HARDENING=balanced   → MADV_DONTDUMP (yalnızca sır sayfaları) + RLIMIT_CORE=0 + mlock
+ARGUS_HARDENING=dev        → hiçbiri; uyarı loglanır
 ```
-Varsayılan **`balanced`**; prod deployment dokümanında `paranoid` önerin. `MADV_DONTDUMP` sayesinde `balanced` modda core dump alabilirsiniz ama sır sayfaları içinde olmaz — en iyi denge budur.
+
+Varsayılan `balanced`'tır; üretim dağıtım dokümanında `paranoid` önerilir. `MADV_DONTDUMP` sayesinde `balanced` modda core dump alınabilir ancak sır sayfaları içinde olmaz; en iyi denge budur.
 
 ---
 
-## H) SIR SIZINTI VEKTÖRLERİ
+## H. Sır sızıntı vektörleri
 
-### H.1 Loglama — `tracing` ile kazara sır kaydı
+### H.1 Loglama: `tracing` ile kazara sır kaydı
 
-Kaynak: https://docs.rs/tracing/latest/tracing/
+**Mekanizma.** `?field` sigil'i alanı `fmt::Debug` implementasyonuyla kaydeder. `%field` sigil'i `fmt::Display` implementasyonuyla kaydeder. Struct alanları nokta notasyonuyla otomatik kaydedilir; `User { name, email }` yapısı `user.name` ve `user.email` olarak ayrı span alanlarına yazılır.
 
-**Mekanizma:**
-- **`?field` sigil'i** → alanı **`fmt::Debug`** implementasyonuyla kaydeder
-- **`%field` sigil'i** → **`fmt::Display`** implementasyonuyla kaydeder
-- **Struct alanları nokta notasyonuyla otomatik kaydedilir**: `User { name, email }` → `user.name` ve `user.email` ayrı span alanları olarak
+Sonuç şudur: `tracing` makrosuna `?` ile giren her tip kendi `Debug` çıktısını sızdırır. `#[derive(Debug)]` taşıyan bir struct'ın içindeki `Vec<u8>` bir anahtar, log satırına düz metin olarak yazılır.
 
-**Sonuç:** `tracing` makrosuna `?` ile giren **her tip** kendi `Debug`'ını sızdırır. `#[derive(Debug)]` olan bir struct'ın içindeki bir `Vec<u8>` anahtar, log satırına düz metin olarak yazılır.
+**En tehlikeli desenler.** Argus'ta yasaklanmalıdır.
 
-#### En tehlikeli desenler (Argus'ta yasaklanmalı)
 ```rust
-// TEHLİKELİ
-#[derive(Debug)]                  // ← anahtar materyalini içeren tipte ASLA
+// Tehlikeli
+#[derive(Debug)]                  // anahtar materyali içeren tipte kullanılmaz
 struct SigningKey { d: Vec<u8>, kid: String }
 
-tracing::debug!(?signing_key);    // ← tüm private key log'a
-tracing::error!(?err);            // ← err içinde key materyali olabilir
-tracing::info!(?request);         // ← request.client_secret
-anyhow::anyhow!("failed for {:?}", key)  // ← hata mesajında sır
+tracing::debug!(?signing_key);    // tüm private key log'a gider
+tracing::error!(?err);            // err içinde key materyali olabilir
+tracing::info!(?request);         // request.client_secret sızabilir
+anyhow::anyhow!("failed for {:?}", key)  // hata mesajında sır
 ```
 
-#### Savunma katmanları (Argus için somut)
+**Savunma katmanları.**
 
-**1. Tip seviyesinde — birincil savunma**
+Birinci ve birincil savunma tip seviyesindedir:
+
 ```rust
 // secrecy::SecretBox'ın Debug'ı redakte eder
 struct SigningKey {
@@ -1120,7 +812,8 @@ struct SigningKey {
 }
 ```
 
-**2. `Debug` derive'ını yasaklayan newtype**
+İkinci savunma `Debug` derive'ını yasaklayan bir newtype'tır:
+
 ```rust
 pub struct KeyMaterial(Zeroizing<Vec<u8>>);
 
@@ -1129,169 +822,125 @@ impl std::fmt::Debug for KeyMaterial {
         f.write_str("KeyMaterial([REDACTED])")
     }
 }
-// Display implement ETMEYİN — %field'i imkânsız kılın
-// Serialize implement ETMEYİN — JSON'a kaçamasın
+// Display implement edilmez — %field imkânsız kılınır
+// Serialize implement edilmez — JSON'a kaçamaz
 ```
 
-**3. Clippy lint'i var mı? — [DOĞRULANMADI]**
-Bu konuda standart bir clippy lint'i bulup doğrulayamadım (arama bütçesi tükendi). Bildiğim seçenekler:
-- **`dylint`** ile özel lint yazmak — Argus'un ölçeğinde buna değer. Bir `#[argus::secret]` attribute'u tanımlayıp, o tiple işaretli her şeyin `Debug`/`Display`/`Serialize` implement etmediğini ve tracing makrolarına geçmediğini denetleyin.
-- **`cargo-semver-checks` benzeri CI kontrolü:** `grep -r "derive(.*Debug" src/crypto/` ile bir CI guard
-- **`#[deny(missing_debug_implementations)]`'ın TERSİ** gerekiyor — böyle bir lint yok
+Üçüncü savunma bir clippy lint'idir ancak bu konuda standart bir lint bulunup doğrulanamamıştır; arama bütçesi tükenmiştir. Bilinen seçenekler `dylint` ile özel bir lint yazmaktır ve Argus'un ölçeğinde buna değer: bir `#[argus::secret]` attribute'u tanımlanır ve o tiple işaretli her şeyin `Debug`, `Display` ve `Serialize` implement etmediği ile tracing makrolarına geçmediği denetlenir. Alternatif olarak CI'da `grep -r "derive(.*Debug" src/crypto/` benzeri bir guard konur. `#[deny(missing_debug_implementations)]` lint'inin tersi gerekmektedir ve böyle bir lint yoktur.
 
-**4. Log pipeline'ında son savunma**
-- Bir `tracing_subscriber::Layer` yazın: alan değerlerinde yüksek-entropi base64/hex desenleri arayıp redakte etsin. Bu **son çare** — tip sistemine güvenin, buna değil.
-- Log toplama katmanında (Vector/Fluent Bit) redaksiyon kuralları.
+Dördüncü savunma log hattındaki son savunmadır: bir `tracing_subscriber::Layer` yazılır ve alan değerlerinde yüksek entropili base64 veya hex desenleri aranarak redakte edilir. Bu son çaredir; tip sistemine güvenilmeli, buna değil. Log toplama katmanında (Vector, Fluent Bit) redaksiyon kuralları eklenir.
 
-**5. Test**
-Argus'un test suite'ine bir test ekleyin: bir signing key üretin, tüm log seviyelerinde tüm public API'yi çağırın, log çıktısını yakalayın, anahtar byte'larının hex/base64 gösterimlerini **grep'leyin**. Bulursa fail.
+Beşinci savunma testtir. Argus'un test süitine bir test eklenir: bir imzalama anahtarı üretilir, tüm log seviyelerinde tüm public API çağrılır, log çıktısı yakalanır ve anahtar baytlarının hex ile base64 gösterimleri aranır. Bulunursa test başarısız olur.
 
-**6. Gerçek CVE'ler — [DOĞRULANMADI]**
-Rust'ta `Debug`/loglama üzerinden sır sızdıran spesifik bir CVE bulup doğrulayamadım. Genel olarak bu sınıfın (CWE-532: Insertion of Sensitive Information into Log File) çok yaygın olduğunu biliyorum ama Argus dokümanında **isim vererek bir vaka aktarmayın** — ben doğrulayamadım.
+Rust'ta `Debug` veya loglama üzerinden sır sızdıran spesifik bir CVE bulunup doğrulanamamıştır. Genel olarak bu sınıfın (CWE-532, hassas bilginin log dosyasına eklenmesi) çok yaygın olduğu bilinmektedir; ancak Argus dokümanında isim vererek bir vaka aktarılmamalıdır.
 
 ### H.2 `/proc/<pid>/environ` ve `/proc/<pid>/cmdline`
 
-**Mekanizma (genel OS bilgisi, bu görevde ayrıca kaynaklandırılmadı):**
-- `/proc/<pid>/environ` — prosesin **başlangıç** ortam değişkenlerini içerir; aynı UID'deki her proses okuyabilir
-- `/proc/<pid>/cmdline` — komut satırı argümanları; **tüm kullanıcılar** tarafından okunabilir (`ps aux`)
-- **`prctl(PR_SET_DUMPABLE, 0)` bunları `root:root` yapar** (G.4) → aynı-UID saldırganı engeller
-
-#### Sır teslim yöntemleri — karşılaştırma
+`/proc/<pid>/environ` sürecin başlangıç ortam değişkenlerini içerir ve aynı UID'deki her süreç okuyabilir. `/proc/<pid>/cmdline` komut satırı argümanlarını içerir ve tüm kullanıcılar tarafından okunabilir (`ps aux`). `prctl(PR_SET_DUMPABLE, 0)` bunları `root:root` yapar (G.4) ve aynı UID'deki saldırganı engeller.
 
 | Yöntem | Sızıntı riski | Argus'ta |
 |---|---|---|
-| **Komut satırı argümanı** | **En kötü** — `ps` ile herkese açık | **ASLA** |
-| **Ortam değişkeni** | `/proc/pid/environ`; child proseslere miras; crash reporter'lar toplar; `docker inspect` gösterir | Sadece düşük-hassasiyetli config |
-| **Dosya (0600, tmpfs)** | Disk (tmpfs ise RAM), okuduktan sonra kapatılabilir | **İyi** — bootstrap credential için |
-| **Unix domain socket** | Dosya sistemi izinleri + `SO_PEERCRED` ile peer doğrulama | **En iyi** — Vault Agent / SPIRE Workload API deseni |
-| **KMS/IMDS ile runtime çekme** | Diskte/env'de hiç yok | **En iyi** — IAM rolü ile |
+| Komut satırı argümanı | En kötüsü; `ps` ile herkese açıktır | Kullanılmaz |
+| Ortam değişkeni | `/proc/pid/environ`'da görünür, child süreçlere miras kalır, crash reporter'lar toplar ve `docker inspect` gösterir | Yalnızca düşük hassasiyetli yapılandırma için |
+| Dosya (0600, tmpfs) | Disk; tmpfs ise RAM. Okuduktan sonra kapatılabilir | İyi; bootstrap credential için |
+| Unix domain socket | Dosya sistemi izinleri ve `SO_PEERCRED` ile peer doğrulaması | En iyi; Vault Agent ve SPIRE Workload API deseni |
+| KMS veya IMDS ile çalışma zamanında çekme | Diskte ve ortam değişkeninde hiç bulunmaz | En iyi; IAM rolü ile |
 
-**Argus önerisi:** Bootstrap kimliği (KMS'e erişim) **workload identity** ile (IRSA/Workload Identity/Managed Identity) — hiç sır dosyası olmasın. Statik sır gerekiyorsa **Unix socket üzerinden Vault Agent / SPIFFE Workload API**.
+**Argus önerisi.** Bootstrap kimliği, yani KMS'e erişim, workload identity ile sağlanır (IRSA, Workload Identity, Managed Identity) ve hiç sır dosyası olmaz. Statik sır gerekiyorsa Unix socket üzerinden Vault Agent veya SPIFFE Workload API kullanılır.
 
 ### H.3 Kubernetes Secrets
 
-Kaynak: https://kubernetes.io/docs/concepts/configuration/secret/
+Kubernetes'in kendi uyarısı şudur: Kubernetes Secret'ları varsayılan olarak API sunucusunun altındaki veri deposunda, yani etcd'de şifrelenmemiş olarak saklanır. API erişimi olan herkes bir Secret'ı alabilir veya değiştirebilir; etcd'ye erişimi olan herkes de aynısını yapabilir.
 
-**Kubernetes'in kendi uyarısı (birebir):**
-> "Kubernetes Secrets are, **by default, stored unencrypted in the API server's underlying data store (etcd)**. Anyone with API access can retrieve or modify a Secret, and so can anyone with access to etcd."
+Erişim riski şudur: bir namespace'te Pod yaratma yetkisi olan herkes o namespace'teki herhangi bir Secret'ı okuyabilir; bu doğrudan API ile veya Deployment yaratma yetkisi üzerinden dolaylı olarak mümkündür.
 
-**Erişim riski:**
-> Bir namespace'te Pod yaratma yetkisi olan **herkes o namespace'teki HERHANGİ bir Secret'ı okuyabilir** — doğrudan API ile veya Deployment yaratma yetkisi üzerinden dolaylı olarak.
+Kubernetes'in önerdiği asgari önlemler encryption at rest'i etkinleştirmek, en az yetki ilkesiyle RBAC yapılandırmak, container erişimini kısıtlayarak Secret'ı yalnızca ihtiyacı olan container'a vermek ve harici secret store sağlayıcılarını değerlendirmektir.
 
-**Kubernetes'in önerdiği minimum önlemler:**
-1. **Encryption at Rest'i etkinleştir** (https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/)
-2. **En az yetki ilkesiyle RBAC** yapılandır
-3. **Container erişimini kısıtla** — Secret'ı sadece ihtiyacı olan container'a ver
-4. **Harici secret store sağlayıcıları düşün** — https://secrets-store-csi-driver.sigs.k8s.io/
-
-Ayrıca: https://kubernetes.io/docs/concepts/security/secrets-good-practices/
-
-#### Karşılaştırma — Argus için
 | Yaklaşım | Değerlendirme |
 |---|---|
-| **K8s Secret → env var** | **En kötü**: etcd'de şifresiz + `/proc/pid/environ` + child prosesler + `kubectl describe` |
-| **K8s Secret → volume mount** | Daha iyi: tmpfs'te, env'de değil. Ama etcd hâlâ şifresiz (encryption-at-rest yoksa) |
-| **K8s Secret + KMS encryption provider** | İyi: etcd'de şifreli |
-| **Secrets Store CSI Driver** | Daha iyi: etcd'ye hiç girmez, doğrudan Vault/KMS'ten tmpfs'e |
-| **Vault Agent sidecar / injector** | Çok iyi: kısa ömürlü token, otomatik yenileme |
-| **Workload Identity (IRSA/GKE WI) + doğrudan KMS** | **En iyi**: hiçbir yerde statik sır yok |
+| K8s Secret'tan ortam değişkenine | En kötüsü: etcd'de şifresizdir, `/proc/pid/environ`'da görünür, child süreçlere geçer ve `kubectl describe` gösterir |
+| K8s Secret'tan volume mount'a | Daha iyidir: tmpfs'tedir, ortam değişkeninde değildir. Ancak encryption at rest yoksa etcd hâlâ şifresizdir |
+| K8s Secret ile KMS encryption provider | İyidir: etcd'de şifrelidir |
+| Secrets Store CSI Driver | Daha iyidir: etcd'ye hiç girmez, doğrudan Vault veya KMS'ten tmpfs'e iner |
+| Vault Agent sidecar veya injector | Çok iyidir: kısa ömürlü token ve otomatik yenileme sağlar |
+| Workload Identity (IRSA, GKE Workload Identity) ile doğrudan KMS | En iyisidir: hiçbir yerde statik sır yoktur |
 
-**Argus'un dokümante etmesi gereken:** "Argus, KMS'e workload identity ile erişir. Kubernetes Secret kullanmaz. Eğer kullanmak zorundaysanız, encryption-at-rest'i etkinleştirin ve volume mount kullanın, env var değil."
+Argus'un dokümante etmesi gereken ifade şudur: Argus KMS'e workload identity ile erişir ve Kubernetes Secret kullanmaz; kullanılması zorunluysa encryption at rest etkinleştirilmeli ve ortam değişkeni yerine volume mount tercih edilmelidir.
 
 ### H.4 Core dump'lar ve crash reporter'lar
 
-- **G.4**'te ele alındı. Ek olarak:
-- **Sentry / minidump / Crashpad:** Minidump'lar **heap segmentlerini içerebilir**. Argus Sentry kullanacaksa `before_send` hook'unda tüm binary payload'ları sıfırlayın ve **sadece** stack trace + mesaj gönderin.
-- **`secrets` crate zaten UNIX release build'lerinde core dump'ı kapatıyor** — bu ücretsiz bir kazanç.
-- **systemd-coredump:** `/etc/systemd/coredump.conf` → `Storage=none`. Ama `PR_SET_DUMPABLE=0` daha güvenilir çünkü uygulama kontrolünde.
+Konu G.4'te ele alınmıştır. Ek noktalar şunlardır. Sentry, minidump ve Crashpad'in ürettiği minidump'lar heap segmentlerini içerebilir; Argus Sentry kullanacaksa `before_send` hook'unda tüm ikili payload'lar sıfırlanır ve yalnızca stack trace ile mesaj gönderilir. `secrets` crate'i UNIX release build'lerinde core dump'ı zaten kapatır; bu maliyetsiz bir kazançtır. systemd-coredump için `/etc/systemd/coredump.conf` dosyasında `Storage=none` ayarlanır; ancak `PR_SET_DUMPABLE=0` daha güvenilirdir, çünkü uygulama kontrolündedir.
 
-### H.5 Yedekler, DB dump'ları, replikasyon
+### H.5 Yedekler, veritabanı dump'ları ve replikasyon
 
-Argus için:
-- **Ara imzalama anahtarları hiçbir zaman DB'ye yazılmamalı** — bu, hibrit modelin bir yan faydası. Bellekte doğar, bellekte ölür.
-- Kök anahtar zaten KMS/HSM'de — DB'de yok.
-- **DB'de ne var:** JWKS geçmişi (sadece **public** anahtarlar), client secret hash'leri (Argon2id), refresh token hash'leri, kullanıcı kimlik bilgileri.
-- **Client secret'ları asla düz metin saklamayın** — hash'leyin (Argon2id). Keycloak'ın client secret'ı geri gösterebilmesi bir zayıflıktır; Argus bunu yapmamalı.
-- **Replikasyon:** WAL/binlog kanalları TLS + at-rest şifreli olmalı.
-- **Yedek:** `pg_dump` çıktısı client secret hash'lerini ve refresh token hash'lerini içerir — bu dump'lar KMS ile şifrelenmeli.
-- **Test/staging'e prod dump kopyalama** — en yaygın gerçek sızıntı yolu. CI'da yasaklayın.
+Ara imzalama anahtarları hiçbir zaman veritabanına yazılmaz; bu, hibrit modelin bir yan faydasıdır. Anahtar bellekte doğar, bellekte ölür. Kök anahtar zaten KMS veya HSM'dedir ve veritabanında bulunmaz.
 
-### H.6 Zamanlama / hata mesajı farkları (yan kanallar)
+Veritabanında bulunanlar JWKS geçmişi (yalnızca public anahtarlar), client secret hash'leri (Argon2id), refresh token hash'leri ve kullanıcı kimlik bilgileridir.
 
-- **Client secret doğrulama:** `subtle::ConstantTimeEq` kullanın, `==` değil.
-- **Hata mesajı ayrımı:** "unknown client" vs "invalid secret" **aynı** hata dönmeli (OAuth 2.0 `invalid_client`). Farklı mesaj = client enumeration.
-- **Zamanlama ayrımı:** Var olmayan client için Argon2 çalıştırmazsanız, cevap süresi farkından client varlığı anlaşılır. **Dummy hash ile sabit-zamanlı yol** izleyin.
-- **JWKS `kid` lookup:** Bilinmeyen `kid` için sabit zamanlı yanıt (bu düşük riskli ama tutarlılık iyi).
-- **Rate limiting'in kendisi bir yan kanaldır:** "bu client throttle'landı" bilgisi client varlığını sızdırır.
+Client secret'ları asla düz metin saklanmaz, Argon2id ile hash'lenir. Keycloak'ın client secret'ı geri gösterebilmesi bir zayıflıktır ve Argus bunu yapmamalıdır.
+
+Replikasyonda WAL ve binlog kanalları TLS ile korunmalı ve at-rest şifreli olmalıdır. Yedeklerde `pg_dump` çıktısı client secret hash'lerini ve refresh token hash'lerini içerir; bu dump'lar KMS ile şifrelenmelidir. Üretim dump'ının test veya staging ortamına kopyalanması en yaygın gerçek sızıntı yoludur ve CI'da yasaklanmalıdır.
+
+### H.6 Zamanlama ve hata mesajı farkları
+
+Client secret doğrulamasında `subtle::ConstantTimeEq` kullanılır, `==` kullanılmaz. Hata mesajı ayrımı yapılmaz; bilinmeyen client ile geçersiz secret için aynı hata dönmelidir, yani OAuth 2.0'ın `invalid_client` hatası; farklı mesaj client enumeration üretir. Zamanlama ayrımı da yapılmaz: var olmayan client için Argon2 çalıştırılmazsa cevap süresi farkından client varlığı anlaşılır, bu nedenle dummy hash ile sabit zamanlı bir yol izlenir. JWKS `kid` aramasında bilinmeyen `kid` için sabit zamanlı yanıt verilir; risk düşüktür ancak tutarlılık iyidir. Rate limiting'in kendisi de bir yan kanaldır; bir client'ın throttle edildiği bilgisi o client'ın varlığını sızdırır.
 
 ---
 
-## ARGUS İÇİN ÖZET KARAR TABLOSU
+## Argus için özet karar tablosu
 
-| Araç / Teknik | Olgunluk | Maliyet | Ne kazandırır | Argus'ta nerede |
+| Araç veya teknik | Olgunluk | Maliyet | Ne kazandırır | Argus'ta nerede |
 |---|---|---|---|---|
-| **`zeroize` 1.9.0** | **Çok yüksek** (169M/90g) | Sıfır | Derleyicinin sıfırlamayı silmemesi | **Her sır tipinde — ZORUNLU** |
-| **`secrecy` 0.10.3** | **Çok yüksek** (38M/90g) | Sıfır | Redakte Debug + explicit exposure | **API sınırlarında — ZORUNLU** |
-| **`cryptoki` 0.12.0** | Yüksek (1.2M/90g) | Sıfır (+HSM donanımı) | PKCS#11 3.x, Session: Send | Kök anahtar HSM'de ise |
-| **`r2d2-cryptoki` 0.5.0** | Orta (28k/90g) | Sıfır | HSM oturum havuzu | cryptoki ile birlikte |
-| **`secrets` 1.3.0** | **Düşük** (9,6k/90g) | Sayfa başına 4 KiB memlock | mlock + guard page + core dump kapatma | **Sadece ara imzalama anahtarı** |
-| **`memsec` 0.7.0** | Orta (543k/90g) | Sıfır | `memfd_secret` erişimi | Opsiyonel sertleştirme |
-| **`memfd_secret(2)`** | Kernel 5.14+, **çoğu yerde kapalı** | Kernel cmdline erişimi | Direct map'ten çıkarma, swap yok, hibernation bloğu | Best-effort, fallback'li |
-| **`PR_SET_DUMPABLE=0`** | Olgun | Debuggability | Core dump + ptrace + /proc kapanışı | Prod'da `paranoid` mod |
-| **AWS KMS (Ed25519/P-256)** | Çok yüksek | $1/ay/anahtar + $0,15/10k | Kök anahtar hiç çıkmaz | **Sadece ara anahtar sarma** |
-| **AWS CloudHSM hsm2m** | Yüksek | Saatlik HSM | 3.000-7.000 P-256/sn, FIPS L3 | Kök anahtar, düzenleyici zorunluluk varsa |
-| **Azure Managed HSM** | Yüksek | Instance saatlik | 330 P-256/sn/partition | Azure'daysanız kök anahtar |
-| **YubiHSM 2** | Yüksek | ~$650 donanım | ~14 P-256/sn, tek thread | **Sadece kök anahtar / dev** |
-| **Vault/OpenBao transit** | Yüksek | Ops yükü | Ed25519 + batch_input + versiyonlama | Ara anahtar sarma (KMS alternatifi) |
-| **OpenBao v2.6.2** | Orta-yüksek, hızlı büyüyor | Ops yükü | BUSL'dan kaçınma, LF yönetişimi | Vault yerine, açık kaynak Argus için |
-| **Delegated-credential tarzı attestation** | Standart-dışı ama kanıtlanmış (Cloudflare) | Az kod | JWKS kompromizasyonuna karşı savunma | JWKS'e ek alan olarak |
+| `zeroize` 1.9.0 | Çok yüksek; 90 günde 169 milyon indirme | Sıfır | Derleyicinin sıfırlamayı silmemesi | Her sır tipinde; zorunludur |
+| `secrecy` 0.10.3 | Çok yüksek; 90 günde 38 milyon indirme | Sıfır | Redakte Debug ve açık exposure | API sınırlarında; zorunludur |
+| `cryptoki` 0.12.0 | Yüksek; 90 günde 1,2 milyon indirme | Sıfır, HSM donanımı hariç | PKCS#11 3.x ve `Session: Send` | Kök anahtar HSM'deyse |
+| `r2d2-cryptoki` 0.5.0 | Orta; 90 günde 28.000 indirme | Sıfır | HSM oturum havuzu | `cryptoki` ile birlikte |
+| `secrets` 1.3.0 | Düşük; 90 günde 9.600 indirme | Sayfa başına 4 KiB memlock | mlock, guard page ve core dump kapatma | Yalnızca ara imzalama anahtarı |
+| `memsec` 0.7.0 | Orta; 90 günde 543.000 indirme | Sıfır | `memfd_secret` erişimi | Opsiyonel sertleştirme |
+| `memfd_secret(2)` | Kernel 5.14 ve üstü; çoğu yerde kapalıdır | Kernel komut satırı erişimi | Direct map'ten çıkarma, swap yokluğu, hibernation bloğu | Best-effort, fallback'li |
+| `PR_SET_DUMPABLE=0` | Olgun | Debuggability kaybı | Core dump, ptrace ve `/proc` kapanışı | Üretimde `paranoid` modda |
+| AWS KMS (Ed25519, P-256) | Çok yüksek | Anahtar başına aylık 1 USD ve 10.000 istek başına 0,15 USD | Kök anahtar hiç çıkmaz | Yalnızca ara anahtar sarmalama |
+| AWS CloudHSM hsm2m | Yüksek | Saatlik HSM ücreti | 3.000-7.000 P-256 imza/sn, FIPS Level 3 | Kök anahtar; düzenleyici zorunluluk varsa |
+| Azure Managed HSM | Yüksek | Instance saatlik ücreti | Partition başına 330 P-256 imza/sn | Azure'da kök anahtar |
+| YubiHSM 2 | Yüksek | Yaklaşık 650 USD donanım | Yaklaşık 14 P-256 imza/sn, tek thread | Yalnızca kök anahtar ve geliştirme |
+| Vault veya OpenBao transit | Yüksek | Operasyon yükü | Ed25519, `batch_input` ve versiyonlama | Ara anahtar sarmalama; KMS alternatifi |
+| OpenBao v2.6.2 | Orta ile yüksek arası; hızlı büyümekte | Operasyon yükü | BUSL'dan kaçınma ve Linux Foundation yönetişimi | Vault yerine; açık kaynak Argus için |
+| Delegated credential tarzı attestation | Standart dışı ancak kanıtlanmış (Cloudflare) | Az kod | JWKS kompromizasyonuna karşı savunma | JWKS'e ek alan olarak |
 
 ---
 
-## EYLEM PLANI (öncelik sırasıyla)
+## Eylem planı
 
-1. **Hibrit modeli tasarım kararı olarak kilitleyin.** Kök → KMS/HSM. Ara anahtar (15 dk / 5M imza, hangisi önce) → bellek. Gerekçe: B bölümündeki 1.000 TPS tavanı ve $39k/ay maliyeti.
-2. **`zeroize` + `secrecy` 0.10.x'i baştan uygulayın.** Sonradan eklemek çok daha zor. `SecretBox`'ın heap-only olmasının move-semantiği gerekçesini kod yorumlarında belgeleyin.
-3. **Kendi bölgenizde KMS Sign p50/p99'unu ölçün.** Yayınlanmış sayı yok; bu ölçüm mimari kararı doğrulayacak (veya çürütecek).
-4. **JWKS rotasyon state machine'ini E.4'teki gibi kurun.** Warm-up 10 dk, aktif 15 dk, drain 20 dk. `kid` = RFC 7638 thumbprint. `Cache-Control: max-age=300, stale-if-error=86400`.
-5. **`ARGUS_HARDENING` kademeli sertleştirme modunu ekleyin** ve hangi katmanın aktif olduğunu startup'ta loglayın + metrik olarak yayınlayın.
-6. **Sır sızıntısı testini CI'ya koyun** (log çıktısında anahtar byte'larını grep'leyen test). Uzun vadede `dylint` özel lint'i.
-7. **HSM entegrasyonunu `cryptoki` 0.12+ ve `r2d2-cryptoki` ile, ayrı bir blocking thread pool'da yapın.** Handle'ları label ile çözün, oturum ömrüne bağlayın.
-8. **Kök anahtar töreni için `boulder/cmd/ceremony`'yi referans alın**, çok kişili kontrol + video kayıt.
+1. Hibrit model bir tasarım kararı olarak kilitlenir: kök anahtar KMS veya HSM'de, ara anahtar bellekte, 15 dakika veya 5 milyon imzadan hangisi önce gelirse rotasyon. Gerekçe B bölümündeki 1.000 TPS tavanı ve aylık 39.000 USD maliyettir.
+2. `zeroize` ile `secrecy` 0.10.x baştan uygulanır; sonradan eklemek çok daha zordur. `SecretBox`'ın heap-only olmasının move semantiği gerekçesi kod yorumlarında belgelenir.
+3. Kendi bölgemizde KMS Sign p50 ve p99 değerleri ölçülür. Yayımlanmış sayı yoktur ve bu ölçüm mimari kararı doğrulayacak veya çürütecektir.
+4. JWKS rotasyon durum makinesi E.4'teki gibi kurulur: 10 dakika ısınma, 15 dakika aktif, 20 dakika drenaj. `kid` değeri RFC 7638 thumbprint'tir. `Cache-Control: max-age=300, stale-if-error=86400` kullanılır.
+5. `ARGUS_HARDENING` kademeli sertleştirme modu eklenir ve hangi katmanın aktif olduğu başlangıçta loglanıp metrik olarak yayımlanır.
+6. Sır sızıntısı testi CI'ya konur; log çıktısında anahtar baytlarını arayan bir test yazılır. Uzun vadede `dylint` ile özel bir lint geliştirilir.
+7. HSM entegrasyonu `cryptoki` 0.12 ve üstü ile `r2d2-cryptoki` kullanılarak ayrı bir blocking thread havuzunda yapılır. Handle'lar label ile çözülür ve oturum ömrüne bağlanır.
+8. Kök anahtar töreni için `boulder/cmd/ceremony` referans alınır; çok kişili kontrol ve video kayıt uygulanır.
 
 ---
 
-### Açıkça doğrulanamayan maddeler (özet)
+## Doğrulanamayan maddeler
 
-1. **AWS/GCP/Azure KMS Sign p50/p99 gecikmesi** — hiçbir sağlayıcı yayınlamıyor; bulamadım.
-2. **Vault transit sign ops/sn** — HashiCorp yayınlamıyor; "37k ops/sn" Medium kaynağı fetch edilemedi (403).
-3. **YubiHSM 2 performans tablosu** — Yubico destek makalesinden arama indeksi üzerinden alındı; sayfanın doğrudan fetch'i CSS hatası verdi. **Tarayıcıda teyit edin.**
-4. **AWS KMS asimetrik fiyatlandırmanın tam per-key-spec tablosu** — sadece $0,15/10k örneği çıkarılabildi.
-5. **GCP Cloud KMS fiyatlandırması** — sayfa içeriği kesildi.
-6. **Keycloak varsayılan anahtar rotasyon ömrü** — kaynaklarda yoktu.
-7. **OIDC Core §10.1.1'in birebir metni** — spec sayfası kesildi; özet ikincil kaynaklardan.
-8. **Docker/K8s varsayılan `RLIMIT_MEMLOCK`** — yetkili kaynakla doğrulanamadı.
-9. **Rust'ta secret-type RFC'si** — bulamadım; yok olduğunu iddia etmiyorum.
-10. **Rust `Debug`/log sır sızıntısı için clippy lint'i** — bulamadım.
-11. **Rust'ta `Debug` üzerinden sır sızdıran spesifik CVE** — doğrulanmış bir örnek bulamadım.
-12. **`cryptoki-rustcrypto`** — crates.io'da ve repo workspace'inde **yok**; yayınlanmış bir crate olarak mevcut değil.
+1. AWS, GCP ve Azure KMS Sign p50 ile p99 gecikmesi; hiçbir sağlayıcı yayımlamamaktadır ve bulunamamıştır.
+2. Vault transit sign işlem/sn değeri; HashiCorp yayımlamamaktadır ve 37.000 işlem/sn iddiasının Medium kaynağı çekilememiştir (HTTP 403).
+3. YubiHSM 2 performans tablosu; Yubico destek makalesinden arama indeksi üzerinden alınmıştır, sayfanın doğrudan çekilmesi CSS hatası vermiştir ve tarayıcıda teyit edilmelidir.
+4. AWS KMS asimetrik fiyatlandırmasının key spec başına tam tablosu; yalnızca 10.000 istek başına 0,15 USD örneği çıkarılabilmiştir.
+5. GCP Cloud KMS fiyatlandırması; sayfa içeriği kesilmiştir.
+6. Keycloak varsayılan anahtar rotasyon ömrü; kaynaklarda bulunmamaktadır.
+7. OIDC Core §10.1.1'in birebir metni; spec sayfası kesilmiştir ve özet ikincil kaynaklardandır.
+8. Docker ve Kubernetes varsayılan `RLIMIT_MEMLOCK` değeri; yetkili kaynakla doğrulanamamıştır.
+9. Rust'ta secret type RFC'si; bulunamamıştır, yok olduğu iddia edilmemektedir.
+10. Rust'ta `Debug` ve log üzerinden sır sızıntısı için clippy lint'i; bulunamamıştır.
+11. Rust'ta `Debug` üzerinden sır sızdıran spesifik bir CVE; doğrulanmış bir örnek bulunamamıştır.
+12. `cryptoki-rustcrypto`; crates.io'da ve repo workspace'inde yoktur, yayımlanmış bir crate olarak mevcut değildir.
 
-*Not: Bu oturumda WebSearch bütçesi (200/200) tükendiği için son birkaç madde yalnızca doğrudan URL fetch'i ile araştırılabildi.*
+Bu oturumda WebSearch bütçesi tükendiği için son birkaç madde yalnızca doğrudan URL çekimiyle araştırılabilmiştir.
 
-**Kaynaklar (ana):**
-- https://github.com/parallaxsecond/rust-cryptoki · https://github.com/parallaxsecond/rust-cryptoki/blob/main/CHANGELOG.md · https://crates.io/crates/cryptoki
-- https://github.com/spruceid/r2d2-cryptoki · https://lib.rs/crates/yubihsm · https://github.com/softhsm/SoftHSMv2 · https://github.com/kushaldas/kryptering
-- https://support.yubico.com/hc/en-us/articles/360021202780-YubiHSM-2-A-load-balanced-design-for-heavy-traffic-environments · https://docs.yubico.com/hardware/yubihsm-2/datasheet/_static/YubiHSM_2_Technical_Data_Sheet.pdf
-- https://docs.aws.amazon.com/cloudhsm/latest/userguide/performance.html · https://docs.aws.amazon.com/cloudhsm/latest/userguide/ki-hsm2m-medium.html
-- https://docs.aws.amazon.com/kms/latest/developerguide/requests-per-second.html · https://docs.aws.amazon.com/kms/latest/developerguide/asymmetric-key-specs.html · https://aws.amazon.com/kms/pricing/
-- https://docs.cloud.google.com/kms/quotas
-- https://learn.microsoft.com/en-us/azure/key-vault/general/service-limits · https://learn.microsoft.com/en-us/azure/key-vault/managed-hsm/scaling-guidance
-- https://blog.cloudflare.com/keyless-delegation/ · https://developers.cloudflare.com/ssl/keyless-ssl/reference/scaling-and-benchmarking/ · https://blog.cloudflare.com/geo-key-manager-how-it-works/
-- https://developer.hashicorp.com/vault/docs/concepts/seal · https://developer.hashicorp.com/vault/docs/secrets/transit · https://developer.hashicorp.com/vault/api-docs/secret/transit · https://www.hashicorp.com/en/blog/understanding-vault-performance-benchmarks-from-real-world-workloads · https://developer.hashicorp.com/vault/tutorials/operations/benchmark-vault
-- https://github.com/openbao/openbao/releases · https://www.techtarget.com/searchitoperations/news/366644831/Nvidia-adopts-OpenBao-open-source-fork-of-HashiCorps-Vault
-- https://github.com/spiffe/spire/blob/main/doc/plugin_server_keymanager_aws_kms.md · https://github.com/sigstore/fulcio/blob/main/docs/setup.md · https://github.com/letsencrypt/boulder/tree/main/cmd/ceremony · https://jhalderm.com/pub/papers/letsencrypt-ccs19.pdf
-- https://docs.aws.amazon.com/encryption-sdk/latest/developer-guide/data-key-caching.html · https://aws.amazon.com/blogs/security/how-to-verify-aws-kms-signatures-in-decoupled-architectures-at-scale/
-- https://datatracker.ietf.org/doc/html/rfc7517 · https://developer.okta.com/docs/concepts/key-rotation/ · https://auth0.com/docs/get-started/tenant-settings/signing-keys/rotate-signing-keys · https://github.com/keycloak/keycloak/blob/main/docs/documentation/server_admin/topics/realms/keys.adoc · https://engineering.zalando.com/posts/2025/01/automated-json-web-key-rotation.html · https://duendesoftware.com/blog/20260113-why-signing-key-rotation-matters-in-openid-connect-and-duende-identityserver
-- https://docs.rs/zeroize/latest/zeroize/ · https://cipherstash.com/blog/verifying-rust-zeroize-with-assembly-including-portable-simd · https://docs.rs/secrecy/latest/secrecy/ · https://github.com/iqlusioninc/crates/blob/main/secrecy/CHANGELOG.md · https://docs.rs/secrets/latest/secrets/ · https://docs.rs/memsec/ · https://lib.rs/crates/memsafe
-- https://www.man7.org/linux/man-pages//man2/memfd_secret.2.html · https://lwn.net/Articles/865256/ · https://man7.org/linux/man-pages/man2/PR_SET_DUMPABLE.2const.html · https://github.com/JonathonReinhart/nosecmem
-- https://docs.rs/tracing/latest/tracing/ · https://kubernetes.io/docs/concepts/configuration/secret/
+---
+
+## Kaynaklar
+
+github.com/parallaxsecond/rust-cryptoki ve CHANGELOG.md; crates.io/crates/cryptoki. github.com/spruceid/r2d2-cryptoki; lib.rs/crates/yubihsm; github.com/softhsm/SoftHSMv2; github.com/kushaldas/kryptering. Yubico'nun YubiHSM 2 yük dengeli tasarım destek makalesi ve docs.yubico.com üzerindeki teknik veri sayfası. AWS CloudHSM performans ve hsm2m.medium bilinen sorunlar sayfaları. AWS KMS saniyedeki istek, asimetrik key spec ve fiyatlandırma sayfaları. docs.cloud.google.com/kms/quotas. Azure Key Vault servis limitleri ve Managed HSM ölçekleme kılavuzu. Cloudflare keyless delegation blogu, Keyless SSL ölçekleme ve benchmark sayfası ile Geo Key Manager yazısı. HashiCorp Vault seal kavramları, transit secrets engine, transit API dokümantasyonu, Vault performans benchmark blogu ve benchmark tutorial'ı. github.com/openbao/openbao/releases ve NVIDIA'nın OpenBao'yu benimsemesine dair haber. SPIRE aws_kms keymanager plugin dokümanı; Sigstore Fulcio setup dokümanı; Let's Encrypt boulder ceremony dizini ve CCS 2019 makalesi. AWS Encryption SDK data key caching sayfası ve KMS imzalarının ölçekte doğrulanmasına dair AWS güvenlik blogu. RFC 7517; Okta anahtar rotasyonu dokümanı; Auth0 imzalama anahtarı rotasyonu; Keycloak keys.adoc; Zalando otomatik JWK rotasyonu yazısı; Duende'nin imzalama anahtarı rotasyonu blogu. docs.rs/zeroize; CipherStash'in zeroize assembly doğrulama yazısı; docs.rs/secrecy ve secrecy CHANGELOG; docs.rs/secrets; docs.rs/memsec; lib.rs/crates/memsafe. man7.org memfd_secret ve PR_SET_DUMPABLE sayfaları; lwn.net/Articles/865256/; github.com/JonathonReinhart/nosecmem. docs.rs/tracing; kubernetes.io Secret dokümantasyonu.

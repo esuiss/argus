@@ -1,363 +1,340 @@
-# 5. Rust ekosistemi fizibilitesi
+# §5 — Rust ekosistemi fizibilitesi
 
-> `ARGUS.md` §5'den taşındı. Numaralandırma korundu; bu dosyanın
-> içindeki `§5 §X` referansları aynı anlamda.
-
-
-**Yöntem:** crates.io API, api.osv.dev, GitHub API/atom, **crate kaynak kodlarının indirilip incelenmesi**, Kanidm/Rauthy klonlanıp ölçülmesi.
+Bu dosyanın yöntemi şudur: crates.io API'si, api.osv.dev, GitHub API ve atom akışları, crate kaynak kodlarının indirilip incelenmesi ile Kanidm ve Rauthy'nin klonlanıp ölçülmesi.
 
 ---
 
-### 0. Net cevap
+## 0. Net cevap
 
-**Rust bu iş için hazır — ama düşünülen yerlerde değil.**
+Rust bu iş için hazırdır, ancak beklenen yerlerde değil.
 
-Beklenen hikâye "Rust hızlı ama kütüphane yok"tu. Gerçek bunun tersi: **altyapı katmanı (TLS, kripto, HTTP, DB) Go'dan İYİ durumda. Boşluk tam olarak protokol-sunucu katmanında ve orası işin %70'i.**
+Beklenen hikâye Rust'ın hızlı olduğu ama kütüphanesinin bulunmadığıydı. Gerçek bunun tersidir: altyapı katmanı — TLS, kripto, HTTP, veritabanı — Go'dan iyi durumdadır. Boşluk tam olarak protokol sunucu katmanındadır ve orası işin %70'idir.
 
 | Katman | Karar |
 |---|---|
-| TLS / kripto / PQ | ✅ **Rust burada Go'yu geçiyor** (rustls PQ varsayılan açık, aws-lc-rs FIPS+ML-DSA) |
-| HTTP / runtime | ✅ Hazır (axum + hyper 1.x + tower) |
-| WebAuthn / Passkey | ✅ Hazır — ekosistemin en güçlü noktası |
-| JOSE / JWT | ✅ Hazır **ama tek bir feature bayrağı hayat memat meselesi** |
-| Veri katmanı | ✅ Hazır (yönetişim uyarısıyla) |
-| **OAuth2/OIDC Authorization Server** | 🔴 **BOŞLUK — Fosite karşılığı YOK** |
-| **SAML** | 🟠 2025'te boşluktu, 2026'da doldu ama **çok taze/kırılgan** |
-| **LDAP sunucu** | 🟠 Wire protokol var, sunucu semantiği yok |
-| **SCIM** | 🟠 Model+filtre var, sunucu yok |
-| Çok kiracılık | 🔴 Her dilde sıfırdan |
+| TLS, kripto, post-quantum | Rust burada Go'yu geçmektedir: rustls'te PQ varsayılan açık, aws-lc-rs'te FIPS ve ML-DSA |
+| HTTP ve runtime | Hazır: axum, hyper 1.x, tower |
+| WebAuthn ve passkey | Hazır; ekosistemin en güçlü noktası |
+| JOSE ve JWT | Hazır, ancak tek bir feature bayrağı belirleyici |
+| Veri katmanı | Hazır; yönetişim uyarısıyla birlikte |
+| OAuth2 ve OIDC Authorization Server | Boşluk; Fosite karşılığı bulunmamaktadır |
+| SAML | 2025'te boşluktu, 2026'da dolmuştur ancak çok tazedir ve kırılgandır |
+| LDAP sunucu | Wire protokolü mevcuttur, sunucu semantiği yoktur |
+| SCIM | Model ve filtre mevcuttur, sunucu yoktur |
+| Çok kiracılık | Her dilde sıfırdan yazılır |
 
-**Rust/Go maliyet çarpanı: ~1.5–2x, ve farkın neredeyse tamamı tek bir kalemden: Fosite'ın yokluğu.**
+Rust ile Go arasındaki maliyet çarpanı yaklaşık 1,5-2 katıdır ve farkın neredeyse tamamı tek bir kalemden, Fosite'ın yokluğundan gelmektedir.
 
 ---
 
-### 1. Web / Runtime
+## 1. Web ve runtime
 
-Sürümler crates.io API'den 2026-09-08'de çekildi.
+Sürümler crates.io API'sinden 8 Eylül 2026'da çekilmiştir.
 
 | Kütüphane | Sürüm | Tarih | Olgunluk | Karar |
 |---|---|---|---|---|
-| **axum** | 0.8.9 | 2026-04-14 | 5 | ✅ **SEÇ** |
-| hyper | 1.11.1 | 2026-08-28 | 5 | ✅ (axum altında) |
-| tower-http | 0.7.1 | 2026-08-31 | 5 | ✅ |
-| tokio | 1.53.1 | 2026-07-20 | 5 | ✅ Argon2 izolasyonuyla |
-| actix-web | 4.15.0 | 2026-08-21 | 4 | ⚠️ **CVE-2026-73051** |
-| ntex | 3.12.3 | 2026-09-07 | 2 | ❌ |
-| poem | 3.1.12 | 2025-07-28 | 2 | ❌ 13 aydır sürüm yok |
-| h3 (HTTP/3) | 0.0.8 | 2025-05-06 | 1 | ❌ 16 aydır durgun |
+| axum | 0.8.9 | 14 Nisan 2026 | 5 | Seçilir |
+| hyper | 1.11.1 | 28 Ağustos 2026 | 5 | Axum altında kullanılır |
+| tower-http | 0.7.1 | 31 Ağustos 2026 | 5 | Kullanılır |
+| tokio | 1.53.1 | 20 Temmuz 2026 | 5 | Argon2 izolasyonuyla kullanılır |
+| actix-web | 4.15.0 | 21 Ağustos 2026 | 4 | CVE-2026-73051 nedeniyle dikkat gerekir |
+| ntex | 3.12.3 | 7 Eylül 2026 | 2 | Kullanılmaz |
+| poem | 3.1.12 | 28 Temmuz 2025 | 2 | Kullanılmaz; 13 aydır sürüm çıkmamıştır |
+| h3 (HTTP/3) | 0.0.8 | 6 Mayıs 2025 | 1 | Kullanılmaz; 16 aydır durgundur |
 
-#### Kararın dayanağı: benchmark değil, ekosistem kütlesi
+### 1.1 Kararın dayanağı: benchmark değil, ekosistem kütlesi
 
-TechEmpower sayıları IdP için anlamsız — istek bütçesinin %95'i Argon2 (50–100 ms) ve imzalamada geçer; framework overhead'i mikrosaniye.
+TechEmpower sayıları bir IdP için anlamsızdır; istek bütçesinin %95'i Argon2'de (50-100 ms) ve imzalamada geçer, framework overhead'i mikrosaniye mertebesindedir.
 
-crates.io ters bağımlılık sayıları:
+crates.io ters bağımlılık sayıları şöyledir:
 
 | axum | actix-web | ntex |
 |---|---|---|
-| **8.508** | 1.695 | **76** |
+| 8.508 | 1.695 | 76 |
 
-ntex'in benchmark üstünlüğü gerçek ama **darboğaz değil**; ekosistem yoksunluğu her gün canı yakar.
+ntex'in benchmark üstünlüğü gerçektir ancak darboğaz değildir; ekosistem yoksunluğu ise her gün maliyet üretir.
 
-**actix güvenlik geçmişi:** CVE-2026-73051 (HTTP/1.1 CL.TE request smuggling, 3.12.1'de düzeldi). Ayrıca 2018 (RUSTSEC-2018-0019, çoklu bellek güvenliği), 2020 (use-after-free), 2021 (smuggling). hyper'ın da geçmişi var ama 2022'den beri temiz.
+**actix güvenlik geçmişi.** CVE-2026-73051 (HTTP/1.1 CL.TE request smuggling) 3.12.1'de düzelmiştir. Ayrıca 2018'de RUSTSEC-2018-0019 (çoklu bellek güvenliği), 2020'de use-after-free ve 2021'de smuggling açıkları görülmüştür. hyper'ın da geçmişi vardır ancak 2022'den beri temizdir.
 
-**HTTP/3: yapma.** h3 16 aydır durgun; IdP'nin ihtiyacı yok, TLS terminasyonu yapan proxy isterse yapar.
+**HTTP/3.** h3 16 aydır durgundur; bir IdP'nin ihtiyacı yoktur ve TLS terminasyonu yapan proxy isterse sağlar.
 
 ---
 
-### 2. TLS ve Kripto — Rust'ın Go'yu açık ara geçtiği yer
+## 2. TLS ve kripto
+
+Bu katman Rust'ın Go'yu açık ara geçtiği yerdir.
 
 | Kütüphane | Sürüm | Tarih | Karar |
 |---|---|---|---|
-| **rustls** | 0.23.44 | 2026-09-07 | ✅ **SEÇ** |
-| **aws-lc-rs** | 1.18.1 | 2026-09-01 | ✅ **SEÇ** (varsayılan provider) |
-| ring | 0.17.14 | **2025-03-11** | ❌ Kaçın |
-| **rsa** (RustCrypto) | 0.9.10 / 0.10.0-rc.18 | 2026-04-27 | 🔴 **ASLA** |
+| rustls | 0.23.44 | 7 Eylül 2026 | Seçilir |
+| aws-lc-rs | 1.18.1 | 1 Eylül 2026 | Seçilir; varsayılan provider'dır |
+| ring | 0.17.14 | 11 Mart 2025 | Kaçınılır |
+| rsa (RustCrypto) | 0.9.10 ve 0.10.0-rc.18 | 27 Nisan 2026 | Kullanılmaz |
 
-#### rustls: post-quantum VARSAYILAN AÇIK
+### 2.1 rustls: post-quantum varsayılan olarak açık
 
-docs.rs/rustls 0.23.44'ten birebir: `prefer-post-quantum` feature **varsayılan olarak etkin**, *"prioritizes post-quantum secure key exchange by default (using X25519MLKEM768)"*. Varsayılan provider **aws-lc-rs**.
+rustls 0.23.44 dokümantasyonuna göre `prefer-post-quantum` özelliği varsayılan olarak etkindir ve X25519MLKEM768 kullanarak post-quantum güvenli anahtar değişimini önceliklendirir. Varsayılan provider aws-lc-rs'tir.
 
-**Bu, Go'nun crypto/tls'inden ileri bir konum.**
+Bu, Go'nun crypto/tls paketinden ileri bir konumdur.
 
-#### aws-lc-rs (kaynak kodundan doğrulandı)
+### 2.2 aws-lc-rs
 
-`aws-lc-rs-1.18.1` tarball'ı açılıp incelendi:
-- `src/kem.rs` → `ML_KEM_512 / 768 / 1024`
-- `src/pqdsa.rs` → `ML_DSA_44 / 65 / 87`
-- `fips` feature → `aws-lc-fips-sys`, **AWS-LC-FIPS 4.x**
+`aws-lc-rs-1.18.1` tarball'ı açılıp incelenmiştir. `src/kem.rs` ML_KEM_512, 768 ve 1024'ü; `src/pqdsa.rs` ML_DSA_44, 65 ve 87'yi tanımlar. `fips` özelliği `aws-lc-fips-sys` üzerinden AWS-LC-FIPS 4.x'i devreye alır.
 
-**FIPS konusunda abartma:** lib.rs'in kendi ifadesi — *"has completed FIPS validation testing... and has been **submitted to NIST for certification**"* — sertifika **beklemede**. Ayrıca FIPS build'i **CMake + Go** gerektiriyor.
+> **FIPS konusunda abartılmaması gereken nokta.** lib.rs'in kendi ifadesine göre kütüphane FIPS doğrulama testini tamamlamış ve sertifikasyon için NIST'e sunulmuştur; sertifika beklemededir. Ayrıca FIPS build'i CMake ve Go gerektirir.
 
-#### 🔴 `rsa` crate'i hâlâ Marvin'e açık
+### 2.3 `rsa` crate'i hâlâ Marvin'e açık
 
-**RUSTSEC-2023-0071 / CVE-2023-49092.** OSV sorgusunda düzeltilmiş sürüm alanı **boş**. Advisory son güncelleme 2026-04-25. README'nin kendi ifadesi:
+RUSTSEC-2023-0071 ve CVE-2023-49092 kayıtlarında OSV sorgusunda düzeltilmiş sürüm alanı boştur. Advisory'nin son güncellemesi 25 Nisan 2026'dır. README'nin kendi ifadesine göre crate Marvin saldırısına açıktır ve bu, ağ üzerindeki bir saldırganın özel anahtarı kurtarmasına imkân verebilir.
 
-> *"This crate is vulnerable to the Marvin Attack... which could enable private key recovery by a network attacker."*
+Proje "Phase 1: Make it work" olarak işaretlidir. 0.10 hâlâ rc.18 aşamasındadır.
 
-Proje **"Phase 1: Make it work 🚧"** olarak işaretli. 0.10 hâlâ `rc.18`.
+Kural şudur: RSA hiçbir zaman `rsa` crate'i ile yapılmaz, aws-lc-rs kullanılır.
 
-> **Kural: RSA'yı asla `rsa` crate'i ile yapma. aws-lc-rs kullan.**
+### 2.4 ring
 
-#### ring: ölmüyor ama duruyor
+0.17.14 sürümü 11 Mart 2025 tarihlidir; 18 aydır yeni sürüm çıkmamıştır. README projeyi bir deney olarak tanımlar. aws-lc-rs zaten ring API'siyle uyumludur.
 
-0.17.14, **2025-03-11** — 18 aydır sürüm yok. README projeyi *"An experiment"* diye tanımlıyor. **aws-lc-rs zaten ring-API uyumlu.**
+### 2.5 Argon2
 
-#### Argon2 — kaynak koddan doğrulanmış
+`argon2-0.6.0` kaynağı incelenmiştir:
 
-`argon2-0.6.0` kaynağı incelendi:
 ```
 src/lib.rs:194   cpufeatures::new!(avx2_cpuid, "avx2");
 src/lib.rs:530   #[target_feature(enable = "avx2")]
 src/lib.rs:531   unsafe fn compress_avx2(...)
 ```
-**AVX2 runtime-dispatch VAR.** 0.6.0 (2026-08-27) ayrıca `parallel` (rayon) feature'ı ekledi.
 
-⚠️ **Ama NEON YOK.** `grep -i neon` boş döndü. **ARM'da (Graviton, Ampere) skaler yola düşülüyor.** ARM hedefleniyorsa `argon2-kdf` (C binding) ile kendi donanımda ölç.
+AVX2 runtime dispatch mevcuttur. 0.6.0 (27 Ağustos 2026) ayrıca rayon tabanlı `parallel` özelliğini eklemiştir.
+
+> **Uyarı.** NEON desteği yoktur; `grep -i neon` boş dönmüştür. ARM üzerinde, yani Graviton ve Ampere'de skaler yola düşülür. ARM hedefleniyorsa `argon2-kdf` (C binding) ile kendi donanımında ölçüm yapılmalıdır.
 
 ---
 
-### 3. Auth'a özel kütüphaneler — en kritik bölüm
+## 3. Auth'a özel kütüphaneler
 
-#### 3.1 🔴 OAuth 2.1 Authorization Server: GERÇEK BOŞLUK
+Bu bölüm dosyanın en kritik kısmıdır.
 
-**Fosite'ın Rust karşılığı YOK.** Kanıtlar kaynak koddan:
+### 3.1 OAuth 2.1 Authorization Server: gerçek boşluk
 
-**`openidconnect` 4.0.1 — istemci, sunucu değil.** `lib.rs:267`'den birebir:
-> *"This library does not implement a complete OpenID Connect Provider, which requires functionality such as credential and session management."*
+Fosite'ın Rust karşılığı bulunmamaktadır. Kanıtlar kaynak kodundan gelmektedir.
 
-Üstelik `rsa ^0.9.2`'ye **zorunlu** bağımlı → Marvin'i miras alıyor.
+**`openidconnect` 4.0.1 bir istemcidir, sunucu değildir.** `lib.rs:267`'deki ifadeye göre kütüphane, credential ve oturum yönetimi gibi işlevler gerektiren eksiksiz bir OpenID Connect Provider implementasyonu sunmamaktadır. Üstelik `rsa ^0.9.2`'ye zorunlu bağımlıdır ve Marvin'i miras alır.
 
-**`oxide-auth` 0.6.1 — son sürüm 2024-06-02.** Bağımlılıkları: `hmac`, `sha2`, `rust-argon2`, `subtle`, `rmp-serde`. **Asimetrik kripto hiç yok** → `id_token` imzalayamaz, OIDC yapamaz. Bakımcı: *"Please respect that I maintain this on my own currently and have limited time"*. **Ters bağımlılık: 14.** 8 yıllık bir crate'in 14 kullanıcısı — fiilen kullanılmadığının kanıtı.
+**`oxide-auth` 0.6.1'in son sürümü 2 Haziran 2024 tarihlidir.** Bağımlılıkları `hmac`, `sha2`, `rust-argon2`, `subtle` ve `rmp-serde`'dir. Asimetrik kripto hiç bulunmaz, dolayısıyla `id_token` imzalayamaz ve OIDC yapamaz. Bakımcısı projeyi tek başına ve sınırlı zamanla sürdürdüğünü belirtmektedir. Ters bağımlılık sayısı 14'tür; sekiz yıllık bir crate'in 14 kullanıcısı olması fiilen kullanılmadığının kanıtıdır.
 
-**Karşılaştırma:** Fosite (Go) 2.6k yıldız, aktif; RFC 6749/6819/7636/8252/9126 + OIDC Core'u hazır veriyor.
+**Karşılaştırma.** Go tarafındaki Fosite 2.600 yıldıza sahiptir ve aktiftir; RFC 6749, 6819, 7636, 8252 ve 9126 ile OIDC Core'u hazır verir.
 
-**Yazılması gerekenler (Fosite'ın bedava verdiği):** authorization code + PKCE (S256), refresh rotation & reuse detection, client_credentials, device grant (RFC 8628), token exchange (RFC 8693), introspection (7662), revocation (7009), PAR (9126), JAR (9101), DPoP (9449), Discovery/JWKS, DCR, sektör bazlı `sub`, pairwise identifier, consent/session, back/front-channel logout, OAuth 2.1 sıkılaştırmaları.
+**Yazılması gerekenler**, yani Fosite'ın ücretsiz verdikleri: authorization code ve PKCE (S256), refresh rotation ile reuse detection, client_credentials, device grant (RFC 8628), token exchange (RFC 8693), introspection (7662), revocation (7009), PAR (9126), JAR (9101), DPoP (9449), Discovery ve JWKS, DCR, sektör bazlı `sub`, pairwise identifier, consent ve session yönetimi, back-channel ve front-channel logout, OAuth 2.1 sıkılaştırmaları.
 
-**Efor: 12–18 geliştirici-ayı.**
+Efor 12-18 geliştirici-ayıdır.
 
-#### 3.2 ✅ JOSE/JWT: `jsonwebtoken` 11 — ama TEK BİR BAYRAK hayati
+### 3.2 JOSE ve JWT: `jsonwebtoken` 11
 
-`jsonwebtoken-11.0.0` kaynağı incelendi. **Güvenlik tasarımı gerçekten iyi:**
+`jsonwebtoken-11.0.0` kaynağı incelenmiştir. Güvenlik tasarımı gerçekten iyidir.
 
 | Savunma | Durum | Kanıt |
 |---|---|---|
-| `alg: none` | **Enum'da hiç yok** | `algorithms.rs` |
-| HMAC↔RSA karışıklığı | **Tip düzeyinde engelli** | `jws.rs:42` `key.family() != header.alg.family()` |
-| Algoritma allowlist | Zorunlu | `decoding.rs:278` |
-| CVE-2026-25537 (type confusion) | **Düzeltilmiş** | `validation.rs:271,274` |
-| Varsayılanlar | `validate_exp=true`, `validate_aud=true`, `exp` zorunlu, leeway 60s | `validation.rs:119` |
+| `alg: none` | Enum'da hiç bulunmaz | `algorithms.rs` |
+| HMAC ile RSA karışıklığı | Tip düzeyinde engellenir | `jws.rs:42`, `key.family() != header.alg.family()` |
+| Algoritma allowlist'i | Zorunludur | `decoding.rs:278` |
+| CVE-2026-25537 (type confusion) | Düzeltilmiştir | `validation.rs:271` ve `274` |
+| Varsayılanlar | `validate_exp=true`, `validate_aud=true`, `exp` zorunlu, leeway 60 sn | `validation.rs:119` |
 
-⚠️ **`validate_nbf` varsayılan `false`** — IdP'de aç.
+> **Uyarı.** `validate_nbf` varsayılan olarak `false`'tur; bir IdP'de açılmalıdır.
 
-🔴 **Kader belirleyen satır:**
+Kader belirleyen satırlar şunlardır:
+
 ```
-default = ["use_pem"]              # kripto backend YOK
+default = ["use_pem"]                 # kripto backend yok
 rust_crypto = [..., "dep:rsa", ...]   # Marvin'e açık
 aws_lc_rs = ["dep:aws-lc-rs"]         # güvenli
 ```
 
-> **`features = ["aws_lc_rs"]` ile kullan. `rust_crypto` seni doğrudan Marvin timing sidechannel'ına bağlar.**
-
-**Diğerleri:**
+Crate `features = ["aws_lc_rs"]` ile kullanılır. `rust_crypto` doğrudan Marvin timing yan kanalına bağlar.
 
 | Crate | Backend | Değerlendirme |
 |---|---|---|
-| **jsonwebtoken 11.0.0** | aws-lc-rs *veya* rsa | ✅ **SEÇ** (aws_lc_rs ile) |
-| jwt-simple 0.13.1 | superboring/boring | ⚠️ İyi tasarım (jedisct1), niş |
-| josekit 0.10.3 | **openssl ^0.10.68** | ❌ C OpenSSL — 28 advisory, 2026'da 6 |
-| biscuit 0.8.0 | ring ~0.17.13 | ⚠️ Duran backend |
-| openidconnect 4.0.1 | **rsa zorunlu** | ❌ |
+| jsonwebtoken 11.0.0 | aws-lc-rs veya rsa | Seçilir; `aws_lc_rs` ile |
+| jwt-simple 0.13.1 | superboring veya boring | İyi tasarımdır (jedisct1), niştir |
+| josekit 0.10.3 | openssl ^0.10.68 | Kullanılmaz; C OpenSSL, 28 advisory, 2026'da altı tanesi |
+| biscuit 0.8.0 | ring ~0.17.13 | Duran backend nedeniyle dikkat gerekir |
+| openidconnect 4.0.1 | rsa zorunlu | Kullanılmaz |
 
-#### 3.3 ✅ WebAuthn: `webauthn-rs` — ekosistemin en güçlü noktası
+### 3.3 WebAuthn: `webauthn-rs`
 
-`webauthn-rs 0.5.5` (2026-04-30) incelendi.
+Ekosistemin en güçlü noktasıdır. `webauthn-rs 0.5.5` (30 Nisan 2026) incelenmiştir.
 
-- **SUSE product security denetiminden geçmiş**
-- WebAuthn **Level 3**, FIDO MDS attestation, `AttestationCaList`
-- Hijyen: `danger-allow-state-serialisation`, `danger-credential-internals` gibi açıkça "tehlikeli" işaretli feature'lar
-- **Kanidm ekibinin ürünü** — gerçek IdP'de üretimde; Rauthy de kullanıyor
+Kütüphane SUSE product security denetiminden geçmiştir. WebAuthn Level 3, FIDO MDS attestation ve `AttestationCaList` destekler. Hijyen açısından `danger-allow-state-serialisation` ve `danger-credential-internals` gibi açıkça tehlikeli olarak işaretlenmiş özellikler sunar. Kanidm ekibinin ürünüdür ve gerçek bir IdP'de üretimdedir; Rauthy de kullanmaktadır.
 
-⚠️ **İki gerçek sınır (kaynak koddan):**
-1. **Conditional UI stabil değil:** `preview-features = ["conditional-ui"]` arkasında
-2. **PRF extension YOK.** `grep -i prf` proto crate'inde boş döndü. CTAP seviyesinde `hmac-secret` var ama WebAuthn seviyesinde PRF yok
+> **İki gerçek sınır, kaynak koddan doğrulanmıştır.** Conditional UI stabil değildir ve `preview-features = ["conditional-ui"]` arkasındadır. PRF extension bulunmamaktadır; `grep -i prf` proto crate'inde boş dönmüştür, CTAP seviyesinde `hmac-secret` vardır ancak WebAuthn seviyesinde PRF yoktur.
 
-`resident-key-support` de ayrı, varsayılan-kapalı feature.
+`resident-key-support` de ayrı ve varsayılan olarak kapalı bir özelliktir.
 
-**Kalan iş:** kimlik bilgisi yaşam döngüsü, cihaz adlandırma, kurtarma akışları, **RP ID / origin çok kiracılık eşlemesi** (çok kiracılıkta sinsi zor).
+**Kalan iş.** Kimlik bilgisi yaşam döngüsü, cihaz adlandırma, kurtarma akışları ve RP ID ile origin'in çok kiracılığa eşlenmesi. Sonuncusu çok kiracılıkta sinsi biçimde zordur.
 
-#### 3.4 🟠 SAML: 2025'te boşluktu, 2026'da doldu — ama çok taze
+### 3.4 SAML: 2025'te boşluktu, 2026'da doldu
 
-**`samael` 0.0.22** (2026-07-07) kaynağı:
-- `default = ["xmlsec"]` → `libc`, `lazy_static`, **`libxml`** (C libxml2)
-- `src/crypto/xmlsec/wrapper/` → `xmlSecDSigCtxCreate` **ham FFI**
-- xmlsec kapatılırsa `crypto_disabled.rs` → **imza doğrulama hiç olmaz**
+**`samael` 0.0.22** (7 Temmuz 2026) kaynağında `default = ["xmlsec"]` tanımı `libc`, `lazy_static` ve C libxml2'yi saran `libxml`'i çeker. `src/crypto/xmlsec/wrapper/` altında `xmlSecDSigCtxCreate` ham FFI ile çağrılır. xmlsec kapatılırsa `crypto_disabled.rs` devreye girer ve imza doğrulama hiç yapılmaz.
 
-**Sürpriz iyi haber:** samael'in **XSW savunması gerçekten güçlü.** `ReduceMode::ValidateAndMarkNoAncestors` **varsayılan** — imza doğrulandıktan sonra belge, imzalanmamış her şey silinerek yeniden inşa ediliyor. Bu, "iki farklı parser arasındaki fark" kök nedenini yapısal olarak kapatan **altın standart**. Ayrıca yinelenen-ID reddi, NCName kontrolü, `allowed_signature_algorithms` allowlist'i, gerçek saldırı test vektörleri.
+**Sürpriz iyi haber.** samael'in XSW savunması gerçekten güçlüdür. `ReduceMode::ValidateAndMarkNoAncestors` varsayılandır; imza doğrulandıktan sonra belge, imzalanmamış her şey silinerek yeniden inşa edilir. Bu, iki farklı parser arasındaki farkı kök nedeninden kapatan altın standarttır. Ayrıca yinelenen ID reddi, NCName kontrolü, `allowed_signature_algorithms` allowlist'i ve gerçek saldırı test vektörleri bulunur.
 
-🔴 **İki ciddi kusur:**
-1. **`libxml = "=0.3.3"` (2023-07-18) tam sürüm sabitlemesi.** Güncel 0.3.21 — **3 yıl, 18 sürüm geride**, `=` olduğu için `cargo update` asla ilerletmez
-2. **libxml2'nin altı çöküyor.** 2026-09-05'te **8 yeni CVE**; **CVE-2026-86144**: `xmlXIncludeProcess` `XML_PARSE_NONET` yaymıyor → **XXE/SSRF**. libxml2 README: ***"It's NOT recommended to use this software to process untrusted data."***
+**İki ciddi kusur.** Birincisi `libxml = "=0.3.3"` (18 Temmuz 2023) biçiminde tam sürüm sabitlemesidir; güncel sürüm 0.3.21'dir, yani üç yıl ve 18 sürüm geridedir ve `=` kullanıldığı için `cargo update` asla ilerletmez. İkincisi libxml2'nin altının çökmesidir: 5 Eylül 2026'da sekiz yeni CVE yayımlanmıştır ve CVE-2026-86144'te `xmlXIncludeProcess` `XML_PARSE_NONET` bayrağını yaymadığı için XXE ve SSRF mümkün olmaktadır. libxml2 README'si bu yazılımın güvenilmeyen veriyi işlemek için önerilmediğini belirtmektedir.
 
-**Saf-Rust alternatif (2026'da doğdu):** `bergshamra` ailesi (Kushal Das) — `bergshamra-c14n` inclusive + **exclusive c14n + InclusiveNamespaces PrefixList**, `bergshamra-dsig` `#![forbid(unsafe_code)]`, koşulsuz yinelenen-ID reddi, `trusted_keys_only: true` / `strict_verification: true` varsayılanları, **xmlsec test suite 1148/1148**. Üstünde `gamlastan` SAML katmanı — ancak onun SPID uyum iddiası kendi beyanıdır ve o süit IdP'leri değil SP'leri test ettiği için Argus açısından kanıt değildir.
+**Saf Rust alternatifi.** 2026'da doğan `bergshamra` ailesi Kushal Das tarafından geliştirilmektedir. `bergshamra-c14n` inclusive ve exclusive c14n ile InclusiveNamespaces PrefixList destekler; `bergshamra-dsig` `#![forbid(unsafe_code)]` bildirir, koşulsuz yinelenen ID reddi uygular ve `trusted_keys_only: true` ile `strict_verification: true` varsayılanlarını kullanır; xmlsec test süitinden 1148/1148 geçer. Üstünde `gamlastan` SAML katmanı bulunur; ancak onun SPID uyum iddiası kendi beyanıdır ve o süit IdP'leri değil SP'leri test ettiği için Argus açısından kanıt değildir.
 
-⚠️ **~80.000 satır, 6 aylık, tek kişi, bağımsız denetim yok, 6–11 yıldız.**
+> **Uyarı.** `bergshamra` ailesi yaklaşık 80.000 satırdır, altı aylıktır, tek kişi tarafından geliştirilmektedir, bağımsız denetimi yoktur ve 6-11 yıldıza sahiptir.
 
-🔴 **crates.io isim-işgali tuzağı:** `saml-rs`, `opensaml`, `samlify`, `rustsaml`, `samlet`, `rust-saml`, `rustauth-saml` — **8 crate, tek sahip (`salasebas`), beyan edilen repo 404.** Hiçbirini kullanma.
+> **crates.io isim işgali tuzağı.** `saml-rs`, `opensaml`, `samlify`, `rustsaml`, `samlet`, `rust-saml` ve `rustauth-saml` adlı sekiz crate tek bir sahibe (`salasebas`) aittir ve beyan edilen repo 404 vermektedir. Hiçbiri kullanılmaz.
 
-**Bağlamsal sinyal:** Kanidm SAML'i **kalıcı olarak reddediyor** (19 Ara 2025): *"the security risks and feature scope of implementing SAML is too great and we should commit to not supporting it."*
+**Bağlamsal sinyal.** Kanidm SAML'i kalıcı olarak reddetmektedir; 19 Aralık 2025 tarihli açıklamaya göre SAML implementasyonunun güvenlik riskleri ve özellik kapsamı fazla büyüktür ve proje desteklememeye karar vermiştir.
 
-**Perspektif — bu Rust sorunu değil, SAML sorunu:** crewjam/saml (Go, 10 yaşında) **8 advisory**; gosaml2 **12**; ruby-saml 2025'te tek yılda **5**.
+**Perspektif.** Bu bir Rust sorunu değil, SAML sorunudur. Go tarafında on yaşındaki crewjam/saml sekiz advisory, gosaml2 on iki advisory almıştır; ruby-saml 2025'te tek yılda beş advisory almıştır.
 
-**Asimetri kritik:** IdP tarafı (imza **üretmek**) belirgin kolay ve güvenli — girdi kendinin. SP tarafı (**doğrulamak**) düşmanca girdi işler. **Biz IdP yazıyoruz → SAML'in kolay yarısındayız.**
+**Kritik asimetri.** IdP tarafı, yani imza üretmek, belirgin biçimde kolay ve güvenlidir çünkü girdi kendi üretimimizdir. SP tarafı, yani doğrulamak, düşmanca girdi işler. Argus bir IdP yazdığı için SAML'in kolay yarısındadır.
 
-#### 3.5 🟠 LDAP sunucu
+### 3.5 LDAP sunucu
 
-`ldap3_proto 0.8.1` (2026-08-14, Kanidm ekibi) — durum sanılandan iyi:
-- **`LdapOp` protokol katmanı TAM:** Bind, Unbind, Search, Modify, Add, Del, ModifyDN, Compare, Abandon, Extended, Intermediate
-- Gerçek tokio `Encoder`/`Decoder` codec'i
-- ⚠️ **`ServerOps` kolaylık katmanı sadece okuma**
-- ⚠️ **SASL:** tip var, **mekanizma implementasyonu yok**
+`ldap3_proto 0.8.1` (14 Ağustos 2026, Kanidm ekibi) sanılandan iyi durumdadır. `LdapOp` protokol katmanı tamdır: Bind, Unbind, Search, Modify, Add, Del, ModifyDN, Compare, Abandon, Extended ve Intermediate. Gerçek bir tokio `Encoder` ve `Decoder` codec'i bulunur.
 
-**Kanidm'in gerçeği (klonlanıp ölçüldü):** LDAP implementasyonu **3.227 satır**, dokümantasyon *"read-only LDAP interface"* diyor. StartTLS bile yok (bilinçli).
+> **İki sınır.** `ServerOps` kolaylık katmanı yalnızca okuma sağlar. SASL için tip tanımı vardır ancak mekanizma implementasyonu yoktur.
 
-**Efor: 9–15 geliştirici-ayı** (tam read-write + SASL). **Go'da da bedava değil** — GLAuth (2.8k yıldız) da ağırlıklı okuma. **Bu katmanda Rust'ın dezavantajı küçük.**
+**Kanidm'in gerçeği.** Proje klonlanıp ölçülmüştür: LDAP implementasyonu 3.227 satırdır ve dokümantasyon bunu salt okunur bir LDAP arayüzü olarak tanımlar. StartTLS bile bilinçli olarak bulunmaz.
 
-#### 3.6 🟠 SCIM
+Efor tam read-write ve SASL için 9-15 geliştirici-ayıdır. Bu iş Go'da da ücretsiz değildir; 2.800 yıldızlı GLAuth da ağırlıklı olarak okuma sunar. Bu katmanda Rust'ın dezavantajı küçüktür.
+
+### 3.6 SCIM
 
 | Crate | Sürüm | Durum |
 |---|---|---|
-| `scim_v2` | 0.5.0 (2026-09-07) | **En iyisi** |
-| `scim_proto` | 1.11.1 (2026-08-14) | Kanidm'in |
-| `scim-server` | 0.5.3 (2025-09-21) | 1 yıl bayat, garip `rust-mcp-sdk` bağımlılığı |
+| `scim_v2` | 0.5.0 (7 Eylül 2026) | En iyisi |
+| `scim_proto` | 1.11.1 (14 Ağustos 2026) | Kanidm'in crate'i |
+| `scim-server` | 0.5.3 (21 Eylül 2025) | Bir yıl bayattır ve garip bir `rust-mcp-sdk` bağımlılığı taşır |
 
-`scim_v2 0.5.0` kaynağı: User/Group/EnterpriseUser/ResourceType modelleri, validation, ve **LALRPOP tabanlı gerçek SCIM filter parser** (RFC 7644 §3.4.2.2) — işin en zor kısmı çözülmüş.
+`scim_v2 0.5.0` kaynağında User, Group, EnterpriseUser ve ResourceType modelleri, validation ve LALRPOP tabanlı gerçek bir SCIM filter parser'ı (RFC 7644 §3.4.2.2) bulunmaktadır; işin en zor kısmı çözülmüştür.
 
-**Yok olan:** endpoint'ler, PATCH semantiği, ETag/versiyonlama, bulk, `/Me`, persistence. **İşin ~%30-40'ı hazır. Efor: 4–6 geliştirici-ayı.**
+Eksik olanlar endpoint'ler, PATCH semantiği, ETag ve versiyonlama, bulk, `/Me` ve persistence'tır. İşin yaklaşık %30-40'ı hazırdır ve efor 4-6 geliştirici-ayıdır.
 
 ---
 
-### 4. Veri katmanı
+## 4. Veri katmanı
 
 | Seçenek | Sürüm | Karar |
 |---|---|---|
-| **sqlx** | 0.9.0 (2026-05-21) | ✅ **SEÇ** |
-| tokio-postgres + deadpool | 0.7.18 / 0.14.2 | ✅ Sıcak yol için |
-| diesel + diesel-async | 2.3.13 / 0.9.2 | ⚠️ 2026'da 6 advisory |
-| sea-orm | 2.0.2 | ❌ Gereksiz katman |
+| sqlx | 0.9.0 (21 Mayıs 2026) | Seçilir |
+| tokio-postgres ve deadpool | 0.7.18 ve 0.14.2 | Sıcak yol için kullanılır |
+| diesel ve diesel-async | 2.3.13 ve 0.9.2 | 2026'da altı advisory almıştır |
+| sea-orm | 2.0.2 | Gereksiz katmandır |
 
-**sqlx yönetişim bulgusu (CHANGELOG'dan birebir):**
-> *"SQLx has not been owned or maintained by LaunchBadge, LLC. for a few years now, and has since been informally transferred to the collective ownership of its principal authors."*
+**sqlx yönetişim bulgusu.** CHANGELOG'daki ifadeye göre SQLx birkaç yıldır LaunchBadge, LLC tarafından sahiplenilmemekte veya sürdürülmemektedir ve gayriresmî olarak başlıca yazarlarının kolektif sahipliğine devredilmiştir.
 
-Depo **github.com/transact-rs/sqlx**'e taşındı. Aktif ama **release kadansı yavaş**: yılda bir major.
+Depo github.com/transact-rs/sqlx adresine taşınmıştır. Proje aktiftir ancak release kadansı yavaştır: yılda bir major sürüm.
 
-**Compile-time query checking'in gerçek maliyeti:** `.sqlx/` dizini commit edilmeli; şema değişiminde her PR'da regenerate; derleme süresine ek. **Tavsiye: `query!` makrolarını sadece karmaşık sorgularda kullan**, sıcak yol için elle prepared statement + `query_as`.
+**Compile-time query checking'in gerçek maliyeti.** `.sqlx/` dizini commit edilmelidir; şema değişiminde her PR'da yeniden üretilmesi gerekir ve derleme süresine ek getirir. Tavsiye, `query!` makrolarının yalnızca karmaşık sorgularda kullanılması, sıcak yol için elle prepared statement ile `query_as` tercih edilmesidir.
 
-⚠️ **diesel 2026'da 6 advisory aldı.** **RUSTSEC-2026-0136 (`COPY FROM`/`COPY TO` command injection) Postgres'i etkiler.** 2.3.8+ kullan.
+> **Uyarı.** diesel 2026'da altı advisory almıştır. RUSTSEC-2026-0136 (`COPY FROM` ve `COPY TO` command injection) Postgres'i etkiler. 2.3.8 ve üstü kullanılmalıdır.
 
-**Bonus:** sqlx 0.9'un `sqlx.toml`'u `_sqlx_migrations` tablosunu yeniden adlandırmayı ve çoklu şemayı destekliyor.
+sqlx 0.9'un `sqlx.toml` dosyası `_sqlx_migrations` tablosunun yeniden adlandırılmasını ve çoklu şemayı destekler.
 
-**pgbouncer gerekli mi?** Tek instance için gereksiz. Çok instance'ta gerekir — **ama transaction mode + prepared statement çakışmasına dikkat.**
+**pgbouncer gerekli mi.** Tek instance için gereksizdir. Çok instance'ta gerekir; ancak transaction mode ile prepared statement çakışmasına dikkat edilmelidir.
 
 ---
 
-### 5. Prior art — gerçek Rust IdP'leri (klonlanıp ölçüldü)
+## 5. Prior art: gerçek Rust IdP'leri
 
-| | **Kanidm** | **Rauthy** |
+Aşağıdaki iki proje klonlanıp ölçülmüştür.
+
+| | Kanidm | Rauthy |
 |---|---|---|
-| Satır sayısı | **224.718** / 458 dosya | **84.242** / 331 dosya |
-| Yaş | 7,5 yıl (Şub 2019) | 3,2 yıl (Tem 2023) |
-| Son sürüm | v1.11.1 (2026-08-14) | **v0.36.2** (2026-08-08) — hâlâ 0.x |
-| Depolama | **SQLite + kendi IDL/ARC cache** | **Hiqlite** (SQLite+openraft) veya Postgres |
+| Satır sayısı | 224.718 satır, 458 dosya | 84.242 satır, 331 dosya |
+| Yaş | 7,5 yıl (Şubat 2019) | 3,2 yıl (Temmuz 2023) |
+| Son sürüm | v1.11.1 (14 Ağustos 2026) | v0.36.2 (8 Ağustos 2026); hâlâ 0.x |
+| Depolama | SQLite ile kendi IDL ve ARC cache'i | Hiqlite (SQLite ve openraft) veya Postgres |
 | Web | axum | actix-web |
-| HA | Eventually consistent, **maks 2 node** | Raft, N node |
-| OIDC/OAuth2 | ✅ Kapsamlı | ✅ **Çok kapsamlı** (device flow, DPoP, DCR, backchannel logout, token exchange, resource indicators, FedCM) |
-| **SAML** | ❌ (kalıcı red) | ❌ |
-| LDAP | ⚠️ **Sadece okuma** (3.227 satır) | ❌ |
-| SCIM | ⚠️ Sadece **gelen** | ⚠️ Sadece **giden** |
-| WebAuthn | ✅ L3 + MDS | ✅ + resident keys |
-| Bağımsız denetim | ❌ | ✅ **Radically Open Security / NGI Zero** |
-| 12 aylık advisory | **10** (1 Critical) | 2 |
-| Bus factor | ~1,5 (Firstyear 412/1000) | **1,0** (sebadob ~%89) |
+| HA | Eventually consistent, azami iki node | Raft, N node |
+| OIDC ve OAuth2 | Kapsamlı | Çok kapsamlı: device flow, DPoP, DCR, backchannel logout, token exchange, resource indicators, FedCM |
+| SAML | Yok; kalıcı olarak reddedilmiştir | Yok |
+| LDAP | Yalnızca okuma; 3.227 satır | Yok |
+| SCIM | Yalnızca gelen | Yalnızca giden |
+| WebAuthn | L3 ve MDS | Mevcut; resident keys dahil |
+| Bağımsız denetim | Yok | Var; Radically Open Security ve NGI Zero |
+| 12 aylık advisory | 10, biri Critical | 2 |
+| Bus factor | Yaklaşık 1,5; Firstyear 412/1000 | 1,0; sebadob yaklaşık %89 |
 
-#### Öğrenilecek 4 ders
+### 5.1 Öğrenilecek dört ders
 
-**1. Kanidm Postgres kullanmadı — bilinçliydi.** `server/lib/src/be/`: `idl_sqlite.rs` (SQLite/rusqlite, WAL) → `idl_arc_sqlite.rs` (concread ARCache) → query server. IDL bitmap indeksleri + ARC cache.
-> **Ders: IdP iş yükü ilişkisel join değil, indeksli entry lookup'tır. Depolama motorunu yazma, ama üstündeki index/cache katmanını sen yazman gerekebilir.**
+**Kanidm Postgres kullanmadı ve bu bilinçliydi.** `server/lib/src/be/` altında `idl_sqlite.rs` (SQLite ve rusqlite, WAL), ardından `idl_arc_sqlite.rs` (concread ARCache) ve en üstte query server bulunur. IDL bitmap indeksleri ile ARC cache birlikte çalışır. Ders şudur: IdP iş yükü ilişkisel join değil, indeksli entry lookup'tır. Depolama motoru yazılmaz, ancak üstündeki indeks ve cache katmanının yazılması gerekebilir.
 
-**2. Tek yazıcı + kilitlenmeyen okuyucu doğru trade-off, ama replikasyonu baştan belirler.** Kanidm COW mimarisi yüzünden 2 node'da tıkandı. **Raft istiyorsan Rauthy gibi baştan koy.**
+**Tek yazıcı ve kilitlenmeyen okuyucu doğru takastır, ancak replikasyonu baştan belirler.** Kanidm COW mimarisi nedeniyle iki node'da tıkanmıştır. Raft isteniyorsa Rauthy gibi baştan konur.
 
-**3. Rust'ın bellek güvenliği güvenlik bütçenin küçük kısmını kapatır.** Kanidm'in 2026'daki 10 advisory'sinin **hiçbiri buffer overflow değil**: parser stack exhaustion (×3, biri incomplete fix), non-constant-time secret karşılaştırma, XSS, ve **Critical seviyede authenticated arbitrary write**.
+**Rust'ın bellek güvenliği güvenlik bütçesinin küçük bir kısmını kapatır.** Kanidm'in 2026'daki on advisory'sinin hiçbiri buffer overflow değildir: üç parser stack exhaustion (biri eksik düzeltme), sabit zamanlı olmayan secret karşılaştırması, XSS ve Critical seviyede authenticated arbitrary write. Somut kural seti şudur: her parser'a decode'dan önce derinlik ve uzunluk sınırı konur, tüm secret karşılaştırmalarında `subtle` kullanılır ve erişim kontrolü için property-based test yazılır.
 
-Somut kural seti: her parser'a **decode'dan önce** derinlik+uzunluk limiti, tüm secret karşılaştırmalarında `subtle`, erişim kontrolü için property-based test.
+**Rauthy'nin 84.000 satırı tek kişinin üç yılda yazdığı, yalnızca OIDC sunan bir IdP'dir.** Argus'un hedefi bunun üstüne SAML, LDAP, SCIM ve çok kiracılık eklemektedir.
 
-**4. Rauthy'nin 84k satırı, tek kişinin 3 yılda yazdığı OIDC-only bir IdP'dir.** Bizim hedefimiz onun üstüne SAML + LDAP + SCIM + çok kiracılık ekliyor.
-
-**Ayrıca:** authentik (Python) 2026'da bileşenlerini **Rust'a taşımaya başladı** (2026.5 worker, 2026.8 server + proxy outpost).
+Ayrıca authentik (Python) 2026'da bileşenlerini Rust'a taşımaya başlamıştır: 2026.5'te worker, 2026.8'de server ve proxy outpost.
 
 ---
 
-### 6. Acımasız değerlendirme
+## 6. Değerlendirme
 
-#### 6.1 Rust'ın Go'ya göre gerçek maliyeti: ~1.5–2x
+### 6.1 Rust'ın Go'ya göre gerçek maliyeti
 
 | Katman | Rust | Go | Çarpan | Neden |
 |---|---|---|---|---|
-| HTTP/TLS/kripto | 1.0x | 1.0x | **1.0** | Rust **daha iyi** (PQ, FIPS) |
-| **OAuth2/OIDC AS** | **12–18 ay** | **3–5 ay** | **🔴 3–4x** | **Fosite yok** |
-| SAML (IdP tarafı) | 6–10 ay | 4–6 ay | 1.5x | samael/gamlastan var |
-| LDAP sunucu | 9–15 ay | 7–12 ay | 1.2x | İki dilde de el işi |
-| SCIM | 4–6 ay | 3–5 ay | 1.2x | filtre parser'ı yardım ediyor |
-| WebAuthn | 2–3 ay | 2–3 ay | **1.0** | webauthn-rs ≈ go-webauthn |
-| Çok kiracılık/admin/ops | 12–18 ay | 12–18 ay | **1.0** | Her dilde sıfırdan |
-| **TOPLAM** | **~46–73 ay** | **~31–49 ay** | **~1.5x** | |
+| HTTP, TLS, kripto | 1,0× | 1,0× | 1,0 | Rust daha iyidir; PQ ve FIPS |
+| OAuth2 ve OIDC AS | 12-18 ay | 3-5 ay | 3-4 | Fosite yoktur |
+| SAML (IdP tarafı) | 6-10 ay | 4-6 ay | 1,5 | samael ve gamlastan mevcuttur |
+| LDAP sunucu | 9-15 ay | 7-12 ay | 1,2 | İki dilde de el işidir |
+| SCIM | 4-6 ay | 3-5 ay | 1,2 | Filtre parser'ı yardımcı olur |
+| WebAuthn | 2-3 ay | 2-3 ay | 1,0 | webauthn-rs ile go-webauthn denktir |
+| Çok kiracılık, admin, operasyon | 12-18 ay | 12-18 ay | 1,0 | Her dilde sıfırdan yazılır |
+| Toplam | Yaklaşık 46-73 ay | Yaklaşık 31-49 ay | Yaklaşık 1,5 | — |
 
-**Toplam efor: 4–6 geliştirici-yılı çekirdek; sertleştirme + sertifikasyon + operasyonel olgunlukla gerçekçi olarak 6–10 geliştirici-yılı.**
+Toplam efor 4-6 geliştirici-yılı çekirdek, sertleştirme ile sertifikasyon ve operasyonel olgunluk dahil gerçekçi olarak 6-10 geliştirici-yılıdır.
 
-Kalibrasyon: Rauthy = 84k satır / 3 yıl / 1 kişi, sadece OIDC. Kanidm = 225k satır / 7,5 yıl / ~2 kişi, SAML yok.
+Kalibrasyon noktaları: Rauthy 84.000 satır, üç yıl, bir kişi, yalnızca OIDC; Kanidm 225.000 satır, 7,5 yıl, yaklaşık iki kişi, SAML yok.
 
-**Kritik nüans: Rust'ın maliyeti "dil zorluğu"ndan gelmiyor.** Borrow checker'ın vergisi bu ölçekte %10-15 ve derleyicinin yakaladığı hatalarla fazlasıyla geri ödenir. **Maliyetin tamamı bir kütüphanenin yokluğu: Fosite.**
+**Kritik nüans.** Rust'ın maliyeti dil zorluğundan gelmemektedir. Borrow checker'ın vergisi bu ölçekte %10-15'tir ve derleyicinin yakaladığı hatalarla fazlasıyla geri ödenir. Maliyetin tamamı tek bir kütüphanenin, Fosite'ın yokluğudur.
 
-#### 6.2 Katman sınıflandırması
+### 6.2 Katman sınıflandırması
 
-| ✅ HAZIR | ⚠️ KULLAN AMA DİKKAT | 🔴 BOŞLUK — YAZ | ❌ RUST'TA YAPMA |
+| Hazır | Kullanılır, dikkat gerekir | Boşluk, yazılmalı | Rust'ta yapılmaz |
 |---|---|---|---|
-| rustls 0.23 (PQ varsayılan) | jsonwebtoken (**`aws_lc_rs` şart**) | **OAuth2/OIDC AS** | HTTP/3 (h3) |
-| aws-lc-rs (FIPS, ML-KEM/DSA) | argon2 (**ARM'da NEON yok**) | LDAP sunucu semantiği + SASL | ntex / poem |
-| axum + hyper + tower | samael (**C libxml2 + `=0.3.3` pin**) | SCIM endpoint/PATCH/bulk | `rsa` crate'i (Marvin) |
-| webauthn-rs (PRF hariç) | bergshamra/gamlastan (**6 aylık, tek kişi**) | Çok kiracılık modeli | `openidconnect` (sunucu için) |
-| sqlx / tokio-postgres | ldap3_proto (codec var, semantik yok) | Consent/session/logout | josekit (C OpenSSL) |
-| tokio (Argon2 izole) | diesel (2.3.8+) | Admin API + policy engine | `salasebas` SAML crate'leri |
+| rustls 0.23; PQ varsayılan | jsonwebtoken; `aws_lc_rs` şart | OAuth2 ve OIDC AS | HTTP/3 (h3) |
+| aws-lc-rs; FIPS, ML-KEM, ML-DSA | argon2; ARM'da NEON yok | LDAP sunucu semantiği ve SASL | ntex ve poem |
+| axum, hyper, tower | samael; C libxml2 ve `=0.3.3` pin | SCIM endpoint, PATCH, bulk | `rsa` crate'i; Marvin |
+| webauthn-rs; PRF hariç | bergshamra ve gamlastan; altı aylık, tek kişi | Çok kiracılık modeli | `openidconnect`; sunucu için |
+| sqlx ve tokio-postgres | ldap3_proto; codec var, semantik yok | Consent, session, logout | josekit; C OpenSSL |
+| tokio; Argon2 izole | diesel 2.3.8 ve üstü | Admin API ve policy engine | `salasebas` SAML crate'leri |
 
-#### 6.3 Rust'ın kötü fikir olduğu yerler
+### 6.3 Rust'ın kötü fikir olduğu yerler
 
-1. **HTTP/3** — h3 16 aydır durgun, faydası sıfır
-2. **`rsa` crate'i ile RSA** — belgelenmiş, düzeltilmemiş timing sidechannel
-3. **Saf-Rust XML güvenliği ile *SP tarafı*** — biz IdP'yiz, az etkileniyoruz
-4. **Framework'te "en hızlısını" kovalamak** — ntex'in 76 ters bağımlılığı kazandığı mikrosaniyelerden pahalı
+1. HTTP/3: h3 16 aydır durgundur ve faydası sıfırdır.
+2. `rsa` crate'i ile RSA: belgelenmiş ve düzeltilmemiş bir timing yan kanalı vardır.
+3. Saf Rust XML güvenliği ile SP tarafı: Argus bir IdP olduğu için bu alandan az etkilenir.
+4. Framework'te en hızlıyı kovalamak: ntex'in 76 ters bağımlılığı, kazandığı mikrosaniyelerden pahalıdır.
 
-#### 6.4 Hibrit yaklaşım: dil hibriti değil, süreç hibriti
+### 6.4 Hibrit yaklaşım: dil hibriti değil, süreç hibriti
 
-🔴 **Yanlış kısım — SAML'i ayrı DİLE taşımak.** Kazanç düşük: Rust'ta zaten yapılabiliyor ve **biz IdP tarafındayız = SAML'in kolay yarısı**. Ayrıca SAML assertion üretmek kullanıcı/oturum/consent durumuna sıkı bağlı — süreç sınırına koymak dağıtık durum problemi yaratır. **Kazanç < maliyet.**
+**Yanlış kısım: SAML'i ayrı bir dile taşımak.** Kazanç düşüktür; Rust'ta zaten yapılabilmektedir ve Argus IdP tarafında, yani SAML'in kolay yarısındadır. Ayrıca SAML assertion üretmek kullanıcı, oturum ve consent durumuna sıkı bağlıdır; süreç sınırına koymak dağıtık durum problemi yaratır. Kazanç maliyetten düşüktür.
 
-✅ **Doğru kısım — LDAP'ı ayırmak.** Farklı protokol yüzeyi, farklı port, farklı tehdit modeli, **sadece-okuma** konumlandırılabilir. **Ama Go'da yazmaya gerek yok** — `ldap3_proto` işi görüyor.
+**Doğru kısım: LDAP'ı ayırmak.** Farklı protokol yüzeyi, farklı port ve farklı tehdit modeli vardır; salt okunur olarak konumlandırılabilir. Ancak Go'da yazmaya gerek yoktur; `ldap3_proto` işi görür.
 
-✅✅ **Asıl doğru hibrit:**
-- **Çekirdek (Rust):** OIDC/OAuth2 AS + WebAuthn + kullanıcı/oturum/policy + admin API. Tek süreç, tek veri modeli
-- **Kenar gateway'ler (yine Rust, ayrı süreç):** LDAP-ro, SAML-IdP, RADIUS. Çekirdeği iç API üzerinden tüketirler. Blast radius izole
+**Asıl doğru hibrit.** Çekirdek Rust'tadır: OIDC ve OAuth2 AS, WebAuthn, kullanıcı, oturum ve policy ile admin API. Tek süreç, tek veri modeli. Kenar gateway'ler yine Rust'ta ancak ayrı süreçtedir: LDAP salt okunur, SAML IdP ve RADIUS. Bunlar çekirdeği iç API üzerinden tüketir ve blast radius izole edilir.
 
-**Değerlendirilmesi gereken alternatif:** Fosite'ı sarmalayan bir Go süreci? 12–18 aylık en büyük riski ortadan kaldırır. Karşılığında protokol sınırında güven sınırı ve iki dilli operasyon yükü. **Tavsiye edilmez** — OAuth AS tam olarak IdP'nin kalbidir ve dışarıda tutmak geri kalanı kabuğa indirger. Ama dürüstçe hesaplanmalı.
+**Değerlendirilmesi gereken alternatif.** Fosite'ı sarmalayan bir Go süreci 12-18 aylık en büyük riski ortadan kaldırır. Karşılığında protokol sınırında bir güven sınırı ve iki dilli operasyon yükü doğar. Tavsiye edilmez: OAuth AS tam olarak IdP'nin kalbidir ve dışarıda tutmak geri kalanı kabuğa indirger. Yine de bu seçenek dürüstçe hesaplanmalıdır.
 
-#### 6.5 En riskli üç alan
+### 6.5 En riskli üç alan
 
-**🥇 1. OAuth2/OIDC AS'in sıfırdan yazılması.** 12–18 ay ve **hataların doğrudan kimlik doğrulama atlatması demek**. Azaltma: OpenID Foundation sertifikasyon test suite'ini **1. günden** CI'a koy; PKCE S256'yı zorunlu, implicit/ROPC'yi mümkün kılma; refresh reuse detection'ı baştan tasarla.
+**OAuth2 ve OIDC AS'in sıfırdan yazılması.** 12-18 ay sürer ve hatalar doğrudan kimlik doğrulama atlatması anlamına gelir. Azaltma: OpenID Foundation sertifikasyon test süiti birinci günden CI'a konur; PKCE S256 zorunlu kılınır, implicit ve ROPC hiç mümkün kılınmaz; refresh reuse detection baştan tasarlanır.
 
-**🥈 2. Tek-bakımcı yığın riski, üst üste binen katmanlarda.** webauthn-rs, ldap3_proto, concread → **hepsi Kanidm ekibi**. bergshamra + uppsala + gamlastan + kryptering → **hepsi tek kişi**. samael → 1 aktif bakımcı + 3 yıl geride pinlenmiş C kütüphanesi. **Bunlar bağımsız değil, korele riskler.** Azaltma: `cargo vendor`, fork kapasitesi, `cargo-audit` + `cargo-deny` CI'da bloklayıcı.
+**Tek bakımcılı yığın riskinin üst üste binmesi.** webauthn-rs, ldap3_proto ve concread'in hepsi Kanidm ekibine aittir. bergshamra, uppsala, gamlastan ve kryptering'in hepsi tek kişiye aittir. samael'in bir aktif bakımcısı ve üç yıl geride pinlenmiş bir C kütüphanesi vardır. Bunlar bağımsız değil, korele risklerdir. Azaltma: `cargo vendor`, fork kapasitesi, CI'da bloklayıcı `cargo-audit` ve `cargo-deny`.
 
-**🥉 3. SAML'in altındaki C yığını (libxml2).** 2026-09-05'te 8 yeni CVE; CVE-2026-86144 XXE/SSRF; kütüphanenin kendi README'si "güvenilmeyen veri için önerilmez". Azaltma: **ayrı, en az yetkili, sandbox'lı süreç**; libxml2 2.15.4+; samael fork'layıp pin güncelle; **veya SAML'i hiç destekleme.**
+**SAML'in altındaki C yığını (libxml2).** 5 Eylül 2026'da sekiz yeni CVE yayımlanmıştır; CVE-2026-86144 XXE ve SSRF üretir; kütüphanenin kendi README'si güvenilmeyen veri için önerilmediğini söyler. Azaltma: ayrı, en az yetkili ve sandbox'lı süreç; libxml2 2.15.4 ve üstü; samael fork'lanıp pin güncellenir; veya SAML hiç desteklenmez.
 
 ---
 
-### 7. Tavsiye edilen yığın
+## 7. Tavsiye edilen yığın
 
 ```toml
 # Runtime
@@ -367,28 +344,26 @@ tokio = { version = "1.53", features = ["full"] }
 # TLS — PQ varsayılan açık, FIPS'e hazır
 rustls = { version = "0.23", features = ["fips"] }   # aws-lc-rs varsayılan provider
 
-# JOSE — aws_lc_rs ŞART, rust_crypto ASLA
+# JOSE — aws_lc_rs şart, rust_crypto kullanılmaz
 jsonwebtoken = { version = "11", default-features = false,
                  features = ["use_pem", "aws_lc_rs"] }
 
 webauthn-rs = { version = "0.5", features = ["danger-allow-state-serialisation"] }
 argon2 = { version = "0.6", features = ["parallel"] }   # ARM'da NEON yok — ölç
 sqlx = { version = "0.9", features = ["postgres", "runtime-tokio-rustls"] }
-ldap3_proto = "0.8"          # sadece codec; semantik bizim
+ldap3_proto = "0.8"          # yalnızca codec; semantik bizim
 scim_v2 = "0.5"              # model + filtre parser; endpoint bizim
 # samael = "0.0.22"          # SAML gerekiyorsa; ayrı süreçte, fork'layıp libxml pinini güncelle
 ```
 
 ---
 
-### 8. Son söz
+## 8. Sonuç
 
-**Rust'ı seç — ama gerekçeyi düzelt.** "Maksimum performans" doğru gerekçe değil: darboğaz Argon2 ve RSA, ikisi de dilden bağımsız.
+Rust seçilir, ancak gerekçesi düzeltilir. Azami performans doğru gerekçe değildir; darboğaz Argon2 ve RSA'dır ve ikisi de dilden bağımsızdır.
 
-**Doğru gerekçe kripto ve TLS katmanının Go'dan iyi olması** (rustls'te PQ varsayılan açık, aws-lc-rs'te FIPS + ML-DSA, tip sistemiyle zorlanan algoritma-ailesi ayrımı) ve **bellek güvenliğinin bir IdP'de gerçekten önemli olması.**
+Doğru gerekçe iki maddedir. Birincisi kripto ve TLS katmanının Go'dan iyi olmasıdır: rustls'te PQ varsayılan açıktır, aws-lc-rs FIPS ve ML-DSA sunar, algoritma ailesi ayrımı tip sistemiyle zorlanır. İkincisi bellek güvenliğinin bir IdP'de gerçekten önemli olmasıdır.
 
-İki illüzyonu bırak:
-1. **Rust bellek güvenliği veriyor, güvenlik vermiyor.** Kanidm'in 2026'daki 10 advisory'sinin hiçbiri buffer overflow değildi. Bir Critical *authenticated arbitrary write*'ı hiçbir borrow checker durdurmaz.
-2. **Fosite'ın yokluğu 12–18 aylık gerçek bir vergidir** ve bu projenin en büyük tek riskidir.
+İki illüzyon bırakılmalıdır. Rust bellek güvenliği verir, güvenlik vermez; Kanidm'in 2026'daki on advisory'sinin hiçbiri buffer overflow değildi ve Critical seviyedeki authenticated arbitrary write'ı hiçbir borrow checker durduramaz. Fosite'ın yokluğu 12-18 aylık gerçek bir vergidir ve bu projenin en büyük tek riskidir.
 
-**Kanidm 7,5 yılda 225 bin satır yazdı ve SAML'i kasıtlı reddediyor. Rauthy 3 yılda 84 bin satır yazdı ve sadece OIDC yapıyor.** İkisi de bizim hedeflediğimizden dar kapsamda. **Kapsamı faz faz kesmek zorundayız.**
+Kanidm 7,5 yılda 225 bin satır yazmış ve SAML'i kasıtlı olarak reddetmiştir. Rauthy üç yılda 84 bin satır yazmış ve yalnızca OIDC sunmaktadır. İkisi de Argus'un hedeflediğinden dar kapsamdadır; dolayısıyla kapsam faz faz kesilmek zorundadır.

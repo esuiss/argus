@@ -1,645 +1,548 @@
-# 19. Yüksek erişilebilirlik ve dağıtık mimari
+# §19 — Yüksek erişilebilirlik ve dağıtık mimari
 
-> `ARGUS.md` §19'den taşındı. Numaralandırma korundu; bu dosyanın
-> içindeki `§19 §X` referansları aynı anlamda.
+Bu bölüm önceden ARGUS.md içindeydi; numaralandırma korunmuştur ve dosya içindeki §X referansları aynı anlamdadır.
 
+**Kapsam.** Rust ile PostgreSQL kullanarak sıfırdan yazılan genel amaçlı bir IdP için yüksek erişilebilirlik ile dağıtım kararları.
 
-**Kapsam:** Rust + PostgreSQL ile sıfırdan yazılan genel amaçlı IdP için HA/dağıtım kararları
-
-> **Metodoloji notu:** Bu oturumda WebSearch bütçesi (200 çağrı) erken tükendi; araştırmanın büyük bölümü birincil kaynakların (resmi dokümanlar, satıcı mühendislik blogları, GitHub tartışmaları, PostgreSQL release notes) doğrudan çekilip okunmasıyla yapıldı. Aşağıdaki her rakamın yanında kaynak ve tarih var. Doğrulayamadıklarımı `[DOĞRULANMADI]` ile işaretledim. **Hiçbir rakam uydurulmadı.**
+> **Metodoloji notu.** Bu oturumda web arama bütçesi, yani 200 çağrı, erken tükenmiştir; araştırmanın büyük bölümü birincil kaynakların, yani resmî dokümanların, satıcı mühendislik bloglarının, GitHub tartışmalarının ile PostgreSQL sürüm notlarının doğrudan çekilip okunmasıyla yapılmıştır. Aşağıdaki her rakamın yanında kaynağı ile tarihi vardır. Doğrulanamayanlar açıkça işaretlenmiştir ve hiçbir rakam uydurulmamıştır.
 
 ---
 
-### 0. YÖNETİCİ ÖZETİ — 8 CÜMLELİK CEVAP
+## 0. Yönetici özeti, sekiz cümlelik cevap
 
-1. **2026'da sektörün gittiği yön net: Infinispan/Redis gibi ayrı dağıtık durum katmanlarını atıp, uçucu durumu senkron replike edilmiş veritabanına koymak.** Keycloak bunu 17 Temmuz 2026'da "stateless / Multi-Cluster v2" olarak duyurdu; Zitadel Şubat 2026'da saf event-sourcing'den "hibrit ilişkisel modele" geçtiğini açıkladı.
-2. Bunun ölçülmüş bedeli **kimlik doğrulama etkileşimi başına ~8–10 ms ek gecikme ve veritabanı CPU/IOPS'unda ~2 kat artış**tır (Keycloak, 2026-07-17). Bu, bir IdP için kabul edilebilir bir takas.
-3. **Çok bölgeli senkron yazma kimlik için çalışmıyor.** Keycloak 26.4 ölçümü: site'lar arası RTT 0 ms'de p99 = 47 ms, 10 ms'de 84 ms, 20 ms'de 130 ms; bir önceki sürümde 20 ms RTT **1.076 ms p99** üretiyordu. Keycloak resmî sınırı: **site'lar arası DB gidiş-dönüş <5 ms önerilir, <10 ms zorunlu.**
-4. Kanidm'in 2 node'da tıkanmasının sebebi ölçek değil, **bilinçli bir CAP tercihi**: quorum'suz, AP, attribute-level last-write-wins. Bu tasarım "kilitlenme/oturum yazımı partition sırasında da çalışsın" der ama **çakışma çözümünü güvenlik açığına dönüştürür**. Argus bu yolu seçmemeli.
-5. **İptal (revocation) yayını için Redis pub/sub bir güvenlik hatasıdır.** Redis resmî dokümanı kelimesi kelimesine: "mesaj sonsuza kadar kaybolur". İptal sinyali kaybolursa iptal edilmiş bir token yaşamaya devam eder. Doğru desen **transactional outbox + polling**'dir — Keycloak tam olarak bunu yapıyor, **varsayılan polling aralığı 100 ms**.
-6. **Read replica'dan token iptali/oturum doğrulama okumak gerçek bir güvenlik riskidir**, teorik değil. CockroachDB'nin follower read'i bile **en az 4,2 saniye geçmişten** okur. Argus'ta iptal kontrolü asla asenkron replica'ya gitmemeli.
-7. **Argus için önerilen topoloji: tek bölge, 3 AZ, senkron quorum commit'li PostgreSQL (Patroni veya CloudNativePG), stateless Rust node'ları, uçucu durum DB'de, iptal yayını DB outbox + 100–250 ms polling, node-yerel `revocation_epoch` cache.** Redis opsiyonel bir hızlandırıcı olmalı, doğruluk kaynağı değil.
-8. Çok bölgelilik **veri replikasyonu ile değil, Okta'nın yaptığı gibi bölge başına izole "hücre" (cell) ile** çözülmeli — bu aynı zamanda veri yerleşimi (data residency) probleminin de tek gerçekçi cevabı.
+1. **2026'da sektörün gittiği yön nettir: Infinispan ile Redis gibi ayrı dağıtık durum katmanlarını atıp uçucu durumu senkron replike edilmiş bir veritabanına koymak.** Keycloak bunu 17 Temmuz 2026'da stateless ile Multi-Cluster v2 olarak duyurmuş, Zitadel ise Şubat 2026'da saf olay kaynaklılıktan hibrit ilişkisel modele geçtiğini açıklamıştır.
+2. Bunun ölçülmüş bedeli kimlik doğrulama etkileşimi başına yaklaşık 8 ile 10 milisaniye ek gecikme ile veritabanı işlemci ve giriş çıkış işlem sayısında yaklaşık iki kat artıştır; Keycloak, 17 Temmuz 2026. Bu, bir IdP için kabul edilebilir bir takastır.
+3. **Çok bölgeli senkron yazma kimlik için çalışmamaktadır.** Keycloak 26.4 ölçümüne göre bölgeler arası gidiş dönüş süresi sıfır milisaniyeyken 99. yüzdelik 47 milisaniye, 10 milisaniyeyken 84 milisaniye, 20 milisaniyeyken 130 milisaniyedir; bir önceki sürümde 20 milisaniyelik gidiş dönüş 1.076 milisaniyelik bir 99. yüzdelik üretmekteydi. Keycloak'ın resmî sınırı şudur: bölgeler arası veritabanı gidiş dönüşü için beş milisaniyenin altı önerilir, on milisaniyenin altı zorunludur.
+4. Kanidm'in iki düğümde tıkanmasının sebebi ölçek değil bilinçli bir CAP tercihidir: quorum yoktur, erişilebilirlik ile bölünme toleransı seçilmiştir ve nitelik seviyesinde son yazan kazanır kuralı vardır. Bu tasarım kilitlenme ile oturum yazımının bölünme sırasında da çalışmasını sağlar ancak çakışma çözümünü bir güvenlik açığına dönüştürür. Argus bu yolu seçmemelidir.
+5. **İptal yayını için Redis yayın ve abonelik bir güvenlik hatasıdır.** Redis resmî dokümanı kelimesi kelimesine mesajın sonsuza kadar kaybolduğunu söylemektedir. Bir iptal sinyali kaybolursa iptal edilmiş bir token yaşamaya devam eder. Doğru desen işlemsel giden kutu ile yoklamadır; Keycloak tam olarak bunu yapmaktadır ve varsayılan yoklama aralığı 100 milisaniyedir.
+6. **Okuma replikasından token iptali veya oturum doğrulaması okumak gerçek bir güvenlik riskidir**, teorik değildir. CockroachDB'nin takipçi okuması bile en az 4,2 saniye geçmişten okumaktadır. Argus'ta iptal kontrolü asla asenkron bir replikaya gitmemelidir.
+7. **Argus için önerilen topoloji şudur:** tek bölge, üç erişilebilirlik alanı, senkron quorum kesinleştirmeli PostgreSQL, yani Patroni veya CloudNativePG; durumsuz Rust düğümleri; uçucu durum veritabanında; iptal yayını veritabanı giden kutusu ile 100 ile 250 milisaniyelik yoklama; düğüme yerel bir iptal dönemi önbelleği. Redis opsiyonel bir hızlandırıcı olmalıdır, bir doğruluk kaynağı değil.
+8. Çok bölgelilik veri replikasyonuyla değil, Okta'nın yaptığı gibi bölge başına izole bir hücreyle çözülmelidir; bu aynı zamanda veri yerleşimi probleminin de tek gerçekçi cevabıdır.
 
 ---
 
-## BÖLÜM 1 — MEVCUT IdP'LERİN HA MİMARİLERİ
+## Bölüm 1 — Mevcut IdP'lerin yüksek erişilebilirlik mimarileri
 
-### 1.1 Keycloak — sektörün en iyi belgelenmiş HA hikâyesi (ve en dürüst itirafı)
+### 1.1 Keycloak: sektörün en iyi belgelenmiş hikâyesi ile en dürüst itirafı
 
-#### 1.1.1 Eski model: Infinispan cross-site replication (Multi-Site v1)
+#### 1.1.1 Eski model: Infinispan bölgeler arası replikasyonu, Multi-Site v1
 
-İki bağımsız Keycloak kümesi, **düşük gecikmeli ağ** ile bağlı iki site'ta çalışır:
+İki bağımsız Keycloak kümesi düşük gecikmeli bir ağla bağlı iki bölgede çalışmaktadır.
 
 | Katman | Replikasyon | Not |
 |---|---|---|
-| Kullanıcı/realm/client/offline session | **Senkron DB replikasyonu** | Aurora PostgreSQL ile test edildi |
-| Oturum verisi | Infinispan `replicated` cache → harici Data Grid → karşı site'a **senkron** | Cross-site "backup" kanalı |
-| Realm cache invalidation | `work` cache üzerinden invalidation mesajı | Node-yerel cache'ler |
+| Kullanıcı, realm, istemci ile çevrimdışı oturum | Senkron veritabanı replikasyonu | Aurora PostgreSQL ile test edilmiştir |
+| Oturum verisi | Infinispan replikalı önbellekten harici veri ızgarasına, oradan karşı bölgeye senkron | Bölgeler arası yedek kanalıdır |
+| Realm önbelleği geçersizleştirmesi | `work` önbelleği üzerinden geçersizleştirme mesajı | Düğüme yerel önbeleklerdir |
 
-Keycloak asenkron replikasyonu **bilinçli olarak reddetti**. Resmî gerekçe (keycloak.org multi-cluster/concepts):
+Keycloak asenkron replikasyonu bilinçli olarak reddetmiştir. Resmî gerekçesi şudur:
 
 > "Lost changes leading to users being able to log in with an old password because database changes are not replicated to the other site."
 
-Bu, bir IdP için asenkron çoklu-site'ın neden yanlış olduğunun en net tek cümlelik ifadesidir: **asenkron replikasyon = parola değişikliğinin kaybolması = eski parolayla giriş.**
+Bu, bir IdP için asenkron çoklu bölgenin neden yanlış olduğunun en net tek cümlelik ifadesidir: asenkron replikasyon parola değişikliğinin kaybolması, yani eski parolayla giriş demektir.
 
-**Belgelenmiş sınırlar (keycloak.org/high-availability/multi-cluster/concepts, erişim 2026-09-08):**
-- "This setup is tested and supported only with **two sites**." — üç site desteklenmiyor.
-- Site arızasında load balancer `/lb-check` ile tespit eder, trafiği yönlendirir; **kurtarma <2 dakika**, ama bu sırada bir kısım istek hata alır.
-- "A successful failover requires a setup **not degraded from previous failures**." — Bir önceki arızadan sonra manuel resync yapılmamışsa failover **veri kaybettirir**.
-- Infinispan'ın "out of sync" durumu: "**currently difficult to monitor**, and it would need a **full manual re-sync**."
+Belgelenmiş sınırları şunlardır, erişim 8 Eylül 2026. Bu kurulum yalnızca iki bölgeyle test edilmiş ile desteklenmektedir, yani üç bölge desteklenmemektedir. Bölge arızasında yük dengeleyici `/lb-check` ile tespit etmekte ve trafiği yönlendirmektedir; kurtarma iki dakikanın altındadır ancak bu sırada bir kısım istek hata almaktadır. Başarılı bir devralma, önceki arızalardan bozulmamış bir kurulum gerektirmektedir, yani bir önceki arızadan sonra elle yeniden senkronizasyon yapılmamışsa devralma veri kaybettirmektedir. Infinispan'ın senkronizasyon dışı kalma durumu şu anda izlenmesi zordur ve tam bir elle yeniden senkronizasyon gerektirmektedir.
 
-Bu son madde kritik: v1 mimarisi, **operatörün elle müdahale etmediği sürece sessizce bozulabilen** bir sistemdir.
+Bu son madde kritiktir: birinci sürüm mimarisi, operatör elle müdahale etmediği sürece sessizce bozulabilen bir sistemdir.
 
-#### 1.1.2 Yeni model: Multi-Cluster v2 + "stateless" (Keycloak 26.7, Temmuz 2026 — preview)
+#### 1.1.2 Yeni model: Multi-Cluster v2 ile stateless, Keycloak 26.7, Temmuz 2026, önizleme
 
-Kaynak: [Multi-Cluster v2 and Stateless Mode now in Preview](https://www.keycloak.org/2026/07/multi-cluster-v2-and-stateless-mode), Alexander Schwartz, **17 Temmuz 2026**.
+Kaynağı Alexander Schwartz'ın 17 Temmuz 2026 tarihli "Multi-Cluster v2 and Stateless Mode now in Preview" yazısıdır.
 
-Bu Argus için en önemli tek kaynak. Keycloak, Infinispan'ı kimlik doğrulama yolundan **tamamen çıkarıyor**:
+Bu, Argus için en önemli tek kaynaktır. Keycloak Infinispan'ı kimlik doğrulama yolundan tamamen çıkarmaktadır.
 
-| Veri | Eskiden | Şimdi (stateless) |
+| Veri | Eskiden | Şimdi, stateless modda |
 |---|---|---|
-| Authentication session (login ortasındaki kullanıcı) | Infinispan distributed cache | **Veritabanı** |
-| Action token (e-posta doğrulama, parola sıfırlama, OAuth code) | Infinispan | **Veritabanı** |
-| Login failure counter (brute-force) | Infinispan | **Veritabanı** |
-| Realm/authorization verisi | Node-yerel cache | Node-yerel cache (değişmedi) |
-| Küme içi cache invalidation | JGroups | JGroups (değişmedi) |
-| **Kümeler arası cache invalidation** | Infinispan cross-site | **DB outbox tablosu + polling, varsayılan 100 ms** |
+| Kimlik doğrulama oturumu, yani girişin ortasındaki kullanıcı | Infinispan dağıtık önbelleği | Veritabanı |
+| Eylem token'ı, yani e-posta doğrulama, parola sıfırlama ile OAuth kodu | Infinispan | Veritabanı |
+| Giriş başarısızlığı sayacı, yani kaba kuvvet koruması | Infinispan | Veritabanı |
+| Realm ile yetkilendirme verisi | Düğüme yerel önbellek | Düğüme yerel önbellek, değişmemiştir |
+| Küme içi önbellek geçersizleştirmesi | JGroups | JGroups, değişmemiştir |
+| Kümeler arası önbellek geçersizleştirmesi | Infinispan bölgeler arası | Veritabanı giden kutusu tablosu ile yoklama, varsayılanı 100 milisaniyedir |
 
-**Ölçülmüş maliyet (blog yazısından doğrudan):**
-- "**Approximately 8-10 milliseconds of additional latency per authentication interaction**, negligible for interactive login flows."
-- "**Database CPU load and IOPS can increase by roughly a factor of two.**"
+Ölçülmüş maliyeti blog yazısından doğrudan şöyledir: kimlik doğrulama etkileşimi başına yaklaşık 8 ile 10 milisaniye ek gecikme vardır ve etkileşimli giriş akışları için ihmal edilebilirdir; veritabanı işlemci yükü ile giriş çıkış işlem sayısı kabaca iki kat artabilir.
 
-**Ön koşul (doğrudan alıntı):**
-> "A synchronously replicated database and a low-latency network between sites (**less than 5 ms suggested, below 10 ms required for database round-trip**)."
+Ön koşulu doğrudan alıntıyla şudur: senkron replike edilmiş bir veritabanı ile bölgeler arasında düşük gecikmeli bir ağ gerekir; beş milisaniyenin altı önerilir, veritabanı gidiş dönüşü için on milisaniyenin altı zorunludur.
 
-**Tasarım felsefesi (doğrudan alıntı):**
-> "The new stateless feature **prioritizes consistency over availability**. Every write is synchronously replicated, so no data is lost during failover at the cost of requiring a low-latency network between sites."
+Tasarım felsefesi doğrudan alıntıyla şudur: yeni stateless özelliği tutarlılığı erişilebilirliğe tercih etmektedir; her yazma senkron replike edilmektedir, dolayısıyla devralma sırasında veri kaybolmamakta, bunun bedeli bölgeler arasında düşük gecikmeli bir ağ gerektirmesidir.
 
-**Kabul edilen sınırlar:**
-- "**Single-region only**: Synchronously replicated databases are generally not available across multiple regions."
-- Patch upgrade sıfır kesinti; **minor/major upgrade için bir site hariç hepsini kapatmak gerekiyor**.
+Kabul edilen sınırları şunlardır: yalnızca tek bölgedir, çünkü senkron replike edilen veritabanları genelde birden çok bölgede kullanılamamaktadır; yama yükseltmeleri sıfır kesintilidir ancak küçük ile büyük sürüm yükseltmeleri için bir bölge hariç hepsini kapatmak gerekmektedir.
 
-**Neden Infinispan'ı attılar (kendi itirafları):**
-- Kaybolan/yeniden başlayan node'da distributed cache rebalancing
-- "Transient failures in login flows if a node unexpectedly disappears"
-- "In large installations, the **login failure cache can grow significantly**, consuming substantial memory and causing **long rebalancing times**"
-- Tam küme yeniden başlatması (minor upgrade) uçucu durumu sıfırlıyordu
-- Mimari Kubernetes ve AWS'e bağlıydı (AWS Lambda + Prometheus alert'leri gerekiyordu)
+Infinispan'ı neden attıkları kendi itiraflarıdır: kaybolan veya yeniden başlayan bir düğümde dağıtık önbellek yeniden dengelemesi olmakta; bir düğüm beklenmedik şekilde kaybolursa giriş akışlarında geçici hatalar çıkmakta; büyük kurulumlarda giriş başarısızlığı önbelleği kayda değer büyüyerek önemli bellek tüketmekte ile uzun yeniden dengeleme sürelerine yol açmakta; tam küme yeniden başlatması, yani küçük sürüm yükseltmesi, uçucu durumu sıfırlamakta; ve mimari Kubernetes ile AWS'e bağlı olup AWS Lambda ile Prometheus uyarıları gerektirmekteydi.
 
-> **Argus için ders:** Keycloak, 10+ yıllık dağıtık cache yatırımını 2026'da terk etti. Sıfırdan yazan bir proje **hiç o yola girmemeli.** Uçucu durum PostgreSQL'de, cross-cluster sinyalizasyon DB outbox'ta.
+> **Argus için ders.** Keycloak on yıldan uzun süren dağıtık önbellek yatırımını 2026'da terk etmiştir. Sıfırdan yazan bir proje hiç o yola girmemelidir: uçucu durum PostgreSQL'de, kümeler arası sinyalleşme veritabanı giden kutusunda olmalıdır.
 
-#### 1.1.3 Keycloak'ın "farklı bölgelere yaymayın" gerekçesi — rakamlarla
+#### 1.1.3 Keycloak'ın farklı bölgelere yaymayın gerekçesi, rakamlarla
 
-Kaynak: [Keycloak Performance Benchmarks (26.4)](https://www.keycloak.org/2025/10/keycloak-benchmark), **Ekim 2025**.
+Kaynağı Ekim 2025 tarihli Keycloak 26.4 performans kıyaslamalarıdır.
 
-**Test koşulları:** Amazon Aurora PostgreSQL 17.5, 100.000 kullanıcı, 3 Keycloak pod'u 3 farklı AZ'de, yük üreteci 20–50 adet t4g.small.
+Test koşulları Amazon Aurora PostgreSQL 17.5, 100.000 kullanıcı, üç farklı erişilebilirlik alanında üç Keycloak podu ile 20 ile 50 adet t4g.small yük üretecidir.
 
-**Ağ gecikmesinin p99 yanıt süresine etkisi** (500 login/s + 2.500 token refresh/s altında):
+Ağ gecikmesinin 99. yüzdelik yanıt süresine etkisi, saniyede 500 giriş ile 2.500 token yenileme altında şöyledir.
 
-| Site'lar arası RTT | KC 26.3 p99 | KC 26.4 p99 |
+| Bölgeler arası gidiş dönüş | KC 26.3, 99. yüzdelik | KC 26.4, 99. yüzdelik |
 |---|---|---|
 | 0 ms | 51 ms | 47 ms |
-| **10 ms** | 116 ms | 84 ms |
-| **20 ms** | **1.076 ms** | 130 ms |
+| 10 ms | 116 ms | 84 ms |
+| 20 ms | 1.076 ms | 130 ms |
 
-Bu tablo, "önermiyoruz" ifadesinin arkasındaki fiziği gösteriyor: **20 ms RTT'de 26.3 çöküyor (21× bozulma).** 26.4 çok daha dayanıklı ama hâlâ 20 ms'de 2,8× bozulma var. Kıtalar arası RTT 70–150 ms olduğuna göre bu bölgede sistem kullanılamaz hale gelir.
+Bu tablo, önermiyoruz ifadesinin arkasındaki fiziği göstermektedir: 20 milisaniyelik gidiş dönüşte 26.3 çökmektedir, yani 21 kat bozulmaktadır. 26.4 çok daha dayanıklıdır ancak 20 milisaniyede hâlâ 2,8 kat bozulma vardır. Kıtalar arası gidiş dönüş 70 ile 150 milisaniye olduğuna göre sistem bu bölgede kullanılamaz hâle gelmektedir.
 
-**Sebep amplifikasyon:** Keycloak dokümanı açıkça diyor ki her istek veri güncellendiğinde site'lar arasında **birden çok tur** yapabilir; "Multiple database interactions per request amplify this effect." Yani 20 ms RTT × 5–7 yazma = 100–140 ms taban gecikme, üstüne kuyruklama.
+Sebebi amplifikasyondur: Keycloak dokümanı her istek veri güncellendiğinde bölgeler arasında birden çok tur yapabileceğini açıkça söylemekte ve istek başına birden çok veritabanı etkileşiminin bu etkiyi amplifiye ettiğini belirtmektedir. Yani 20 milisaniye gidiş dönüş ile beş ile yedi yazma 100 ile 140 milisaniyelik bir taban gecikme, üstüne de kuyruklama demektir.
 
-#### 1.1.4 Keycloak kapasite rakamları (Argus'un kendi hedefini konumlandırmak için)
+#### 1.1.4 Keycloak kapasite rakamları, Argus'un kendi hedefini konumlandırmak için
 
 | Metrik | Değer | Kaynak |
 |---|---|---|
-| 1 vCPU başına | **15 login/s** | KC benchmark 26.4, Ekim 2025 |
-| 1 vCPU başına | **120 refresh token isteği/s** | Aynı |
-| 3 pod × 24 vCPU + 4 GB, db.r8g.2xlarge | 500 login/s, 2.500 refresh/s | Aynı |
-| 3 pod × 40 vCPU + 8 GB, db.r8g.4xlarge | 1.000 login/s, 5.000 refresh/s | Aynı |
-| 3 pod × 74 vCPU + 8 GB, db.r8g.16xlarge | 2.000 login/s, 10.000 refresh/s | Aynı |
-| Cache 10k→200k entry | Aurora peak CPU **%77,77 → %63,77**; bellek 1,30 → 1,45 GB | Aynı |
+| Sanal işlemci başına | Saniyede 15 giriş | KC 26.4 kıyaslaması, Ekim 2025 |
+| Sanal işlemci başına | Saniyede 120 yenileme token'ı isteği | Aynı |
+| Üç pod, 24 sanal işlemci ile 4 GB, db.r8g.2xlarge | Saniyede 500 giriş ile 2.500 yenileme | Aynı |
+| Üç pod, 40 sanal işlemci ile 8 GB, db.r8g.4xlarge | Saniyede 1.000 giriş ile 5.000 yenileme | Aynı |
+| Üç pod, 74 sanal işlemci ile 8 GB, db.r8g.16xlarge | Saniyede 2.000 giriş ile 10.000 yenileme | Aynı |
+| Önbellek 10 binden 200 bin girdiye çıkarılınca | Aurora zirve işlemcisi %77,77'den %63,77'ye inmekte, bellek 1,30'dan 1,45 GB'a çıkmaktadır | Aynı |
 
-Rapor "Keycloak scales vertically almost linearly in the tested range" diyor.
+Rapor, Keycloak'ın test edilen aralıkta neredeyse doğrusal biçimde dikey ölçeklendiğini söylemektedir.
 
-> **Argus için kıyas hedefi:** Java/Infinispan'lı Keycloak 1 vCPU'da 15 login/s yapıyor. Argon2id maliyeti login'in baskın maliyeti olduğu için Rust'ın avantajı **login'de değil, refresh/introspection/JWKS yolunda** ortaya çıkacak. Argus'un gerçekçi hedefi: refresh yolunda vCPU başına 300–600/s. `[TAHMİN — ölçülmedi]`
+> **Argus için kıyas hedefi.** Java ile Infinispan kullanan Keycloak bir sanal işlemcide saniyede 15 giriş yapmaktadır. Argon2id maliyeti girişin baskın maliyeti olduğu için Rust'ın avantajı girişte değil yenileme, içgözlem ile JWKS yolunda ortaya çıkacaktır. Argus'un gerçekçi hedefi yenileme yolunda sanal işlemci başına saniyede 300 ile 600'dür; bu bir tahmindir ve ölçülmemiştir.
 
-#### 1.1.5 Keycloak failure mode özeti
+#### 1.1.5 Keycloak arıza modu özeti
 
 | Senaryo | Davranış |
 |---|---|
-| Tek node kaybı (v1, Infinispan) | Distributed cache en az 2 node'da tuttuğu için veri kaybı yok, ama **rebalancing** ve login akışlarında geçici hatalar |
-| Tek node kaybı (v2, stateless) | **Hiçbir şey olmaz** — auth yolunda Infinispan trafiği yok |
-| Tam küme yeniden başlatma (v1) | Devam eden login'ler, brute-force sayaçları **sıfırlanır** |
-| Tam küme yeniden başlatma (v2) | Korunur (DB'de) |
-| Site kaybı (v1) | LB yönlendirir, <2 dk; **önceki arızadan resync yapılmamışsa veri kaybı** |
-| Site kaybı (v2) | Senkron DB sayesinde **veri kaybı yok**, kullanıcılar giriş yapmış kalır |
-| Site'lar arası ağ kopması | v1: Infinispan out-of-sync, tespit zor, **tam manuel resync** gerekir. v2: senkron DB kendi quorum'una göre davranır; consistency>availability |
-| **Split-brain** | v1'de Infinispan seviyesinde mümkün ve **izlenmesi zor**. v2'de split-brain riski DB katmanına devredilir (Patroni/DCS quorum'u çözer) |
+| Tek düğüm kaybı, birinci sürüm, Infinispan | Dağıtık önbellek veriyi en az iki düğümde tuttuğu için veri kaybı yoktur, ancak yeniden dengeleme ile giriş akışlarında geçici hatalar olur |
+| Tek düğüm kaybı, ikinci sürüm, stateless | Hiçbir şey olmaz, çünkü kimlik doğrulama yolunda Infinispan trafiği yoktur |
+| Tam küme yeniden başlatma, birinci sürüm | Devam eden girişler ile kaba kuvvet sayaçları sıfırlanır |
+| Tam küme yeniden başlatma, ikinci sürüm | Korunur, çünkü veritabanındadır |
+| Bölge kaybı, birinci sürüm | Yük dengeleyici yönlendirir ve iki dakikanın altında toparlanır; önceki arızadan sonra yeniden senkronizasyon yapılmamışsa veri kaybı olur |
+| Bölge kaybı, ikinci sürüm | Senkron veritabanı sayesinde veri kaybı yoktur ve kullanıcılar giriş yapmış kalır |
+| Bölgeler arası ağ kopması | Birinci sürümde Infinispan senkronizasyon dışı kalır, tespiti zordur ve tam elle yeniden senkronizasyon gerekir. İkinci sürümde senkron veritabanı kendi quorum'una göre davranır ve tutarlılık erişilebilirliğe tercih edilir |
+| Bölünmüş beyin | Birinci sürümde Infinispan seviyesinde mümkündür ile izlenmesi zordur. İkinci sürümde risk veritabanı katmanına devredilir ve Patroni ile dağıtık yapılandırma deposu quorum'u çözer |
 
----
+### 1.2 Zitadel: olay kaynaklılığın yüksek erişilebilirlikteki bedeli ve geri adım
 
-### 1.2 Zitadel — event sourcing'in HA'daki bedeli (ve geri adım)
+**Mimarisi** olay kaynaklılık ile komut sorgu sorumluluk ayrımıdır. Yazma tarafı değişmez bir olay deposuna yazmakta, okuma tarafı bir projeksiyonu, yani denormalize bir görünümü okumaktadır.
 
-**Mimari:** Event Sourcing + CQRS. Yazma tarafı immutable event store'a yazar; okuma tarafı **projeksiyon** (denormalize view) okur.
+**Tutarlılık modeli.** Resmî doküman şöyle der: olay kaynaklılık ile komut sorgu sorumluluk ayrımının birleşimi Zitadel'i nihai tutarlı yapmaktadır. Sorgu görünümleri asenkron güncellenmektedir; ancak kimlikle yapılan tekil kaynak aramaları olay deposuna karşı doğrulanarak güçlü tutarlılık alabilmektedir.
 
-**Tutarlılık modeli:** Resmî doküman (zitadel.com/docs/concepts/architecture/software): "The combination of Event Sourcing and CQRS makes Zitadel **eventual consistent**." Query view'lar **asenkron** güncellenir; ancak **ID ile tekil kaynak araması event store'a karşı doğrulanarak strong consistency** alabiliyor.
+**Projeksiyon gecikmesi yüksek erişilebilirlikte ne yapmaktadır.** Kritik nokta şudur: Zitadel bakımcısının 2024 tarihli açıklaması, 7636 numaralı GitHub tartışması:
 
-**Projeksiyon gecikmesi HA'da ne yapıyor?** İşte kritik nokta: Zitadel bakımcısının 2024 tarihli açıklaması (GitHub Discussion [#7636](https://github.com/zitadel/zitadel/discussions/7636)):
+> "At the moment we do not (yet) support the usage of read replicas because we want to keep most data consistent."
 
-> "At the moment we do not (yet) support the usage of **read replicas** because we want to keep most data **consistent**."
+Yani olay kaynaklı bir IdP bile, projeksiyon gecikmesi bir güvenlik anlamı taşıdığı için okuma replikası kullanmayı reddetmektedir. Bu, 2.4'teki iptal edilmiş bir token replikada geçerli görünür mü sorusunun sektörden gelen dolaylı cevabıdır: evet, o yüzden kimse yapmamaktadır.
 
-Yani event-sourced bir IdP bile, projeksiyon gecikmesi güvenlik anlamı taşıdığı için **read replica kullanmayı reddediyor.** Bu, Bölüm 2.4'teki "iptal edilmiş token replica'da geçerli görünür mü?" sorusunun sektörden gelen dolaylı cevabıdır: **evet, o yüzden kimse yapmıyor.**
+**Çok bölge duruşu**, aynı tartışmadan: PostgreSQL ile çok erişilebilirlik alanlı tek bölge kümesi ile felaket kurtarma amaçlı bölgeler arası replikasyon kullanılmaktadır, aktif aktif yoktur. CockroachDB veya Spanner ile bölgeler arası aktif aktif dağıtımlar çalışmaktadır, ancak bölgeler birbirinden uzaksa gecikme tarafında biraz feda edilmektedir.
 
-**Multi-region duruşu (aynı tartışma):**
-- **PostgreSQL ile:** çok-AZ tek bölge küme + **felaket kurtarma amaçlı** cross-region replikasyon. Aktif-aktif **yok**.
-- **CockroachDB/Spanner ile:** "cross region active-active deployments work" — ama "You might sacrifice a little on the latency side if your regions are far apart."
+**2026 gelişmesi: Zitadel olay kaynaklılıktan kısmen geri çekilmektedir.** Kaynağı kurucu ile genel müdür Florian Forster'ın 12 Şubat 2026 tarihli "Scaling Cloud-Native Identity: Optimizing Performance with Caching" yazısıdır:
 
-**2026 GELİŞMESİ — Zitadel event sourcing'den kısmen geri çekiliyor.** Kaynak: [Scaling Cloud-Native Identity: Optimizing Performance with Caching](https://zitadel.com/blog/scaling-cloud-native-identity-optimizing-performance-with-caching), Florian Forster (kurucu/CEO), **12 Şubat 2026**:
+> "We are currently working on a major evolution of our core engine—shifting to a hybrid relational model that combines the speed of traditional tables with the auditability of events. This change will drastically reduce the need for complex read models."
 
-> "We are currently working on a **major evolution of our core engine—shifting to a hybrid relational model** that combines the speed of traditional tables with the auditability of events. This change will **drastically reduce the need for complex read models**."
+Önbellek bağlayıcıları için ölçülmüş bir rakam da vardır: PostgreSQL önbellek bağlayıcısıyla yalnızca bu varsayılan kurulumu kullanarak saniyede 30.000'in üzerinde istek yapan müşteriler görülmektedir.
 
-Ve caching connector'ları için ölçülmüş bir rakam:
-> PostgreSQL cache connector için: "We see customers running **north of 30,000 requests per second** using just this default setup."
+Ayrıca bellek içi önbellek hakkında bir uyarı vardır: çok konteynerli bir ortamda yapışkan oturum olmadan kullanılamaz, çünkü kullanıcılar veri tutarsızlığı yaşayabilir, örneğin bir istekte çıkış yapmış diğerinde giriş yapmış olabilirler.
 
-Ayrıca in-memory cache hakkında uyarı: çok-container ortamda sticky session olmadan kullanılamaz — "users may experience data inconsistencies (e.g., **being logged out on one request and logged in on the next**)".
-
-| Zitadel failure mode | Davranış |
+| Zitadel arıza modu | Davranış |
 |---|---|
-| Node kaybı | Stateless uygulama katmanı; DB'ye devredilmiş |
-| Projeksiyon gecikmesi | Okuma tarafı bayat olabilir; kritik okumalar event store'a düşer |
-| Redis cache kaybı | Cache miss → DB'ye düşer (degrade, kesinti değil) |
-| Split-brain | Uygulama katmanında yok; DB katmanına devredilmiş |
-| Bölge kaybı (Postgres) | DR failover, **veri kaybı riski var** (asenkron cross-region) |
+| Düğüm kaybı | Uygulama katmanı durumsuzdur ve veritabanına devredilmiştir |
+| Projeksiyon gecikmesi | Okuma tarafı bayat olabilir; kritik okumalar olay deposuna düşer |
+| Redis önbelleği kaybı | Önbellek ıskalanır ve veritabanına düşülür; bu bir bozulmadır, kesinti değildir |
+| Bölünmüş beyin | Uygulama katmanında yoktur ve veritabanı katmanına devredilmiştir |
+| Bölge kaybı, Postgres ile | Felaket kurtarma devralması yapılır ve asenkron bölgeler arası replikasyon nedeniyle veri kaybı riski vardır |
 
-> **Argus için ders:** Event sourcing'i "HA çözer" diye seçme. Zitadel bunu 8 yıl uyguladıktan sonra hibrit ilişkisel modele dönüyor. **Argus doğrudan ilişkisel + ayrı append-only audit tablosu ile başlamalı.**
+> **Argus için ders.** Olay kaynaklılık yüksek erişilebilirliği çözer diye seçilmemelidir. Zitadel bunu sekiz yıl uyguladıktan sonra hibrit ilişkisel modele dönmektedir. Argus doğrudan ilişkisel bir modelle ve ayrı bir yalnızca ekleme yapılan denetim tablosuyla başlamalıdır.
 
----
+### 1.3 Kanidm: neden iki düğümde tıkanmıştır
 
-### 1.3 Kanidm — neden 2 node'da tıkandı
+Kaynakları replikasyon tasarım notları dokümanı, erişim 8 Eylül 2026, ile 4099 numaralı GitHub tartışmasıdır.
 
-Kaynak: [Replication Design and Notes](https://kanidm.github.io/kanidm/master/developers/designs/replication_design_and_notes.html) (erişim 2026-09-08) ve GitHub Discussion [#4099](https://github.com/kanidm/kanidm/discussions/4099).
+Bu bir tıkanma değil bilinçli bir CAP tercihidir ve tercih Argus için yanlıştır.
 
-**Bu bir "tıkanma" değil, bilinçli bir CAP tercihidir ve tercih Argus için yanlıştır.**
+Kanidm erişilebilirlik ile bölünme toleransını seçen, tutarlılığı feda eden bir sistemdir. Gerekçesi doğrudan tasarım dokümanındadır: quorum gerektirmek bölünme sırasında yazamamak demektir ve bu kimlik yönetimi için kabul edilemezdir, çünkü oturum oluşturma ile güvenlik kilitlemesi bölünme sırasında da çalışmalıdır.
 
-Kanidm **AP** sistemidir (CAP'te Availability + Partition tolerance; Consistency feda edilir). Gerekçesi doğrudan tasarım dokümanında: quorum gerektirmek, partition sırasında yazamamak demektir; ve bu IDM için kabul edilemez — çünkü **oturum oluşturma ve güvenlik kilitlemesi (lockout) partition sırasında da çalışmalı**.
+Nasıl çalıştığı şöyledir. Seçim yoktur ve quorum yoktur; tüm düğümler yazma kabul etmektedir. Her değişiklik bir değişiklik kimliği almaktadır: zaman damgası ile sunucu evrensel benzersiz kimliği. Zaman damgaları her zaman ileri gitmekte, asla geri gitmemektedir ve gerektiğinde ileri sürüklenmektedir. Nitelik seviyesinde son yazan kazanmaktadır: her nitelik kendi son değişim kimliğini tutar ve çakışmada yüksek kimlik kazanır. Replika güncelleme vektörü her başlatıcı sunucu için asgari ile azami değişiklik aralığını tutar; tüketici vektörünü sağlayıcıya gönderir ve sağlayıcı farkı hesaplar; bu, vekil replikasyona izin verir ve tam örgü gerektirmez. Topoloji rolleri okuma yazma, yazma kabul etmeyip yalnızca ileten taşıma merkezi ile yalnızca okumadır. Silme bir mezar taşıdır ve replikasyon penceresinden sonra toplanır.
 
-**Nasıl çalışıyor:**
-- **Seçim yok, quorum yok.** Tüm node'lar yazma kabul eder.
-- Her değişiklik bir **CID** alır: `(timestamp, server UUID)`. Timestamp'ler "her zaman ileri gider, asla geri gitmez" (gerektiğinde ileri sürüklenir).
-- **Attribute-level last-write-wins:** her attribute kendi son değişim CID'sini tutar; çakışmada **yüksek CID kazanır**.
-- **RUV (Replica Update Vector):** her originating server için min/max değişiklik aralığı. Consumer RUV'unu supplier'a gönderir, supplier farkı hesaplar. Bu, **proxy replikasyon**a izin verir — full-mesh gerekmez.
-- Topoloji rolleri: Read-Write, **Transport Hub** (yazma kabul etmez, sadece iletir), Read-Only.
-- Silme = **tombstone**; replikasyon penceresinden sonra reap edilir.
-
-**Sınırlar ve failure mode'lar (dokümanın kendi "Stated Limitations" bölümünden):**
+Sınırları ile arıza modları, dokümanın kendi belirtilen sınırlamalar bölümünden:
 
 | Sorun | Sonuç |
 |---|---|
-| **Zombie entry** | Node çok geri kalırsa tombstone o node'a ulaşmadan reap edilir → silinmiş kayıt **dirilir**. Kanidm bunu "**lagging node'u dondurarak**" (inbound+outbound replikasyonu durdurarak) önlüyor |
-| **Uniqueness çakışması** | En olası çakışma kaynağı. Node'lar uzun ayrı kalırsa aynı e-posta/username iki node'da yaratılabilir → entry conflict state'e düşer |
-| **Schema morphing** | Merge sırasında entry sınıf değiştirip şemayı ihlal edebilir (group→person) |
-| **Tombstone penceresi takası** | Uzun pencere zombie'yi önler ama çakışma riskini artırır |
-| **Tutarlılık garantisi yok** | "Clients may read stale data; eventual consistency only" |
+| Zombi kayıt | Bir düğüm çok geri kalırsa mezar taşı ona ulaşmadan toplanır ve silinmiş bir kayıt dirilir. Kanidm bunu geri kalan düğümü dondurarak, yani gelen ile giden replikasyonu durdurarak önlemektedir |
+| Benzersizlik çakışması | En olası çakışma kaynağıdır. Düğümler uzun süre ayrı kalırsa aynı e-posta ya da kullanıcı adı iki düğümde yaratılabilir ve kayıt çakışma durumuna düşer |
+| Şema başkalaşımı | Birleştirme sırasında bir kayıt sınıf değiştirip şemayı ihlal edebilir, örneğin gruptan kişiye dönebilir |
+| Mezar taşı penceresi takası | Uzun bir pencere zombiyi önler ancak çakışma riskini artırır |
+| Tutarlılık garantisi yokluğu | İstemciler bayat veri okuyabilir; yalnızca nihai tutarlılık vardır |
 
-**Node sayısı:** 2 node resmî destekli. 3 node "**technically unsupported**" ama çalışıyor — sebep mimari değil, **test eksikliği** (Discussion #4099).
+Düğüm sayısı açısından iki düğüm resmî olarak desteklenmektedir. Üç düğüm teknik olarak desteklenmemektedir ancak çalışmaktadır; sebebi mimari değil test eksikliğidir, 4099 numaralı tartışma.
 
-> **Argus için ders — bu en önemli negatif dersimiz:**
->
-> LWW çakışma çözümü kimlikte bir **güvenlik açığıdır**, sadece bir veri tutarsızlığı değil. Somut senaryo: Partition sırasında A node'unda kullanıcı parolasını değiştirir (CID=100), B node'unda saldırgan eski oturumundan bir credential ekler (CID=101). Merge'de **saldırganın değişikliği kazanır.** Aynı şekilde: bir node'da hesap kilitlenir, diğerinde daha yüksek CID'li bir "unlock" olur → kilit kaybolur.
->
-> Kanidm bunu attribute-level çözünürlük ve dondurma ile hafifletiyor ama **kaldıramıyor**. Argus quorum'lu (CP) bir sistem olmalı; "partition sırasında yazamamak" kimlikte **doğru** davranıştır.
+> **Argus için en önemli olumsuz dersimiz budur.** Son yazan kazanır çakışma çözümü kimlikte bir güvenlik açığıdır, yalnızca bir veri tutarsızlığı değildir. Somut senaryo şudur: bölünme sırasında A düğümünde kullanıcı parolasını değiştirir, değişiklik kimliği 100; B düğümünde saldırgan eski oturumundan bir kimlik bilgisi ekler, değişiklik kimliği 101. Birleştirmede saldırganın değişikliği kazanır. Aynı şekilde bir düğümde hesap kilitlenir, diğerinde daha yüksek kimlikli bir kilit açma olur ve kilit kaybolur. Kanidm bunu nitelik seviyesinde çözünürlük ile dondurmayla hafifletmektedir ancak kaldıramamaktadır. Argus quorum'lu, yani tutarlılık ile bölünme toleransını seçen bir sistem olmalıdır; bölünme sırasında yazamamak kimlikte doğru davranıştır.
 
----
+### 1.4 Rauthy ile Hiqlite: Raft tabanlı gömülü yaklaşım
 
-### 1.4 Rauthy + Hiqlite — Raft'lı gömülü yaklaşım
+Kaynakları Rauthy'nin yüksek erişilebilirlik dokümanı, `hiqlite` crate'i ile `openraft` deposudur, erişim 8 Eylül 2026.
 
-Kaynak: [Rauthy HA docs](https://sebadob.github.io/rauthy/config/ha.html), [hiqlite crate](https://crates.io/crates/hiqlite), [openraft](https://github.com/databendlabs/openraft) (erişim 2026-09-08).
+Ne yaptıkları şudur: Hiqlite, `rusqlite` üzerine bir asenkron sarmalayıcı ile `openraft` tabanlı Raft konsensüsüdür. Rauthy'nin tüm örnekleri tek bir yüksek erişilebilirlikli önbellek katmanı paylaşmaktadır.
 
-**Ne yaptılar:** Hiqlite = `rusqlite` üzerine async wrapper + `openraft` ile Raft konsensüsü. Rauthy'nin tüm instance'ları **tek bir HA cache katmanı** paylaşır.
+Neden Raft sorusunun cevabı şudur: Rauthy'nin bazı verileri yalnızca önbellekte yaşamaktadır, özellikle authorization code'lar. Bir authorization code'un tek bir düğümde kalması, yük dengelenmiş bir ortamda token takasının başarısız olması demektir. Redis'e bağımlı olmadan bunu çözmenin yolu gömülü konsensüstür.
 
-**Neden Raft?** Çünkü Rauthy'nin bazı verileri **yalnızca cache'te** yaşıyor — özellikle **authorization code**'lar. Bir authorization code'un tek bir node'da kalması, load-balanced ortamda token exchange'in başarısız olması demek. Redis'e bağımlı olmadan bunu çözmenin yolu gömülü konsensüs.
+`openraft`'ın standart Raft'a göre farkı kendi README dosyasındadır: genelleştirilmiş üyelik değişimi, yani tek bir işlemde keyfi bir düğüm kümesi değişimi, ile azaltılmış seçim çatışması oranı, yani bölünmüş oyun yeni bir döneme zorlamaması.
 
-**openraft'ın standart Raft'a göre farkı (kendi README'sinden):** generalized membership change (tek işlemde keyfi node kümesi değişimi) ve azaltılmış election conflict oranı (split vote yeni term'e zorlamıyor).
-
-**Ölçülmüş rakamlar:**
-- Hiqlite yazarının ilk benchmark'ı: **ucuz tüketici M2 SSD'de ~24.500 tekil insert/s**; 3 ayrı process, localhost ama **gerçek networking** ile. Eski SATA SSD'li makinede **~16.500 insert/s**.
-- Rauthy dokümanı: **3 replika önerilir, 5 daha yüksek dayanıklılık için.** "at some point, the write throughput will degrade" — sonsuz ölçeklenemez.
-- Graceful shutdown **en az 15 saniye**, leader election / küme durumu değişimi sırasında **25–30 saniye**.
-- Postgres kullanılsa bile "you should provide a **persistent volume**" — Raft state diskte yaşamalı.
-
-**Failure mode'lar:**
+Ölçülmüş rakamlar şunlardır. Hiqlite yazarının ilk kıyaslaması ucuz bir tüketici M2 SSD'de saniyede yaklaşık 24.500 tekil ekleme göstermektedir; üç ayrı süreç, yerel makinede ancak gerçek ağ kullanımıyla. Eski SATA SSD'li bir makinede saniyede yaklaşık 16.500 eklemedir. Rauthy dokümanı üç replika önermekte, daha yüksek dayanıklılık için beş demektedir; bir noktada yazma iş hacminin bozulacağını belirtmektedir, yani sonsuz ölçeklenmemektedir. Zarif kapanma en az 15 saniye, lider seçimi ile küme durumu değişimi sırasında 25 ile 30 saniye sürmektedir. Postgres kullanılsa bile kalıcı bir birim sağlanması gerekmektedir, çünkü Raft durumu diskte yaşamalıdır.
 
 | Senaryo | Davranış |
 |---|---|
-| 3 node'dan 1 kaybı | Quorum korunur (2/3), yazma devam eder, leader election gerekiyorsa kısa kesinti |
-| 3 node'dan 2 kaybı | **Quorum kaybı → yazma durur.** Raft'ın doğası; CP sistem |
-| Split-brain | **Yapısal olarak imkânsız** — Raft'ın temel garantisi |
-| Node ekleme | Yazma throughput'u düşer (her yazma daha çok node'a replike) |
+| Üç düğümden birinin kaybı | Quorum korunur, yani üçte iki; yazma devam eder ve lider seçimi gerekiyorsa kısa bir kesinti olur |
+| Üç düğümden ikisinin kaybı | Quorum kaybolur ve yazma durur; bu Raft'ın doğasıdır ve tutarlılık ile bölünme toleransını seçen bir sistemdir |
+| Bölünmüş beyin | Yapısal olarak imkânsızdır; Raft'ın temel garantisidir |
+| Düğüm ekleme | Yazma iş hacmi düşer, çünkü her yazma daha çok düğüme replike edilir |
 
-> **Argus için ders:** Rauthy'nin çözümü **doğru ama Argus'un ölçeğine yanlış.** Raft yazma throughput'u node sayısıyla ters orantılıdır; 5 node üstü mantıksız. Argus zaten PostgreSQL'e sahipse **ikinci bir konsensüs sistemi taşımanın anlamı yok** — Postgres'in kendi replikasyonu (Patroni + etcd) aynı garantiyi zaten veriyor. Rauthy'nin Raft'a ihtiyacı, "Postgres opsiyonel, SQLite ile de çalışsın" hedefinden doğuyor; Argus'un böyle bir kısıtı yok.
+> **Argus için ders.** Rauthy'nin çözümü doğrudur ancak Argus'un ölçeğine yanlıştır. Raft yazma iş hacmi düğüm sayısıyla ters orantılıdır ve beş düğümün üstü mantıksızdır. Argus zaten PostgreSQL'e sahipse ikinci bir konsensüs sistemi taşımanın anlamı yoktur; Postgres'in kendi replikasyonu, yani Patroni ile etcd, aynı garantiyi zaten vermektedir. Rauthy'nin Raft'a ihtiyacı Postgres opsiyoneldir ve SQLite ile de çalışsın hedefinden doğmaktadır; Argus'un böyle bir kısıtı yoktur.
 
----
+### 1.5 Ory Hydra ile Kratos: yüksek erişilebilirliği tamamen veritabanına devretme
 
-### 1.5 Ory Hydra / Kratos — HA'yı tamamen DB'ye devretme
+**Tasarımı.** Hydra ile Kratos durumsuz süreçlerdir. Onay ile giriş durumu, oturum ile yenileme token'ı hepsi SQL veritabanındadır. Uygulama katmanında hiçbir küme koordinasyonu, dedikodu protokolü ya da önbellek geçersizleştirmesi yoktur. Yüksek erişilebilirlik veritabanını yüksek erişilebilir yapmak, N kopya çalıştırmak ile bir yük dengeleyici koymaktan ibarettir.
 
-**Tasarım:** Hydra ve Kratos **stateless** process'lerdir. Consent/login state, session, refresh token — hepsi SQL veritabanında. Uygulama katmanında hiçbir küme koordinasyonu, gossip, cache invalidation yok. HA = "DB'yi HA yap, N tane kopya çalıştır, LB koy."
+**Bu tasarımın gerçek dünyada çarptığı duvar en değerli olumsuz veri noktamızdır.** ory/kratos deposundaki 3134 numaralı tartışmada küresel CockroachDB ile ciddi performans sorunları anlatılmaktadır: `SELECT session_devices.* FROM session_devices WHERE session_id = $1` sorgusu, yani düz bir birincil anahtar araması, ortalama 230 milisaniye sürmektedir; giriş yapmış kullanıcılar için toplam yaklaşık bir saniye ek gecikme oluşmaktadır. CockroachDB desteğinin teşhisi tabloların küresel olarak yapılandırılmamış olması ve sorguların bölgeler arasında dolaşmasıdır.
 
-**Bu tasarımın gerçek dünyada çarptığı duvar — en değerli negatif veri noktası:**
+Ory bakımcısı aeneasr üç şey söylemektedir ve üçü de Argus için doğrudan geçerlidir. Birincisi fiziktir: her yazılım sistemi fizik nedeniyle bu soruna sahip olacaktır; SQL sorgularınız derin deniz kablolarında 400 milisaniye yol alıyorsa her SQL sorgusu yavaş olacaktır. İkincisi açık kaynağın yönetilen ağdan farkıdır: açık kaynak Kratos, yalnızca Ory'nin yönetilen ağında bulunan tescilli küresel optimizasyon kodundan yoksundur ve küresel TCP yönlendirmesi gibi şeyler gerekmektedir. Üçüncüsü hukukun teknikle çelişmesidir: küresel tablolar, kişisel veri saklandığında bölgesel veri gizliliği yasalarını, yani GDPR ile CCPA'yı, ihlal etmektedir.
 
-GitHub Discussion [ory/kratos#3134](https://github.com/ory/kratos/discussions/3134) — global CockroachDB ile ciddi performans sorunları:
-- `SELECT session_devices.* FROM session_devices WHERE session_id = $1` — **düz bir primary key lookup'ta 230 ms ortalama gecikme**
-- Giriş yapmış kullanıcılar için **toplam ~1 saniye ek gecikme**
-- CockroachDB desteğinin teşhisi: tablolar `GLOBAL` yapılandırılmadığı için sorgular bölgeler arası dolaşıyor
+Üçüncü madde çok önemlidir: CockroachDB'nin çok bölgeli düşük gecikme çözümü, yani küresel tablolar, kişisel veri için yasal olarak kullanılamamaktadır. Yani CockroachDB kullan ve çok bölgelilik çözülür cümlesi kimlik iş yükü için yanlıştır.
 
-Ory bakımcısı (aeneasr) üç şey söylüyor ve üçü de Argus için doğrudan geçerli:
+**Ory Network'ün gerçek mimarisi** kendi blog yazısındadır: Kubernetes, ArgoCD, Crossplane, Grafana ile CockroachDB kullanılmaktadır. Tam replikasyon değil coğrafi parçalama, yani veri yurtlandırma vardır: kişisel veri kullanıcının kendi ülkesinde kalmakta ancak bölgeler arasında birleşik bir kullanıcı kimliği korunmaktadır. Ölçek iddiası günde yaklaşık üç milyar API isteği ile 11.000'den fazla üretim ortamıdır. Reddedilen alternatifler homomorfik şifreleme, ki bir milyon kat daha hızlanma gerekmektedir, ile kolon seviyesinde şifrelemedir, ki yabancı anahtar, benzersizlik kısıtı ile aralık sorgularıyla uyumlu açık kaynak bir çözüm yoktur.
 
-1. **Fizik:** "Every software system will have this problem... because of physics. If your SQL queries travel 400 ms through deep sea cables, then **every SQL query will be slow**."
-2. **Açık kaynak ≠ Ory Network:** "open-source Kratos lacks proprietary global optimization code available only in Ory's managed network" — global TCP routing gibi şeyler gerekiyor.
-3. **Hukuk teknikle çelişiyor:** "**GLOBAL tables violate regional data privacy laws** (GDPR, CCPA, etc.) when storing personal information."
+Bir satıcı iddiası bağımsız olarak doğrulanmamıştır: Ory ile Cockroach Labs'ın ortak blogu, ChatGPT'nin haftada 800 milyondan fazla aktif kullanıcısı için girişi bu kombinasyonun çalıştırdığını söylemektedir. Bu pazarlama içerikli ortak bir yazıdır ve teknik detay, yani bölge sayısı, 99. yüzdelik ile tablo yerleşimi, verilmemektedir.
 
-Üçüncü madde çok önemli: CockroachDB'nin çok bölgeli düşük gecikme çözümü (`GLOBAL` tablolar) **kişisel veri için yasal olarak kullanılamaz.** Yani "CockroachDB kullan, multi-region çözülür" cümlesi kimlik iş yükü için **yanlıştır**.
+### 1.6 authentik ve 2026'da Redis'ten çıkışı
 
-**Ory Network'ün gerçek mimarisi** ([ory.com/blog/global-identity-and-access-management-multi-region](https://www.ory.com/blog/global-identity-and-access-management-multi-region)):
-- Kubernetes, ArgoCD, Crossplane, Grafana, CockroachDB
-- **Tam replikasyon değil, coğrafi sharding** — "data homing": kişisel veri kullanıcının kendi ülkesinde kalır, ama "unified user identity across regions" korunur
-- Ölçek iddiası: günde **~3 milyar API isteği**, **11.000+ production environment**
-- Reddedilen alternatifler: homomorfik şifreleme ("another 1 million times" hızlanma gerekir), column-level encryption (FK/unique constraint ve range query'lerle uyumlu açık kaynak çözüm yok)
+Kaynağı docs.goauthentik.io'nun mimari sayfasıdır, sürüm 2026.8, erişim 8 Eylül 2026.
 
-**Satıcı iddiası `[BAĞIMSIZ DOĞRULANMADI]`:** Ory + Cockroach Labs ortak blogu, ChatGPT'nin **800M+ haftalık aktif kullanıcı** için login'i bu kombinasyonun çalıştırdığını söylüyor ([ory.sh/blog/the-future-of-identity-ory-and-cockroach-labs-iam-for-agentic-ai](https://www.ory.sh/blog/the-future-of-identity-ory-and-cockroach-labs-iam-for-agentic-ai)). Bu pazarlama içerikli bir ortak yazıdır; teknik detay (bölge sayısı, p99, tablo yerleşimi) verilmiyor.
+Bileşenleri sunucu, yani çekirdek ile gömülü dış nokta, işçi, yani arka plan görevleri, ile PostgreSQL'dir.
 
----
+Dikkat çekici olan şudur: 2026.8 mimari dokümanında Redis artık zorunlu bir bileşen olarak listelenmemektedir. 2025.8 sürüm notlarında sebebi yazmaktadır:
 
-### 1.6 Authentik — ve 2026'da Redis'ten çıkışı
+> "The authentik worker and background tasks have been reworked... This rework also allowed us to not depend on Redis for background tasks."
 
-Kaynak: [docs.goauthentik.io/core/architecture](https://docs.goauthentik.io/core/architecture) (sürüm 2026.8, erişim 2026-09-08).
+Celery'den Postgres tabanlı bir görev kuyruğuna geçmişlerdir. Geçiş sorunsuz bir göç yolu içermemektedir; yüksek trafikli kurulumlarda yükseltme sırasında görev kaybı olabilmektedir ve sürüm notlarında açık bir uyarı vardır. Helm paketinde Redis hâlâ vardır, 8.0'dan 8.2'ye güncellenmiştir, ve önbellek ile oturum içindir.
 
-**Bileşenler:** Server (Core + embedded outpost) · Worker (arka plan görevleri) · PostgreSQL.
+Yüksek erişilebilirlik modeli şudur: sunucu ile işçi yatay ölçeklenmektedir, yani durumsuzdur, ve durum PostgreSQL'dedir. Bu, Keycloak'ın ikinci sürümü ile Ory'nin desenine aynıdır.
 
-**Dikkat çeken:** 2026.8 mimari dokümanında **Redis artık zorunlu bileşen olarak listelenmiyor.** 2025.8 release notes'ta sebebi yazıyor:
+> **Argus için ders.** Üç bağımsız proje, yani Keycloak, authentik ile Zitadel, 2025 ile 2026'da aynı yöne gitmiştir: ayrı durum sistemini sil ve PostgreSQL'e taşı. Bu bir moda değil operasyonel gerçeğin dayattığı bir yakınsamadır.
 
-> "The authentik worker and background tasks have been reworked... This rework also allowed us to **not depend on Redis for background tasks**."
+### 1.7 Karşılaştırma tablosu: IdP yüksek erişilebilirlik modelleri
 
-Celery → Postgres tabanlı görev kuyruğuna geçtiler. Geçiş "seamless migration path" içermiyor; yüksek trafikli kurulumlarda **upgrade sırasında görev kaybı** olabiliyor (release notes'ta açık uyarı var). Helm chart'ta Redis hâlâ var (8.0→8.2 güncellendi), cache/oturum için.
-
-**HA modeli:** Server ve worker yatay ölçeklenir (stateless), durum PostgreSQL'de. Keycloak v2 / Ory ile aynı desen.
-
-> **Argus için ders:** Üç bağımsız proje (Keycloak, authentik, Zitadel) 2025–2026'da aynı yöne gitti: **ayrı durum sistemini sil, PostgreSQL'e taşı.** Bu bir moda değil, operasyonel gerçeğin dayattığı yakınsama.
-
----
-
-### 1.7 Karşılaştırma tablosu — IdP HA modelleri
-
-| Ürün | Tutarlılık modeli | Dağıtık durum nerede | Max node/site | Split-brain | Node kaybında | Operasyonel maliyet |
+| Ürün | Tutarlılık modeli | Dağıtık durum nerededir | Azami düğüm ile bölge | Bölünmüş beyin | Düğüm kaybında | Operasyonel maliyet |
 |---|---|---|---|---|---|---|
-| **Keycloak v1** (≤26.6) | Senkron DB + senkron Infinispan | Harici Infinispan | **2 site** (test/destek) | Infinispan seviyesinde mümkün, **izlemesi zor** | Rebalancing + geçici login hataları | **Çok yüksek** (Infinispan kümesi + monitoring + Lambda + failback prosedürü) |
-| **Keycloak v2 stateless** (26.7+, preview) | Senkron DB, consistency>availability | **PostgreSQL** | 2+ küme, tek bölge | DB'ye devredilmiş | Etkisiz | **Düşük** (sadece HA DB) |
-| **Zitadel** | Eventual (CQRS); ID lookup'ta strong | PostgreSQL / CockroachDB (+opsiyonel Redis cache) | Sınırsız (stateless) | Yok | Etkisiz | Orta (event store + projeksiyon operasyonu) |
-| **Kanidm** | **Eventual, AP, LWW** | Kendi replikasyonu (RUV) | **2 (resmî), 3 test dışı** | **Var — çakışma normal işleyiş** | Diğer node yazma alır | Düşük ama **çakışma riski güvenlik riski** |
-| **Rauthy** | **Linearizable (Raft)** | Hiqlite (SQLite+openraft) | **3–5** | **İmkânsız** | 1/3 kaybı OK; 2/3 kaybı **yazma durur** | Düşük (gömülü) |
-| **Ory Hydra/Kratos** | DB'ye devredilmiş | SQL veritabanı | Sınırsız (stateless) | Yok | Etkisiz | Düşük (uygulama), DB'ye kayar |
-| **Authentik** | DB'ye devredilmiş | PostgreSQL (+Redis cache) | Sınırsız | Yok | Etkisiz | Düşük |
+| Keycloak birinci sürüm, 26.6 ve altı | Senkron veritabanı ile senkron Infinispan | Harici Infinispan | İki bölge, test ile destek kapsamında | Infinispan seviyesinde mümkündür ile izlemesi zordur | Yeniden dengeleme ile geçici giriş hataları | Çok yüksektir: Infinispan kümesi, izleme, Lambda ile geri dönüş prosedürü gerekir |
+| Keycloak ikinci sürüm stateless, 26.7 ve üstü, önizleme | Senkron veritabanı; tutarlılık erişilebilirliğe tercih edilir | PostgreSQL | İki ve üzeri küme, tek bölge | Veritabanına devredilmiştir | Etkisizdir | Düşüktür; yalnızca yüksek erişilebilirlikli veritabanı gerekir |
+| Zitadel | Nihai tutarlılık; kimlik aramasında güçlü tutarlılık | PostgreSQL veya CockroachDB, opsiyonel Redis önbelleğiyle | Sınırsızdır, durumsuzdur | Yoktur | Etkisizdir | Ortadır; olay deposu ile projeksiyon işletimi gerekir |
+| Kanidm | Nihai tutarlılık, erişilebilirlik ile bölünme toleransı, son yazan kazanır | Kendi replikasyonu, replika güncelleme vektörüyle | İki resmî, üç test dışı | Vardır; çakışma normal işleyiştir | Diğer düğüm yazma alır | Düşüktür ancak çakışma riski bir güvenlik riskidir |
+| Rauthy | Doğrusallaştırılabilir, Raft ile | Hiqlite, yani SQLite ile openraft | Üç ile beş | İmkânsızdır | Üçte birlik kayıp sorunsuzdur, üçte iki kayıpta yazma durur | Düşüktür, gömülüdür |
+| Ory Hydra ile Kratos | Veritabanına devredilmiştir | SQL veritabanı | Sınırsızdır, durumsuzdur | Yoktur | Etkisizdir | Uygulamada düşüktür, veritabanına kayar |
+| authentik | Veritabanına devredilmiştir | PostgreSQL, opsiyonel Redis önbelleğiyle | Sınırsızdır | Yoktur | Etkisizdir | Düşüktür |
 
 ---
 
-## BÖLÜM 2 — POSTGRESQL İLE HA
+## Bölüm 2 — PostgreSQL ile yüksek erişilebilirlik
 
-### 2.1 Failover araçları — 2026 durumu
+### 2.1 Devralma araçları, 2026 durumu
 
 | Araç | Konum | Güçlü yanı | Zayıf yanı | 2026 tavsiyesi |
 |---|---|---|---|---|
-| **Patroni** (4.1.x) | VM + Kubernetes | Endüstri standardı; etcd/Consul/ZooKeeper/K8s DCS; REST API; self-healing (`pg_rewind` ile eski primary'yi geri alır); **DCS Failsafe Mode** | Ayrı DCS kümesi taşıma yükü; 2 node'da quorum sorunları | **VM/bare-metal için varsayılan** |
-| **CloudNativePG** (1.28/1.29, 1.30 devel) | Sadece Kubernetes | Patroni'siz; **doğrudan Kubernetes API server'ı DCS olarak kullanır**, ayrı etcd yok; declarative CRD; StatefulSet kullanmaz, kendi PVC yönetimi | K8s dışında yok | **Greenfield Kubernetes için varsayılan** |
-| **pg_auto_failover** | VM | Patroni'den basit, repmgr'dan otomatik; 2 node'da quorum derdi yok | **Monitor tek hata noktası** — primary düştüğünde monitor de düşükse failover olmaz | Küçük kurulumlar |
-| **repmgr** | VM | Basit, DCS gerekmez | Node'lar arası doğrudan iletişim → **split-brain riski daha yüksek** | Yeni kurulumda önerilmez |
-| **Stolon** | — | — | Proje aktivitesi durmuş | `[DOĞRULANMADI — arşiv durumu teyit edilmedi]` |
+| Patroni 4.1.x | Sanal makine ile Kubernetes | Endüstri standardıdır; etcd, Consul, ZooKeeper ile Kubernetes'i dağıtık yapılandırma deposu olarak kullanır; REST API'si vardır; `pg_rewind` ile eski birincili geri alarak kendini onarır; dağıtık yapılandırma deposu için güvenli mod sunar | Ayrı bir dağıtık yapılandırma deposu kümesi taşıma yükü vardır ile iki düğümde quorum sorunları çıkar | Sanal makine ile çıplak donanım için varsayılandır |
+| CloudNativePG 1.28 ile 1.29, 1.30 geliştirmede | Yalnızca Kubernetes | Patroni gerektirmez; doğrudan Kubernetes API sunucusunu dağıtık yapılandırma deposu olarak kullanır ve ayrı etcd istemez; bildirimsel özel kaynak tanımları vardır; StatefulSet kullanmaz ve kendi kalıcı birim yönetimini yapar | Kubernetes dışında yoktur | Sıfırdan Kubernetes kurulumları için varsayılandır |
+| pg_auto_failover | Sanal makine | Patroni'den basit, repmgr'dan otomatiktir; iki düğümde quorum derdi yoktur | İzleyici tek bir hata noktasıdır; birincil düşerken izleyici de düşükse devralma olmaz | Küçük kurulumlar içindir |
+| repmgr | Sanal makine | Basittir ve dağıtık yapılandırma deposu gerektirmez | Düğümler doğrudan haberleşir ve bölünmüş beyin riski daha yüksektir | Yeni kurulumda önerilmez |
+| Stolon | — | — | Proje etkinliği durmuştur | Arşiv durumu doğrulanamamıştır |
 
-**Patroni'nin kritik davranışı (resmî FAQ, erişim 2026-09-08):**
-- Otomatik failover = "**leader race**": leader lock TTL süresinde yenilenmezse DCS'ten düşer, tüm node'lar aday olur, ilk lock'u alan promote olur.
-- **DCS kaybedilirse:** "all the Patroni clusters that rely on that DCS will go to **read-only mode** – unless DCS Failsafe Mode is enabled."
-- **DCS'te çoğunluk kaybedilirse:** "The DCS will become unresponsive, which will cause Patroni to **demote the current read/write Postgres node**."
+Patroni'nin kritik davranışı resmî sıkça sorulan sorularındadır, erişim 8 Eylül 2026. Otomatik devralma bir lider yarışıdır: lider kilidi yaşam süresi içinde yenilenmezse dağıtık yapılandırma deposundan düşer, tüm düğümler aday olur ve kilidi ilk alan yükselir. Dağıtık yapılandırma deposu kaybedilirse ona dayanan tüm Patroni kümeleri salt okunur moda geçer, meğerki güvenli mod etkinleştirilmiş olsun. Dağıtık yapılandırma deposunda çoğunluk kaybedilirse depo yanıt vermez hâle gelir ve bu, Patroni'nin mevcut okuma yazma yapan Postgres düğümünü düşürmesine sebep olur.
 
-> **Argus için doğrudan sonuç:** etcd kümesi çökerse PostgreSQL **salt-okunur** olur. Yani **Argus'un login akışı durur ama token doğrulama devam edebilir.** Bu, Bölüm 7'deki kademeli bozulma tasarımının temel taşı. **DCS Failsafe Mode mutlaka açılmalı.**
+> **Argus için doğrudan sonuç.** etcd kümesi çökerse PostgreSQL salt okunur olur. Yani Argus'un giriş akışı durur ancak token doğrulama devam edebilir. Bu, yedinci bölümdeki kademeli bozulma tasarımının temel taşıdır ve güvenli mod mutlaka açılmalıdır.
 
-**Patroni failover süresi — gerçek formül:**
-- Kısıt: `ttl >= loop_wait + 2 * retry_timeout`
-- Minimum değerler: `ttl=20, loop_wait=2, retry_timeout=3`
-- Primary arızasında en kötü durum: `loop_wait + primary_start_timeout + loop_wait` (`primary_start_timeout=0` ise sadece `loop_wait`)
-- `patronictl list` çıktısı `loop_wait` saniyeye kadar gecikmeli olabilir
-- Saha raporu `[İKİNCİL KAYNAK]`: `ttl=20, loop_wait=5, retry_timeout=5, watchdog.safety_margin=3` ile **sağlıklı altyapıda 25 saniyenin altında failover** (stackharbor.com bilgi bankası, 2026)
+Patroni devralma süresinin gerçek formülü şöyledir. Kısıt `ttl >= loop_wait + 2 * retry_timeout` şeklindedir. Asgari değerler yaşam süresi 20, döngü bekleme iki ile yeniden deneme zaman aşımı üçtür. Birincil arızasında en kötü durum döngü bekleme artı birincil başlatma zaman aşımı artı döngü beklemedir; birincil başlatma zaman aşımı sıfırsa yalnızca döngü beklemedir. `patronictl list` çıktısı döngü bekleme saniyesi kadar gecikmeli olabilir. Bir saha raporuna göre, ki ikincil bir kaynaktır, yaşam süresi 20, döngü bekleme beş, yeniden deneme zaman aşımı beş ile gözcü güvenlik payı üç ayarlarıyla sağlıklı bir altyapıda 25 saniyenin altında devralma görülmektedir; stackharbor.com bilgi bankası, 2026.
 
-**CloudNativePG primary arıza akışı** (docs 1.28, Failure Modes):
-1. Operator, **en düşük replikasyon gecikmesine sahip** standby'ı promote eder
-2. `-rw` service yeni primary'ye yönlenir
-3. Arızalı pod `-r` ve `-rw` service'lerinden çıkar
-4. Standby'lar yeni primary'den replike etmeye başlar
-5. Eski primary PVC'si varsa `pg_rewind` ile geri katılır, yoksa backup'tan yeni standby yaratılır
+CloudNativePG'nin birincil arıza akışı, doküman 1.28, arıza modları bölümü: operatör en düşük replikasyon gecikmesine sahip beklemedeki düğümü yükseltir; okuma yazma servisi yeni birincile yönlenir; arızalı pod okuma ile okuma yazma servislerinden çıkarılır; beklemedeki düğümler yeni birincilden replike etmeye başlar; eski birincilin kalıcı birimi varsa `pg_rewind` ile geri katılır, yoksa yedekten yeni bir bekleme düğümü yaratılır.
 
-CNPG bir CNCF projesidir; **olgunluk seviyesi (Sandbox/Incubating) bu araştırmada doğrulanamadı** `[DOĞRULANMADI]`.
+CloudNativePG bir CNCF projesidir; olgunluk seviyesi, yani kum havuzu mu kuluçka mı olduğu, bu araştırmada doğrulanamamıştır.
 
-### 2.2 Senkron mu asenkron mu — bir IdP için cevap
+### 2.2 Senkron mu asenkron mu, bir IdP için cevap
 
-#### 2.2.1 `synchronous_commit` seviyeleri
+**2.2.1 `synchronous_commit` seviyeleri.**
 
-| Değer | Commit ne zaman döner | Veri kaybı riski | IdP'de kullanımı |
+| Değer | Kesinleştirme ne zaman döner | Veri kaybı riski | IdP'de kullanımı |
 |---|---|---|---|
-| `off` | WAL diske bile yazılmadan | **Crash'te son işlemler kaybolur** | Asla |
-| `local` | Yerel WAL fsync sonrası | Node kaybında kayıp | Yalnız tek-node dev |
-| `remote_write` | Standby WAL'i **OS'a yazdı** | Standby OS crash'inde kayıp | Kabul edilebilir orta yol |
-| `on` (varsayılan senkron) | Standby WAL'i **fsync etti** | Kayıp yok (standby ayakta) | **Argus'un varsayılanı** |
-| `remote_apply` | Standby WAL'i **uyguladı** — replica'da görünür | Kayıp yok + **replica'da anında okunabilir** | Yalnız kritik yollarda |
+| `off` | Yazma ileri günlüğü diske bile yazılmadan | Çökmede son işlemler kaybolur | Asla kullanılmaz |
+| `local` | Yerel yazma ileri günlüğü eşitlendikten sonra | Düğüm kaybında kayıp olur | Yalnızca tek düğümlü geliştirme ortamı |
+| `remote_write` | Bekleme düğümü günlüğü işletim sistemine yazdıktan sonra | Bekleme düğümünün işletim sistemi çökerse kayıp olur | Kabul edilebilir bir orta yoldur |
+| `on`, varsayılan senkron | Bekleme düğümü günlüğü eşitledikten sonra | Bekleme düğümü ayaktayken kayıp yoktur | Argus'un varsayılanıdır |
+| `remote_apply` | Bekleme düğümü günlüğü uyguladıktan sonra, yani replikada görünür olduğunda | Kayıp yoktur ve replikada anında okunabilir | Yalnızca kritik yollarda kullanılır |
 
-#### 2.2.2 Ölçülmüş maliyet
-
-Kaynak: [EDB — The Cost Implications of PostgreSQL Synchronous Replication](https://www.enterprisedb.com/blog/the-varying-cost-synchronous-replication).
-**Test:** 3× AWS `r5.2xlarge` (8 vCPU, 64 GB), **tek AZ**, ~150 GB veri (pgbench scale 10.000), her sunucuda 2× io2 EBS (10.000 IOPS; biri data biri WAL), gecikme Linux `tc` ile yapay eklendi, `synchronous_standby_names = '2 ("pg-node-2","pg-node-3")'`.
+**2.2.2 Ölçülmüş maliyet.** Kaynağı EDB'nin PostgreSQL senkron replikasyonunun maliyet etkileri yazısıdır. Test üç adet AWS `r5.2xlarge`, yani sekiz sanal işlemci ile 64 GB, tek erişilebilirlik alanında, yaklaşık 150 GB veriyle, yani pgbench ölçeği 10.000, her sunucuda ikişer io2 EBS diskiyle, yani 10.000 giriş çıkış işlemiyle, biri veri biri günlük için; gecikme Linux trafik kontrolüyle yapay eklenmiş ve `synchronous_standby_names = '2 ("pg-node-2","pg-node-3")'` kullanılmıştır.
 
 | Koşul | İstemci | `local` yazma gecikmesi | `remote_write` | Fark |
 |---|---|---|---|---|
-| **10 ms ağ gecikmesi** | 40 | 9,5 ms | **16 ms** | **+%67** |
-| **10 ms ağ gecikmesi** | 80 | 17 ms | **20 ms** | **+%19** |
-| **3 ms ağ gecikmesi** | 40 | — | TPS `local`'ın **%92**'si | — |
-| **3 ms ağ gecikmesi** | 80 | — | TPS `local` ile **eşit** | — |
-| **3 ms**, 120+ istemci | — | — | `local` ile **%1 içinde** | — |
-| **3 ms** sorgu gecikmesi | tümü | tüm modlar **1 ms içinde birbirine yakın** | | |
+| 10 milisaniye ağ gecikmesi | 40 | 9,5 ms | 16 ms | %67 artış |
+| 10 milisaniye ağ gecikmesi | 80 | 17 ms | 20 ms | %19 artış |
+| 3 milisaniye ağ gecikmesi | 40 | — | Saniyedeki işlem `local`'ın %92'sidir | — |
+| 3 milisaniye ağ gecikmesi | 80 | — | Saniyedeki işlem `local` ile eşittir | — |
+| 3 milisaniye, 120 ve üzeri istemci | — | — | `local` ile %1 içindedir | — |
+| 3 milisaniyede sorgu gecikmesi | Hepsi | Tüm modlar bir milisaniye içinde birbirine yakındır | | |
 
-Ayrıca Percona ölçümü: `synchronous_commit=off`, `remote_apply`'a göre **2 kattan fazla** performans gösteriyor ([percona.com/blog/postgresql-synchronous_commit-options...](https://www.percona.com/blog/postgresql-synchronous_commit-options-and-synchronous-standby-replication/)).
+Ayrıca bir Percona ölçümüne göre `synchronous_commit=off` ayarı `remote_apply`'a göre iki kattan fazla performans göstermektedir.
 
-**Kritik yorum:** Senkron replikasyonun maliyeti **yükle birlikte düşüyor** — çünkü artan eşzamanlılık, WAL flush'ları gruplar (group commit). Yani "senkron replikasyon pahalı" iddiası **düşük eşzamanlılıkta doğru, IdP'nin gerçek yük profilinde büyük ölçüde yanlış**.
+Kritik yorum şudur: senkron replikasyonun maliyeti yükle birlikte düşmektedir, çünkü artan eşzamanlılık yazma ileri günlüğü boşaltmalarını gruplamaktadır. Yani senkron replikasyon pahalıdır iddiası düşük eşzamanlılıkta doğru, bir IdP'nin gerçek yük profilinde büyük ölçüde yanlıştır.
 
-**AZ'ler arası gerçek gecikme:** Aynı bölgede AZ'ler arası RTT tipik olarak **1–2 ms** mertebesindedir `[KESİN RAKAM DOĞRULANMADI — cloudping.co veya AWS resmî SLA'sı bu oturumda çekilemedi]`. Ancak Keycloak'ın "site'lar arası **<5 ms önerilir, <10 ms zorunlu**" eşiği (2026-07-17) tam olarak çok-AZ tek bölge senaryosunu tarifliyor ve EDB'nin 3 ms testinin "neredeyse bedava" sonucuyla uyumlu.
+Erişilebilirlik alanları arasındaki gerçek gecikme aynı bölgede tipik olarak bir ile iki milisaniye mertebesindedir; kesin rakam doğrulanamamıştır, çünkü cloudping.co ile AWS resmî hizmet düzeyi anlaşması bu oturumda çekilememiştir. Ancak Keycloak'ın bölgeler arası beş milisaniyenin altı önerilir ile on milisaniyenin altı zorunludur eşiği, 17 Temmuz 2026, tam olarak çok erişilebilirlik alanlı tek bölge senaryosunu tariflemekte ve EDB'nin üç milisaniyelik testinin neredeyse bedava sonucuyla uyuşmaktadır.
 
-#### 2.2.3 Argus için karar
-
-**Bir IdP veri kaybı tolere edemez.** Somut nedenler:
+**2.2.3 Argus için karar.** Bir IdP veri kaybı tolere edemez. Somut nedenleri şunlardır.
 
 | İşlem | Kayıp olursa ne olur |
 |---|---|
-| Parola değişimi | **Kullanıcı eski parolayla giriş yapabilir** (Keycloak'ın kendi gerekçesi) |
-| Token/oturum iptali | **İptal edilmiş oturum yaşamaya devam eder** |
-| MFA kaydı silme | Saldırganın eklediği authenticator geri gelir |
-| Refresh token rotation | **Reuse detection kırılır** — çalınmış token tekrar kullanılabilir |
-| Brute-force sayacı | Kilitleme sıfırlanır |
-| Hesap kilitleme/deaktivasyon | **İşten çıkarılan çalışanın erişimi geri gelir** |
+| Parola değişimi | Kullanıcı eski parolayla giriş yapabilir; Keycloak'ın kendi gerekçesidir |
+| Token ile oturum iptali | İptal edilmiş oturum yaşamaya devam eder |
+| Çok adımlı doğrulama kaydının silinmesi | Saldırganın eklediği kimlik doğrulayıcı geri gelir |
+| Yenileme token'ı rotasyonu | Yeniden kullanım tespiti kırılır ve çalınmış token tekrar kullanılabilir |
+| Kaba kuvvet sayacı | Kilitleme sıfırlanır |
+| Hesap kilitleme ile devre dışı bırakma | İşten çıkarılan çalışanın erişimi geri gelir |
 
-**Karar:**
-- **Varsayılan:** `synchronous_commit = on` + **quorum commit**: `synchronous_standby_names = 'ANY 1 (standby_a, standby_b)'`. Bu, 3 AZ'de **bir standby'ın kaybını tolere ederken** veri kaybını sıfırlar.
-- **Neden `ANY 1` ve `FIRST 1` değil:** `ANY N` en hızlı N standby'ı bekler; belirli bir standby yavaşlarsa sistem takılmaz.
-- **Kritik nokta — kendini vurma tuzağı:** Tek standby ile `synchronous_commit=on` yapılırsa ve standby düşerse **primary tüm yazmalarda asılır**. Bu yüzden **en az 2 standby + `ANY 1`** zorunludur. Aksi halde HA çözümü tek başına kesinti kaynağı olur.
-- **Audit log ve telemetri yazmaları** ayrı bir bağlantıda `synchronous_commit = local` ile yazılabilir (session-level `SET`) — audit satırının kaybı güvenlik kararını değiştirmez, sadece iz kaybettirir. Bu, IOPS'un %30–50'sini senkron yoldan çıkarır. `[TASARIM ÖNERİSİ — ölçülmedi]`
+Kararı şudur. Varsayılan `synchronous_commit = on` ile quorum kesinleştirmedir: `synchronous_standby_names = 'ANY 1 (standby_a, standby_b)'`. Bu, üç erişilebilirlik alanında bir bekleme düğümünün kaybını tolere ederken veri kaybını sıfırlar. Neden `ANY 1` ile `FIRST 1` değil sorusunun cevabı şudur: `ANY N` en hızlı N bekleme düğümünü beklemektedir ve belirli bir düğüm yavaşlarsa sistem takılmaz.
 
-### 2.3 Failover sırasında Argus ne yapar
+Kritik nokta bir kendini vurma tuzağıdır: tek bekleme düğümüyle `synchronous_commit=on` yapılırsa ve o düğüm düşerse birincil tüm yazmalarda asılır. Bu yüzden en az iki bekleme düğümü ile `ANY 1` zorunludur; aksi hâlde yüksek erişilebilirlik çözümü tek başına bir kesinti kaynağı olur.
 
-Gerçekçi zaman çizelgesi (Patroni, `ttl=20/loop_wait=5/retry_timeout=5`):
+Denetim günlüğü ile telemetri yazmaları ayrı bir bağlantıda `synchronous_commit = local` ile yazılabilir, yani oturum seviyesinde ayarlanabilir; bir denetim satırının kaybı güvenlik kararını değiştirmez, yalnızca iz kaybettirir. Bu, giriş çıkış işlemlerinin %30 ile %50'sini senkron yoldan çıkarır. Bu bir tasarım önerisidir ve ölçülmemiştir.
 
-| t | Olay | Argus'un görevi |
+### 2.3 Devralma sırasında Argus ne yapar
+
+Gerçekçi zaman çizelgesi, Patroni ile yaşam süresi 20, döngü bekleme beş ile yeniden deneme zaman aşımı beş ayarlarında:
+
+| Zaman | Olay | Argus'un görevi |
 |---|---|---|
-| 0 s | Primary düşer | Aktif sorgular TCP hatası/timeout alır |
-| 0–20 s | Leader lock TTL'i dolar | **Yazma imkânsız.** Login, token exchange, refresh **başarısız** |
-| ~20–25 s | Leader race, yeni primary promote | — |
-| ~25 s | VIP/DNS/pooler yeni primary'ye yönelir | Bağlantı havuzu yeniden kurulur |
-| 25 s+ | Normal | — |
+| 0 saniye | Birincil düşer | Aktif sorgular TCP hatası ya da zaman aşımı alır |
+| 0 ile 20 saniye | Lider kilidi yaşam süresi dolar | Yazma imkânsızdır; giriş, token takası ile yenileme başarısız olur |
+| Yaklaşık 20 ile 25 saniye | Lider yarışı olur ile yeni birincil yükselir | — |
+| Yaklaşık 25 saniye | Sanal IP, DNS ya da havuzlayıcı yeni birincile yönelir | Bağlantı havuzu yeniden kurulur |
+| 25 saniye sonrası | Normale döner | — |
 
-**Argus bu 25 saniyede ne yapmalı — bu tasarım kararıdır, varsayılan davranış değil:**
+Argus bu 25 saniyede ne yapmalıdır; bu bir tasarım kararıdır, varsayılan davranış değildir.
 
-1. **JWT doğrulama devam etmeli.** İmza doğrulama DB gerektirmez. JWKS bellekte. `revocation_epoch` node-yerel cache'te. → **Kaynak sunucular etkilenmez.** Bu, Argus'un en değerli kademeli bozulma özelliğidir.
-2. **`/token` refresh akışı durur** (rotation yazma gerektirir). İstemcilere **`503 + Retry-After: 5`** dönülmeli, `400 invalid_grant` **asla** — çünkü `invalid_grant` istemci SDK'larının çoğunda kullanıcıyı **logout ettirir**. Bu ayrım, 25 saniyelik bir DB failover'ının milyonlarca kullanıcıyı çıkış yaptırmasıyla hiç fark edilmemesi arasındaki farktır.
-3. **Login akışı durur** → kullanıcıya "geçici sorun, tekrar deneyin" (kimlik hatası değil).
-4. **Bağlantı havuzu davranışı:** `sqlx`/`deadpool` havuzundaki tüm bağlantılar ölü. Health-check ile hızlı tahliye + exponential backoff ile yeniden kurma şart; yoksa 25 saniyelik kesinti, havuz doygunluğu yüzünden 2–3 dakikaya uzar.
+1. JWT doğrulaması devam etmelidir. İmza doğrulama veritabanı gerektirmez, JWKS bellektedir ile iptal dönemi düğüme yerel önbellektedir. Kaynak sunucular etkilenmez ve bu, Argus'un en değerli kademeli bozulma özelliğidir.
+2. `/token` yenileme akışı durur, çünkü rotasyon bir yazma gerektirir. İstemcilere 503 ile `Retry-After: 5` dönülmeli, `400 invalid_grant` asla dönülmemelidir; çünkü `invalid_grant` istemci SDK'larının çoğunda kullanıcıyı çıkış yaptırmaktadır. Bu ayrım, 25 saniyelik bir veritabanı devralmasının milyonlarca kullanıcıyı çıkış yaptırmasıyla hiç fark edilmemesi arasındaki farktır.
+3. Giriş akışı durur ve kullanıcıya geçici bir sorun olduğu ile tekrar denemesi söylenir; bu bir kimlik hatası değildir.
+4. Bağlantı havuzu davranışı önemlidir: `sqlx` ya da `deadpool` havuzundaki tüm bağlantılar ölüdür. Sağlık kontrolüyle hızlı tahliye ile üstel geri çekilmeyle yeniden kurma şarttır; yoksa 25 saniyelik bir kesinti, havuz doygunluğu yüzünden iki ile üç dakikaya uzar.
 
-**Bağlantı dizesi:** `libpq` (PostgreSQL 18 dokümanı, erişim 2026-09-08) çok-host + `target_session_attrs=read-write` destekliyor — istemci ilk kabul edilebilir host'u seçer. Ancak bu **failover'ı bir sonraki bağlantı kurulumunda** çözer, mevcut bağlantıları değil. `load_balance_hosts=random` ile standby'lara okuma dağıtımı yapılabilir. **Not:** `sqlx`'in bu semantiği tam desteklediği doğrulanmadı `[DOĞRULANMADI]`; Argus kendi failover-aware havuz mantığını yazmalı veya pooler'a devretmeli.
+Bağlantı dizesi tarafında `libpq`, yani PostgreSQL 18 dokümanı, erişim 8 Eylül 2026, çok host ile `target_session_attrs=read-write` desteklemektedir; istemci ilk kabul edilebilir sunucuyu seçmektedir. Ancak bu, devralmayı bir sonraki bağlantı kurulumunda çözmekte, mevcut bağlantıları çözmemektedir. `load_balance_hosts=random` ile bekleme düğümlerine okuma dağıtımı yapılabilir. Not olarak `sqlx`'in bu semantiği tam desteklediği doğrulanmamıştır; Argus kendi devralma farkındalıklı havuz mantığını yazmalı veya havuzlayıcıya devretmelidir.
 
-### 2.4 Read replica — hangi sorgu nereye gider
+### 2.4 Okuma replikası: hangi sorgu nereye gider
 
-#### 2.4.1 Kritik soru: **iptal edilmiş token replica'da hâlâ geçerli görünür mü?**
+**2.4.1 Kritik soru: iptal edilmiş bir token replikada hâlâ geçerli görünür mü.**
 
-**Cevap: EVET, ve bu teorik değil, ölçülebilir bir açıktır.**
+Cevap evettir ve bu teorik değil ölçülebilir bir açıktır.
 
-Kanıt zinciri:
+Kanıt zinciri şöyledir. Birincisi PostgreSQL akış replikasyonu varsayılan olarak asenkrondur; replikasyon gecikmesi normal işletimde milisaniye mertebesindedir ancak kontrol noktası, uzun sorgu, vakumlama, disk baskısı ya da ağ sıkışması altında saniyelere ile dakikalara çıkmaktadır, ve tam da bu anlarda, yani yük altında, saldırı olma olasılığı yüksektir. İkincisi sektörün davranışı bu riski doğrulamaktadır: Zitadel bakımcısı okuma replikası desteğini verilerin çoğu tutarlı kalsın diye reddetmektedir, 7636 numaralı tartışma. Üçüncüsü dağıtık veritabanlarında bile durum aynıdır: CockroachDB'nin `follower_read_timestamp()` fonksiyonu en az 4,2 saniye geçmişten okumaktadır, erişim 8 Eylül 2026. Yani en yakın replikadan hızlı okuma 4,2 saniyelik bir iptal penceresi demektir.
 
-1. **PostgreSQL streaming replication varsayılan olarak asenkrondur.** Replikasyon gecikmesi normal işletimde ms mertebesindedir ama **checkpoint, uzun sorgu, VACUUM, disk baskısı veya ağ sıkışması altında saniyelere ve dakikalara çıkar** — ve tam da bu anlarda (yük altında) saldırı olma olasılığı yüksektir.
-2. **Sektörün davranışı bu riski doğruluyor:** Zitadel bakımcısı, read replica desteğini **"most data consistent" kalsın diye reddediyor** ([zitadel#7636](https://github.com/zitadel/zitadel/discussions/7636)).
-3. **Dağıtık DB'lerde bile durum aynı:** CockroachDB'nin `follower_read_timestamp()` fonksiyonu **en az 4,2 saniye geçmişten** okur (docs.cockroachlabs.com/docs/stable/follower-reads, erişim 2026-09-08). Yani "en yakın replikadan hızlı okuma" = **4,2 saniyelik iptal penceresi**.
+Somut saldırı senaryosu şudur: kullanıcı tüm cihazlarından çıkmak ister veya güvenlik operasyon merkezi bir hesabı devre dışı bırakır. Birincilde iptal dönemi artırılır. Bu sırada Argus'un yedinci düğümü bir içgözlem isteğini bir okuma replikasına yönlendirir. Replikasyon üç saniye geridedir. Saldırgan bu üç saniyede yenileme token'ını kullanır ve yeni, tam ömürlü bir access token alır. Erişim iptalden saatler sonrasına kadar uzar.
 
-**Somut saldırı senaryosu:**
-> Kullanıcı "tüm cihazlarımdan çık" der veya SOC bir hesabı devre dışı bırakır. Primary'de `revocation_epoch` artırılır. Bu sırada Argus node'u #7 introspection isteğini bir read replica'ya yönlendirir. Replikasyon 3 saniye geride. Saldırgan bu 3 saniyede refresh token'ı kullanır → **yeni, tam ömürlü bir access token alır.** Erişim iptalden **saatler sonrasına kadar** uzar.
+Argus için kural pazarlık edilemez.
 
-**Argus için kural — pazarlık edilemez:**
-
-| Sorgu tipi | Replica'ya gidebilir mi | Gerekçe |
+| Sorgu tipi | Replikaya gidebilir mi | Gerekçe |
 |---|---|---|
-| **Token iptali / `revocation_epoch` kontrolü** | **HAYIR** | Yukarıdaki senaryo |
-| **Oturum doğrulama (aktif mi)** | **HAYIR** | Aynı |
-| **Refresh token rotation + reuse detection** | **HAYIR** (yazma zaten) | Bayat okuma reuse detection'ı kırar |
-| **Parola/credential doğrulama** | **HAYIR** | Parola değişimi/kilitleme bayat kalır |
-| **Brute-force sayacı okuma** | **HAYIR** | Sayaç bayatsa kilit çalışmaz |
-| **Consent kontrolü** | **HAYIR** | Geri çekilmiş consent bayat kalır |
-| **JWKS / discovery metadata** | Evet (ama zaten bellekte olmalı) | Anahtar rotasyonu planlı ve yavaş; ayrıca overlap penceresi var |
-| **Admin kullanıcı arama/listeleme** | **EVET** | Bayatlık zararsız |
-| **Admin raporları, denetim izi görüntüleme** | **EVET** | Salt okuma analitik |
-| **Kullanıcı profil sayfası okuma (self-service)** | Evet, dikkatle | Read-your-writes gerekli (aşağıda) |
-| **Grup/rol üyeliği (yetkilendirme kararı)** | **HAYIR** | Kaldırılan rol bayat kalır |
+| Token iptali ile iptal dönemi kontrolü | Hayır | Yukarıdaki senaryo |
+| Oturum doğrulaması, yani aktif mi | Hayır | Aynı |
+| Yenileme token'ı rotasyonu ile yeniden kullanım tespiti | Hayır, zaten bir yazmadır | Bayat okuma yeniden kullanım tespitini kırar |
+| Parola ile kimlik bilgisi doğrulaması | Hayır | Parola değişimi ile kilitleme bayat kalır |
+| Kaba kuvvet sayacı okuması | Hayır | Sayaç bayatsa kilit çalışmaz |
+| Onay kontrolü | Hayır | Geri çekilmiş onay bayat kalır |
+| JWKS ile keşif metadata'sı | Evet, ancak zaten bellekte olmalıdır | Anahtar rotasyonu planlı ile yavaştır ve ayrıca bir örtüşme penceresi vardır |
+| Yönetici kullanıcı arama ile listeleme | Evet | Bayatlık zararsızdır |
+| Yönetici raporları ile denetim izi görüntüleme | Evet | Salt okunur analitiktir |
+| Kullanıcı profil sayfası okuması, yani kendi kendine servis | Evet, dikkatle | Kendi yazdığını okuma gereklidir, aşağıya bakınız |
+| Grup ile rol üyeliği, yani yetkilendirme kararı | Hayır | Kaldırılan rol bayat kalır |
 
-**Genel kural:** *Bir sorgunun sonucu bir **güvenlik kararını** etkiliyorsa, primary'den okunur.*
+Genel kural şudur: bir sorgunun sonucu bir güvenlik kararını etkiliyorsa birincilden okunur.
 
-#### 2.4.2 Bunu güvenli yapmanın yolları
+**2.4.2 Bunu güvenli yapmanın yolları.**
 
-| Teknik | Nasıl | Maliyet | Argus'ta yeri |
+| Teknik | Nasıl | Maliyet | Argus'taki yeri |
 |---|---|---|---|
-| **Primary'ye pinleme** | Güvenlik-kritik okumaları hep primary'ye | Primary'de okuma yükü | **Varsayılan** |
-| **`synchronous_commit = remote_apply`** | Commit, standby **uygulayana** kadar bekler → replica'da anında görünür | En pahalı mod (Percona: `off`'a göre 2× yavaş) | Yalnız iptal/kilitleme yazmalarında, session-level `SET` ile |
-| **LSN tabanlı read-your-writes** | Yazmadan sonra `pg_current_wal_lsn()` alınır, cookie/token'a konur; replica'da `pg_last_wal_replay_lsn()` ile karşılaştırılır, geride ise primary'ye düşülür | Uygulama karmaşıklığı | Self-service profil ekranları için |
-| **Bounded staleness** | Lag eşiği aşan replica devre dışı | İzleme gerekir | Genel sağlık koruması |
-| **Node-yerel epoch cache + kısa TTL** | Bkz. Bölüm 4.5 | Küçük | **Ana ölçekleme kaldıracı** |
+| Birincile sabitleme | Güvenlik kritik okumalar hep birincile gider | Birincilde okuma yükü artar | Varsayılandır |
+| `synchronous_commit = remote_apply` | Kesinleştirme, bekleme düğümü uygulayana kadar bekler ve replikada anında görünür | En pahalı moddur; Percona'ya göre `off` ayarına göre iki kat yavaştır | Yalnızca iptal ile kilitleme yazmalarında, oturum seviyesinde ayarlanarak |
+| Günlük sıra numarası tabanlı kendi yazdığını okuma | Yazmadan sonra `pg_current_wal_lsn()` alınır ile çerez ya da token'a konur; replikada `pg_last_wal_replay_lsn()` ile karşılaştırılır ve geride ise birincile düşülür | Uygulama karmaşıklığı | Kendi kendine servis profil ekranları için |
+| Sınırlı bayatlık | Gecikme eşiğini aşan replika devre dışı bırakılır | İzleme gerekir | Genel sağlık koruması |
+| Düğüme yerel dönem önbelleği ile kısa yaşam süresi | 4.5'e bakınız | Küçüktür | Ana ölçekleme kaldıracıdır |
 
-**En pratik Argus deseni:** Replikadan hiç güvenlik okuması yapma. Bunun yerine **iptal durumunu node belleğine cache'le** ve o cache'i outbox/polling ile **100–250 ms içinde** güncelle. Bu, hem replica'dan hızlı hem primary'den doğrudur.
+En pratik Argus deseni şudur: replikadan hiç güvenlik okuması yapılmaz. Bunun yerine iptal durumu düğüm belleğine önbeleklenir ile o önbellek giden kutusu ve yoklamayla 100 ile 250 milisaniye içinde güncellenir. Bu, hem replikadan hızlı hem birincilden doğrudur.
 
-### 2.5 Connection pooling ve failover etkileşimi
+### 2.5 Bağlantı havuzlaması ile devralma etkileşimi
 
-| Pooler | Failover davranışı | Performans (Tembo benchmark) | Argus'a uygunluk |
+| Havuzlayıcı | Devralma davranışı | Performans, Tembo kıyaslaması | Argus'a uygunluğu |
 |---|---|---|---|
-| **PgBouncer** | Replica failover desteği zayıf; `PAUSE`/`RESUME` manuel; genelde VIP/DNS değişimine bağımlı | **<50 istemcide en iyi gecikme ve throughput** | Basit, kanıtlanmış; Patroni'nin callback'leriyle birleştirilmeli |
-| **pgcat** (Rust) | **Otomatik failover + read replica yük dağıtımı + sharding** | >50 istemcide PgBouncer'dan iyi; PgBouncer'a göre −%17…+%24 aralığında | **Argus için en uygun** — Rust, read/write split yerleşik |
-| **Supavisor** (Elixir) | Tenant pausing ile graceful failover; çok kiracılı | **%80–160 daha yüksek gecikme** | Argus'un profiline uymuyor |
-| **Odyssey** | — | — | Değerlendirilmedi `[DOĞRULANMADI]` |
+| PgBouncer | Replika devralma desteği zayıftır; duraklat ile devam et elle yapılır ve genelde sanal IP ya da DNS değişimine bağımlıdır | 50'den az istemcide en iyi gecikme ile iş hacmini vermektedir | Basittir ile kanıtlanmıştır; Patroni'nin geri çağrılarıyla birleştirilmelidir |
+| pgcat, Rust ile yazılmıştır | Otomatik devralma, okuma replikası yük dağıtımı ile parçalama sunar | 50'den fazla istemcide PgBouncer'dan iyidir; PgBouncer'a göre eksi %17 ile artı %24 aralığındadır | Argus için en uygunudur; Rust'tır ve okuma yazma ayrımı yerleşiktir |
+| Supavisor, Elixir ile yazılmıştır | Kiracı duraklatmayla zarif devralma sunar ile çok kiracılıdır | %80 ile %160 daha yüksek gecikme vermektedir | Argus'un profiline uymamaktadır |
+| Odyssey | — | — | Değerlendirilmemiştir ve doğrulanamamıştır |
 
-Kaynak: [Tembo — Benchmarking PostgreSQL connection poolers](https://legacy.tembo.io/blog/postgres-connection-poolers/).
+Kaynağı Tembo'nun PostgreSQL bağlantı havuzlayıcıları kıyaslamasıdır.
 
-**Kritik uyarı:** PgBouncer'ı **transaction pooling** modunda kullanmak, prepared statement'ları ve geçici tabloları kısıtlar. Argus `sqlx` ile prepared statement'a yoğun olarak dayanır. PgBouncer 1.21+ named prepared statement desteği ekledi ama Argus'un bunu doğrulaması gerekir `[DOĞRULANMADI]`. **pgcat veya doğrudan uygulama havuzu (sqlx) + pgcat kombinasyonu** daha az sürprizli.
+Kritik uyarı şudur: PgBouncer'ı işlem havuzlama modunda kullanmak hazırlanmış ifadeleri ile geçici tabloları kısıtlamaktadır. Argus `sqlx` ile hazırlanmış ifadelere yoğun olarak dayanmaktadır. PgBouncer 1.21 ve üstü isimli hazırlanmış ifade desteği eklemiştir ancak Argus'un bunu doğrulaması gerekir ve doğrulanmamıştır. pgcat ya da doğrudan uygulama havuzu, yani `sqlx`, ile pgcat kombinasyonu daha az sürprizlidir.
 
-### 2.6 PostgreSQL 18 — HA açısından ne değişti
+### 2.6 PostgreSQL 18: yüksek erişilebilirlik açısından ne değişmiştir
 
-Kaynak: [PostgreSQL 18.0 Release Notes](https://www.postgresql.org/docs/release/18.0/) (Eylül 2025).
+Kaynağı PostgreSQL 18.0 sürüm notlarıdır, Eylül 2025.
 
-| Özellik | HA/IdP anlamı |
+| Özellik | Yüksek erişilebilirlik ile IdP anlamı |
 |---|---|
-| **Asenkron I/O (AIO)** — `io_method` (Linux'ta `io_uring`, her yerde worker fallback); `io_combine_limit`, `pg_aios` view | Sequential/bitmap scan ve VACUUM hızlanır. **IdP'de doğrudan etkisi sınırlı** (iş yükü index lookup ağırlıklı) ama VACUUM hızlanması oturum tablolarındaki bloat baskısını azaltır |
-| **`uuidv7()`** — zaman sıralı UUID | **Argus için önemli.** UUIDv4 birincil anahtarlar B-tree'yi parçalar; UUIDv7 insert'leri index'in sonuna yazar. Oturum/token tabloları gibi yüksek insert hacimli tablolarda index bloat ve WAL hacmi ciddi azalır |
-| **`idle_replication_slot_timeout`** | Terk edilmiş logical slot'ların WAL'i sonsuz biriktirip **diski doldurup primary'yi öldürmesini** engeller. Bu klasik bir üretim kesinti sebebidir |
-| **`pg_recvlogical --enable-failover`** | Failover slot'ları — logical replication failover'dan sağ çıkar |
-| **`pg_createsubscriber --all`** | Tüm veritabanları için logical replica oluşturma |
-| **Logical replication çakışma loglama** | Aktif-aktif denemelerinde çakışmaların görünür olması |
-| **Major upgrade'de planner istatistiklerinin korunması** | Upgrade sonrası "performans çukuru" ortadan kalkar — **planlı bakım penceresini kısaltır** |
-| **OAuth istemci kimlik doğrulama desteği** | Argus'un kendisi PostgreSQL'e OAuth ile bağlanabilir (ironik ama gerçek) |
+| Asenkron giriş çıkış: `io_method`, Linux'ta `io_uring` ile her yerde işçi yedeği; `io_combine_limit` ile `pg_aios` görünümü | Ardışık ile bit eşlem taramaları ile vakumlama hızlanmaktadır. IdP'de doğrudan etkisi sınırlıdır, çünkü iş yükü indeks araması ağırlıklıdır; ancak vakumlamanın hızlanması oturum tablolarındaki şişme baskısını azaltmaktadır |
+| `uuidv7()`, yani zaman sıralı evrensel benzersiz kimlik | Argus için önemlidir. UUID sürüm dört birincil anahtarlar B ağacını parçalamakta, UUID sürüm yedi eklemeleri indeksin sonuna yazmaktadır. Oturum ile token tabloları gibi yüksek ekleme hacimli tablolarda indeks şişmesi ile günlük hacmi ciddi azalmaktadır |
+| `idle_replication_slot_timeout` | Terk edilmiş mantıksal yuvaların günlüğü sonsuz biriktirip diski doldurarak birincili öldürmesini engellemektedir. Bu klasik bir üretim kesinti sebebidir |
+| `pg_recvlogical --enable-failover` | Devralma yuvalarıdır; mantıksal replikasyon devralmadan sağ çıkmaktadır |
+| `pg_createsubscriber --all` | Tüm veritabanları için mantıksal replika oluşturmaktadır |
+| Mantıksal replikasyon çakışma günlüklemesi | Aktif aktif denemelerinde çakışmaları görünür kılmaktadır |
+| Büyük sürüm yükseltmesinde planlayıcı istatistiklerinin korunması | Yükseltme sonrası performans çukuru ortadan kalkmakta ve planlı bakım penceresi kısalmaktadır |
+| OAuth istemci kimlik doğrulama desteği | Argus'un kendisi PostgreSQL'e OAuth ile bağlanabilmektedir; ironiktir ancak gerçektir |
 
-**Not:** Logical replication slot senkronizasyonu (`sync_replication_slots`) **PostgreSQL 17** ile geldi; 18 bunun araç desteğini tamamlıyor.
+Not olarak mantıksal replikasyon yuvası senkronizasyonu, yani `sync_replication_slots`, PostgreSQL 17 ile gelmiştir; 18 bunun araç desteğini tamamlamaktadır.
 
-**PostgreSQL 19:** Normal takvimde Eylül 2026'da beklenir. Bu araştırmada içeriği doğrulanamadı `[DOĞRULANMADI]`.
+PostgreSQL 19 normal takvimde Eylül 2026'da beklenmektedir. Bu araştırmada içeriği doğrulanamamıştır.
 
 ---
 
-## BÖLÜM 3 — ÇOK BÖLGELİ (MULTI-REGION) KİMLİK
+## Bölüm 3 — Çok bölgeli kimlik
 
-### 3.1 Login akışı kaç yazma yapıyor — çok bölgeliliğin gerçek maliyeti
+### 3.1 Giriş akışı kaç yazma yapmaktadır, çok bölgeliliğin gerçek maliyeti
 
-Bir OIDC authorization code + PKCE akışında Argus'un yapması gereken yazmalar:
+Bir OIDC authorization code ile PKCE akışında Argus'un yapması gereken yazmalar şunlardır.
 
-| # | Yazma | Zorunlu mu |
+| # | Yazma | Zorunlu mudur |
 |---|---|---|
-| 1 | Authentication session (login formu gösterildiğinde) | Evet (Keycloak v2 bunu DB'ye taşıdı) |
-| 2 | Brute-force / login failure sayacı güncelleme | Evet (başarısızlıkta) |
-| 3 | Authorization code (tek kullanımlık, kısa ömürlü) | Evet |
-| 4 | User session kaydı | Evet |
-| 5 | Refresh token kaydı (rotation ailesiyle) | Evet |
-| 6 | `last_login_at` güncelleme | Genelde |
-| 7 | Audit event | Evet |
-| 8 | DPoP `jti` / nonce kaydı (DPoP kullanılıyorsa) | Duruma göre |
+| 1 | Kimlik doğrulama oturumu, giriş formu gösterildiğinde | Evet; Keycloak ikinci sürümü bunu veritabanına taşımıştır |
+| 2 | Kaba kuvvet ile giriş başarısızlığı sayacı güncellemesi | Evet, başarısızlıkta |
+| 3 | Authorization code, tek kullanımlık ile kısa ömürlü | Evet |
+| 4 | Kullanıcı oturumu kaydı | Evet |
+| 5 | Yenileme token'ı kaydı, rotasyon ailesiyle | Evet |
+| 6 | Son giriş zamanı güncellemesi | Genelde |
+| 7 | Denetim olayı | Evet |
+| 8 | DPoP `jti` ya da nonce kaydı, DPoP kullanılıyorsa | Duruma göre |
 
-**~5–7 yazma.** `[MİMARİ TAHMİN — Keycloak'ın "multiple database interactions per request" ifadesiyle uyumlu, ancak Argus için ölçülmedi]`
+Yani beş ile yedi yazma vardır. Bu bir mimari tahmindir; Keycloak'ın istek başına birden çok veritabanı etkileşimi ifadesiyle uyumludur ancak Argus için ölçülmemiştir.
 
-Şimdi çarpalım:
+Şimdi çarpalım.
 
-| Topoloji | Yazma başına konsensüs maliyeti | 6 yazmalık login |
+| Topoloji | Yazma başına konsensüs maliyeti | Altı yazmalık giriş |
 |---|---|---|
-| Tek AZ | ~0 | taban |
-| **3 AZ, tek bölge** (RTT ~1–2 ms) | ~1–2 ms | **+6–12 ms** ✅ |
-| İki site, 10 ms RTT | ~10 ms | +60 ms ⚠️ |
-| İki site, 20 ms RTT | ~20 ms | +120 ms ❌ (Keycloak 26.3'te 1.076 ms p99) |
-| **us-east ↔ eu-west** (~80–90 ms RTT `[DOĞRULANMADI]`) | ~40–90 ms | **+240–540 ms** ❌❌ |
+| Tek erişilebilirlik alanı | Yaklaşık sıfır | Tabandır |
+| Üç erişilebilirlik alanı, tek bölge, gidiş dönüş bir ile iki milisaniye | Yaklaşık bir ile iki milisaniye | Artı altı ile 12 milisaniye; uygundur |
+| İki bölge, 10 milisaniye gidiş dönüş | Yaklaşık 10 milisaniye | Artı 60 milisaniye; dikkat gerekir |
+| İki bölge, 20 milisaniye gidiş dönüş | Yaklaşık 20 milisaniye | Artı 120 milisaniye; uygun değildir, Keycloak 26.3'te 99. yüzdelik 1.076 milisaniyeydi |
+| Doğu ABD ile batı Avrupa, yaklaşık 80 ile 90 milisaniye gidiş dönüş, doğrulanamamıştır | Yaklaşık 40 ile 90 milisaniye | Artı 240 ile 540 milisaniye; kesinlikle uygun değildir |
 
-Bu tablo, Keycloak'ın "farklı bölgelere yaymayın" cümlesinin tüm gerekçesidir. **Argus için pipeline'ı kısaltmak (yazma sayısını 6'dan 3'e indirmek) çok bölgeliliği mümkün kılmaz, sadece acıyı yarıya indirir.**
+Bu tablo Keycloak'ın farklı bölgelere yaymayın cümlesinin tüm gerekçesidir. Argus için boru hattını kısaltmak, yani yazma sayısını altıdan üçe indirmek, çok bölgeliliği mümkün kılmaz, yalnızca acıyı yarıya indirir.
 
-### 3.2 Dağıtık SQL seçenekleri — kimlik iş yükü için
+### 3.2 Dağıtık SQL seçenekleri, kimlik iş yükü için
 
-| Ürün | Tutarlılık | Cross-region yazma | Postgres uyumu | Kimlik iş yükü için sorun | Lisans/maliyet |
+| Ürün | Tutarlılık | Bölgeler arası yazma | Postgres uyumu | Kimlik iş yükü için sorun | Lisans ile maliyet |
 |---|---|---|---|---|---|
-| **CockroachDB** | Serializable, Raft | Var (`REGIONAL BY ROW` ile row-level homing) | Wire uyumlu, ama PL/pgSQL ve birçok uzantı yok | **Ory'nin yaşadığı: PK lookup'ta 230 ms.** `GLOBAL` tablolar GDPR'a aykırı (kişisel veri için) | 24.3.0'dan itibaren **CockroachDB Software License**. Enterprise Free: **<$10M yıllık ciro**, telemetri zorunlu, **7 gün telemetri gitmezse throttle**. Üstü ücretli |
-| **Aurora DSQL** | Snapshot isolation, **OCC**, strong consistency | **Aktif-aktif, iki bölgesel endpoint** | PG16 uyumlu | **Tetikleyici yok, PL/pgSQL yok, geçici tablo yok, işlem başına 3.000 satır limiti, işlem başına 1 DDL, bağlantı 1 saatte kopar, tek `postgres` DB, sadece `C` collation.** Kıtalar arası multi-region **yok** | AWS'e kilitli |
-| **YugabyteDB** | Raft, serializable/snapshot | xCluster + geo-partitioning | En yüksek PG uyumu iddiası (PG kod tabanını yeniden kullanıyor) | Bu araştırmada bağımsız benchmark bulunamadı `[DOĞRULANMADI]` | Apache 2.0 (core) |
-| **TiDB** | Raft | Var | **MySQL uyumlu** | Argus Postgres'e yazılıyor — dışarıda | Apache 2.0 |
-| **Vitess** | MySQL sharding | Multi-region için tasarlanmadı | MySQL | Dışarıda | Apache 2.0 |
-| **Neon** | Postgres, storage/compute ayrımı | Cross-region replica sınırlı | **Tam PostgreSQL** | Serverless soğuk başlangıç IdP için risk; multi-region aktif-aktif yok. Databricks satın alması sonrası yol haritası belirsiz `[DOĞRULANMADI]` | — |
-| **AlloyDB / AlloyDB Omni** | Postgres uyumlu | Cross-region replikasyon (asenkron) | Yüksek | Aktif-aktif değil | GCP'ye kilitli (Omni hariç) |
-| **Spanner (PG arayüzü)** | External consistency (TrueTime) | Gerçek global | Kısıtlı PG arayüzü | Maliyet; GCP kilidi | GCP |
+| CockroachDB | Serileştirilebilir, Raft ile | Vardır, satır seviyesinde yurtlandırmayla | Kablo uyumludur ancak PL/pgSQL ile birçok uzantı yoktur | Ory'nin yaşadığıdır: birincil anahtar aramasında 230 milisaniye. Küresel tablolar kişisel veri için GDPR'a aykırıdır | 24.3.0'dan itibaren CockroachDB yazılım lisansıdır. Kurumsal ücretsiz kullanım yıllık cironun 10 milyon doların altında olmasını, zorunlu telemetriyi ile telemetri yedi gün gitmezse kısıtlamayı içerir; üstü ücretlidir |
+| Aurora DSQL | Anlık görüntü izolasyonu, iyimser eşzamanlılık kontrolü ile güçlü tutarlılık | Aktif aktiftir, iki bölgesel uç noktayla | PostgreSQL 16 uyumludur | Tetikleyici, PL/pgSQL ile geçici tablo yoktur; işlem başına 3.000 satır ile bir DDL limiti vardır; bağlantı bir saatte kopmaktadır; tek bir `postgres` veritabanı ile yalnızca `C` harmanlaması vardır. Kıtalar arası çok bölgelilik yoktur | AWS'e kilitlidir |
+| YugabyteDB | Raft ile serileştirilebilir ya da anlık görüntü | Bölgeler arası küme ile coğrafi bölümleme | En yüksek PostgreSQL uyumu iddiasındadır, çünkü PostgreSQL kod tabanını yeniden kullanmaktadır | Bu araştırmada bağımsız bir kıyaslama bulunamamış ile doğrulanamamıştır | Çekirdeği Apache 2.0'dır |
+| TiDB | Raft | Vardır | MySQL uyumludur | Argus Postgres'e yazılmaktadır, dolayısıyla kapsam dışıdır | Apache 2.0 |
+| Vitess | MySQL parçalaması | Çok bölge için tasarlanmamıştır | MySQL | Kapsam dışıdır | Apache 2.0 |
+| Neon | PostgreSQL, depolama ile hesaplama ayrımıyla | Bölgeler arası replika sınırlıdır | Tam PostgreSQL'dir | Sunucusuz soğuk başlangıç bir IdP için risklidir ile çok bölgeli aktif aktif yoktur. Databricks satın alması sonrası yol haritası belirsizdir ve doğrulanamamıştır | — |
+| AlloyDB ile AlloyDB Omni | PostgreSQL uyumludur | Bölgeler arası asenkron replikasyon | Yüksektir | Aktif aktif değildir | Omni hariç GCP'ye kilitlidir |
+| Spanner, PostgreSQL arayüzüyle | Dış tutarlılık, TrueTime ile | Gerçekten küreseldir | Kısıtlı bir PostgreSQL arayüzü vardır | Maliyet ile GCP kilidi vardır | GCP |
 
-#### 3.2.1 CockroachDB'yi kimlik için doğru anlamak
-
-Tablo yerleşimleri (docs.cockroachlabs.com, erişim 2026-09-08):
+**3.2.1 CockroachDB'yi kimlik için doğru anlamak.** Tablo yerleşimleri şöyledir, erişim 8 Eylül 2026.
 
 | Yerleşim | Okuma | Yazma | Kimlikte kullanımı |
 |---|---|---|---|
-| `REGIONAL BY TABLE` | Home region'da hızlı, dışarıdan yavaş | Home region'da hızlı | Bölgeye özgü tablolar |
-| `REGIONAL BY ROW` | Satırın home region'ında hızlı; dışarıdan **düşük gecikmeli follower read** | Home region'da hızlı; dışarıdan yazma **yavaş** | **Kullanıcı verisi için doğru araç** — satır bazında bölgeye pin |
-| `GLOBAL` | **Her bölgeden düşük gecikmeli** | **Yüksek** (commit-wait adımı) | Realm/client/policy metadata için ideal; **kişisel veri için yasal olarak kullanılamaz** |
+| Tabloya göre bölgesel | Yurt bölgesinde hızlı, dışarıdan yavaştır | Yurt bölgesinde hızlıdır | Bölgeye özgü tablolar içindir |
+| Satıra göre bölgesel | Satırın yurt bölgesinde hızlıdır, dışarıdan düşük gecikmeli takipçi okuması vardır | Yurt bölgesinde hızlı, dışarıdan yavaştır | Kullanıcı verisi için doğru araçtır; satır bazında bölgeye sabitlenir |
+| Küresel | Her bölgeden düşük gecikmelidir | Yüksektir, çünkü bir kesinleştirme bekleme adımı vardır | Realm, istemci ile politika metadata'sı için idealdir; kişisel veri için yasal olarak kullanılamaz |
 
-**Survival goal:**
-- `ZONE` (varsayılan): AZ kaybından sağ çıkar
-- `REGION`: bölge kaybından sağ çıkar, ama **tüm yazmalar en az bir ek bölgeye danışmak zorunda** → yazma gecikmesi artar. Super region için **en az 3 bölge** gerekir.
+Hayatta kalma hedefi `ZONE`, yani varsayılan, erişilebilirlik alanı kaybından sağ çıkar; `REGION` bölge kaybından sağ çıkar ancak tüm yazmalar en az bir ek bölgeye danışmak zorundadır ve yazma gecikmesi artar. Süper bölge için en az üç bölge gerekir.
 
-**Sert sınırlar:**
-- Follower read (`follower_read_timestamp()`): **en az 4,2 saniye geçmiş** — güvenlik kararı için kullanılamaz
-- `GLOBAL` tablolarda **node'lar arası RTT >150 ms ise düzensiz yüksek gecikme** `[Cockroach dokümanından arama sonucu üzerinden; doğrudan sayfa doğrulanmadı]`
-- Yeni kümelerde `--max-offset 250ms` öneriliyor (`GLOBAL` yazma gecikmesini düşürmek için)
+Sert sınırları şunlardır: takipçi okuması en az 4,2 saniye geçmiştir ve bir güvenlik kararı için kullanılamaz; küresel tablolarda düğümler arası gidiş dönüş 150 milisaniyeyi aşarsa düzensiz yüksek gecikme oluşmaktadır, ki bu Cockroach dokümanından bir arama sonucu üzerinden gelmekte ve doğrudan sayfa doğrulanmamaktadır; yeni kümelerde küresel yazma gecikmesini düşürmek için `--max-offset 250ms` önerilmektedir.
 
-**Sonuç:** CockroachDB, "kullanıcıyı bölgeye pin'le, metadata'yı global yap" deseni için gerçekten tasarlanmış tek olgun açık ürün. Ama Ory'nin deneyimi gösteriyor ki **out-of-the-box çalışmıyor** — tablo yerleşimlerini tek tek elle tasarlamak, sorguları yeniden yazmak ve global TCP routing eklemek gerekiyor. Ve lisans değişikliği (2024-11) self-host'u ticari bir karar haline getirdi.
+Sonuç şudur: CockroachDB, kullanıcıyı bölgeye sabitle ile metadata'yı küresel yap deseni için gerçekten tasarlanmış tek olgun açık üründür. Ancak Ory'nin deneyimi kutudan çıktığı gibi çalışmadığını göstermektedir: tablo yerleşimlerini tek tek elle tasarlamak, sorguları yeniden yazmak ile küresel TCP yönlendirmesi eklemek gerekmektedir. Ayrıca Kasım 2024'teki lisans değişikliği kendi kendine barındırmayı ticari bir karar hâline getirmiştir.
 
-### 3.3 PostgreSQL logical replication ile çok bölge (aktif-aktif)
+### 3.3 PostgreSQL mantıksal replikasyonuyla çok bölge, aktif aktif
 
 | Çözüm | Durum | Çakışma çözümü |
 |---|---|---|
-| **pgEdge / Spock** | Açık kaynak, aktif geliştirme | LWW + kullanıcı tanımlı |
-| **pgactive** (AWS) | RDS için | LWW |
-| **EDB Postgres Distributed (PGD)** | Ticari | Gelişmiş, CRDT sayaçlar dahil |
-| **PostgreSQL 18 native** | Aktif-aktif değil; çakışma **loglama** eklendi | — |
+| pgEdge ile Spock | Açık kaynaktır ile aktif geliştirmededir | Son yazan kazanır ile kullanıcı tanımlı |
+| pgactive, AWS | RDS içindir | Son yazan kazanır |
+| EDB Postgres Distributed | Ticaridir | Gelişmiştir; çatışmasız replike veri tipi sayaçları dahildir |
+| PostgreSQL 18 yerel | Aktif aktif değildir; çakışma günlüklemesi eklenmiştir | — |
 
-**Argus için verdiğim cevap: HAYIR.**
+Argus için cevap hayırdır.
 
-Gerekçe Kanidm bölümüyle aynı ve daha güçlü: **LWW çakışma çözümü kimlikte bir güvenlik açığıdır.** Aktif-aktif logical replication, iki bölgede aynı kullanıcının parolasını/MFA'sını/rollerini eşzamanlı değiştirebilir ve **saat kaymasına göre kazananı seçer.** Bir IdP'de "son yazan kazanır" demek, "saldırgan saatini ileri alırsa kazanır" demektir.
+Gerekçesi Kanidm bölümüyle aynıdır ve daha güçlüdür: son yazan kazanır çakışma çözümü kimlikte bir güvenlik açığıdır. Aktif aktif mantıksal replikasyon, iki bölgede aynı kullanıcının parolasını, çok adımlı doğrulamasını ya da rollerini eşzamanlı değiştirebilir ile saat kaymasına göre kazananı seçer. Bir IdP'de son yazan kazanır demek, saldırgan saatini ileri alırsa kazanır demektir.
 
-İstisna: **çakışmayan, bölgeye özgü tablolar** (örn. bölgesel audit log'ları) için logical replication tek yönlü toplama amacıyla kullanılabilir.
+İstisnası çakışmayan ve bölgeye özgü tablolardır, örneğin bölgesel denetim günlükleri; bunlar için mantıksal replikasyon tek yönlü toplama amacıyla kullanılabilir.
 
-### 3.4 Veri yerleşimi (data residency) — çok bölgeliliğin gerçek sürücüsü
+### 3.4 Veri yerleşimi, çok bölgeliliğin gerçek sürücüsü
 
-Burada kritik bir tersine çevirme var: **Çoğu ekip "multi-region" ister çünkü düşük gecikme sanır. Gerçekte multi-region ihtiyacının %90'ı yasal veri yerleşimidir — ve bu iki hedef birbiriyle çelişir.**
+Burada kritik bir tersine çevirme vardır: çoğu ekip çok bölgeliliği düşük gecikme sandığı için istemektedir. Gerçekte çok bölge ihtiyacının %90'ı yasal veri yerleşimidir ve bu iki hedef birbiriyle çelişmektedir. Düşük gecikme çok bölgeli okuma ister, yani veriyi her yere kopyala; veri yerleşimi ise veriyi hiçbir yere kopyalama der.
 
-- Düşük gecikme çok bölgeli okuma ister → veriyi **her yere kopyala**
-- Veri yerleşimi → veriyi **hiçbir yere kopyalama**
+Ory'nin bakımcısı bunu doğrudan söylemektedir: küresel tablolar kişisel veri için GDPR ile CCPA ihlalidir. Ory Network bu yüzden veri yurtlandırması yapmaktadır: kişisel veri kullanıcının ülkesinde kalmakta, yalnızca kimlik referansı küresel olmaktadır.
 
-Ory'nin bakımcısı bunu doğrudan söylüyor: `GLOBAL` tablolar kişisel veri için GDPR/CCPA ihlali. Ory Network bu yüzden **"data homing"** yapıyor: kişisel veri kullanıcının ülkesinde kalır, sadece kimlik referansı global.
+Sektörün gerçek cevabı replikasyon değil izolasyondur.
 
-**Sektörün gerçek cevabı: replikasyon değil, izolasyon.**
+Okta'nın hücre tabanlı mimarisi, kendi beyaz kâğıtlarından: her hücre izole, hiçbir şeyi paylaşmayan ve aynı Okta altyapısının tam bir kopyasıdır; yönlendiriciden yük dengeleyiciye, oradan veritabanına kadar uzanır. Hücreler bağımsız çalışmakta ve hata izolasyonu erişilebilirlik stratejisinin temelini oluşturmaktadır. AWS bölgeleri üzerinde Kuzey Amerika, Avrupa, Avustralya ile Japonya'da bulunmaktadır. Amacı açıkça hem erişilebilirlik hem veri yerleşimidir.
 
-**Okta — cell-based architecture** (okta.com whitepapers, "Scaling Okta to 50 Billion Users" / "How Okta Builds and Runs Scalable Infrastructure"):
-- Her "cell" = **izole, shared-nothing, aynı Okta altyapısının tam kopyası** — router ve load balancer'dan veritabanına kadar
-- Cell'ler bağımsız çalışır → **hata izolasyonu availability stratejisinin temeli**
-- AWS bölgeleri üzerinde: Kuzey Amerika, Avrupa, Avustralya, Japonya
-- Amaç açıkça hem availability hem **veri yerleşimi**
+Auth0 aynı modeli kullanmaktadır: bölgesel kiracılar, yani ABD, AB, Avustralya ile Japonya; kiracı bölgeler arasında taşınmamakta ile replike edilmemektedir. Auth0'ın 2026 tarihli mimari yazısı bu oturumda doğrulanamamıştır.
 
-**Auth0** aynı modeli kullanıyor: bölgesel tenant'lar (US/EU/AU/JP), tenant bölgeler arası **taşınmaz, replike edilmez** `[Auth0'ın 2026 tarihli mimari yazısı bu oturumda doğrulanamadı]`.
+> **Argus için ders.** Çok bölgeli kimlik, bölge başına bağımsız bir Argus kurulumu, yani hücre, artı kiracıların bir hücreye atanması artı hücreler arasında hiçbir veri replikasyonu demektir. Bu, dağıtık SQL'in tüm karmaşıklığını ortadan kaldırmakta ve yasal gereksinimi doğal olarak karşılamaktadır. Küresel olan tek şey kontrol düzlemidir: hangi kiracının hangi hücrede olduğu haritası; küçüktür, nadiren değişir ile önbeleklenebilir.
 
-> **Argus için ders:** Çok bölgeli kimlik = **bölge başına bağımsız Argus kurulumu (hücre)** + tenant'ların bir hücreye atanması + hücreler arası **hiçbir veri replikasyonu**. Bu, dağıtık SQL'in tüm karmaşıklığını ortadan kaldırır ve yasal gereksinimi doğal olarak karşılar. Global tek şey **kontrol düzlemi**dir: "hangi tenant hangi hücrede" haritası (küçük, nadiren değişen, cache'lenebilir).
+### 3.5 Çok bölge karar tablosu, Argus için
 
-### 3.5 Çok bölge karar tablosu — Argus
-
-| Yaklaşım | Tutarlılık | Login gecikmesi | Failure mode | Op. maliyeti | Argus kararı |
+| Yaklaşım | Tutarlılık | Giriş gecikmesi | Arıza modu | Operasyonel maliyet | Argus kararı |
 |---|---|---|---|---|---|
-| Tek bölge, 3 AZ, senkron Postgres | Strong | **Taban +6–12 ms** | Bölge kaybı = kesinti (DR'a failover) | Düşük | ✅ **v1** |
-| İki site, aynı bölge, senkron (Keycloak v2 modeli) | Strong | +8–10 ms/etkileşim, DB CPU 2× | Site kaybı = veri kaybı yok | Orta | ✅ **v2** |
-| Hücre başına bölge (Okta modeli) | Hücre içinde strong | Taban (kullanıcı kendi hücresinde) | Hücre kaybı = **sadece o hücre** | Orta-yüksek (N kurulum) | ✅ **v3 — hedef** |
-| CockroachDB `REGIONAL BY ROW` | Serializable | Home region'da düşük, dışarıda yüksek | Bölge kaybı tolere edilir (REGION survival) | **Yüksek** (şema tasarımı + lisans) | ⚠️ Yalnız gerçek global gereksinim varsa |
-| Postgres aktif-aktif (logical) | **Eventual + LWW** | Düşük | **Çakışma = güvenlik açığı** | Yüksek | ❌ **Asla** |
-| Aurora DSQL | Snapshot, OCC | İyi (kıta içi) | Bölge kaybı tolere | Düşük ama **AWS kilidi + ağır SQL kısıtları** | ⚠️ Yalnız AWS-only ürün stratejisinde |
+| Tek bölge, üç erişilebilirlik alanı, senkron Postgres | Güçlüdür | Taban artı altı ile 12 milisaniye | Bölge kaybı bir kesintidir ve felaket kurtarmaya geçilir | Düşüktür | Birinci sürümde seçilir |
+| İki bölge, aynı bölgede, senkron, yani Keycloak ikinci sürüm modeli | Güçlüdür | Etkileşim başına artı sekiz ile 10 milisaniye, veritabanı işlemcisi iki kat | Bölge kaybında veri kaybı yoktur | Ortadır | İkinci sürümde seçilir |
+| Hücre başına bölge, yani Okta modeli | Hücre içinde güçlüdür | Tabandır, çünkü kullanıcı kendi hücresindedir | Hücre kaybı yalnızca o hücreyi etkiler | Orta ile yüksektir, çünkü N kurulum vardır | Üçüncü sürümde hedeftir |
+| CockroachDB satıra göre bölgesel | Serileştirilebilirdir | Yurt bölgesinde düşük, dışarıda yüksektir | Bölge kaybı tolere edilir | Yüksektir; şema tasarımı ile lisans nedeniyle | Yalnızca gerçek bir küresel gereksinim varsa |
+| Postgres aktif aktif, mantıksal | Nihai tutarlılık ile son yazan kazanır | Düşüktür | Çakışma bir güvenlik açığıdır | Yüksektir | Asla seçilmez |
+| Aurora DSQL | Anlık görüntü ile iyimser eşzamanlılık | Kıta içinde iyidir | Bölge kaybı tolere edilir | Düşüktür ancak AWS kilidi ile ağır SQL kısıtları vardır | Yalnızca yalnızca AWS ürün stratejisinde |
 
 ---
 
-## BÖLÜM 4 — DAĞITIK DURUM VE İPTAL YAYINI
+## Bölüm 4 — Dağıtık durum ve iptal yayını
 
-### 4.1 Yayın mekanizmaları karşılaştırması
+### 4.1 Yayın mekanizmalarının karşılaştırması
 
-| Mekanizma | Teslim garantisi | Gecikme | Node kaybında | Ek altyapı | Kimlik için verdict |
+| Mekanizma | Teslim garantisi | Gecikme | Düğüm kaybında | Ek altyapı | Kimlik için karar |
 |---|---|---|---|---|---|
-| **Redis/Valkey pub/sub** | **At-most-once** | ~1 ms | **Mesaj sonsuza kadar kaybolur** | Redis | ❌ **Tek başına asla** |
-| **Redis Streams** | At-least-once (consumer group) | ~1 ms | Kalıcı, replay edilebilir | Redis | ⚠️ Kabul edilebilir |
-| **NATS core** | **At-most-once** | <1 ms | Kaybolur | NATS | ❌ |
-| **NATS JetStream** | **At-least-once**, ack + redelivery, sequence number | ~1–5 ms | Stream diskte, replay edilir | NATS + storage | ✅ Ama fazladan sistem |
-| **Kafka** | At-least-once, kalıcı log | 5–50 ms | Kalıcı | Kafka + ZK/KRaft | ❌ **IdP için aşırı** |
-| **Gossip** | Eventual, olasılıksal | 100 ms–saniyeler | Yakınsar | Yok | ⚠️ Yakınsama süresi belirsiz |
-| **DB polling** | Olay DB'de kalıcı; **teslimat at-least-once** | Polling aralığı | Kaybolmaz | **Yok** | ✅ |
-| **DB transactional outbox + polling** | **Atomik üretim** (iş değişikliğiyle aynı transaction) + **at-least-once teslimat** | Polling aralığı (100 ms) | Kaybolmaz | **Yok** | ✅✅ **Keycloak'ın seçimi** |
-| **PostgreSQL `LISTEN/NOTIFY`** | At-most-once (bağlantı kopunca kaybolur) | <1 ms | **Kaybolur** | Yok | ❌ **İptal yayınında kullanılmaz** (§6 §4.5) |
+| Redis ile Valkey yayın aboneliği | En fazla bir kez | Yaklaşık bir milisaniye | Mesaj sonsuza kadar kaybolur | Redis | Tek başına asla kullanılmaz |
+| Redis akışları | En az bir kez, tüketici grubuyla | Yaklaşık bir milisaniye | Kalıcıdır ile yeniden oynatılabilir | Redis | Kabul edilebilirdir |
+| NATS çekirdeği | En fazla bir kez | Bir milisaniyenin altı | Kaybolur | NATS | Kullanılmaz |
+| NATS JetStream | En az bir kez, onay ile yeniden teslim ile sıra numarasıyla | Bir ile beş milisaniye | Akış diskte durur ile yeniden oynatılır | NATS ile depolama | Uygundur ancak fazladan bir sistemdir |
+| Kafka | En az bir kez, kalıcı günlükle | 5 ile 50 milisaniye | Kalıcıdır | Kafka ile ZooKeeper ya da KRaft | Bir IdP için aşırıdır |
+| Dedikodu protokolü | Nihai, olasılıksaldır | 100 milisaniyeden saniyelere | Yakınsar | Yoktur | Yakınsama süresi belirsizdir |
+| Veritabanı yoklaması | Olay veritabanında kalıcıdır ile teslimat en az bir kezdir | Yoklama aralığı kadar | Kaybolmaz | Yoktur | Uygundur |
+| Veritabanı işlemsel giden kutusu ile yoklama | Atomik üretim, yani iş değişikliğiyle aynı işlemde, ile en az bir kez teslimat | Yoklama aralığı kadar, yani 100 milisaniye | Kaybolmaz | Yoktur | En uygunudur; Keycloak'ın seçimidir |
+| PostgreSQL `LISTEN` ile `NOTIFY` | En fazla bir kez; bağlantı koparsa kaybolur | Bir milisaniyenin altı | Kaybolur | Yoktur | İptal yayınında kullanılmaz, §6'nın 4.5 bölümü |
 
-> ⚠️ **Düzeltme (3. inceleme turu): son iki satırda önceden "exactly-once" yazıyordu.** Bu, teslimat semantiği olarak fazla güçlü ve genel olarak yanlış. **Olayın DB'de kalıcı olması** ile **tüketicinin etkisinin tam bir kez uygulanması** ayrı şeylerdir: tüketici satırı okuyup cache'e uygulamadan ölürse, yeniden başladığında aynı olayı yeniden alır. Doğru hedef üç parçalıdır ve üçü de ayrı ayrı tasarlanır:
-> **atomik üretim** (olay ile iş değişikliği aynı transaction) + **at-least-once teslimat** (yeniden teslimat normaldir) + **idempotent/monoton uygulama** (epoch yalnızca artar; aynı olayın iki kez uygulanması sonucu değiştirmez).
+> **Üçüncü inceleme turunda yapılan düzeltme.** Son iki satırda önceden tam bir kez yazıyordu. Bu, teslimat semantiği olarak fazla güçlü ile genel olarak yanlıştır. Olayın veritabanında kalıcı olması ile tüketicinin etkisinin tam bir kez uygulanması ayrı şeylerdir: tüketici satırı okuyup önbelleğe uygulamadan ölürse, yeniden başladığında aynı olayı yeniden alır. Doğru hedef üç parçalıdır ve üçü de ayrı ayrı tasarlanır: atomik üretim, yani olay ile iş değişikliğinin aynı işlemde olması; en az bir kez teslimat, yani yeniden teslimatın normal olması; ile idempotent ve monoton uygulama, yani dönemin yalnızca artması ve aynı olayın iki kez uygulanmasının sonucu değiştirmemesi.
 
-### 4.2 Redis pub/sub'ın güvenlik problemi — bu bir görüş değil, dokümante edilmiş davranış
+### 4.2 Redis yayın aboneliğinin güvenlik problemi: bu bir görüş değil belgelenmiş bir davranıştır
 
-Redis resmî dokümanı ([redis.io/docs/latest/develop/pubsub/](https://redis.io/docs/latest/develop/pubsub/), "Delivery semantics", erişim 2026-09-08), doğrudan alıntı:
+Redis resmî dokümanının teslimat semantiği bölümü, erişim 8 Eylül 2026, doğrudan alıntıyla şöyledir:
 
-> "Redis' Pub/Sub exhibits **at-most-once** message delivery semantics. As the name suggests, it means that a message will be delivered once if at all. Once the message is sent by the Redis server, there's no chance of it being sent again. If the subscriber is unable to handle the message (for example, due to an error or a network disconnect) **the message is forever lost**."
+> "Redis' Pub/Sub exhibits at-most-once message delivery semantics. As the name suggests, it means that a message will be delivered once if at all. Once the message is sent by the Redis server, there's no chance of it being sent again. If the subscriber is unable to handle the message (for example, due to an error or a network disconnect) the message is forever lost."
 
-Mesaj kaybının somut sebepleri: abonesiz kanala gönderim, bağlantısı kopmuş abone, **çıkış tamponu (output buffer) taşması** (yavaş abone → Redis sessizce düşürür), master/replica switchover.
+Mesaj kaybının somut sebepleri abonesiz bir kanala gönderim, bağlantısı kopmuş bir abone, çıkış tamponu taşması, yani yavaş bir abonenin mesajının Redis tarafından sessizce düşürülmesi, ile birincilden replikaya geçiştir.
 
-**IdP'de bu ne demek:** İptal sinyali kaybolan node, iptal edilmiş token'ı **kabul etmeye devam eder** — ve bunu **sessizce** yapar. Ne log, ne alarm. Bu, "güvenlik kontrolü var sanıp olmaması" durumudur ve hiç olmamasından beterdir.
+Bir IdP'de bu şu demektir: iptal sinyali kaybolan düğüm iptal edilmiş token'ı kabul etmeye devam eder ve bunu sessizce yapar. Ne günlük ne alarm vardır. Bu, bir güvenlik kontrolünün var sanılıp olmaması durumudur ve hiç olmamasından beterdir.
 
-**Redis'i tamamen atmak gerekmiyor** — ama **doğruluk kaynağı olamaz.** Doğru kullanım: DB'deki gerçeği hızlandıran, kaybolduğunda polling'in yakaladığı **opsiyonel bir hızlandırıcı**.
+Redis'i tamamen atmak gerekmez ancak bir doğruluk kaynağı olamaz. Doğru kullanımı, veritabanındaki gerçeği hızlandıran ve kaybolduğunda yoklamanın yakaladığı opsiyonel bir hızlandırıcı olmasıdır.
 
-### 4.3 Transactional outbox — Keycloak'ın çözümü, Argus'un çözümü olmalı
+### 4.3 İşlemsel giden kutusu: Keycloak'ın çözümü ile Argus'un çözümü olmalıdır
 
-**Keycloak Multi-Cluster v2'de (2026-07-17):**
-> "Between clusters, a **database outbox pattern** propagates invalidation messages via **polling, with a default interval of 100 milliseconds**."
-> "Cross-cluster cache invalidation is handled through a **database queuing table, not through direct network connections between clusters**."
+Keycloak Multi-Cluster v2'de, 17 Temmuz 2026:
 
-**Neden bu doğru:** İptal işlemi ve iptal sinyali **aynı transaction'da** yazılır. Ya ikisi de olur ya hiçbiri. Redis'e ayrı bir `PUBLISH` yapmak "dual write" problemidir: DB commit olur, Redis publish başarısız olur → **kalıcı güvenlik açığı**.
+> "Between clusters, a database outbox pattern propagates invalidation messages via polling, with a default interval of 100 milliseconds."
+>
+> "Cross-cluster cache invalidation is handled through a database queuing table, not through direct network connections between clusters."
 
-#### Argus için somut şema
+Bunun neden doğru olduğu şudur: iptal işlemi ile iptal sinyali aynı işlemde yazılır, yani ya ikisi de olur ya hiçbiri. Redis'e ayrı bir yayın yapmak ikili yazma problemidir: veritabanı kesinleşir, Redis yayını başarısız olur ve kalıcı bir güvenlik açığı oluşur.
+
+**Argus için somut şema.**
 
 ```sql
 -- Kullanıcı başına iptal epoch'u (asıl gerçek)
@@ -659,7 +562,8 @@ CREATE TABLE revocation_outbox (
 CREATE INDEX ON revocation_outbox (seq);
 ```
 
-İptal işlemi:
+İptal işlemi şöyledir:
+
 ```sql
 BEGIN;
   UPDATE user_revocation SET epoch = epoch + 1, updated_at = now()
@@ -669,187 +573,151 @@ BEGIN;
 COMMIT;
 ```
 
-Her Argus node'u:
+Her Argus düğümü 100 ile 250 milisaniyede bir şu sorguyu çalıştırır:
+
 ```sql
 SELECT seq, subject, epoch FROM revocation_outbox
  WHERE seq > $last_seen_seq ORDER BY seq LIMIT 1000;
 ```
-her 100–250 ms'de bir. Sonuçlar node-yerel epoch cache'ine uygulanır. `last_seen_seq` node'un belleğinde; **node yeniden başlarsa `seq`'i sıfırdan değil, cache'i boşaltıp "cache miss = DB'ye sor" moduyla ısınır** (bkz. Bölüm 6.4).
 
-**`bigserial` gap tuzağı — bu klasik bir hatadır:** Eşzamanlı transaction'larda `seq=105` commit olup `seq=104` henüz commit olmamış olabilir. Naif `seq > last_seen` polling'i **104'ü kalıcı olarak atlar.** Çözümlerden biri seçilmeli:
-1. **Zaman penceresiyle örtüşme:** `WHERE created_at > now() - interval '5 seconds'` ile son 5 saniyeyi her turda yeniden tara (idempotent olduğu için zararsız).
-2. **`pg_snapshot_xmin(pg_current_snapshot())` takibi:** Sadece xmin'in altındaki, kesin commit olmuş satırları işle.
-3. **`txid` kolonu + snapshot karşılaştırma** (Debezium'un yaptığı).
+Sonuçlar düğüme yerel dönem önbelleğine uygulanır. Son görülen sıra numarası düğümün belleğindedir; düğüm yeniden başlarsa sıra numarasını sıfırdan almak yerine önbelleği boşaltıp önbellek ıskalamasında veritabanına sor moduyla ısınır, 6.4'e bakınız.
 
-⚠️ **Düzeltme (2. ve 3. inceleme turu): (1) seçimi GERİ ALINDI — yeterli değil.**
+**`bigserial` boşluk tuzağı klasik bir hatadır.** Eşzamanlı işlemlerde 105 numaralı sıra kesinleşmiş, 104 numaralı henüz kesinleşmemiş olabilir. Naif bir sıra numarası karşılaştırmalı yoklama 104'ü kalıcı olarak atlar. Çözümlerden biri seçilmelidir: zaman penceresiyle örtüşme, yani son beş saniyeyi her turda yeniden taramak, ki idempotent olduğu için zararsızdır; anlık görüntünün asgari işlem kimliğini takip etmek, yani yalnızca kesin kesinleşmiş satırları işlemek; ya da bir işlem kimliği kolonu ile anlık görüntü karşılaştırması, ki Debezium'un yaptığı budur.
 
-Seçenek (1) bir doğruluk mekanizması değildir. PostgreSQL'de `now()` transaction'ın
-**başlangıç** zamanını döndürür, commit zamanını değil; dolayısıyla `created_at`, satır
-transaction açıldığı anla damgalanır. Pencereden uzun süren tek bir transaction — ki yukarıdaki
-`UPDATE` + `INSERT` deseninin normal şeklidir — satırı zaten pencerenin dışına düşmüş
-`created_at` ile görünür kılar. Tüketici duraksarsa da pencere kayar ve satır kalıcı olarak
-atlanır. Pencere en fazla bir **hızlandırıcı** olabilir.
+> **İkinci ile üçüncü inceleme turunda yapılan düzeltme: birinci seçim geri alınmıştır, çünkü yeterli değildir.**
+>
+> Birinci seçenek bir doğruluk mekanizması değildir. PostgreSQL'de `now()` işlemin başlangıç zamanını döndürmektedir, kesinleşme zamanını değil; dolayısıyla oluşturma zamanı, satır işlem açıldığı anla damgalanmaktadır. Pencereden uzun süren tek bir işlem, ki yukarıdaki güncelleme ile ekleme deseninin normal şeklidir, satırı zaten pencerenin dışına düşmüş bir oluşturma zamanıyla görünür kılar. Tüketici duraksarsa da pencere kayar ile satır kalıcı olarak atlanır. Pencere en fazla bir hızlandırıcı olabilir.
+>
+> İkinci seçenek de yazıldığı hâliyle eksiktir: şemada işlem kimliği tutulmamaktadır ile imlecin nasıl ilerleyeceği tanımlı değildir. Ayrıca sıra numarası tabanlı bir imleç bu problemi prensipte çözemez, çünkü kesinleşmemiş bir işlemin satırı çok sürümlü eşzamanlılık kontrolü altında görünmez ve uçuştaki bir işleme ait en düşük sıra numarası tablodan hesaplanamaz.
+>
+> **Teslimat algoritması bu belgede açık bir karardır.** İki aday, yani işlem kimliği su hattı üzerinden yoklama ile mantıksal çözümleme, ve ikisinin de ortak sınanacağı arıza matrisi için §1'in 10.2 bölümüne bakınız. Karşılaştırma yapılmadan ile matris koşulmadan buraya bir seçim yazılmayacaktır.
 
-Seçenek (2) de yazıldığı hâliyle eksiktir: şemada transaction kimliği tutulmuyor ve cursor'un
-nasıl ilerleyeceği tanımlı değil. Ayrıca sequence tabanlı bir cursor bu problemi **prensipte**
-çözemez — commit etmemiş bir transaction'ın satırı MVCC altında görünmez, dolayısıyla
-"uçuştaki transaction'a ait en düşük `seq`" değeri tablodan hesaplanamaz.
+Maliyet, seçime bağlı bir hipotezdir: sıra numarası indeksi üzerinden yoklama varsayımıyla düğüm başına saniyede dört ile 10 küçük indeksli sorgu, 20 düğümde saniyede 80 ile 200 sorgu demektir ve bu Postgres için önemsizdir. Ancak bu rakam artık teslimat algoritmasının seçimine bağlıdır; seçilen aday sıra numarası indeksini kullanmayabilir ve asgari işlem kimliği adayı sistem sütunu üzerinden çalışırsa indeks kullanamaz ile ardışık tarama riski taşır, o durumda bu maliyet tahmini geçersizdir ile yeniden ölçülmelidir.
 
-**Teslimat algoritması bu belgede AÇIK KARARDIR.** İki aday (xid watermark üzerinden polling ·
-logical decoding) ve ikisinin de ortak sınanacağı arıza matrisi için bkz. **§1 §10.2**.
-Karşılaştırma yapılmadan ve matris koşulmadan buraya bir seçim yazılmayacak.
+Saklama süresi açık bir karardır: giden kutusu tablosu bir pencereyle budanmalıdır, yani bölümlenmiş bir tablo ile bölüm düşürme kullanılmalıdır, yoksa şişer. Ancak 24 saat henüz güvenli bir karar değildir: tüketici penceresinden uzun süre düşerse bölüm düşürmek olayları kalıcı olarak yok eder. Yeniden senkronizasyon tasarımı tamamlanmadan hiçbir bölüm düşürülemez; pencere süresi o tasarımın çıktısı olarak belirlenecektir, §1'in 10.2 bölümü ile arıza matrisinin üçüncü senaryosu.
 
-**Maliyet `[SEÇİME BAĞLI HİPOTEZ]`:** *sequence indeksi üzerinden* polling varsayımıyla node başına saniyede 4–10 küçük indeksli sorgu; 20 node'da 80–200 qps — Postgres için önemsiz. ⚠️ **Bu rakam artık teslimat algoritmasının seçimine bağlıdır (§1 §10.2).** Seçilen aday sequence indeksini kullanmayabilir: `xmin` adayı sistem sütunu üzerinden çalışırsa indeks kullanamaz ve **seq scan** riski taşır — o durumda bu maliyet tahmini geçersizdir ve yeniden ölçülmelidir.
+> **`NOTIFY` hızlandırması kullanılmaz; ikinci inceleme turunda yapılan düzeltmedir.** Bu paragraf önceden isteğe bağlı hızlandırma başlığıyla, aynı işlemin sonunda bir bildirim yapılmasını öneriyordu. Bu, §6'nın 4.5 bölümündeki mutlak yasakla ile §1'in 4.1 bölümü ve §2'nin dördüncü çelişkisinin karar satırlarıyla çelişmekteydi. Daha önemlisi opsiyonel çerçevesi hata modundan kaçamamaktadır: bildirim iptal yazımıyla aynı işlemin içinde olduğu için, bildirim kuyruğu dolduğunda kaybolan bir hızlandırma değil iptalin kendisinin kesinleşememesi söz konusudur. Yani iptal mekanizması veritabanının yazma yolunu düşürebilir hâle gelir ve §6'nın 4.5 bölümü bunu zaten kabul edilemez bir hata modu ilan etmiştir. Tek konum şudur: `LISTEN` ile `NOTIFY` iptal yayınında hiç kullanılmaz.
 
-**Retention `[AÇIK]`:** outbox tablosu bir pencereyle budanmalı (partitioned table + `DROP PARTITION`), yoksa şişer. ⚠️ **Ama 24 saat henüz güvenli bir karar değil:** tüketici penceresinden uzun süre düşerse partition düşürmek olayları kalıcı olarak yok eder. **Yeniden senkronizasyon tasarımı tamamlanmadan hiçbir partition düşürülemez** — pencere süresi, o tasarımın çıktısı olarak belirlenecek (§1 §10.2, arıza matrisi senaryo 3).
+### 4.4 Bloom ile guguk filtresiyle iptal listesi
 
-**⚠️ `NOTIFY` hızlandırması KULLANILMAZ — düzeltme (2. inceleme turu).** Bu paragraf önceden "isteğe bağlı hızlandırma" başlığıyla, aynı transaction'ın sonunda `NOTIFY revocation` yapılmasını öneriyordu. Bu, §6 §4.5'teki mutlak yasakla ve §1 §4.1 / §2 Çelişki 4'ün karar satırlarıyla çelişiyordu. Daha önemlisi, **"opsiyonel" çerçevesi hata modundan kaçmıyor:** `NOTIFY` iptal yazımıyla *aynı transaction'ın* içinde olduğu için, bildirim kuyruğu dolduğunda kaybolan bir hızlandırma değil — **iptalin kendisi commit olamaz**. Yani iptal mekanizması DB'nin yazma yolunu düşürebilir hâle gelir; §6 §4.5 bunu zaten "kabul edilemez bir hata modu" ilan etmişti. **Tek konum: `LISTEN/NOTIFY` iptal yayınında hiç kullanılmaz.**
+Bulgu şudur: bu araştırmada üretim IdP'lerinde token iptali için Bloom ya da guguk filtresi kullanan doğrulanmış bir örnek bulunamamıştır.
 
-### 4.4 Bloom / cuckoo filter ile iptal listesi
+Birinci ilkelerden güvenlik analizi şöyledir. Bloom filtresi yanlış pozitif verir, yanlış negatif vermez. İptal listesi bağlamında yanlış pozitif bu token iptal edilmiştir demektir, oysa değildir, ve geçerli bir token reddedilerek kullanıcı gereksiz yere çıkış yapar. Yanlış negatif imkânsızdır, yani iptal edilmiş bir token asla kaçmaz. Yani yön güvenlidir ve güvenli tarafa düşmektedir; bu önemlidir ile çoğu kişi tersini sanmaktadır.
 
-**Bulgu:** Bu araştırmada, üretim IdP'lerinde token iptali için Bloom/cuckoo filter kullanan **doğrulanmış bir örnek bulunamadı** `[DOĞRULANMADI]`.
+Ancak pratik problemler vardır. Birincisi silme yoktur: standart Bloom filtresinden eleman çıkarılamaz, token süresi dolduğunda filtreden çıkarılamaz, filtre doyar ile yanlış pozitif oranı zamanla tavana vurur; sayan Bloom ya da silmeyi destekleyen guguk filtresi gerekir. İkincisi yanlış pozitif oranı rastgele çıkış oranıdır: yüzde birlik bir oran kullanıcıların yüzde birinin rastgele çıkış yapması demektir ve kabul edilemez, on binde bire inmek için filtre büyür. Üçüncüsü iptal dönemi deseninin aynı işi sekiz baytla ile sıfır hatayla yapmasıdır; Bloom'un tek avantajı bellektir ve dönem deseni zaten bir bellek problemi yaratmamaktadır.
 
-**Güvenlik analizi (birinci ilkelerden):**
+Karar şudur: Argus kullanmamalıdır. Tek meşru kullanım alanı DPoP `jti` yeniden oynatma koruması gibi çok yüksek kardinaliteli, kısa ömürlü ile yanlış pozitifi yalnızca tek bir isteği reddetmek olan, kullanıcı çıkışı olmayan durumlardır. Orada bile Redis kümesi ile yaşam süresi daha basittir.
 
-Bloom filter **yanlış pozitif** verir, yanlış negatif vermez. İptal listesi bağlamında:
-- Yanlış pozitif = "bu token iptal edilmiş" (aslında değil) → **geçerli token reddedilir** → kullanıcı gereksiz yere çıkış yapar
-- Yanlış negatif **imkânsız** = iptal edilmiş token asla kaçmaz ✅
+### 4.5 İptal dönemi deseni: Argus'un omurgası olmalıdır
 
-**Yani yön güvenlidir** — fail-safe tarafa düşer. Bu önemli ve çoğu kişi tersini sanır.
+Desen şudur: kullanıcı başına monoton artan bir sayaç tutulur. Token'a bir dönem claim'i konur veya `iat` ile karşılaştırılır. Doğrulamada token'ın dönemi kullanıcının güncel döneminden küçükse token ölüdür.
 
-**Ama pratik problemler:**
-1. **Silme yok.** Standart Bloom'dan eleman çıkarılamaz. Token süresi dolduğunda filtreden çıkaramazsın → filtre doyar, yanlış pozitif oranı zamanla **tavana vurur**. Counting Bloom veya **cuckoo filter** (silme destekler) gerekir.
-2. **Yanlış pozitif oranı = rastgele logout oranı.** %1 FP oranı, kullanıcıların %1'inin rastgele çıkış yapması demektir. Bu kabul edilemez; %0,01'e inmek için filtre büyür.
-3. **`revocation_epoch` deseni aynı işi 8 byte ile ve %0 hatayla yapıyor.** Bloom'un tek avantajı bellek — ve epoch deseni zaten bellek problemi yaratmıyor.
+Tek bir `UPDATE ... SET epoch = epoch + 1` ifadesi o kullanıcının şimdiye kadar verilmiş tüm token'larını öldürür.
 
-**Verdict: Argus kullanmamalı.** Tek meşru kullanım alanı: **DPoP `jti` replay koruması** gibi çok yüksek kardinaliteli, kısa ömürlü ve "yanlış pozitif = tek isteği reddet" (kullanıcı çıkışı değil) olan durumlar. Orada bile Redis SET + TTL daha basit.
+Kim kullanmaktadır sorusunun cevabı şudur: bu, token sürümü, token nesli ile oturum nesli adlarıyla yaygın bir desendir. Django'nun `AbstractBaseUser.get_session_auth_hash()` fonksiyonu, Rails'in `devise` eklentisindeki kimlik doğrulanabilir tuz ile Firebase Auth'un `tokensValidAfterTime` alanı aynı fikrin varyasyonlarıdır; bu ürün eşleşmeleri genel bilgiye dayanmaktadır ve bu oturumda tek tek doğrulanmamıştır. Genel teknik yazın bunu token sürümleme olarak tarif etmekte ve tek bir veritabanı güncellemesinin kullanıcının şimdiye kadar verdiği her token'ı geçersiz kıldığını, kullanıcı başına yalnızca sekiz bayt depolama gerektirdiğini söylemektedir; bu ikincil ile düşük otoriteli bir kaynaktır, yani michal-drozd.com ile techinterview.org gibi blog yazılarıdır, bağımsız bir üretim ölçümü değildir.
 
-### 4.5 `revocation_epoch` deseni — Argus'un omurgası olmalı
+> **Uyarı.** Aramada karşılaşılan saniyede 10.000 istek ile 100 bin kullanıcıda token sürümü doğrulamasının önbeleklenmiş aramayla yalnızca 0,3 milisaniye eklediği, kısa sona ermenin 0,05 milisaniye ile engelleme listesinin 0,2 milisaniye olduğu rakamları düşük otoriteli blog yazılarından gelmektedir ile bağımsız olarak doğrulanamamıştır. Argus bunları bir planlama girdisi olarak kullanmamalı ile kendi ölçümünü yapmalıdır.
 
-**Desen:** Kullanıcı başına monoton artan bir sayaç. Token'a `epoch` claim'i (veya `iat` ile karşılaştırma) konur. Doğrulamada:
+`iat` değerinin dönem zaman damgasından küçük olması varyantı ile sayaç varyantının karşılaştırması şöyledir.
 
-```
-if token.epoch < current_epoch(user)  →  token ÖLÜ
-```
-
-Tek bir `UPDATE ... SET epoch = epoch + 1` **o kullanıcının şimdiye kadar verilmiş tüm token'larını öldürür.**
-
-**Kim kullanıyor:**
-- Bu, "token version" / "token generation" / "session generation" adlarıyla yaygın bir desendir. Django'nun `AbstractBaseUser.get_session_auth_hash()`, Rails'in `devise` `authenticatable_salt`'ı ve Firebase Auth'un `tokensValidAfterTime` alanı aynı fikrin varyasyonlarıdır `[Bu ürün eşleşmeleri genel bilgiye dayanıyor, bu oturumda tek tek doğrulanmadı]`.
-- Genel teknik yazın bunu "token versioning" olarak tarif ediyor: "one database update invalidates every token the user has ever issued, requiring only **8 bytes of storage per user**" `[İKİNCİL/DÜŞÜK OTORİTE KAYNAK — michal-drozd.com, techinterview.org gibi blog yazıları; bağımsız üretim ölçümü değil]`.
-
-**⚠️ Uyarı:** Aramada karşılaşılan "**10.000 istek/s ve 100k kullanıcıda token version doğrulaması cache'li lookup ile sadece 0,3 ms ekliyor; kısa expiry 0,05 ms, denylist 0,2 ms**" rakamları **düşük otoriteli blog yazılarından** geliyor ve **bağımsız olarak doğrulanamadı**. Argus bunları planlama girdisi olarak kullanmamalı; kendi ölçümünü yapmalı.
-
-**`iat < epoch_timestamp` varyantı vs sayaç varyantı:**
-
-| Varyant | Artı | Eksi |
+| Varyant | Artısı | Eksisi |
 |---|---|---|
-| **Monoton sayaç** (`epoch: bigint`) | Saat kaymasından bağımsız; kesin | Token'a ekstra claim gerekir |
-| **Zaman damgası** (`revoked_before: timestamptz`, `iat < revoked_before ⇒ ölü`) | Ekstra claim gerekmez, `iat` zaten var | **Saat kayması** riski: 1 sn içinde çıkarılan token'lar aynı saniyeye düşer; ayrıca `iat` saniye çözünürlüklü — **aynı saniyede iptal + yeni token = yeni token da ölür** |
+| Monoton sayaç, yani `epoch: bigint` | Saat kaymasından bağımsızdır ile kesindir | Token'a ekstra bir claim gerekir |
+| Zaman damgası, yani `revoked_before: timestamptz`, `iat` ondan küçükse ölüdür | Ekstra claim gerekmez, çünkü `iat` zaten vardır | Saat kayması riski vardır: bir saniye içinde çıkarılan token'lar aynı saniyeye düşer; ayrıca `iat` saniye çözünürlüklüdür ve aynı saniyede iptal ile yeni token verilirse yeni token da ölür |
 
-**Argus önerisi: her ikisi.** Token'da `rev` (epoch sayısı) claim'i taşı; kullanıcı tablosunda hem `epoch` hem `epoch_set_at` tut. Doğrulama sayaç üzerinden yapılır (kesin), zaman damgası sadece gözlemlenebilirlik/denetim için.
+Argus önerisi her ikisidir: token'da bir `rev` claim'i, yani dönem sayısı, taşınır; kullanıcı tablosunda hem dönem hem dönemin ayarlandığı zaman tutulur. Doğrulama sayaç üzerinden yapılır, çünkü kesindir; zaman damgası yalnızca gözlemlenebilirlik ile denetim içindir.
 
-#### 4.5.1 Ölçekleme davranışı ve node'lara yayılım
+**4.5.1 Ölçekleme davranışı ile düğümlere yayılım.** Bu desenin tek zorluğu her token doğrulamasında kullanıcının dönemini bilmek gerekmesidir. Naif uygulama her istekte bir veritabanı sorgusudur ve ölçeklenmez.
 
-Bu desenin tek zorluğu: **her token doğrulamasında kullanıcının epoch'unu bilmek gerekir.** Naif uygulama = her istekte bir DB sorgusu = ölçeklenmez.
-
-**Argus'un çözümü — üç katmanlı:**
+Argus'un çözümü üç katmanlıdır.
 
 ```
 Katman 1: Node-yerel epoch cache (moka/DashMap)
           - key: user_id → epoch
           - kapasite: aktif kullanıcı sayısı (~1M kullanıcı × 24 byte ≈ 24 MB)
           - TTL: yok; outbox invalidation ile güncellenir
-          
+
 Katman 2: Outbox polling (100–250 ms)
           - epoch değişimlerini cache'e uygular
           - "en kötü durumda iptal gecikmesi" = polling aralığı
-          
+
 Katman 3: PostgreSQL primary (doğruluk kaynağı)
           - cache miss → tekil sorgu
           - node soğuk başlangıcında baskın yol
 ```
 
-**Kritik güvenlik detayı — negatif cache tuzağı:** Cache'te olmayan bir kullanıcı için "epoch = 0 varsay" **kabul edilemez**, çünkü bir iptal kaçırılabilir. Doğru davranış: **cache miss → mutlaka DB'ye sor.** Cache yalnızca **pozitif** (bilinen) değerleri hızlandırır.
+Kritik güvenlik detayı olumsuz önbellek tuzağıdır: önbellekte olmayan bir kullanıcı için dönem sıfırdır varsaymak kabul edilemez, çünkü bir iptal kaçırılabilir. Doğru davranış önbellek ıskalamasında mutlaka veritabanına sormaktır; önbellek yalnızca bilinen, yani olumlu değerleri hızlandırır.
 
-**Alternatif optimizasyon — global epoch floor:** Node, gördüğü en yüksek `outbox.seq`'i ve son N dakikada iptal edilen kullanıcıların **set**'ini tutar. Token'ın `iat`'ı node'un "tam senkronize olduğu andan" (`synced_since`) sonraysa ve kullanıcı iptal setinde değilse, **DB sorgusu gerekmez.** Bu, cache miss'lerin büyük çoğunluğunu ortadan kaldırır ve sadece "son N dakikada iptal edilenler" kadar bellek ister. N = 1 saat, saatte 10.000 iptal → 10.000 UUID ≈ 160 KB. Bu, Argus'un en verimli tasarımıdır.
+Alternatif bir optimizasyon küresel dönem tabanıdır: düğüm, gördüğü en yüksek giden kutusu sıra numarasını ile son N dakikada iptal edilen kullanıcıların kümesini tutar. Token'ın `iat` değeri düğümün tam senkronize olduğu andan sonraysa ve kullanıcı iptal kümesinde değilse veritabanı sorgusu gerekmez. Bu, önbellek ıskalamalarının büyük çoğunluğunu ortadan kaldırır ile yalnızca son N dakikada iptal edilenler kadar bellek ister. N bir saat ve saatte 10.000 iptal olursa 10.000 evrensel benzersiz kimlik yaklaşık 160 kilobayt eder. Bu, Argus'un en verimli tasarımıdır.
 
-**Ölçek:** Bu desen kullanıcı sayısıyla O(1) davranır çünkü maliyet **iptal hızıyla** orantılıdır, kullanıcı sayısıyla değil. 100M kullanıcılı bir sistemde bile saniyede 100 iptal varsa outbox trafiği önemsizdir.
+Ölçek açısından bu desen kullanıcı sayısıyla sabit davranır, çünkü maliyet iptal hızıyla orantılıdır, kullanıcı sayısıyla değil. Yüz milyon kullanıcılı bir sistemde bile saniyede 100 iptal varsa giden kutusu trafiği önemsizdir.
 
-### 4.6 Gecikme bütçesi — "anında iptal" kaç ms olmalı
+### 4.6 Gecikme bütçesi: anında iptal kaç milisaniye olmalıdır
 
-**Sektörde fiilen kabul edilen değerler:**
+Sektörde fiilen kabul edilen değerler şunlardır.
 
 | Sistem | İptal yayılım süresi | Kaynak |
 |---|---|---|
-| **Keycloak Multi-Cluster v2** | **100 ms** (outbox polling varsayılanı) | keycloak.org, 2026-07-17 ✅ |
-| **CockroachDB follower read** | **≥4,2 saniye** (kaçınılmaz bayatlık) | cockroachlabs docs ✅ |
-| OAuth 2.0 access token ömrü (yaygın pratik) | 5–15 dakika — **fiili iptal gecikmesi bu** | Genel pratik |
-| CAEP/SSF sinyal teslimi | Push modelinde saniyeler | `[Sayısal SLA doğrulanmadı]` |
+| Keycloak Multi-Cluster v2 | 100 milisaniye, giden kutusu yoklama varsayılanı | keycloak.org, 17 Temmuz 2026, doğrulanmıştır |
+| CockroachDB takipçi okuması | En az 4,2 saniye, kaçınılmaz bayatlık | cockroachlabs dokümanı, doğrulanmıştır |
+| OAuth 2.0 access token ömrü, yaygın pratik | Beş ile 15 dakika; fiilî iptal gecikmesi budur | Genel pratiktir |
+| CAEP ile SSF sinyal teslimi | İtme modelinde saniyeler | Sayısal hizmet düzeyi doğrulanmamıştır |
 
-**Argus için önerilen bütçe:**
+Argus için önerilen bütçe şöyledir.
 
 | Katman | Hedef | Nasıl |
 |---|---|---|
-| **Aynı node** | **0 ms** (senkron) | İptal işlemi kendi node'unda cache'i hemen günceller |
-| **Diğer node'lar, aynı küme** | **p99 < 250 ms** ⚠️ *hedef; teslimat algoritması açık karar (§1 §10.2)* | Outbox polling 100 ms (⚠️ `NOTIFY` hızlandırması **kullanılmaz** — §4.3) |
-| **Diğer küme / site** | **p99 < 500 ms** | Senkron DB + outbox polling |
-| **Kaynak sunucular (RS)** | **≤ access token ömrü** | Kısa access token (5 dk) + introspection ile 250 ms |
-| **Federe RP'ler** | **saniyeler** | SSF/CAEP push |
+| Aynı düğüm | Sıfır milisaniye, senkron | İptal işlemi kendi düğümünde önbelleği hemen günceller |
+| Diğer düğümler, aynı küme | 99. yüzdelikte 250 milisaniyenin altı; bu bir hedeftir ve teslimat algoritması açık bir karardır, §1'in 10.2 bölümü | Giden kutusu yoklaması 100 milisaniyedir; `NOTIFY` hızlandırması kullanılmaz, 4.3'e bakınız |
+| Diğer küme ya da bölge | 99. yüzdelikte 500 milisaniyenin altı | Senkron veritabanı ile giden kutusu yoklaması |
+| Kaynak sunucular | Access token ömrü kadar | Kısa access token, yani beş dakika, ile içgözlemde 250 milisaniye |
+| Federe ilgili taraflar | Saniyeler | SSF ile CAEP itmesi |
 
-**Bu bütçenin savunması:** Kullanıcı "tüm cihazlarımdan çık" dediğinde, Argus'un kendi yüzeyi (login, refresh, introspection) **250 ms içinde** iptali uygular. Access token'ı hâlâ elinde tutan bir kaynak sunucu, token süresi dolana kadar (max 5 dk) kabul edebilir — **bu tasarım gereğidir, hata değil**, ve yalnız DPoP + introspection zorunluluğu ile kapatılabilir.
+Bu bütçenin savunması şudur: kullanıcı tüm cihazlarından çıkmak istediğinde Argus'un kendi yüzeyi, yani giriş, yenileme ile içgözlem, iptali 250 milisaniye içinde uygular. Access token'ı hâlâ elinde tutan bir kaynak sunucu, token süresi dolana kadar, yani en fazla beş dakika, kabul edebilir; bu tasarım gereğidir, bir hata değildir, ve yalnızca DPoP ile içgözlem zorunluluğuyla kapatılabilir.
 
-**Karşı tez ve cevabı:** "Anında iptal" isteyen ekipler genellikle introspection'ı zorunlu kılmayı reddeder çünkü gecikme istemez. **Bu ikisi aynı anda olamaz.** Argus bu takası açıkça belgelemeli ve iki profil sunmalı: *fast* (JWT self-contained, 5 dk, iptal ≤5 dk) ve *strict* (introspection zorunlu, iptal ≤250 ms).
+Karşı tez ile cevabı şudur: anında iptal isteyen ekipler genellikle içgözlemi zorunlu kılmayı reddetmektedir, çünkü gecikme istememektedir. Bu ikisi aynı anda olamaz. Argus bu takası açıkça belgelemeli ile iki profil sunmalıdır: hızlı profilde JWT kendi kendine yeterlidir, beş dakikalıktır ile iptal beş dakikaya kadar sürer; katı profilde içgözlem zorunludur ile iptal 250 milisaniyeye kadar sürer.
 
 ---
 
-## BÖLÜM 5 — DAĞITIK RATE LIMITING
+## Bölüm 5 — Dağıtık hız sınırlama
 
 ### 5.1 Algoritmalar
 
-| Algoritma | Bellek | Burst davranışı | Dağıtıklaştırılabilirlik | Not |
+| Algoritma | Bellek | Ani yük davranışı | Dağıtıklaştırılabilirlik | Not |
 |---|---|---|---|---|
-| **Fixed window** | En az (1 sayaç) | **Pencere sınırında 2× burst** | Kolay (INCR + EXPIRE) | Sınır davranışı kabul edilemez |
-| **Sliding window log** | Yüksek (her istek kaydı) | Kesin | Zor/pahalı | Doğru ama pahalı |
-| **Sliding window counter** | Düşük (2 sayaç + ağırlık) | İyi yaklaşım | Kolay | **Pratik tatlı nokta** |
-| **Token bucket** | Düşük (2 alan: token, ts) | Kontrollü burst | Kolay | Yaygın |
-| **GCRA** (Generic Cell Rate Algorithm) | **En düşük (tek `tat` değeri)** | Kontrollü burst; **arka plan drip process gerektirmez** | Kolay (tek atomik değer) | **Teknik olarak en zarif** |
+| Sabit pencere | En azdır, tek sayaçtır | Pencere sınırında iki kat ani yüke izin verir | Kolaydır; artır ile süre ver yeterlidir | Sınır davranışı kabul edilemezdir |
+| Kayan pencere günlüğü | Yüksektir, her istek kaydedilir | Kesindir | Zordur ile pahalıdır | Doğrudur ancak pahalıdır |
+| Kayan pencere sayacı | Düşüktür, iki sayaç ile bir ağırlık | İyi bir yaklaşımdır | Kolaydır | Pratik tatlı noktadır |
+| Jeton kovası | Düşüktür, iki alan: jeton ile zaman damgası | Kontrollü ani yüke izin verir | Kolaydır | Yaygındır |
+| GCRA, yani genel hücre hızı algoritması | En düşüktür, tek bir teorik varış zamanı değeri | Kontrollü ani yüke izin verir ile arka planda bir damlatma süreci gerektirmez | Kolaydır, tek atomik değerdir | Teknik olarak en zarifidir |
 
-**GCRA neden üstün:** Tek bir "theoretical arrival time" (TAT) değeri saklar. Ne sayaç dizisi ne zamanlayıcı gerekir; sürekli (rolling) zaman penceresi verir. redis-cell'in README'si bunu açıkça söylüyor: "provides a rolling time window and **doesn't depend on a background drip process**."
+GCRA'nın neden üstün olduğu şudur: tek bir teorik varış zamanı değeri saklar; ne bir sayaç dizisi ne bir zamanlayıcı gerekir ve sürekli, yani kayan bir zaman penceresi verir. redis-cell'in README dosyası bunu açıkça söylemektedir: kayan bir zaman penceresi sağlar ile arka planda bir damlatma sürecine bağımlı değildir.
 
-### 5.2 Rust ekosistemi — ve dağıtık moddaki boşluk
+### 5.2 Rust ekosistemi ile dağıtık moddaki boşluk
 
-**`governor` 0.10.4** (docs.rs, son güncelleme **5 Eylül 2026**):
-- GCRA uygular
-- `DefaultDirectRateLimiter` (tek durum) ve `DefaultKeyedRateLimiter` (key başına durum, `dashmap` ile)
-- **Tamamen süreç-içi.** Bağımlılıkları (`dashmap`, `parking_lot`, `quanta`, `spinning_top`) bunu doğruluyor — hiçbir ağ/depolama backend'i yok.
+`governor` 0.10.4, docs.rs'e göre son güncellemesi 5 Eylül 2026'dır. GCRA uygulamaktadır; varsayılan doğrudan hız sınırlayıcı, yani tek durumlu, ile varsayılan anahtarlı hız sınırlayıcı, yani anahtar başına durumlu ve `dashmap` tabanlı, sunmaktadır. Tamamen süreç içidir; bağımlılıkları, yani `dashmap`, `parking_lot`, `quanta` ile `spinning_top`, bunu doğrulamaktadır, çünkü hiçbir ağ ya da depolama arka ucu yoktur.
 
-**`tower-governor`:** `governor`'ı Tower middleware'i olarak sarar. Aynı sınır: **süreç-içi.**
+`tower-governor` crate'i `governor`'ı bir Tower ara katmanı olarak sarmaktadır ve aynı sınıra sahiptir: süreç içidir.
 
-> **Net sonuç: Rust'ta hazır, olgun, dağıtık bir rate limiter YOK.** `governor` mükemmel bir **yerel** limiter'dır; dağıtık katmanı Argus'un kendisi yazmak zorunda.
+> **Net sonuç: Rust'ta hazır, olgun ile dağıtık bir hız sınırlayıcı yoktur.** `governor` mükemmel bir yerel sınırlayıcıdır; dağıtık katmanı Argus'un kendisi yazmak zorundadır.
 
-**`redis-cell`** (github.com/brandur/redis-cell, erişim 2026-09-08):
-- GCRA'yı Redis modülü olarak uygular; `CL.THROTTLE <key> <max_burst> <count> <period> [<quantity>]`
-- Performans: "**very roughly 0.1 ms per command** as seen from a Redis client", basit bir `SET`'in "biraz iki katından az" süresi
-- **⚠️ 2026 durumu: "This package is in 'best effort' maintenance mode."** Yazar aktif geliştirmiyor. Modül yüklemek gerektiği için yönetilen Redis servislerinin çoğunda **kullanılamaz** (ElastiCache, Memorystore).
+`redis-cell`, erişim 8 Eylül 2026: GCRA'yı bir Redis modülü olarak uygulamakta ile `CL.THROTTLE` komutunu sunmaktadır. Performansı bir Redis istemcisinden görüldüğü kadarıyla komut başına kabaca 0,1 milisaniyedir ve basit bir kümeleme işleminin biraz iki katından azdır. 2026 durumu şudur: paket elden gelenin en iyisi bakım modundadır, yani yazarı aktif geliştirmemektedir. Bir modül yüklemek gerektiği için yönetilen Redis servislerinin çoğunda kullanılamaz, örneğin ElastiCache ile Memorystore'da.
 
-### 5.3 Doğruluk vs performans — yaklaşık sayaçlar kabul edilebilir mi
+### 5.3 Doğruluk ile performans: yaklaşık sayaçlar kabul edilebilir midir
 
-**Cevap sınırın türüne bağlıdır ve bu ayrım kritiktir:**
+Cevap sınırın türüne bağlıdır ile bu ayrım kritiktir.
 
 | Sınır tipi | Doğruluk gereksinimi | Neden |
 |---|---|---|
-| **Kaba trafik/DoS koruması** (IP başına istek) | **Yaklaşık kabul edilebilir** | %10 hata hiçbir şeyi değiştirmez |
-| **API kotası** (müşteri başına ücretli) | Orta | Fatura anlaşmazlığı, güvenlik değil |
-| **Hesap başına parola denemesi (credential stuffing)** | **KESİN OLMALI** | Aşağıda |
-| **OTP/MFA deneme sayısı** | **KESİN OLMALI** | 6 haneli OTP'de her ekstra deneme entropiyi doğrudan yer |
-| **Parola sıfırlama / e-posta gönderimi** | Orta | Suistimal, güvenlik değil |
+| Kaba trafik ile hizmet reddi koruması, IP başına istek | Yaklaşık kabul edilebilirdir | Yüzde onluk bir hata hiçbir şeyi değiştirmez |
+| API kotası, müşteri başına ücretli | Ortadır | Bir fatura anlaşmazlığıdır, güvenlik değildir |
+| Hesap başına parola denemesi, yani kimlik bilgisi doldurma | Kesin olmalıdır | Aşağıya bakınız |
+| Tek kullanımlık parola ile çok adımlı doğrulama deneme sayısı | Kesin olmalıdır | Altı haneli bir parolada her ekstra deneme entropiyi doğrudan yemektedir |
+| Parola sıfırlama ile e-posta gönderimi | Ortadır | Bir suistimaldir, güvenlik değildir |
 
-**Neden hesap başına sınır kesin olmalı — matematik:**
+Hesap başına sınırın neden kesin olması gerektiğinin matematiği şudur. Altı haneli bir tek kullanımlık parolanın bir milyon olası değeri vardır. Saldırganın hesap başına beş denemesi varsa başarı olasılığı beş bölü bir milyon, yani iki yüz binde birdir. Argus 10 düğüme dağıtılmışsa ile her düğüm bağımsız bir yerel sayaç tutuyorsa, saldırgan istekleri düğümlere dağıtarak 10 çarpı beş, yani 50 deneme yapar ve başarı olasılığı on kat artar. Düğüm sayısı arttıkça açık büyür; yani yatay ölçekleme doğrudan bir güvenlik zafiyetine dönüşmektedir.
 
-6 haneli bir OTP'nin 1.000.000 olası değeri var. Saldırganın hesap başına 5 denemesi varsa başarı olasılığı 5/10⁶ = **1/200.000**. Eğer Argus 10 node'a dağıtılmışsa ve her node **bağımsız yerel sayaç** tutuyorsa, saldırgan istekleri node'lara dağıtarak **10 × 5 = 50 deneme** yapar → başarı olasılığı **10 kat artar**. Node sayısı arttıkça açık büyür — yani **yatay ölçekleme doğrudan güvenlik zafiyetine dönüşür.**
-
-Aynı mantık credential stuffing için: hesap başına 5/dakika sınırı, 20 node'da fiilen 100/dakika olur.
+Aynı mantık kimlik bilgisi doldurma için de geçerlidir: hesap başına dakikada beş denemelik bir sınır, 20 düğümde fiilen dakikada 100 olur.
 
 ### 5.4 Argus için iki katmanlı tasarım
 
@@ -859,7 +727,7 @@ KATMAN A — Yerel, yaklaşık (governor)
   Kapsam: IP başına, endpoint başına, global QPS tavanı
   Doğruluk: yaklaşık, node başına (N node = N× gerçek sınır) — KABUL EDİLEBİLİR
   Maliyet: ~0 (bellek içi, kilitsiz)
-  
+
 KATMAN B — Paylaşılan, kesin
   Amaç: güvenlik sınırları
   Kapsam: hesap başına parola denemesi, OTP denemesi, MFA challenge,
@@ -869,7 +737,7 @@ KATMAN B — Paylaşılan, kesin
   Maliyet: yazma başına 1 DB round-trip (~1 ms aynı AZ)
 ```
 
-**Katman B'yi PostgreSQL'de yapmak — Argus için doğru tercih:**
+İkinci katmanı PostgreSQL'de yapmak Argus için doğru tercihtir:
 
 ```sql
 -- Tek atomik ifade, GCRA benzeri, kilit tutmadan
@@ -882,54 +750,51 @@ RETURNING tat;
 -- 0 satır dönerse → limit aşıldı
 ```
 
-**Neden Redis değil de Postgres:**
-1. **Zaten senkron replike ediliyor** → sayaç failover'da kaybolmuyor. Redis'te AOF `everysec` ile bile son 1 saniye kaybolabilir; ve replica promote'ta sayaç geri gidebilir → **saldırgan sayacı sıfırlamak için failover'ı tetiklemeye çalışabilir.**
-2. **Aynı transaction'da kilitleme kararıyla birlikte yazılabilir** → tutarsızlık yok.
-3. **Bir bağımlılık daha az** (Bölüm 1'deki sektör yakınsamasıyla tutarlı).
+Neden Redis değil de Postgres sorusunun üç cevabı vardır. Birincisi Postgres zaten senkron replike edilmektedir ve sayaç devralmada kaybolmamaktadır; Redis'te saniyelik ekleme günlüğüyle bile son bir saniye kaybolabilir ve replika yükseltmesinde sayaç geri gidebilir, yani saldırgan sayacı sıfırlamak için devralmayı tetiklemeye çalışabilir. İkincisi aynı işlemde kilitleme kararıyla birlikte yazılabilmesi ve tutarsızlık olmamasıdır. Üçüncüsü bir bağımlılığın daha az olması ve bunun birinci bölümdeki sektör yakınsamasıyla tutarlı olmasıdır.
 
-**Maliyet endişesi ve cevabı:** "Her login denemesinde bir yazma" pahalı görünür. Ama Argus zaten login başına 5–7 yazma yapıyor (Bölüm 3.1) ve Keycloak stateless modunda tam olarak bunu yapıyor (login failure counter DB'de) — ölçülmüş maliyet **etkileşim başına 8–10 ms**. Bu, Argon2id'nin (kasten) 100–500 ms olan maliyetinin yanında görünmez.
+Maliyet endişesi ile cevabı şudur: her giriş denemesinde bir yazma pahalı görünmektedir. Ancak Argus zaten giriş başına beş ile yedi yazma yapmaktadır, 3.1'e bakınız, ve Keycloak durumsuz modunda tam olarak bunu yapmaktadır, yani giriş başarısızlığı sayacını veritabanında tutmaktadır; ölçülmüş maliyeti etkileşim başına sekiz ile 10 milisaniyedir. Bu, Argon2id'nin kasten 100 ile 500 milisaniye olan maliyetinin yanında görünmezdir.
 
-**Redis nerede kullanılır:** Katman A'nın küme-geneli versiyonu için (IP başına global sınır), **kaybı tolere edilebilir** olduğu için. Redis düşerse Argus yerel `governor` sınırlarına düşer — daha gevşek ama çalışır.
+Redis'in kullanılacağı yer birinci katmanın küme geneli sürümüdür, yani IP başına küresel sınırdır, çünkü kaybı tolere edilebilirdir. Redis düşerse Argus yerel `governor` sınırlarına düşer; daha gevşek olur ancak çalışır.
 
-### 5.5 Gerçek ölçümler — bulunanlar ve bulunamayanlar
+### 5.5 Gerçek ölçümler: bulunanlar ile bulunamayanlar
 
-| Ölçüm | Değer | Kaynak/durum |
+| Ölçüm | Değer | Kaynak ile durum |
 |---|---|---|
-| redis-cell `CL.THROTTLE` gecikmesi | **~0,1 ms** (istemciden), basit `SET`'in ~2 katı | redis-cell README (yazar "informal benchmarks" diyor) |
-| Cloudflare'in milyonlarca domain için rate limiting mimarisi | — | Blog sayfası çekilebildi ama **içerik ayıklanamadı** `[DOĞRULANMADI]` |
-| Stripe/Heroku'nun Redis+Lua rate limiter deneyimi | Nitel: redis-cell yazarı "I've seen this at both Heroku and Stripe" — naif implementasyonlar yaygın | redis-cell README |
-| Yerel+periyodik senkronizasyon (approximate distributed) üretim raporları | — | **Bu araştırmada bulunamadı** `[DOĞRULANMADI]` |
+| redis-cell `CL.THROTTLE` gecikmesi | İstemciden yaklaşık 0,1 milisaniye, basit bir kümeleme işleminin yaklaşık iki katı | redis-cell README dosyası; yazar bunlara gayriresmî kıyaslamalar demektedir |
+| Cloudflare'in milyonlarca alan adı için hız sınırlama mimarisi | — | Blog sayfası çekilebilmiş ancak içerik ayıklanamamıştır ve doğrulanamamıştır |
+| Stripe ile Heroku'nun Redis ile Lua hız sınırlayıcı deneyimi | Niteldir: redis-cell yazarı bunu hem Heroku'da hem Stripe'ta gördüğünü söylemektedir ve naif implementasyonlar yaygındır | redis-cell README dosyası |
+| Yerel ile periyodik senkronizasyonlu yaklaşık dağıtık sınırlayıcı üretim raporları | — | Bu araştırmada bulunamamış ile doğrulanamamıştır |
 
 ---
 
-## BÖLÜM 6 — ÖLÇEKLENME VE KAPASİTE
+## Bölüm 6 — Ölçeklenme ve kapasite
 
-### 6.1 "Postgres N bağlantı üstünde çöker" — gerçek eğri
+### 6.1 Postgres N bağlantının üstünde çöker iddiası ile gerçek eğri
 
-Bu sorunun en iyi cevabı Andres Freund'un (PostgreSQL core committer, o dönem Microsoft) analizidir: [Analyzing the Limits of Connection Scalability in Postgres](https://techcommunity.microsoft.com/blog/adforpostgresql/analyzing-the-limits-of-connection-scalability-in-postgres/1757266), **8 Ekim 2020** ve devamı [Improving Postgres Connection Scalability: Snapshots](https://techcommunity.microsoft.com/blog/adforpostgresql/improving-postgres-connection-scalability-snapshots/1806462).
+Bu sorunun en iyi cevabı PostgreSQL çekirdek katkıcısı Andres Freund'un, o dönem Microsoft'ta, yaptığı analizdir: 8 Ekim 2020 tarihli bağlantı ölçeklenebilirliği sınırları yazısı ile devamı olan anlık görüntü yazısı.
 
-**Ölçülmüş bulgular:**
+Ölçülmüş bulguları şunlardır.
 
 | Bulgu | Değer | Koşul |
 |---|---|---|
-| **Bağlantı başına bellek** | **< 2 MiB** | `huge_pages` **açık** olduğunda. Yazar sonuç: "connection memory overhead is **acceptable**" |
-| **Gecikmesiz pgbench read-only zirvesi** | **~48 istemci** | 20 çekirdek / 40 thread iş istasyonu, localhost |
-| **10GbE üzerinden, yakın makineler** | zirve **~48 → ~500 bağlantı** | Ağ gecikmesi eklenince |
-| **1 ms ağ + 1 ms uygulama işleme gecikmesi** | zirve **~3.000 bağlantı** | Aynı donanım |
-| **Asıl darboğaz** | Bellek değil, **snapshot ölçeklenebilirliği** (`GetSnapshotData()`) | Boştaki bağlantılar bile her snapshot'ta taranıyordu |
-| **PostgreSQL 14 düzeltmesi** | "little evidence of scalability issues even at **very high connection counts**" | Azure F72s_v2 VM'de before/after |
+| Bağlantı başına bellek | İki mebibayttan azdır | Büyük sayfalar açık olduğunda. Yazarın sonucu bağlantı bellek ek yükünün kabul edilebilir olduğudur |
+| Gecikmesiz yalnızca okuma pgbench zirvesi | Yaklaşık 48 istemci | 20 çekirdekli ile 40 iş parçacıklı bir iş istasyonunda, yerel makinede |
+| 10 gigabit ethernet üzerinden, yakın makinelerde | Zirve yaklaşık 48'den yaklaşık 500 bağlantıya çıkmaktadır | Ağ gecikmesi eklendiğinde |
+| Bir milisaniye ağ ile bir milisaniye uygulama işleme gecikmesi | Zirve yaklaşık 3.000 bağlantıdır | Aynı donanımda |
+| Asıl darboğaz | Bellek değil anlık görüntü ölçeklenebilirliğidir, yani `GetSnapshotData()` | Boştaki bağlantılar bile her anlık görüntüde taranmaktaydı |
+| PostgreSQL 14 düzeltmesi | Çok yüksek bağlantı sayılarında bile ölçeklenebilirlik sorununa dair az kanıt bulunmaktadır | Azure F72s_v2 sanal makinesinde öncesi ile sonrası ölçümüyle |
 
-**Bu üç rakam bir arada okunmalı — ve çoğu ekibin yanlış anladığı yer burası:**
+Bu üç rakam bir arada okunmalıdır ve çoğu ekibin yanlış anladığı yer burasıdır.
 
-> "Postgres 100 bağlantıdan sonra çöker" **yanlıştır.** Doğrusu: *aktif, aynı anda sorgu çalıştıran* bağlantı sayısı çekirdek sayısını çok aşarsa throughput düşer. Ama gerçek uygulamalarda bağlantılar zamanın büyük kısmında **boştadır** (ağ gecikmesi + uygulama işleme). 1 ms ağ + 1 ms işleme ile zirve **3.000 bağlantıya** çıkıyor.
+> Postgres 100 bağlantıdan sonra çöker ifadesi yanlıştır. Doğrusu şudur: aktif olarak, yani aynı anda sorgu çalıştıran bağlantı sayısı çekirdek sayısını çok aşarsa iş hacmi düşmektedir. Ancak gerçek uygulamalarda bağlantılar zamanın büyük kısmında boştadır, çünkü ağ gecikmesi ile uygulama işleme süresi vardır. Bir milisaniye ağ ile bir milisaniye işleme süresiyle zirve 3.000 bağlantıya çıkmaktadır.
 
-**PostgreSQL 14 öncesi** boştaki bağlantılar bile `GetSnapshotData()` maliyetini artırıyordu — asıl "çökme" buydu. **PostgreSQL 14+ (yani Argus'un hedeflediği 17/18) bu problemi büyük ölçüde çözdü.**
+PostgreSQL 14 öncesinde boştaki bağlantılar bile anlık görüntü alma maliyetini artırmaktaydı ve asıl çökme buydu. PostgreSQL 14 ve üstü, yani Argus'un hedeflediği 17 ile 18, bu problemi büyük ölçüde çözmüştür.
 
-**Argus için pratik sonuç:** `max_connections = 500` PostgreSQL 18'de tamamen makul. Yine de pooler kullanılmalı — bağlantı **kurma** maliyeti (TLS + latency + Postgres process fork) hâlâ yüksek.
+Argus için pratik sonuç şudur: `max_connections = 500` PostgreSQL 18'de tamamen makuldür. Yine de bir havuzlayıcı kullanılmalıdır, çünkü bağlantı kurma maliyeti, yani TLS, gecikme ile Postgres süreç çatallanması, hâlâ yüksektir.
 
-### 6.2 Bağlantı / worker / havuz boyutu ilişkisi
+### 6.2 Bağlantı, işçi ile havuz boyutu ilişkisi
 
-Argus (Rust, `tokio`, async) için hesap:
+Argus için, yani Rust, tokio ile asenkron yapı için, hesap şöyledir.
 
 ```
 Argus node sayısı           : N
@@ -937,84 +802,84 @@ Node başına havuz boyutu    : P
 Toplam DB bağlantısı        : N × P   (+ pooler varsa pooler→DB ayrı)
 ```
 
-**Rehber:**
+Rehber şudur.
 
 | Parametre | Öneri | Gerekçe |
 |---|---|---|
-| **DB CPU başına aktif bağlantı** | 2–4 | Klasik `connections ≈ (2 × cores) + effective_spindle_count`; NVMe'de spindle terimi ~0 |
-| **Node başına havuz (`P`)** | **8–16** | Async runtime'da bir bağlantı çok istek servis eder; büyük havuz sadece kuyruğu DB'ye taşır |
-| **`N × P` üst sınırı** | DB `max_connections`'ın **%70'i** | Kalan: admin, replikasyon, backup, migration |
-| **Ayrı havuz: kritik yol** | 4–8 bağlantı, yüksek öncelik | Token doğrulama/introspection, uzun admin sorgularının arkasında kuyruğa girmesin |
-| **Ayrı havuz: admin/rapor** | 2–4, timeout kısa | Admin sorgusu login akışını asla aç bırakmamalı |
-| **Ayrı havuz: read replica** | Ayrı | Yalnız Bölüm 2.4'te izin verilen sorgular |
+| Veritabanı işlemcisi başına aktif bağlantı | İki ile dört | Klasik formül çekirdek sayısının iki katı artı etkin iğ sayısıdır; NVMe'de iğ terimi sıfıra yakındır |
+| Düğüm başına havuz | Sekiz ile 16 | Asenkron çalışma zamanında bir bağlantı çok istek servis etmektedir; büyük bir havuz yalnızca kuyruğu veritabanına taşır |
+| Toplam bağlantının üst sınırı | Veritabanının azami bağlantı sayısının %70'i | Kalanı yönetici, replikasyon, yedekleme ile migration içindir |
+| Ayrı havuz, kritik yol | Dört ile sekiz bağlantı, yüksek öncelikli | Token doğrulama ile içgözlem, uzun yönetici sorgularının arkasında kuyruğa girmemelidir |
+| Ayrı havuz, yönetici ile rapor | İki ile dört, kısa zaman aşımıyla | Bir yönetici sorgusu giriş akışını asla aç bırakmamalıdır |
+| Ayrı havuz, okuma replikası | Ayrı tutulur | Yalnızca 2.4'te izin verilen sorgular içindir |
 
-**Anti-pattern:** Node başına 100 bağlantılık havuz + 20 node = 2.000 bağlantı. Bu, DB'de kuyruk oluşturur ve **gecikmeyi görünmez kılar** — istekler DB'de bekler, uygulama metriklerinde "hızlı" görünür. Doğrusu: **havuzu küçük tut, kuyruğu uygulamada tut, kuyruk derinliğini metrik yap** (bu, backpressure ve load shedding için tek doğru yerdir).
+Anti desen şudur: düğüm başına 100 bağlantılık bir havuz ile 20 düğüm 2.000 bağlantı demektir. Bu, veritabanında kuyruk oluşturmakta ile gecikmeyi görünmez kılmaktadır, çünkü istekler veritabanında beklemekte ancak uygulama metriklerinde hızlı görünmektedir. Doğrusu havuzu küçük tutmak, kuyruğu uygulamada tutmak ile kuyruk derinliğini bir metrik yapmaktır; bu, geri basınç ile yük atma için tek doğru yerdir.
 
-### 6.3 Yatay ölçeklenmede neyin paylaşılması ZORUNLU
+### 6.3 Yatay ölçeklenmede neyin paylaşılması zorunludur
 
 Bu, Argus'un mimarisinin özüdür.
 
-| Durum | Paylaşım zorunlu mu | Nerede | Kaybı tolere edilir mi |
+| Durum | Paylaşım zorunlu mudur | Nerededir | Kaybı tolere edilir mi |
 |---|---|---|---|
-| **JWKS / imzalama anahtarları** | **Evet** (aynı anahtar seti) | DB'den okunur, **bellekte tutulur**; rotasyon overlap penceresiyle | Hayır — ama nadiren değişir, cache'lenebilir |
-| **Oturum (session)** | **Evet** | **PostgreSQL** | Hayır |
-| **Authentication session (login ortası)** | **Evet** | **PostgreSQL** (Keycloak v2'nin yaptığı) | Kullanıcı login'i baştan yapar — tolere edilebilir ama kötü UX |
-| **Authorization code** | **Evet** | **PostgreSQL** (tek kullanımlık; sticky session'a güvenilemez) | Hayır — Rauthy'nin Raft'a ihtiyaç duymasının sebebi tam olarak bu |
-| **Refresh token + rotation ailesi** | **Evet** | **PostgreSQL** | Hayır — reuse detection kırılır |
-| **İptal durumu / `revocation_epoch`** | **Evet** | PostgreSQL (gerçek) + node cache (hız) | Hayır |
-| **Brute-force / hesap kilitleme sayacı** | **Evet** (kesin) | **PostgreSQL** | Hayır (Bölüm 5.3) |
-| **DPoP `jti` replay listesi** | **Evet** | Redis (TTL'li) veya PostgreSQL | Kısmen — kayıp = replay penceresi açılır ⚠️ |
-| **PAR request_uri** | **Evet** | PostgreSQL | Hayır |
-| **Nonce / state (OIDC)** | Evet | Client-side (şifreli cookie) tercih edilir; yoksa DB | — |
-| **IP başına kaba rate limit** | Hayır (yaklaşık yeter) | Node-yerel `governor` | Evet |
-| **Realm/client/policy metadata** | Hayır (cache'lenebilir) | Node-yerel cache + outbox invalidation | Evet (yeniden yüklenir) |
-| **Kullanıcı profil verisi** | Hayır | DB'den okunur | Evet |
+| JWKS ile imzalama anahtarları | Evet, aynı anahtar seti gerekir | Veritabanından okunur ile bellekte tutulur; rotasyon bir örtüşme penceresiyle yapılır | Hayır; ancak nadiren değişir ile önbeleklenebilir |
+| Oturum | Evet | PostgreSQL | Hayır |
+| Kimlik doğrulama oturumu, girişin ortası | Evet | PostgreSQL; Keycloak ikinci sürümünün yaptığıdır | Kullanıcı girişi baştan yapar; tolere edilebilir ancak kötü bir deneyimdir |
+| Authorization code | Evet | PostgreSQL; tek kullanımlıktır ile yapışkan oturuma güvenilemez | Hayır; Rauthy'nin Raft'a ihtiyaç duymasının sebebi tam olarak budur |
+| Yenileme token'ı ile rotasyon ailesi | Evet | PostgreSQL | Hayır; yeniden kullanım tespiti kırılır |
+| İptal durumu ile iptal dönemi | Evet | Gerçeği PostgreSQL'de, hızı düğüm önbelleğindedir | Hayır |
+| Kaba kuvvet ile hesap kilitleme sayacı | Evet, kesin olarak | PostgreSQL | Hayır, 5.3'e bakınız |
+| DPoP `jti` yeniden oynatma listesi | Evet | Yaşam süreli Redis veya PostgreSQL | Kısmen; kayıp bir yeniden oynatma penceresi açar |
+| Anlık istek nesnesi tanımlayıcısı | Evet | PostgreSQL | Hayır |
+| Nonce ile state | Evet | Şifreli çerezle istemci tarafında tercih edilir, yoksa veritabanında | — |
+| IP başına kaba hız limiti | Hayır, yaklaşık yeterlidir | Düğüme yerel `governor` | Evet |
+| Realm, istemci ile politika metadata'sı | Hayır, önbeleklenebilir | Düğüme yerel önbellek ile giden kutusu geçersizleştirmesi | Evet, yeniden yüklenir |
+| Kullanıcı profil verisi | Hayır | Veritabanından okunur | Evet |
 
-**Kritik gözlem:** Bu listede **paylaşılması zorunlu olan her şey PostgreSQL'de olabilir.** Tek istisna DPoP `jti` — ve o bile Postgres'te partitioned tablo + agresif budama ile yapılabilir. **Argus'un Redis'e mimari bağımlılığı olmamalı.**
+Kritik gözlem şudur: bu listede paylaşılması zorunlu olan her şey PostgreSQL'de olabilir. Tek istisna DPoP `jti` değeridir ve o bile Postgres'te bölümlenmiş bir tablo ile agresif budamayla yapılabilir. Argus'un Redis'e mimari bir bağımlılığı olmamalıdır.
 
-### 6.4 Cold start / warm-up problemi
+### 6.4 Soğuk başlangıç ile ısınma problemi
 
-Yeni bir Argus node'u cache'siz geldiğinde:
+Yeni bir Argus düğümü önbeleksiz geldiğinde şunlar olur.
 
 | Problem | Etki | Çözüm |
 |---|---|---|
-| Realm/client cache boş | İlk isteklerde DB'ye N sorgu | **Readiness probe'u cache doldurma tamamlanana kadar başarısız döndür.** Node LB'ye erken girmemeli |
-| `revocation_epoch` cache boş | **Her token doğrulamasında DB sorgusu** → DB'de ani yük | Bölüm 4.5.1'deki `synced_since` deseni: node başlarken **son 1 saatin iptal setini** tek sorguyla çeker, sonra outbox'a takılır. Bu **tek sorgu**, kullanıcı başına sorgu yerine |
-| JWKS yüklenmemiş | İmzalama başarısız | Başlangıçta zorunlu yükleme; başarısızsa **başlama** |
-| Bağlantı havuzu boş | İlk isteklerde TLS + auth el sıkışması | Havuzu `min_connections` ile önceden doldur |
-| **Thundering herd** | Aynı anda 10 node başlarsa DB'ye 10× ısınma yükü | Başlangıçta **jitter** (0–5 sn rastgele) + rolling deploy |
+| Realm ile istemci önbelleği boştur | İlk isteklerde veritabanına N sorgu yapılır | Hazır olma yoklaması, önbellek doldurma tamamlanana kadar başarısız dönmelidir; düğüm yük dengeleyiciye erken girmemelidir |
+| İptal dönemi önbelleği boştur | Her token doğrulamasında bir veritabanı sorgusu yapılır ile veritabanında ani yük oluşur | 4.5.1'deki senkronize olma zamanı deseni kullanılır: düğüm başlarken son bir saatin iptal kümesini tek bir sorguyla çeker, sonra giden kutusuna takılır. Bu, kullanıcı başına sorgu yerine tek bir sorgudur |
+| JWKS yüklenmemiştir | İmzalama başarısız olur | Başlangıçta zorunlu yükleme yapılır ile başarısızsa süreç başlamaz |
+| Bağlantı havuzu boştur | İlk isteklerde TLS ile kimlik doğrulama el sıkışması yapılır | Havuz asgari bağlantı ayarıyla önceden doldurulur |
+| Gürleyen sürü | Aynı anda 10 düğüm başlarsa veritabanına 10 kat ısınma yükü biner | Başlangıçta sıfır ile beş saniye arası rastgele bir sapma ile yuvarlanan dağıtım kullanılır |
 
-**Keycloak'ın aynı problemi:** benchmark raporu, cache boyutunu 10.000'den 200.000 entry'ye çıkarmanın Aurora tepe CPU'sunu **%77,77 → %63,77**'ye düşürdüğünü ölçtü. Yani cache eksikliği doğrudan DB CPU'suna yansıyor — ve soğuk node **kalıcı olarak %0 cache** demektir. Bu yüzden readiness gate'i şart.
+Keycloak'ın aynı problemi vardır: kıyaslama raporu önbellek boyutunu 10.000'den 200.000 girdiye çıkarmanın Aurora tepe işlemcisini %77,77'den %63,77'ye düşürdüğünü ölçmüştür. Yani önbellek eksikliği doğrudan veritabanı işlemcisine yansımaktadır ile soğuk bir düğüm kalıcı olarak sıfır önbellek demektir. Bu yüzden hazır olma kapısı şarttır.
 
 ---
 
-## BÖLÜM 7 — FELAKET SENARYOLARI VE KADEMELİ BOZULMA
+## Bölüm 7 — Felaket senaryoları ve kademeli bozulma
 
-### 7.1 Kademeli bozulma (graceful degradation) matrisi — Argus tasarımı
+### 7.1 Kademeli bozulma matrisi, Argus tasarımı
 
-Bu matris, Argus'un **açık bir tasarım kararı** olarak uygulanmalı; varsayılan davranış değildir.
+Bu matris Argus'un açık bir tasarım kararı olarak uygulanmalıdır; varsayılan bir davranış değildir.
 
-| Senaryo | Login | Token refresh | **Token doğrulama (JWT)** | Introspection | Admin API | Kullanıcı kaydı |
+| Senaryo | Giriş | Token yenileme | JWT doğrulama | İçgözlem | Yönetim API'si | Kullanıcı kaydı |
 |---|---|---|---|---|---|---|
-| **Normal** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **DB primary düştü, failover sürüyor (0–30 s)** | ❌ 503 | ❌ **503 + Retry-After** (asla `invalid_grant`) | ✅ **çalışır** | ⚠️ epoch cache'ten (bayat riski) | ❌ | ❌ |
-| **DB tamamen erişilemez (dakikalar)** | ❌ | ❌ | ✅ **çalışır (degraded mode)** | ⚠️ **cache-only, TTL sonrası fail-closed** | ❌ | ❌ |
-| **DCS (etcd) kaybı, Postgres salt-okunur** | ❌ | ❌ | ✅ | ✅ (okuma çalışıyor) | 👁️ salt-okunur | ❌ |
-| **Read replica kaybı** | ✅ | ✅ | ✅ | ✅ | ⚠️ yavaş (primary'ye düşer) | ✅ |
-| **Redis/Valkey kaybı** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ — *çünkü Redis kritik yolda değil* |
-| **Bir AZ kaybı (3 AZ'den)** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **İki AZ kaybı (quorum kaybı)** | ❌ | ❌ | ✅ | ⚠️ | ❌ | ❌ |
-| **Bölge tamamen kayboldu** | Hücre modelinde: **diğer hücreler etkilenmez** | | | | | |
+| Normal | Çalışır | Çalışır | Çalışır | Çalışır | Çalışır | Çalışır |
+| Veritabanı birincili düştü, devralma sürüyor, 0 ile 30 saniye | 503 döner | 503 ile yeniden dene döner, asla `invalid_grant` dönmez | Çalışır | Dönem önbeleğinden çalışır, bayatlık riski vardır | Durur | Durur |
+| Veritabanı tamamen erişilemez, dakikalar | Durur | Durur | Çalışır, bozulmuş modda | Yalnızca önbellekten çalışır ve yaşam süresi sonrası kapalı başarısız olur | Durur | Durur |
+| Dağıtık yapılandırma deposu kaybı, Postgres salt okunur | Durur | Durur | Çalışır | Çalışır, okuma çalışmaktadır | Salt okunur çalışır | Durur |
+| Okuma replikası kaybı | Çalışır | Çalışır | Çalışır | Çalışır | Yavaşlar, birincile düşer | Çalışır |
+| Redis ile Valkey kaybı | Çalışır | Çalışır | Çalışır | Çalışır | Çalışır | Çalışır, çünkü Redis kritik yolda değildir |
+| Üç erişilebilirlik alanından birinin kaybı | Çalışır | Çalışır | Çalışır | Çalışır | Çalışır | Çalışır |
+| İki erişilebilirlik alanı kaybı, yani quorum kaybı | Durur | Durur | Çalışır | Bayatlık riskiyle çalışır | Durur | Durur |
+| Bölge tamamen kayboldu | Hücre modelinde diğer hücreler etkilenmez | | | | | |
 
-### 7.2 "Degraded mode" — DB düştüğünde token doğrulamaya devam
+### 7.2 Bozulmuş mod: veritabanı düştüğünde token doğrulamaya devam etmek
 
-**Bu mümkün mü? Evet, ve Argus'un en değerli farklılaştırıcısı olabilir.** Ama sınırları net olmalı.
+Bu mümkün müdür sorusunun cevabı evettir ve Argus'un en değerli farklılaştırıcısı olabilir. Ancak sınırları net olmalıdır.
 
-**Neden mümkün:** JWT imza doğrulaması DB gerektirmez. Gereken tek şey: (a) public key — bellekte, (b) `exp`/`nbf` — token'ın içinde, (c) `revocation_epoch` — node cache'inde.
+Neden mümkün olduğu şudur: JWT imza doğrulaması veritabanı gerektirmez. Gereken tek şeyler açık anahtardır, ki bellektedir; sona erme ile geçerlilik başlangıcıdır, ki token'ın içindedir; ile iptal dönemidir, ki düğüm önbeleğindedir.
 
-**Tehlike:** Cache bayatladıkça, iptal edilmiş token'ları kabul etme olasılığı artar. **Sonsuza kadar degraded mode = güvenlik açığı.**
+Tehlike şudur: önbellek bayatladıkça iptal edilmiş token'ları kabul etme olasılığı artmaktadır. Sonsuza kadar bozulmuş mod bir güvenlik açığıdır.
 
-**Argus'un uygulaması — "stale-while-degraded" penceresi:**
+Argus'un uygulaması bozulmuşken bayat kullanma penceresidir.
 
 ```
 DB erişilemez süresi:
@@ -1029,59 +894,56 @@ DB erişilemez süresi:
                 kısa access token ömrü tek gerçek koruma.
 ```
 
-**Kritik gerçek:** Argus, kaynak sunucuların JWT'yi yerel olarak doğrulamasını **engelleyemez**. Bu nedenle degraded mode'un gerçek güvenlik sınırı **access token ömrüdür**. 5 dakikalık access token = en kötü durumda 5 dakikalık maruziyet. **Bu, kısa token ömrünün en güçlü tek gerekçesidir** ve degraded mode tasarımının önkoşuludur.
+Kritik gerçek şudur: Argus, kaynak sunucuların JWT'yi yerel olarak doğrulamasını engelleyemez. Bu nedenle bozulmuş modun gerçek güvenlik sınırı access token ömrüdür. Beş dakikalık bir access token en kötü durumda beş dakikalık bir maruziyet demektir. Bu, kısa token ömrünün en güçlü tek gerekçesidir ile bozulmuş mod tasarımının ön koşuludur.
 
-### 7.3 Redis/Valkey düşerse
+### 7.3 Redis ile Valkey düşerse
 
-Argus'un önerilen mimarisinde **Redis kritik yolda değil**, bu yüzden cevap kısa: sistem yerel `governor` sınırlarına düşer, kaba rate limiting gevşer, hiçbir güvenlik kararı bozulmaz.
+Argus'un önerilen mimarisinde Redis kritik yolda değildir, bu yüzden cevap kısadır: sistem yerel `governor` sınırlarına düşer, kaba hız sınırlaması gevşer ile hiçbir güvenlik kararı bozulmaz.
 
-**Eğer Redis kritik yola konulursa** (bu tasarım hatasıdır ama yaygındır), kaybının anlamı:
-- Oturum Redis'te → **tüm kullanıcılar çıkış yapar**
-- İptal listesi Redis'te → **iptal kontrolü fail-open mu fail-closed mu?** Fail-open = güvenlik açığı, fail-closed = tam kesinti. İkisi de kötü.
-- Rate limit Redis'te → **fail-open** ise credential stuffing penceresi açılır
+Eğer Redis kritik yola konulursa, ki bu bir tasarım hatasıdır ancak yaygındır, kaybının anlamı şudur. Oturum Redis'teyse tüm kullanıcılar çıkış yapar. İptal listesi Redis'teyse iptal kontrolü açık mı kapalı mı başarısız olacaktır sorusu doğar; açık başarısızlık bir güvenlik açığı, kapalı başarısızlık tam bir kesintidir ve ikisi de kötüdür. Hız limiti Redis'teyse ve açık başarısız oluyorsa kimlik bilgisi doldurma penceresi açılır.
 
-Bu, Argus'un Redis'i doğruluk kaynağı yapmama kararının tek gerekçesi.
+Bu, Argus'un Redis'i bir doğruluk kaynağı yapmama kararının tek gerekçesidir.
 
 ### 7.4 Bir bölge tamamen kaybolursa
 
-| Topoloji | Sonuç | RTO | RPO |
+| Topoloji | Sonuç | Kurtarma süresi hedefi | Kurtarma noktası hedefi |
 |---|---|---|---|
-| Tek bölge, DR yok | **Tam kesinti** | Yedekten geri yükleme süresi | Son yedek |
-| Tek bölge + asenkron cross-region standby | Manuel/otomatik promote | Dakikalar | **Replikasyon gecikmesi kadar veri kaybı** ⚠️ |
-| İki site aynı bölge (Keycloak v2) | Bölge kaybı **kapsanmaz** — ikisi de aynı bölgede | — | — |
-| **Hücre başına bölge (Okta modeli)** | **Sadece o hücredeki tenant'lar etkilenir** | Hücre DR'ı | Hücre DR'ı |
-| CockroachDB, REGION survival, 3+ bölge | **Otomatik, kesintisiz** | ~0 | 0 |
+| Tek bölge, felaket kurtarma yok | Tam kesintidir | Yedekten geri yükleme süresidir | Son yedektir |
+| Tek bölge ile asenkron bölgeler arası bekleme düğümü | Elle ya da otomatik yükseltme yapılır | Dakikalardır | Replikasyon gecikmesi kadar veri kaybıdır |
+| İki bölge aynı coğrafi bölgede, Keycloak ikinci sürümü | Bölge kaybı kapsanmaz, çünkü ikisi de aynı bölgededir | — | — |
+| Hücre başına bölge, Okta modeli | Yalnızca o hücredeki kiracılar etkilenir | Hücrenin felaket kurtarması kadardır | Hücrenin felaket kurtarması kadardır |
+| CockroachDB, bölge hayatta kalma hedefiyle, üç ve üzeri bölgede | Otomatiktir ile kesintisizdir | Yaklaşık sıfırdır | Sıfırdır |
 
-**Argus için gerçekçi cevap:** Bölge kaybını sıfır RPO ile tolere etmek **yalnızca CockroachDB sınıfı bir DB veya Aurora DSQL ile** mümkündür ve bunun bedeli Bölüm 3'te sayılan gecikme + karmaşıklık + lisans maliyetidir.
+Argus için gerçekçi cevap şudur: bölge kaybını sıfır kurtarma noktası hedefiyle tolere etmek yalnızca CockroachDB sınıfı bir veritabanı ya da Aurora DSQL ile mümkündür ve bunun bedeli üçüncü bölümde sayılan gecikme, karmaşıklık ile lisans maliyetidir.
 
-**Pragmatik orta yol:** Cross-region **asenkron** standby + açıkça belgelenmiş RPO. IdP için "son N saniyenin yazmalarını kaybedebiliriz" demek, **"bölge kaybı gibi felaket bir olayda birkaç saniyelik parola değişikliği kaybını kabul ediyoruz"** demektir — bu, tam kesintiye tercih edilebilir bir takastır, ama **karar bilinçli verilmeli ve dokümante edilmeli.** Felaket sonrası prosedür: promote'tan hemen sonra **tüm epoch'ları global olarak artır** (herkesi çıkart) — kaybolmuş bir iptali kaçırmaktansa herkesi yeniden giriş yaptırmak doğrudur.
+Pragmatik orta yol bölgeler arası asenkron bir bekleme düğümü ile açıkça belgelenmiş bir kurtarma noktası hedefidir. Bir IdP için son N saniyenin yazmalarını kaybedebiliriz demek, bölge kaybı gibi felaket bir olayda birkaç saniyelik parola değişikliği kaybını kabul ediyoruz demektir; bu, tam bir kesintiye tercih edilebilir bir takastır, ancak karar bilinçli verilmeli ile dokümante edilmelidir. Felaket sonrası prosedür şudur: yükseltmeden hemen sonra tüm dönemler küresel olarak artırılır, yani herkes çıkarılır; kaybolmuş bir iptali kaçırmaktansa herkesi yeniden giriş yaptırmak doğrudur.
 
-### 7.5 Break-glass erişimi — dağıtık mimaride
+### 7.5 Acil durum erişimi, dağıtık mimaride
 
-**Problem:** Argus, kendi altyapısının kimlik doğrulamasını da yapıyorsa, Argus çöktüğünde **operatörler Argus'u düzeltmek için giriş yapamaz.** Bu klasik döngüsel bağımlılıktır ve gerçek kesintilerin uzamasının bir numaralı sebebidir.
+Problem şudur: Argus kendi altyapısının kimlik doğrulamasını da yapıyorsa, Argus çöktüğünde operatörler Argus'u düzeltmek için giriş yapamaz. Bu klasik bir döngüsel bağımlılıktır ile gerçek kesintilerin uzamasının bir numaralı sebebidir.
 
-**Argus için tasarım ilkeleri:**
+Argus için tasarım ilkeleri şunlardır.
 
 | İlke | Uygulama |
 |---|---|
-| **1. Break-glass yolu, normal yoldan bağımsız kod yolu olmalı** | Ayrı endpoint (`/break-glass`), ayrı doğrulama fonksiyonu, **normal auth pipeline'ının hiçbir parçasını çağırmamalı** — rate limiter, risk motoru, MFA orkestratörü dahil |
-| **2. Bağımlılık zinciri minimum** | Yalnız: yerel disk/env'den okunan public key + saat. **DB'ye, Redis'e, harici IdP'ye bağımlı olmamalı** |
-| **3. Kimlik: donanım anahtarı, çevrimdışı doğrulanabilir** | Break-glass credential'ları = önceden dağıtılmış **FIDO2 anahtar** public key'leri veya **çevrimdışı imzalanmış, kısa ömürlü yetki belgesi** (m-of-n imza). Her node'un config'inde |
-| **4. Yerel doğrulanabilirlik** | Node, break-glass token'ını **hiçbir ağ çağrısı yapmadan** doğrulayabilmeli |
-| **5. Kısıtlı yetki** | Break-glass yalnız operasyonel işlemler yapabilmeli (config okuma, sağlık, feature flag, epoch reset). **Kullanıcı verisi okuma/değiştirme YOK** |
-| **6. Zorunlu, silinemez iz** | Kullanım anında: yerel dosyaya + syslog'a + (erişilebilirse) harici SIEM'e. **Argus'un kendi audit tablosuna güvenilemez — DB düşmüş olabilir** |
-| **7. Otomatik alarm** | Kullanım anında tüm on-call'a bildirim; "sessiz break-glass" olmamalı |
-| **8. Kısa ömür + tek kullanım** | Belge 15 dakika geçerli; kullanımdan sonra rotasyon zorunlu |
-| **9. Düzenli tatbikat** | **Çeyrekte bir test edilmeyen break-glass, çalışmayan break-glass'tır.** Bu bir süreç gereksinimidir, teknik değil |
-| **10. Hücre başına ayrı** | Her hücrenin kendi break-glass credential'ı; birinin sızması diğerlerini etkilemez |
+| 1. Acil durum yolu normal yoldan bağımsız bir kod yolu olmalıdır | Ayrı bir endpoint, yani `/break-glass`, ile ayrı bir doğrulama fonksiyonu kullanılır ve normal kimlik doğrulama boru hattının hiçbir parçası, yani hız sınırlayıcı, risk motoru ile çok adımlı doğrulama orkestratörü, çağrılmaz |
+| 2. Bağımlılık zinciri asgari olmalıdır | Yalnızca yerel diskten ya da ortam değişkeninden okunan bir açık anahtar ile saat kullanılır; veritabanına, Redis'e ya da harici bir IdP'ye bağımlı olunmaz |
+| 3. Kimlik donanım anahtarıyla ve çevrimdışı doğrulanabilir olmalıdır | Acil durum kimlik bilgileri önceden dağıtılmış FIDO2 anahtarlarının açık anahtarları ya da çevrimdışı imzalanmış, kısa ömürlü bir yetki belgesidir, yani N kişiden M imzasıdır. Her düğümün yapılandırmasında bulunur |
+| 4. Yerel doğrulanabilirlik olmalıdır | Düğüm, acil durum token'ını hiçbir ağ çağrısı yapmadan doğrulayabilmelidir |
+| 5. Yetki kısıtlı olmalıdır | Acil durum yolu yalnızca operasyonel işlemler yapabilmelidir, yani yapılandırma okuma, sağlık kontrolü, özellik bayrağı ile dönem sıfırlama; kullanıcı verisi okuma ya da değiştirme yapılmamalıdır |
+| 6. Zorunlu ile silinemez bir iz olmalıdır | Kullanım anında yerel bir dosyaya, sistem günlüğüne ile erişilebiliyorsa harici bir güvenlik bilgi ve olay yönetimi sistemine yazılır. Argus'un kendi denetim tablosuna güvenilemez, çünkü veritabanı düşmüş olabilir |
+| 7. Otomatik alarm olmalıdır | Kullanım anında tüm nöbetçilere bildirim gider ile sessiz bir acil durum erişimi olmamalıdır |
+| 8. Kısa ömürlü ile tek kullanımlık olmalıdır | Belge 15 dakika geçerlidir ile kullanımdan sonra rotasyon zorunludur |
+| 9. Düzenli tatbikat yapılmalıdır | Çeyrekte bir test edilmeyen bir acil durum yolu çalışmayan bir acil durum yoludur. Bu teknik değil bir süreç gereksinimidir |
+| 10. Hücre başına ayrı olmalıdır | Her hücrenin kendi acil durum kimlik bilgisi vardır ile birinin sızması diğerlerini etkilemez |
 
-**Anti-pattern:** "Acil durum admin hesabı" — DB'de duran, parolası kasada olan bir kullanıcı. **DB düştüğünde işe yaramaz** ve normal zamanda kalıcı bir saldırı yüzeyidir.
+Anti desen acil durum yönetici hesabıdır: veritabanında duran ile parolası kasada olan bir kullanıcı. Veritabanı düştüğünde işe yaramaz ile normal zamanda kalıcı bir saldırı yüzeyidir.
 
 ---
 
-## BÖLÜM 8 — ARGUS İÇİN NET TOPOLOJİ ÖNERİSİ
+## Bölüm 8 — Argus için net topoloji önerisi
 
-### 8.1 Aşama 1 (v1) — "Tek bölge, üç AZ, sıkı tutarlılık"
+### 8.1 Birinci aşama: tek bölge, üç erişilebilirlik alanı ile sıkı tutarlılık
 
 ```
                     ┌────────────────────────┐
@@ -1116,43 +978,40 @@ Bu, Argus'un Redis'i doğruluk kaynağı yapmama kararının tek gerekçesi.
               └────────────────────────────────────┘
 ```
 
-**Yapılandırma kararları:**
+Yapılandırma kararları şunlardır.
 
 | Karar | Değer | Gerekçe |
 |---|---|---|
-| `synchronous_commit` | `on` | Veri kaybı yok (Bölüm 2.2.3) |
-| `synchronous_standby_names` | `ANY 1 (sb_b, sb_c)` | Bir standby kaybını tolere eder, **primary asılmaz** |
-| Audit yazmaları | session-level `synchronous_commit = local` | IOPS tasarrufu, güvenlik etkisi yok |
-| Patroni | `ttl=20, loop_wait=5, retry_timeout=5` + watchdog | ~25 sn failover |
-| **DCS Failsafe Mode** | **ON** | etcd kaybı = salt-okunur, tam kesinti değil |
-| Birincil anahtarlar | **`uuidv7()`** (PG18) | Index bloat ve WAL hacmi |
-| Uçucu durum | **Tamamı PostgreSQL'de** | Keycloak v2 / authentik / Ory yakınsaması |
-| Redis/Valkey | **Yok** (v1'de hiç) | Bağımlılık azaltma; sonradan opsiyonel hızlandırıcı |
-| İptal yayını | **Outbox tablosu + 100 ms polling** (⚠️ `NOTIFY` hızlandırması kullanılmaz); **cursor algoritması AÇIK KARAR** | Bölüm 4.3, §1 §10.2 |
-| İptal modeli | **`revocation_epoch` (per-user monoton sayaç) + node cache** | Bölüm 4.5 |
-| Rate limiting | **Yerel `governor`** (kaba) + **PostgreSQL atomik UPDATE** (hesap başına) | Bölüm 5.4 |
-| Havuz | Node başına 8–16; ayrı havuzlar: kritik / admin / replica | Bölüm 6.2 |
-| Read replica | **Yalnız admin arama, raporlama, denetim izi görüntüleme** | Bölüm 2.4.1 tablosu |
-| Access token ömrü | **5 dakika** | Degraded mode'un güvenlik sınırı (Bölüm 7.2) |
+| `synchronous_commit` | `on` | Veri kaybı olmaz, 2.2.3'e bakınız |
+| `synchronous_standby_names` | `ANY 1 (sb_b, sb_c)` | Bir bekleme düğümünün kaybını tolere eder ile birincil asılmaz |
+| Denetim yazmaları | Oturum seviyesinde `synchronous_commit = local` | Giriş çıkış işlemi tasarrufu sağlar ile güvenlik etkisi yoktur |
+| Patroni | Yaşam süresi 20, döngü bekleme beş, yeniden deneme zaman aşımı beş ile gözcü | Yaklaşık 25 saniyelik devralma |
+| Dağıtık yapılandırma deposu güvenli modu | Açık | etcd kaybı salt okunur demektir, tam kesinti değil |
+| Birincil anahtarlar | PostgreSQL 18'in `uuidv7()` fonksiyonu | İndeks şişmesi ile günlük hacmi için |
+| Uçucu durum | Tamamı PostgreSQL'dedir | Keycloak ikinci sürümü, authentik ile Ory yakınsamasıdır |
+| Redis ile Valkey | Birinci sürümde hiç yoktur | Bağımlılık azaltmadır; sonradan opsiyonel bir hızlandırıcı olur |
+| İptal yayını | Giden kutusu tablosu ile 100 milisaniyelik yoklama; `NOTIFY` hızlandırması kullanılmaz ile imleç algoritması açık bir karardır | 4.3 ile §1'in 10.2 bölümü |
+| İptal modeli | Kullanıcı başına monoton iptal dönemi sayacı ile düğüm önbelleği | 4.5 |
+| Hız sınırlaması | Kaba sınır için yerel `governor`, hesap başına için PostgreSQL atomik güncellemesi | 5.4 |
+| Havuz | Düğüm başına sekiz ile 16; ayrı havuzlar kritik, yönetici ile replika içindir | 6.2 |
+| Okuma replikası | Yalnızca yönetici araması, raporlama ile denetim izi görüntüleme için | 2.4.1'deki tablo |
+| Access token ömrü | Beş dakika | Bozulmuş modun güvenlik sınırıdır, 7.2 |
 
-**Bu topolojinin karşıladığı:** AZ kaybı (kesintisiz), node kaybı (kesintisiz), DB primary kaybı (~25 sn, veri kaybı yok, token doğrulama kesilmez), etcd kaybı (salt-okunur degrade).
+Bu topolojinin karşıladıkları erişilebilirlik alanı kaybı, ki kesintisizdir; düğüm kaybı, ki kesintisizdir; veritabanı birincilinin kaybı, ki yaklaşık 25 saniye sürer, veri kaybı yoktur ile token doğrulama kesilmez; ile etcd kaybıdır, ki salt okunur bir bozulmadır.
 
-**Karşılamadığı:** Bölge kaybı (asenkron DR ile RPO > 0, RTO dakikalar).
+Karşılamadığı bölge kaybıdır; asenkron felaket kurtarmayla kurtarma noktası hedefi sıfırdan büyüktür ile kurtarma süresi dakikalardır.
 
-### 8.2 Aşama 2 (v2) — "İki küme, tek bölge" (Keycloak Multi-Cluster v2 deseni)
+### 8.2 İkinci aşama: iki küme, tek bölge, Keycloak Multi-Cluster v2 deseni
 
-Yalnızca **iki bağımsız Kubernetes/deploy alanı** gerekiyorsa (ör. farklı veri merkezleri, aynı metro):
+Yalnızca iki bağımsız Kubernetes ya da dağıtım alanı gerekiyorsa, örneğin aynı metropolde farklı veri merkezleri varsa, şu yapılır.
 
-- İki bağımsız Argus kümesi, senkron replike edilmiş **tek mantıksal DB** (Patroni multi-DC veya Aurora)
-- **Site'lar arası DB RTT < 5 ms hedef, < 10 ms tavan** (Keycloak'ın doğrulanmış eşiği)
-- Cross-cluster invalidation: **aynı outbox tablosu** — hiçbir ek altyapı yok
-- LB: `/lb-check` benzeri sağlık endpoint'i ile site failover
+İki bağımsız Argus kümesi ile senkron replike edilmiş tek bir mantıksal veritabanı, yani Patroni'nin çok veri merkezli kurulumu ya da Aurora, kullanılır. Bölgeler arası veritabanı gidiş dönüşü beş milisaniyenin altında hedeflenir ile 10 milisaniyelik bir tavan konur; bu Keycloak'ın doğrulanmış eşiğidir. Kümeler arası geçersizleştirme aynı giden kutusu tablosuyla yapılır ile hiçbir ek altyapı gerekmez. Yük dengeleyici `/lb-check` benzeri bir sağlık uç noktasıyla bölge devralması yapar.
 
-**Beklenen maliyet (Keycloak'ın ölçtüğü, Argus için de geçerli olması muhtemel):** etkileşim başına **+8–10 ms**, DB CPU/IOPS **~2×**.
+Beklenen maliyet, ki Keycloak'ın ölçtüğüdür ile Argus için de geçerli olması muhtemeldir, etkileşim başına sekiz ile 10 milisaniye ek gecikme ile veritabanı işlemcisi ve giriş çıkış işlemlerinde yaklaşık iki kat artıştır.
 
-### 8.3 Aşama 3 (v3) — "Hücre başına bölge" (Okta modeli)
+### 8.3 Üçüncü aşama: hücre başına bölge, Okta modeli
 
-Çok bölgeli gereksinim ortaya çıktığında **veri replikasyonuyla değil, izolasyonla** çöz:
+Çok bölgeli bir gereksinim ortaya çıktığında bu veri replikasyonuyla değil izolasyonla çözülür.
 
 ```
   ┌── control plane (küçük, global) ────────────────┐
@@ -1171,134 +1030,86 @@ Yalnızca **iki bağımsız Kubernetes/deploy alanı** gerekiyorsa (ör. farklı
               ↑ HÜCRELER ARASI VERİ REPLİKASYONU YOK
 ```
 
-**Kazanımlar:**
-- Veri yerleşimi **yapısal olarak** çözülür (GDPR/KVKK/veri yerelleştirme)
-- Hata izolasyonu: bir hücrenin çökmesi diğerlerini etkilemez
-- Cross-region konsensüs maliyeti **sıfır** — her hücre içinde tek bölge
-- Ölçekleme: kapasite eklemek = hücre eklemek (doğrusal, tahmin edilebilir)
-- Türkiye'nin ödeme/e-para kuruluşları için veri yurt içinde tutma gereksinimi doğal olarak karşılanır (README §83 ile bağlantılı)
+Kazanımları şunlardır: veri yerleşimi yapısal olarak çözülür, yani GDPR, KVKK ile veri yerelleştirme gereksinimleri karşılanır; hata izolasyonu sağlanır ve bir hücrenin çökmesi diğerlerini etkilemez; bölgeler arası konsensüs maliyeti sıfırdır, çünkü her hücre içinde tek bölge vardır; ölçekleme doğrusal ile tahmin edilebilirdir, çünkü kapasite eklemek hücre eklemektir; ve Türkiye'nin ödeme ile elektronik para kuruluşları için verinin yurt içinde tutulması gereksinimi doğal olarak karşılanır.
 
-**Bedeller:**
-- N hücre = N operasyonel yüzey → **otomasyon zorunlu** (GitOps, tek şablon)
-- Tenant'lar hücreler arası **taşınamaz** (veya taşıma ayrı bir proje)
-- "Global kullanıcı" (birden çok hücrede aynı kişi) desteklenmez veya kontrol düzleminde federe bir kimlik referansıyla çözülür (Ory'nin "data homing" yaklaşımı)
-- Kontrol düzlemi yeni bir kritik bileşen — kendisi HA olmalı ve **hücrelerin çalışması için gerekli olmamalı** (yalnız routing için)
+Bedelleri şunlardır: N hücre N operasyonel yüzey demektir ile otomasyon zorunludur, yani GitOps ile tek bir şablon gerekir; kiracılar hücreler arasında taşınamaz veya taşıma ayrı bir projedir; küresel kullanıcı, yani birden çok hücrede aynı kişi, desteklenmez ya da kontrol düzleminde federe bir kimlik referansıyla çözülür, ki Ory'nin veri yurtlandırma yaklaşımıdır; ve kontrol düzlemi yeni bir kritik bileşendir, kendisi yüksek erişilebilir olmalı ile hücrelerin çalışması için gerekli olmamalıdır, yalnızca yönlendirme için kullanılmalıdır.
 
-### 8.4 Ne YAPILMAMALI — Argus için kırmızı çizgiler
+### 8.4 Ne yapılmamalıdır, Argus için kırmızı çizgiler
 
-| ❌ Yapma | Neden |
+| Yapılmaz | Neden |
 |---|---|
-| **Redis pub/sub ile iptal yayını** | At-most-once; "message is forever lost" (Redis docs) |
-| **İptal/oturum/kilit sorgularını read replica'ya yönlendirme** | Bayat okuma = güvenlik açığı (Bölüm 2.4.1); Zitadel bu yüzden replica'yı hiç desteklemiyor |
-| **Postgres logical replication ile aktif-aktif** | LWW çakışma çözümü = kimlikte güvenlik açığı (Kanidm dersi) |
-| **Kanidm tarzı quorum'suz çok-master** | Aynı |
-| **Kıtalar arası senkron yazma** | Keycloak 26.3: 20 ms RTT'de p99 1.076 ms |
-| **Tek standby ile `synchronous_commit=on`** | Standby düşünce primary asılır — HA çözümü kesinti kaynağı olur |
-| **Infinispan/Hazelcast tarzı gömülü dağıtık cache** | Keycloak 2026'da bu yoldan geri döndü |
-| **Node başına bağımsız hesap-bazlı rate limit** | Yatay ölçekleme = güvenlik zafiyeti (Bölüm 5.3) |
-| **Bloom filter tabanlı iptal listesi** | `revocation_epoch` aynı işi %0 hatayla yapıyor; doğrulanmış üretim örneği yok |
-| **DB'de duran "acil durum admin hesabı"** | DB düştüğünde işe yaramaz; sürekli saldırı yüzeyi |
-| **Refresh failover'ında `400 invalid_grant`** | İstemci SDK'ları kullanıcıyı çıkartır; **503 + Retry-After** kullan |
+| Redis yayın aboneliğiyle iptal yayını | En fazla bir kez teslimat vardır ve Redis dokümanı mesajın sonsuza kadar kaybolduğunu söylemektedir |
+| İptal, oturum ile kilit sorgularını okuma replikasına yönlendirmek | Bayat okuma bir güvenlik açığıdır, 2.4.1; Zitadel bu yüzden replikayı hiç desteklememektedir |
+| Postgres mantıksal replikasyonuyla aktif aktif | Son yazan kazanır çakışma çözümü kimlikte bir güvenlik açığıdır; Kanidm dersidir |
+| Kanidm tarzı quorum'suz çok birincilli yapı | Aynı sebeptir |
+| Kıtalar arası senkron yazma | Keycloak 26.3'te 20 milisaniyelik gidiş dönüşte 99. yüzdelik 1.076 milisaniyedir |
+| Tek bekleme düğümüyle `synchronous_commit=on` | Bekleme düğümü düşünce birincil asılır ile yüksek erişilebilirlik çözümü bir kesinti kaynağı olur |
+| Infinispan ya da Hazelcast tarzı gömülü dağıtık önbellek | Keycloak 2026'da bu yoldan geri dönmüştür |
+| Düğüm başına bağımsız hesap bazlı hız limiti | Yatay ölçekleme bir güvenlik zafiyetine dönüşmektedir, 5.3 |
+| Bloom filtresi tabanlı iptal listesi | İptal dönemi aynı işi sıfır hatayla yapmaktadır ile doğrulanmış bir üretim örneği yoktur |
+| Veritabanında duran acil durum yönetici hesabı | Veritabanı düştüğünde işe yaramaz ile sürekli bir saldırı yüzeyidir |
+| Yenileme devralmasında `400 invalid_grant` dönmek | İstemci SDK'ları kullanıcıyı çıkarmaktadır; 503 ile yeniden dene kullanılmalıdır |
 
 ---
 
-## BÖLÜM 9 — KAYNAKLAR
+## Bölüm 9 — Kaynaklar
 
-### 9.1 Birinci elden çekilip okunan (erişim: 8 Eylül 2026)
+### 9.1 Birinci elden çekilip okunanlar, erişim 8 Eylül 2026
 
-**Keycloak**
-1. [Keycloak Performance Benchmarks: A Deep Dive into Scaling and Sizing (26.4)](https://www.keycloak.org/2025/10/keycloak-benchmark) — Ekim 2025 — **tüm kapasite ve RTT rakamları**
-2. [Multi-Cluster v2 and Stateless Mode now in Preview](https://www.keycloak.org/2026/07/multi-cluster-v2-and-stateless-mode) — Alexander Schwartz, **17 Temmuz 2026** — **8-10 ms, 2× DB, <5/<10 ms, 100 ms outbox polling**
-3. [Concepts for multi-cluster deployments](https://www.keycloak.org/high-availability/multi-cluster/concepts) — iki site sınırı, manuel resync, <2 dk kurtarma
-4. [Storing sessions in Keycloak 26](https://www.keycloak.org/2024/12/storing-sessions-in-kc26) — Aralık 2024 — persistent user sessions
-5. [Keycloak blog index](https://www.keycloak.org/blog) — sürüm takibi (26.7.3, 31 Ağustos 2026)
+**Keycloak.** Ekim 2025 tarihli 26.4 performans kıyaslamaları yazısı, ki tüm kapasite ile gidiş dönüş rakamları oradandır. Alexander Schwartz'ın 17 Temmuz 2026 tarihli Multi-Cluster v2 ile stateless önizleme yazısı, ki sekiz ile 10 milisaniye, iki kat veritabanı, beş ile 10 milisaniyelik eşikler ile 100 milisaniyelik giden kutusu yoklaması oradandır. Çok kümeli dağıtım kavramları sayfası, ki iki bölge sınırı, elle yeniden senkronizasyon ile iki dakikanın altında kurtarma oradandır. Aralık 2024 tarihli Keycloak 26'da oturum saklama yazısı, ki kalıcı kullanıcı oturumları anlatılmaktadır. Keycloak blog dizini, ki sürüm takibi için kullanılmıştır, 26.7.3, 31 Ağustos 2026.
 
-**Zitadel**
-6. [Scaling Cloud-Native Identity: Optimizing Performance with Caching](https://zitadel.com/blog/scaling-cloud-native-identity-optimizing-performance-with-caching) — Florian Forster, **12 Şubat 2026** — **>30.000 req/s Postgres cache, hibrit ilişkisel modele geçiş**
-7. [Does Zitadel support multi-region with Postgres? #7636](https://github.com/zitadel/zitadel/discussions/7636) — read replica reddi
-8. [Zitadel Software Architecture](https://zitadel.com/docs/concepts/architecture/software) — CQRS/eventual consistency
+**Zitadel.** Florian Forster'ın 12 Şubat 2026 tarihli önbeleklemeyle performans optimizasyonu yazısı, ki saniyede 30 binden fazla istek ile hibrit ilişkisel modele geçiş oradandır. 7636 numaralı tartışma, ki okuma replikası reddi oradandır. Yazılım mimarisi dokümanı, ki komut sorgu sorumluluk ayrımı ile nihai tutarlılık oradandır.
 
-**Kanidm**
-9. [Replication Design and Notes](https://kanidm.github.io/kanidm/master/developers/designs/replication_design_and_notes.html) — AP tercihi, CID, RUV, tombstone, dondurma
-10. [Three-node replication topology #4099](https://github.com/kanidm/kanidm/discussions/4099) — 3 node "technically unsupported"
+**Kanidm.** Replikasyon tasarım notları, ki erişilebilirlik tercihi, değişiklik kimliği, replika güncelleme vektörü, mezar taşı ile dondurma oradandır. 4099 numaralı tartışma, ki üç düğümün teknik olarak desteklenmediği oradandır.
 
-**Rauthy / Hiqlite**
-11. [Rauthy HA Configuration](https://sebadob.github.io/rauthy/config/ha.html) — 3/5 replika, 15–30 sn shutdown
-12. [hiqlite crate](https://crates.io/crates/hiqlite) / [github](https://github.com/sebadob/hiqlite) — 24.5k / 16.5k insert/s
-13. [openraft](https://github.com/databendlabs/openraft) — generalized membership change
+**Rauthy ile Hiqlite.** Rauthy yüksek erişilebilirlik yapılandırması, ki üç ile beş replika ile 15 ile 30 saniyelik kapanma oradandır. `hiqlite` crate'i ile deposu, ki saniyede 24,5 bin ile 16,5 bin ekleme oradandır. `openraft` deposu, ki genelleştirilmiş üyelik değişimi oradandır.
 
-**Ory**
-14. [Severe performance issues with global CockroachDB #3134](https://github.com/ory/kratos/discussions/3134) — **230 ms PK lookup, ~1 s ek gecikme, GLOBAL tablo/GDPR çelişkisi**
-15. [Global IAM Across Regions](https://www.ory.com/blog/global-identity-and-access-management-multi-region) — data homing, 3 milyar istek/gün
-16. [Ory & CockroachDB for Scalable Identity](https://www.ory.sh/blog/the-future-of-identity-ory-and-cockroach-labs-iam-for-agentic-ai) — ⚠️ pazarlama içerikli
+**Ory.** 3134 numaralı tartışma, ki 230 milisaniyelik birincil anahtar araması, yaklaşık bir saniyelik ek gecikme ile küresel tablo ve GDPR çelişkisi oradandır. Bölgeler arası küresel kimlik ile erişim yönetimi yazısı, ki veri yurtlandırması ile günde üç milyar istek oradandır. Ory ile CockroachDB ortak yazısı, ki pazarlama içeriklidir.
 
-**authentik**
-17. [Architecture](https://docs.goauthentik.io/core/architecture) — sürüm 2026.8
-18. [Release 2025.8](https://docs.goauthentik.io/releases/2025.8) — Redis'ten çıkış
+**authentik.** Mimari sayfası, sürüm 2026.8. 2025.8 sürüm notları, ki Redis'ten çıkış oradandır.
 
-**PostgreSQL**
-19. [PostgreSQL 18.0 Release Notes](https://www.postgresql.org/docs/release/18.0/) — Eylül 2025 — AIO, uuidv7, `idle_replication_slot_timeout`, failover slots
-20. [libpq Connection Strings (PG18)](https://www.postgresql.org/docs/18/libpq-connect.html) — `target_session_attrs`, `load_balance_hosts`
-21. [Andres Freund — Analyzing the Limits of Connection Scalability in Postgres](https://techcommunity.microsoft.com/blog/adforpostgresql/analyzing-the-limits-of-connection-scalability-in-postgres/1757266) — 8 Ekim 2020 — **<2 MiB/bağlantı, 48 → 500 → 3.000 zirve**
-22. [Andres Freund — Improving Postgres Connection Scalability: Snapshots](https://techcommunity.microsoft.com/blog/adforpostgresql/improving-postgres-connection-scalability-snapshots/1806462) — PG14 düzeltmesi
-23. [EDB — The Cost Implications of PostgreSQL Synchronous Replication](https://www.enterprisedb.com/blog/the-varying-cost-synchronous-replication) — **9,5→16 ms / 17→20 ms tablosu**
-24. [Percona — PostgreSQL synchronous_commit options](https://www.percona.com/blog/postgresql-synchronous_commit-options-and-synchronous-standby-replication/) — `off` vs `remote_apply` 2×
-25. [Patroni FAQ (4.1.5)](https://patroni.readthedocs.io/en/latest/faq.html) — leader race, DCS kaybı → salt-okunur / demote
-26. [Patroni Dynamic Configuration](https://patroni.readthedocs.io/en/latest/dynamic_configuration.html) — `ttl >= loop_wait + 2*retry_timeout`
-27. [CloudNativePG Failure Modes (1.28)](https://cloudnative-pg.io/docs/1.28/failure_modes/) — primary/standby arıza akışı
-28. [Tembo — Benchmarking PostgreSQL connection poolers](https://legacy.tembo.io/blog/postgres-connection-poolers/) — PgBouncer/pgcat/Supavisor
+**PostgreSQL.** PostgreSQL 18.0 sürüm notları, Eylül 2025, ki asenkron giriş çıkış, `uuidv7()`, `idle_replication_slot_timeout` ile devralma yuvaları oradandır. PostgreSQL 18 libpq bağlantı dizeleri dokümanı, ki `target_session_attrs` ile `load_balance_hosts` oradandır. Andres Freund'un 8 Ekim 2020 tarihli bağlantı ölçeklenebilirliği analizi, ki bağlantı başına iki mebibayttan az ile 48'den 500'e ve 3.000'e çıkan zirve oradandır. Aynı yazarın anlık görüntü yazısı, ki PostgreSQL 14 düzeltmesi oradandır. EDB'nin senkron replikasyon maliyeti yazısı, ki 9,5'ten 16'ya ile 17'den 20 milisaniyeye tablosu oradandır. Percona'nın `synchronous_commit` seçenekleri yazısı, ki `off` ile `remote_apply` arasındaki iki kat oradandır. Patroni 4.1.5 sıkça sorulan sorular, ki lider yarışı ile dağıtık yapılandırma deposu kaybında salt okunur ve düşürme oradandır. Patroni dinamik yapılandırma dokümanı, ki yaşam süresi formülü oradandır. CloudNativePG 1.28 arıza modları, ki birincil ile bekleme arıza akışı oradandır. Tembo'nun bağlantı havuzlayıcı kıyaslaması, ki PgBouncer, pgcat ile Supavisor karşılaştırması oradandır.
 
-**Dağıtık SQL**
-29. [CockroachDB Follower Reads](https://docs.cockroachlabs.com/docs/stable/follower-reads) — **≥4,2 saniye bayatlık**
-30. [CockroachDB Multi-Region Overview](https://docs.cockroachlabs.com/docs/stable/multiregion-overview) — survival goals, table localities
-31. [CockroachDB — How to Choose a Multi-Region Configuration](https://docs.cockroachlabs.com/docs/stable/choosing-a-multi-region-configuration) — `--max-offset 250ms`
-32. [CockroachDB Licensing FAQs](https://www.cockroachlabs.com/docs/stable/licensing-faqs) — **<$10M ciro Free, telemetri zorunlu, 7 gün throttle**
-33. [What is Amazon Aurora DSQL?](https://docs.aws.amazon.com/aurora-dsql/latest/userguide/what-is-aurora-dsql.html) — 99,99/99,999, kıtalar arası yok
-34. [Migrating from PostgreSQL to Aurora DSQL](https://docs.aws.amazon.com/aurora-dsql/latest/userguide/working-with-postgresql-compatibility-unsupported-features.html) — **OCC, 3.000 satır, no PL/pgSQL, 1 saat bağlantı**
+**Dağıtık SQL.** CockroachDB takipçi okumaları dokümanı, ki en az 4,2 saniyelik bayatlık oradandır. Çok bölgeli genel bakış, ki hayatta kalma hedefleri ile tablo yerleşimleri oradandır. Çok bölgeli yapılandırma seçme rehberi, ki `--max-offset 250ms` oradandır. Lisanslama sıkça sorulan sorular, ki 10 milyon doların altı ciroyla ücretsizlik, zorunlu telemetri ile yedi günde kısıtlama oradandır. Amazon Aurora DSQL nedir dokümanı, ki erişilebilirlik oranları ile kıtalar arası olmayışı oradandır. PostgreSQL'den Aurora DSQL'e geçiş dokümanı, ki iyimser eşzamanlılık kontrolü, 3.000 satır, PL/pgSQL yokluğu ile bir saatlik bağlantı oradandır.
 
-**Mesajlaşma / rate limiting**
-35. [Redis Pub/sub — Delivery semantics](https://redis.io/docs/latest/develop/pubsub/) — **"forever lost"**
-36. [NATS JetStream](https://docs.nats.io/nats-concepts/jetstream) — core at-most-once, JetStream at-least-once
-37. [redis-cell](https://github.com/brandur/redis-cell) — GCRA, ~0,1 ms, **best-effort maintenance mode**
-38. [governor 0.10.4](https://docs.rs/governor/latest/governor/) — 5 Eylül 2026, GCRA, süreç-içi
+**Mesajlaşma ile hız sınırlama.** Redis yayın aboneliği teslimat semantiği, ki sonsuza kadar kaybolur ifadesi oradandır. NATS JetStream dokümanı, ki çekirdeğin en fazla bir kez, JetStream'in en az bir kez olduğu oradandır. redis-cell deposu, ki GCRA, yaklaşık 0,1 milisaniye ile elden gelenin en iyisi bakım modu oradandır. `governor` 0.10.4 dokümanı, 5 Eylül 2026, ki GCRA ile süreç içi olduğu oradandır.
 
-**Kurumsal mimariler**
-39. [Okta — Scaling Okta to 50 Billion Users](https://www.okta.com/resources/whitepapers/scaling-okta-to-billions-of-users/) ve [How Okta Builds and Runs Scalable Infrastructure](https://www.okta.com/resources/whitepapers/how-okta-builds-and-runs-scalable-infrastructure/) — cell-based architecture
+**Kurumsal mimariler.** Okta'nın 50 milyar kullanıcıya ölçekleme ile ölçeklenebilir altyapı inşa etme beyaz kâğıtları, ki hücre tabanlı mimari oradandır.
 
-### 9.2 İkincil / düşük otorite kaynaklar (dikkatle kullanılmalı)
+### 9.2 İkincil ile düşük otoriteli kaynaklar, dikkatle kullanılmalıdır
 
-- Patroni failover süresi "sub-25 seconds" — stackharbor.com bilgi bankası (2026)
-- `revocation_epoch` performans rakamları (0,3 ms / 0,05 ms / 0,2 ms) — michal-drozd.com, techinterview.org, oneuptime.com blogları — **bağımsız doğrulanmadı, planlama girdisi olarak kullanılmamalı**
-- Patroni/repmgr/pg_auto_failover 2026 karşılaştırması — Medium (Tomasz Gintowt, Temmuz 2026)
+Patroni devralma süresinin 25 saniyenin altında olduğu iddiası stackharbor.com bilgi bankasındandır, 2026.
 
-### 9.3 `[DOĞRULANMADI]` listesi — açıkça işaretlenenler
+İptal dönemi performans rakamları, yani 0,3 milisaniye, 0,05 milisaniye ile 0,2 milisaniye, michal-drozd.com, techinterview.org ile oneuptime.com bloglarındandır; bağımsız doğrulanmamıştır ile bir planlama girdisi olarak kullanılmamalıdır.
+
+Patroni, repmgr ile pg_auto_failover'ın 2026 karşılaştırması Tomasz Gintowt'un Temmuz 2026 tarihli Medium yazısındandır.
+
+### 9.3 Doğrulanamayanlar listesi, açıkça işaretlenenler
 
 | Konu | Durum |
 |---|---|
-| CloudNativePG'nin CNCF olgunluk seviyesi (Sandbox/Incubating) | Doğrulanamadı |
-| Stolon'un arşiv durumu | Doğrulanamadı |
-| pg_auto_failover'ın 2026 bakım durumu | Doğrulanamadı |
-| AWS bölgeler arası kesin RTT rakamları (us-east↔eu-west) | Doğrulanamadı — cloudping.co çekilemedi |
-| AZ'ler arası kesin RTT (1–2 ms iddiası) | Doğrulanamadı |
-| CockroachDB "RTT >150 ms'de GLOBAL tablo düzensiz gecikme" | Arama özetinden; doğrudan doküman sayfası doğrulanmadı |
-| Auth0'ın 2026 tarihli mimari yazısı / bölgesel tenant modeli detayı | Bulunamadı |
-| Google/Cloudflare Access'in kimlik doğrulama mimarisi yazıları | Bulunamadı |
-| YugabyteDB'nin kimlik iş yükü için bağımsız benchmark'ı | Bulunamadı |
-| Bloom/cuckoo filter ile token iptalinin üretim örneği | **Bulunamadı** |
-| Cloudflare dağıtık rate limiting mimarisi detayı | Sayfa çekildi, içerik ayıklanamadı |
-| Yerel+periyodik senkronizasyonlu dağıtık rate limiting üretim raporları | Bulunamadı |
-| PgBouncer 1.21+ named prepared statement desteğinin sqlx ile uyumu | Doğrulanamadı |
-| `sqlx`'in `target_session_attrs` çok-host desteği | Doğrulanamadı |
-| PostgreSQL 19 içeriği/takvimi | Doğrulanamadı |
-| Argus'un login akışındaki yazma sayısı (5–7) | **Mimari tahmin**, ölçülmedi |
-| Rust'ın Keycloak'a göre refresh yolu avantajı tahmini | **Tahmin**, ölçülmedi |
+| CloudNativePG'nin CNCF olgunluk seviyesi | Doğrulanamamıştır |
+| Stolon'un arşiv durumu | Doğrulanamamıştır |
+| pg_auto_failover'ın 2026 bakım durumu | Doğrulanamamıştır |
+| AWS bölgeler arası kesin gidiş dönüş rakamları | Doğrulanamamıştır; cloudping.co çekilememiştir |
+| Erişilebilirlik alanları arası kesin gidiş dönüş, yani bir ile iki milisaniye iddiası | Doğrulanamamıştır |
+| CockroachDB'de gidiş dönüşün 150 milisaniyeyi aşmasıyla küresel tabloda düzensiz gecikme | Arama özetindendir; doğrudan doküman sayfası doğrulanmamıştır |
+| Auth0'ın 2026 tarihli mimari yazısı ile bölgesel kiracı modeli detayı | Bulunamamıştır |
+| Google ile Cloudflare Access'in kimlik doğrulama mimarisi yazıları | Bulunamamıştır |
+| YugabyteDB'nin kimlik iş yükü için bağımsız kıyaslaması | Bulunamamıştır |
+| Bloom ya da guguk filtresiyle token iptalinin üretim örneği | Bulunamamıştır |
+| Cloudflare'in dağıtık hız sınırlama mimarisi detayı | Sayfa çekilmiş ancak içerik ayıklanamamıştır |
+| Yerel ile periyodik senkronizasyonlu dağıtık hız sınırlama üretim raporları | Bulunamamıştır |
+| PgBouncer 1.21 ve üstündeki isimli hazırlanmış ifade desteğinin sqlx ile uyumu | Doğrulanamamıştır |
+| `sqlx`'in `target_session_attrs` çok sunuculu desteği | Doğrulanamamıştır |
+| PostgreSQL 19 içeriği ile takvimi | Doğrulanamamıştır |
+| Argus'un giriş akışındaki yazma sayısı, yani beş ile yedi | Bir mimari tahmindir ve ölçülmemiştir |
+| Rust'ın Keycloak'a göre yenileme yolu avantajı tahmini | Bir tahmindir ve ölçülmemiştir |
 
----
+### Ek: bir sonraki araştırma için açık kalan sorular
 
-### EK: BİR SONRAKİ ARAŞTIRMA İÇİN AÇIK KALAN SORULAR
-
-1. **AWS/GCP bölgeler arası ve AZ'ler arası gerçek RTT matrisi** — Argus'un çok bölge kararının sayısal temeli için gerekli.
-2. **Auth0 ve Cloudflare Access'in yayımlanmış mimarisi** — bu oturumda bulunamadı; Okta'nın whitepaper'ları tek somut kurumsal referans.
-3. **YugabyteDB'nin kimlik iş yükünde bağımsız ölçümü** — CockroachDB'ye tek gerçek açık alternatif, ama veri yok.
-4. **Rust IdP prototipi ile gerçek benchmark** — Keycloak'ın 15 login/s/vCPU rakamına karşı Argus'un gerçek değeri. Bu, tüm kapasite planlamasının temeli ve **şu an sadece tahmin.**
-5. **Outbox polling'in 20+ node'da DB üzerindeki ölçülmüş maliyeti** — 100 ms polling'in gerçek qps ve CPU etkisi.
+1. AWS ile GCP'nin bölgeler arası ile erişilebilirlik alanları arası gerçek gidiş dönüş matrisi; Argus'un çok bölge kararının sayısal temeli için gereklidir.
+2. Auth0 ile Cloudflare Access'in yayımlanmış mimarisi; bu oturumda bulunamamıştır ve Okta'nın beyaz kâğıtları tek somut kurumsal referanstır.
+3. YugabyteDB'nin kimlik iş yükünde bağımsız ölçümü; CockroachDB'ye tek gerçek açık alternatiftir ancak veri yoktur.
+4. Bir Rust IdP prototipiyle gerçek bir kıyaslama; Keycloak'ın sanal işlemci başına saniyede 15 giriş rakamına karşı Argus'un gerçek değeri. Bu, tüm kapasite planlamasının temelidir ile şu an yalnızca bir tahmindir.
+5. Giden kutusu yoklamasının 20 ve üzeri düğümde veritabanı üzerindeki ölçülmüş maliyeti; 100 milisaniyelik yoklamanın gerçek sorgu hızı ile işlemci etkisi.

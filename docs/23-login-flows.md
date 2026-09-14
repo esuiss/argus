@@ -1,636 +1,514 @@
-# 23. Giriş akışları ve UX
+# §23 — Giriş akışları ve kullanıcı deneyimi
 
-> `ARGUS.md` §23'den taşındı. Numaralandırma korundu; bu dosyanın
-> içindeki `§23 §X` referansları aynı anlamda.
+Bu bölüm `ARGUS.md` dosyasının 23. kısmından taşınmıştır. Numaralandırma korunmuştur; dosya içindeki `§23 §X` referansları aynı anlamdadır.
 
-
-Aşağıdaki bulgular ~50 arama/fetch sonucudur. Her iddiada kaynak + tarih var. Doğrulanamayanlar açıkça işaretlendi.
+Aşağıdaki bulgular yaklaşık 50 arama ile çekme sonucudur. Her iddiada kaynak ile tarih vardır. Doğrulanamayanlar açıkça işaretlenmiştir.
 
 ---
 
-## 1. IDENTIFIER-FIRST AKIŞI
+## 1. Önce tanımlayıcı akışı
 
-### 1.1 Endüstri neden geçti — gerçek gerekçe
+### 1.1 Endüstri neden geçmiştir, gerçek gerekçe
 
-Birincil gerekçe **estetik değil, federasyon yönlendirmesi**. Auth0'ın resmî dokümanı akışı açıkça bu şekilde tanımlıyor: kullanıcı e-postasını girer, Auth0 alan adının kayıtlı bir Enterprise connection ile eşleşip eşleşmediğine bakar; eşleşirse kurumsal IdP'ye yönlendirir, eşleşmezse yerel parola sorar ([Auth0 — Configure Identifier First Authentication](https://auth0.com/docs/authenticate/login/auth0-universal-login/identifier-first)). Auth0 üç varyant belgeliyor: Identifier + Password (tek ekran), Identifier First, Identifier First + Biometrics (WebAuthn kaydı için).
+Birincil gerekçe estetik değil federasyon yönlendirmesidir. Auth0'ın resmî dokümanı akışı açıkça bu şekilde tanımlamaktadır: kullanıcı e-postasını girmekte, Auth0 alan adının kayıtlı bir kurumsal bağlantıyla eşleşip eşleşmediğine bakmakta, eşleşirse kurumsal kimlik sağlayıcıya yönlendirmekte ile eşleşmezse yerel parola sormaktadır. Auth0 üç varyant belgelemektedir: tanımlayıcı ile parolanın tek ekranda alınması, önce tanımlayıcı ile önce tanımlayıcı artı biyometri, ki WebAuthn kaydı içindir.
 
-İkincil gerekçe: **kimlik doğrulama yönteminin kullanıcıya göre değişmesi**. Identifier alınmadan hangi yöntemin (parola / passkey / kurumsal SSO / magic link) gösterileceği bilinemez. Microsoft'un yeni sign-in UI'ının "kullanıcı için mevcut en güvenli yöntemi otomatik tespit edip önceliklendirdiğini" ve bu tasarımın **parola kullanımını %20'den fazla azalttığını** açıkladığı yer: [Microsoft Security Blog, 1 Mayıs 2025](https://www.microsoft.com/en-us/security/blog/2025/05/01/pushing-passkeys-forward-microsofts-latest-updates-for-simpler-safer-sign-ins/).
+İkincil gerekçe kimlik doğrulama yönteminin kullanıcıya göre değişmesidir. Tanımlayıcı alınmadan hangi yöntemin, yani parola, geçiş anahtarı, kurumsal çoklu oturum açma ya da sihirli bağlantının gösterileceği bilinememektedir. Microsoft'un 1 Mayıs 2025 tarihli güvenlik blog yazısı, yeni giriş arayüzünün kullanıcı için mevcut en güvenli yöntemi otomatik tespit edip önceliklendirdiğini ile bu tasarımın parola kullanımını %20'den fazla azalttığını açıklamaktadır.
 
-⚠️ **DOĞRULANMADI:** Google'ın 2015'teki identifier-first geçişine ait resmî bir tasarım gerekçesi belgesi bulunamadı. Sadece Google Cloud dokümanlarında davranışın tarifi var ([Google Cloud — Best practices for federating](https://docs.cloud.google.com/architecture/identity/best-practices-for-federating)).
+Bir doğrulanamayan nokta vardır: Google'ın 2015'teki önce tanımlayıcı geçişine ait resmî bir tasarım gerekçesi belgesi bulunamamıştır. Yalnızca Google Cloud dokümanlarında davranışın tarifi bulunmaktadır.
 
-### 1.2 Enumeration: yapısal olarak sızdırır mı? — EVET
+### 1.2 Numaralandırma: yapısal olarak sızdırmakta mıdır? Evet
 
-Bu bir implementasyon hatası değil, **akışın yapısal sonucu**. İki adımlı akışta 1. adımın çıktısı zorunlu olarak "bu identifier için ne yapmalıyım" bilgisidir; bu da hesabın varlığını ima eder.
+Bu bir gerçekleme hatası değil akışın yapısal sonucudur. İki adımlı akışta birinci adımın çıktısı zorunlu olarak bu tanımlayıcı için ne yapmalıyım bilgisidir; bu da hesabın varlığını ima etmektedir.
 
-Somut kanıt:
+Somut kanıtlar şunlardır.
 
-- **CVE-2026-4633 (Keycloak)** — Organizations etkinken identity-first login flow'da farklılaşan hata mesajları üzerinden kullanıcı enumeration'ı. CVSS 3.7 (Low), CWE-209, yayın 27 Mart 2026 ([SentinelOne vuln DB](https://www.sentinelone.com/vulnerability-database/cve-2026-4633/)). Önerilen azaltmalar: yamalar, Organizations'ı kapatmak, rate limiting, CAPTCHA, jenerik hata mesajları.
-- **Keycloak issue #17629** — Password-less browser login flow'undaki Username Form, olmayan kullanıcı için "Invalid username or email" dönüyor; varsayılan browser flow'daki UsernamePassword Form ise ayrım yapmıyor. Issue **"closed as not planned"** ile kapatıldı ([GitHub](https://github.com/keycloak/keycloak/issues/17629)). Yani üst düzey bir IdP bunu kabul edilebilir takas saymış.
-- Keycloak brute-force koruması kilitli hesapta da aynı "Invalid username or password" mesajını gösteriyor — bu bilinçli bir tasarım ([Keycloak brute-force docs](https://github.com/keycloak/keycloak/blob/main/docs/documentation/server_admin/topics/threat/brute-force.adoc)).
+CVE-2026-4633, Keycloak'ta, organizasyonlar etkinken önce kimlik giriş akışında farklılaşan hata mesajları üzerinden kullanıcı numaralandırmasıdır. CVSS 3,7 düşük, zayıflık sınıfı gözlemlenebilir farklılık, yayın 27 Mart 2026. Önerilen azaltmalar yamalar, organizasyonların kapatılması, hız sınırlama, CAPTCHA ile jenerik hata mesajlarıdır.
 
-**Ürünler bunu nasıl ele alıyor — en net belgelenmiş örnek Clerk** ([Clerk — User enumeration protection](https://clerk.com/docs/guides/secure/user-enumeration-protection)):
+Keycloak'ın 17629 numaralı konusu, parolasız tarayıcı giriş akışındaki kullanıcı adı formunun olmayan bir kullanıcı için geçersiz kullanıcı adı ya da e-posta döndürdüğünü, varsayılan tarayıcı akışındaki kullanıcı adı ile parola formunun ise ayrım yapmadığını göstermektedir. Konu planlanmadı olarak kapatılmıştır. Yani üst düzey bir kimlik sağlayıcı bunu kabul edilebilir bir takas saymıştır.
 
-| Mod | Ne yapar | UX bedeli |
+Keycloak kaba kuvvet koruması kilitli hesapta da aynı geçersiz kullanıcı adı ya da parola mesajını göstermektedir; bu bilinçli bir tasarımdır.
+
+Ürünlerin bunu nasıl ele aldığının en net belgelenmiş örneği Clerk'tür.
+
+| Mod | Ne yapmaktadır | Kullanıcı deneyimi bedeli |
 |---|---|---|
-| **Bulk protection** | Rate limiting; normal sign-in deneyimi korunur | Kullanıcı hesabın var olmadığını yine öğrenir ("no account found") |
-| **Strict protection** | Hesabın varlığı kimlik doğrulanana kadar gizlenir; olmayan hesaplar için password/Web3 stratejilerinde **gerçek doğrulama kodu gönderilmez** | Yanlış identifier'da hiçbir geri bildirim yok; **Open access mode zorunlu**, password başlangıç stratejisi olamaz, username identifier desteklenmez |
+| Toplu koruma | Hız sınırlama uygulanmakta ile normal giriş deneyimi korunmaktadır | Kullanıcı hesabın var olmadığını yine öğrenmektedir |
+| Katı koruma | Hesabın varlığı kimlik doğrulanana kadar gizlenmekte ile olmayan hesaplar için parola ve Web3 stratejilerinde gerçek doğrulama kodu gönderilmemektedir | Yanlış tanımlayıcıda hiçbir geri bildirim yoktur; açık erişim modu zorunludur, parola bir başlangıç stratejisi olamamaktadır ile kullanıcı adı tanımlayıcısı desteklenmemektedir |
 
-Bu tablo Argus için doğrudan kopyalanabilir bir tasarım: enumeration koruması bir *mod*, tek bir davranış değil — ve strict mod diğer özellikleri (username login, invite-only) yapısal olarak dışlıyor.
+Bu tablo Argus için doğrudan kopyalanabilir bir tasarımdır: numaralandırma koruması bir moddur, tek bir davranış değildir; ile katı mod diğer özellikleri, yani kullanıcı adıyla girişi ile yalnızca davetle katılımı yapısal olarak dışlamaktadır.
 
-Corbado'nun analizi ek bir yapısal nokta koyuyor: **identifier adımını tamamen atlayan "Passkey ile giriş yap" butonu** (boş `allowCredentials`, discoverable credential) enumeration'ı sıfırlar — çünkü tarayıcı hiçbir sunucu sorgusu olmadan yerel credential'ı bulur. Amazon, Microsoft ve Google'ın fallback seçenekleri kaydın gerçekten var olup olmadığını maskeliyor ([Corbado — Account enumeration risk with passkeys](https://www.corbado.com/blog/passkey-login-best-practices/account-enumeration-risk-passkeys)).
+Corbado'nun analizi ek bir yapısal nokta koymaktadır: tanımlayıcı adımını tamamen atlayan geçiş anahtarıyla giriş yap düğmesi, yani boş kimlik bilgisi listesi ile keşfedilebilir kimlik bilgisi kullanımı, numaralandırmayı sıfırlamaktadır; çünkü tarayıcı hiçbir sunucu sorgusu olmadan yerel kimlik bilgisini bulmaktadır. Amazon, Microsoft ile Google'ın yedek seçenekleri kaydın gerçekten var olup olmadığını maskelemektedir.
 
-OWASP'ın konumu net ve takası açıkça kabul ediyor: uygulama geçersiz kullanıcı, geçersiz parola, **kilitli hesap ve devre dışı hesap** için aynı mesajı dönmeli ("Login failed; Invalid user ID or password"); parola sıfırlamada "If that email address is in our database, we will send you an email". OWASP ayrıca "quick exit" kod desenlerinin **zamanlama üzerinden** sızdırdığını ve jenerik mesajların meşru kullanıcıyı kafası karışık bırakıp uygulamayı terk etmeye itebileceğini kabul ediyor; öneri, kritikliğe göre karar vermek ve jenerik mesajı CAPTCHA ile birleştirmek ([OWASP Authentication Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html)).
+OWASP'ın konumu nettir ile takası açıkça kabul etmektedir: uygulama geçersiz kullanıcı, geçersiz parola, kilitli hesap ile devre dışı hesap için aynı mesajı dönmelidir; parola sıfırlamada o adres veritabanımızdaysa bir e-posta göndereceğiz denmelidir. OWASP ayrıca hızlı çıkış kod desenlerinin zamanlama üzerinden sızdırdığını ile jenerik mesajların meşru kullanıcıyı kafası karışık bırakıp uygulamayı terk etmeye itebileceğini kabul etmektedir; önerisi kritikliğe göre karar vermek ile jenerik mesajı bir bot kontrolüyle birleştirmektir.
 
-### 1.3 Home Realm Discovery — güvenlik riskleri
+### 1.3 Ev alanı keşfi, güvenlik riskleri
 
-HRD iki ayrı sızıntı yaratıyor:
+Bu mekanizma iki ayrı sızıntı yaratmaktadır.
 
-**(a) Kullanıcının hangi kuruma ait olduğunun sızması.** Microsoft'un `getuserrealm.srf` endpoint'i kimlik doğrulama olmadan `FederationBrandName` ve hesabın Managed mi Federated mi olduğunu döndürüyor — tek istekle kurumun ADFS/Okta/Ping kullanıp kullanmadığı anlaşılıyor ([Sprocket Security — Tenant Enumeration is Back, 10 Aralık 2025](https://www.sprocketsecurity.com/blog/tenant-enumeration-is-back)). Microsoft MC1081538 (23 Mayıs 2025) ile Autodiscover SOAP servisini kısıtladı, rollout Haziran–Ağustos 2025; artık yalnızca sorgulanan alan adını dönüyor, toplu enumeration kırıldı. Ama `getuserrealm.srf` ve `/.well-known/openid-configuration` üzerinden tenant keşfi devam ediyor.
+Birincisi kullanıcının hangi kuruma ait olduğunun sızmasıdır. Microsoft'un kullanıcı alanı sorgulama uç noktası kimlik doğrulama olmadan federasyon marka adını ile hesabın yönetilen mi federe mi olduğunu döndürmektedir; tek istekle kurumun hangi federasyon ürününü kullandığı anlaşılmaktadır. Sprocket Security'nin 10 Aralık 2025 tarihli kiracı numaralandırması geri döndü yazısı bunu belgelemektedir. Microsoft 23 Mayıs 2025 tarihli bir mesaj merkezi duyurusuyla otomatik keşif servisini kısıtlamıştır; dağıtım Haziran ile Ağustos 2025 arasındadır. Artık yalnızca sorgulanan alan adı dönmekte ile toplu numaralandırma kırılmıştır. Ancak kullanıcı alanı sorgulaması ile iyi bilinen OIDC yapılandırması üzerinden kiracı keşfi devam etmektedir.
 
-**(b) `domain_hint` ile otomatik hızlandırma (auto-acceleration).** Microsoft'un resmî tavsiyesi **auto-acceleration'a karşı**: "Microsoft advises against configuring auto-acceleration because it can hinder stronger authentication methods like FIDO and collaboration." Gerekçe güvenlik: bir uygulamanın gönderdiği `domain_hint=contoso.com` kullanıcıyı federe IdP'ye fırlatır, kullanıcı **managed credential'ını (FIDO) kullanamaz**, guest kullanıcılar giremez ([Microsoft Entra — Home Realm Discovery Policy](https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/home-realm-discovery-policy), güncelleme 6 Nisan 2026).
+İkincisi alan adı ipucuyla otomatik hızlandırmadır. Microsoft'un resmî tavsiyesi otomatik hızlandırmaya karşıdır: otomatik hızlandırma yapılandırmasının önerilmediği, çünkü FIDO gibi daha güçlü kimlik doğrulama yöntemlerini ile iş birliğini engelleyebileceği belirtilmektedir. Gerekçe güvenliktir: bir uygulamanın gönderdiği alan adı ipucu kullanıcıyı federe sağlayıcıya fırlatmakta, kullanıcı yönetilen kimlik bilgisini kullanamamakta ile misafir kullanıcılar girememektedir. Doküman güncellemesi 6 Nisan 2026'dır.
 
-Microsoft'un iki savunması:
-1. **Domain confirmation dialog (Nisan 2023'ten beri)** — auto-acceleration veya smart link kullanan organizasyonlarda kullanıcıya "hangi tenant'a giriş yapıyorsun" onayı gösteriliyor. Doküman bunu doğrudan "part of Microsoft's security hardening efforts" olarak tanımlıyor. Kullanıcıya `kelly@contoso.com` identifier'ı ve hedef tenant domain'i gösterilip Confirm isteniyor.
-2. **`DomainHintPolicy`** — `IgnoreDomainHintForDomains` / `RespectDomainHintForDomains` / `IgnoreDomainHintForApps` / `RespectDomainHintForApps`. "Respect" her zaman "Ignore"u ezer. `all_domains` ve `all_apps` wildcard'ları var. Dört fazlı rollout planı belgeleniyor ([Microsoft — Disable auto-acceleration sign-in](https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/prevent-domain-hints-with-home-realm-discovery)).
+Microsoft'un iki savunması vardır. Birincisi Nisan 2023'ten beri gösterilen alan adı onay penceresidir: otomatik hızlandırma ya da akıllı bağlantı kullanan organizasyonlarda kullanıcıya hangi kiracıya giriş yaptığı onayı gösterilmektedir. Doküman bunu doğrudan Microsoft'un güvenlik sertleştirme çabalarının parçası olarak tanımlamaktadır; kullanıcıya tanımlayıcısı ile hedef kiracının alan adı gösterilip onay istenmektedir. İkincisi alan adı ipucu politikasıdır: belirli alan adları ile uygulamalar için ipucunun yok sayılması ya da dikkate alınması ayarlanabilmektedir. Dikkate al her zaman yok say kuralını ezmektedir. Tüm alan adları ile tüm uygulamalar için joker değerler bulunmaktadır. Dört fazlı bir dağıtım planı belgelenmektedir.
 
-Öncelik sırası: domain hint > service principal policy > organization policy > default. Not: `domain_hint` HRD policy'deki auto-acceleration'ı **ezer** — yani istemci sunucu politikasını geçersiz kılabiliyor, bu tek başına bir tasarım hatası sinyali. Ayrıca HRD policy'leri mobil/macOS brokered authentication'da çalışmıyor.
+Öncelik sırası alan adı ipucu, servis aslı politikası, organizasyon politikası ile varsayılandır. Not edilmelidir: alan adı ipucu, keşif politikasındaki otomatik hızlandırmayı ezmektedir; yani istemci sunucu politikasını geçersiz kılabilmektedir, ki bu tek başına bir tasarım hatası sinyalidir. Ayrıca bu politikalar mobil ile macOS aracılı kimlik doğrulamasında çalışmamaktadır.
 
-**Argus için çıkarım:** `domain_hint` benzeri bir parametreyi kabul edeceksek, tenant tarafında bunu *ignore* edebilme yetkisi zorunlu — ve istemci hint'i sunucu politikasını ezmemeli (Microsoft'un yaptığının tersi).
+Argus için çıkarım şudur: alan adı ipucu benzeri bir parametre kabul edilecekse, kiracı tarafında bunu yok sayabilme yetkisi zorunludur ile istemci ipucu sunucu politikasını ezmemelidir; Microsoft'un yaptığının tersi olmalıdır.
 
 ---
 
-## 2. PASSKEY / WEBAUTHN UX — 2026 GERÇEĞİ
+## 2. Geçiş anahtarı ile WebAuthn kullanıcı deneyimi, 2026 gerçeği
 
-### 2.1 Conditional UI (autofill) — teknik durum
+### 2.1 Koşullu arayüz, yani otomatik doldurma, teknik durum
 
-Chrome'un birincil dokümanı ([web.dev — Sign in with a passkey through form autofill](https://web.dev/articles/passkey-form-autofill)):
+Chrome'un birincil dokümanından çıkanlar şunlardır.
 
-- `autocomplete="username webauthn"` (boşlukla ayrılmış); `autofocus` eklenirse prompt sayfa yüklenince tetiklenir
-- `allowCredentials` **boş dizi** olmalı — tarayıcı o `rpId` için tüm credential'ları gösterir
-- `mediation: 'conditional'` — promise, kullanıcı input'a dokunana kadar askıda kalır, UI gösterilmez
-- Feature detection artık `PublicKeyCredential.getClientCapabilities()` üzerinden `conditionalGet === true`
-- `AbortController.signal` ile programatik iptal
-- `userVerification: "preferred"` ise authenticator data'daki **UV flag'i doğrulanmalı**
-- Başarılı passkey doğrulamasından sonra ikinci faktör istenmemeli
+Otomatik tamamlama özniteliği kullanıcı adı ile WebAuthn değerlerini boşlukla ayrılmış olarak taşımalıdır; otomatik odaklanma eklenirse istem sayfa yüklenince tetiklenmektedir. İzin verilen kimlik bilgileri boş bir dizi olmalıdır; tarayıcı o bağlı taraf kimliği için tüm kimlik bilgilerini göstermektedir. Aracılık koşullu olmalıdır; söz, kullanıcı girdiye dokunana kadar askıda kalmakta ile arayüz gösterilmemektedir. Özellik tespiti artık istemci yetenekleri çağrısındaki koşullu alma bayrağı üzerindendir. Bir iptal denetleyicisi sinyaliyle programatik iptal mümkündür. Kullanıcı doğrulaması tercih edilir ayarındaysa kimlik doğrulayıcı verisindeki doğrulama bayrağı kontrol edilmelidir. Başarılı bir geçiş anahtarı doğrulamasından sonra ikinci faktör istenmemelidir.
 
-**Tarayıcı/OS desteği:** Chrome/Edge 108+ (Aralık 2022), Safari 16+, Firefox 122+ — ama yalnızca alttaki OS Windows 11, macOS, Android veya iOS/iPadOS 16+ ise. Windows 10, eski ChromeOS ve çoğu in-app browser view'da aynı kod yolu **hiçbir şey döndürmez ve form hiçbir öneri göstermez** ([MojoAuth — Conditional UI browser support](https://mojoauth.com/blog/conditional-ui-browser-support-passkey-autofill)) ⚠️ satıcı kaynağı, ama teknik iddia Chrome dokümanlarıyla tutarlı.
+Tarayıcı ile işletim sistemi desteği Chrome ve Edge 108 ve üstü, yani Aralık 2022, Safari 16 ve üstü ile Firefox 122 ve üstüdür; ancak yalnızca alttaki işletim sistemi Windows 11, macOS, Android ya da iOS ve iPadOS 16 ve üstüyse geçerlidir. Windows 10, eski ChromeOS ile çoğu uygulama içi tarayıcı görünümünde aynı kod yolu hiçbir şey döndürmemekte ile form hiçbir öneri göstermemektedir. Bu bir satıcı kaynağıdır ancak teknik iddia Chrome dokümanlarıyla tutarlıdır.
 
-### 2.2 Autofill vs modal — hangisi ne zaman
+### 2.2 Otomatik doldurmayla kalıcı pencerenin karşılaştırması
 
-Chrome'un kendi kılavuzu net bir ayrım koyuyor:
-- **Autofill (conditional)**: hem parola hem passkey kullanıcılarını aynı mevcut form içinde destekliyorsan
-- **Modal**: passkey birincil yöntemin ise
+Chrome'un kendi kılavuzu net bir ayrım koymaktadır: hem parola hem geçiş anahtarı kullanıcıları aynı mevcut form içinde destekleniyorsa koşullu arayüz, geçiş anahtarı birincil yöntemse kalıcı pencere kullanılmalıdır.
 
-Conditional UI'ın belgelenmiş dezavantajları ([Corbado — WebAuthn Conditional UI](https://www.corbado.com/blog/webauthn-conditional-ui-passkeys-autofill)):
-1. **Sessiz başarısızlık ve ölçülemezlik** — site, dropdown'ın göründüğünü, boş göründüğünü veya kullanıcının görmezden geldiğini **ayırt edemez**. Bozuk implementasyon çalışan implementasyonla aynı görünür. (Bu Argus için kritik: telemetri tasarımını baştan buna göre kurmak gerekir.)
-2. Password manager eklentileri DOM'u değiştirip `autocomplete` tag'ini ezebiliyor
-3. Kullanıcı alana dokunmadan tetiklenmez
-4. Yalnızca discoverable credential'lar listelenir
-5. Platform desteği eşit değil
+Koşullu arayüzün belgelenmiş dezavantajları şunlardır.
 
-**Önerilen desen:** Conditional UI + her zaman bir "Passkey ile giriş yap" butonu; butona basıldığında bekleyen conditional isteği `AbortController` ile iptal et.
+1. Sessiz başarısızlık ile ölçülemezlik. Site, açılır listenin göründüğünü, boş göründüğünü ya da kullanıcının görmezden geldiğini ayırt edememektedir. Bozuk bir gerçekleme çalışan bir gerçeklemeyle aynı görünmektedir. Bu Argus için kritiktir: telemetri tasarımı baştan buna göre kurulmalıdır.
+2. Parola yöneticisi eklentileri belge nesne modelini değiştirip otomatik tamamlama etiketini ezebilmektedir.
+3. Kullanıcı alana dokunmadan tetiklenmemektedir.
+4. Yalnızca keşfedilebilir kimlik bilgileri listelenmektedir.
+5. Platform desteği eşit değildir.
 
-⚠️ **DOĞRULANMADI:** Conditional UI'ın modal'a kıyasla dönüşüm etkisine dair **bağımsız, birincil, sayısal** veri bulunamadı. "Conditional UI is usually the single biggest lever on adoption" iddiası satıcı içeriği (MojoAuth) ve doğrulanamadı.
+Önerilen desen şudur: koşullu arayüz artı her zaman bir geçiş anahtarıyla giriş yap düğmesi; düğmeye basıldığında bekleyen koşullu istek bir iptal denetleyicisiyle iptal edilmelidir.
 
-### 2.3 Passkey benimseme — 2026 rakamları
+Bir doğrulanamayan nokta vardır: koşullu arayüzün kalıcı pencereye kıyasla dönüşüm etkisine dair bağımsız, birincil ile sayısal bir veri bulunamamıştır. Koşullu arayüzün benimseme üzerindeki en büyük tek kaldıraç olduğu iddiası satıcı içeriğidir ile doğrulanamamıştır.
 
-**FIDO Alliance, World Passkey Day 2026 (7 Mayıs 2026)** — birincil kaynak ([FIDO Alliance](https://fidoalliance.org/fido-alliance-reports-accelerating-global-passkey-adoption-on-world-passkey-day-2026/)):
+### 2.3 Geçiş anahtarı benimsemesi, 2026 rakamları
 
-- Dünyada tahminen **5 milyar passkey** kullanımda
-- Tüketici farkındalığı **%90** (2025'te %75'ti)
-- **%75** en az bir hesapta passkey etkinleştirmiş
-- **%49** mümkün olduğunda düzenli olarak kullanıyor
-- **%68** kurum çalışan girişleri için passkey dağıtmış veya dağıtıyor
-- **%82** tam passwordless'ı nihai hedef olarak belirtiyor; **%28** ulaşmış
-- **%57** kurum hâlâ birincil çalışan girişinde phishable yöntemlere dayanıyor
-- **%33** geçen yıl hesap ele geçirilmesi/ihlal bildirimi yaşamış (ABD'de %41)
-- **%47** parolayı hatırlayamadığında satın almayı/girişi terk etme eğiliminde
+FIDO Alliance'ın 7 Mayıs 2026 tarihli dünya geçiş anahtarı günü raporu birincil kaynaktır.
 
-**Metodoloji (önemli):** Sapio Research, Nisan 2026. Tüketici: 11.000 kişi, 10 ülke, ±%0,9 hata payı (%95 güven). İşgücü: 1.400 karar verici, 500+ çalışanlı kurumlar, ±%2,6. **Bunlar anket verisi — telemetri değil.** "%75 passkey etkinleştirdi" beyan edilen davranış; gerçek kullanım oranı değil.
+Dünyada tahminen beş milyar geçiş anahtarı kullanımdadır. Tüketici farkındalığı %90'dır, 2025'te %75'ti. Kullanıcıların %75'i en az bir hesapta geçiş anahtarı etkinleştirmiştir. %49'u mümkün olduğunda düzenli olarak kullanmaktadır. Kurumların %68'i çalışan girişleri için geçiş anahtarı dağıtmış ya da dağıtmaktadır. %82'si tam parolasızlığı nihai hedef olarak belirtmekte ile %28'i ulaşmıştır. Kurumların %57'si hâlâ birincil çalışan girişinde kimlik avına açık yöntemlere dayanmaktadır. %33'ü geçen yıl bir hesap ele geçirilmesi ya da ihlal bildirimi yaşamıştır; ABD'de bu oran %41'dir. Tüketicilerin %47'si parolayı hatırlayamadığında satın almayı ya da girişi terk etme eğilimindedir.
 
-Ek kırılım ([Descope 2026 FIDO raporu özeti](https://www.descope.com/blog/post/2026-fido-report)): benimseme sürücüleri phishing/MFA fatigue koruması %39, phishing-resistant auth %37, hız/UX %34. Engeller: legacy uyumluluk %38, bütçe %35, **cihaz kurtarma endişesi %33**.
+Metodoloji önemlidir: Sapio Research, Nisan 2026. Tüketici tarafında 11.000 kişi, 10 ülke ile %95 güvende artı eksi 0,9 puan hata payı. İş gücü tarafında 500'den fazla çalışanlı kurumlardan 1.400 karar verici ile artı eksi 2,6 puan hata payı. Bunlar anket verisidir, telemetri değildir. Geçiş anahtarı etkinleştirdim beyanı bir davranış beyanıdır, gerçek kullanım oranı değildir.
 
-**Gerçek telemetri (satıcı ama üretim verisi):**
-- **Google, Mart–Nisan 2023:** aynı cihazda passkey başarı oranı **%63,8** vs parola **%13,8**; ortalama giriş süresi **14,9 sn** vs **30,4 sn** ([Google Online Security Blog, 5 Mayıs 2023](https://security.googleblog.com/2023/05/making-authentication-faster-than-ever.html))
-- **Microsoft, 1 Mayıs 2025:** passkey kullanıcıları **~%98** vs parola **%32** başarı; passkey girişleri parola+MFA'dan **8x hızlı**; günde **~1 milyon** passkey kaydı; yeni sign-in UI parola kullanımını **%20+** azaltmış ([Microsoft Security Blog](https://www.microsoft.com/en-us/security/blog/2025/05/01/pushing-passkeys-forward-microsofts-latest-updates-for-simpler-safer-sign-ins/))
-- **TikTok, Temmuz 2023:** %97 giriş başarısı, uygun kullanıcıların **yalnızca %14'ü** benimsemiş, SMS OTP kullanımında %2 düşüş ([Passkey Central — metrics](https://www.passkeycentral.org/identify-your-needs/passkey-authentication-metrics), Authenticate 2023 sunumu)
-- **KAYAK:** giriş süresinde %50 azalma (aynı kaynak)
-- **FIDO Passkey Index (13 Ekim 2025, Liminal ile):** passkey girişlerinde **%93** başarı vs diğer yöntemler **%63** → **%30 dönüşüm artışı**. ⚠️ Metodoloji: **9 FIDO üye kuruluşuna yapılan gizli anket** + 200 kuruluşluk Liminal çalışması ([FIDO Alliance](https://fidoalliance.org/fido-alliance-launches-passkey-index-revealing-significant-passkey-uptake-and-business-benefits/)). Anonim, agrege, denetlenmemiş — pazarlama ağırlığı yüksek.
+Ek kırılım şudur: benimseme sürücüleri kimlik avı ile çok faktörlü yorgunluk koruması %39, kimlik avına dirençli kimlik doğrulama %37 ile hız ve kullanıcı deneyimi %34'tür. Engeller eski sistem uyumluluğu %38, bütçe %35 ile cihaz kurtarma endişesi %33'tür.
 
-**Kritik yorum:** Microsoft'un %98 vs %32'si ile Google'ın %63,8 vs %13,8'i aynı şeyi ölçmüyor ve her ikisi de **seçim yanlılığı** taşıyor — passkey kuran kullanıcı zaten aktif, cihazı elinde olan kullanıcıdır. Bu rakamları Argus'un iş gerekçesinde kullanacaksak "seçilmiş popülasyon" uyarısıyla kullanmalıyız.
+Gerçek telemetri, satıcı kaynaklı ancak üretim verisi olanlar şunlardır. Google'ın Mart ile Nisan 2023 verisine göre aynı cihazda geçiş anahtarı başarı oranı %63,8, parola %13,8'dir; ortalama giriş süresi 14,9 saniyeye karşı 30,4 saniyedir. Microsoft'un 1 Mayıs 2025 verisine göre geçiş anahtarı kullanıcıları yaklaşık %98, parola kullanıcıları %32 başarı oranına sahiptir; geçiş anahtarı girişleri parola artı çok faktörlüden sekiz kat hızlıdır; günde yaklaşık bir milyon geçiş anahtarı kaydı yapılmaktadır ile yeni giriş arayüzü parola kullanımını %20'den fazla azaltmıştır. TikTok'un Temmuz 2023 verisine göre giriş başarısı %97'dir ancak uygun kullanıcıların yalnızca %14'ü benimsemiştir ile kısa mesaj tek kullanımlık şifre kullanımında %2 düşüş olmuştur. KAYAK giriş süresinde %50 azalma bildirmiştir. FIDO geçiş anahtarı endeksi, 13 Ekim 2025, Liminal ile birlikte, geçiş anahtarı girişlerinde %93 başarı, diğer yöntemlerde %63 başarı ile %30 dönüşüm artışı bildirmektedir. Metodolojisi dokuz FIDO üye kuruluşuna yapılan gizli bir anket artı 200 kuruluşluk bir Liminal çalışmasıdır; anonim, toplu ile denetlenmemiştir ile pazarlama ağırlığı yüksektir.
 
-### 2.4 Passkey UX başarısızlıkları — cross-device gerçeği
+Kritik yorum şudur: Microsoft'un rakamlarıyla Google'ınkiler aynı şeyi ölçmemekte ile her ikisi de seçim yanlılığı taşımaktadır; geçiş anahtarı kuran kullanıcı zaten aktif, cihazı elinde olan kullanıcıdır. Bu rakamlar Argus'un iş gerekçesinde kullanılacaksa seçilmiş popülasyon uyarısıyla kullanılmalıdır.
 
-Bu, raporun en sert bulgusu.
+### 2.4 Geçiş anahtarı kullanıcı deneyimi başarısızlıkları, cihazlar arası gerçek
 
-**Android cross-device QR funnel (Google Authenticate 2025 verisi, Corbado tarafından derlenmiş):**
-- Başlangıç sayfası → tarayıcı prompt'u: **%48**
-- Tarayıcı prompt'u → QR taraması: **%29** ← kritik kopuş
-- QR taraması → authenticator başarısı: **%64**
-- Authenticator → oturum açık: **%89**
-- **Uçtan uca: 10 Android kullanıcısından 1'inden azı** cross-device girişi tamamlıyor
+Bu, raporun en sert bulgusudur.
 
-([MojoAuth — Cross-device passkey QR flow](https://mojoauth.com/blog/cross-device-passkey-qr-flow-where-users-drop-off), kaynak: Corbado Passkey Benchmark 2026)
+Android cihazlar arası karekod hunisi, Google'ın Authenticate 2025 verisinden Corbado tarafından derlenmiştir.
 
-**Corbado Passkey Benchmark 2026, Q1 2026 üretim trafiği** ([Corbado](https://www.corbado.com/passkey-benchmark-2026/passkey-authentication-success-rate)):
+| Adım | Oran |
+|---|---|
+| Başlangıç sayfasından tarayıcı istemine | %48 |
+| Tarayıcı isteminden karekod taramasına | %29; kritik kopuş buradadır |
+| Karekod taramasından kimlik doğrulayıcı başarısına | %64 |
+| Kimlik doğrulayıcıdan açık oturuma | %89 |
 
-| Platform | Başarı oranı | Cross-device gerektiren pay |
+Uçtan uca on Android kullanıcısından birinden azı cihazlar arası girişi tamamlamaktadır.
+
+Corbado'nun 2026 karşılaştırması, 2026'nın ilk çeyreği üretim trafiğinden, şöyledir.
+
+| Platform | Başarı oranı | Cihazlar arası gerektiren pay |
 |---|---|---|
-| iOS web | %85–95 | %0–5 |
-| Android web | %70–85 | %5–10 |
-| macOS web | %70–85 | %10–15 |
-| **Windows 10/11 web** | **%45–60** | **%40–65** |
+| iOS web | %85 ile %95 | %0 ile %5 |
+| Android web | %70 ile %85 | %5 ile %10 |
+| macOS web | %70 ile %85 | %10 ile %15 |
+| Windows 10 ile 11 web | %45 ile %60 | %40 ile %65 |
 
-Bilinen cihaz (hatırlanan/yerel passkey): %95–99. Bilinmeyen cihaz (identifier-first): %55–95.
+Bilinen cihazda, yani hatırlanan ya da yerel geçiş anahtarında başarı %95 ile %99'dur. Bilinmeyen cihazda, yani önce tanımlayıcı akışında %55 ile %95'tir.
 
-⚠️ Metodoloji şeffaflığı sınırlı — Corbado Research kendi müşteri trafiği; ülke/dikey kırılımlar ücretli katmanda. Ama **Windows'un felaket olduğu** yönü Google funnel verisiyle tutarlı ve teknik olarak açıklanabilir (Windows 10'da Bluetooth/hybrid transport eksikliği).
+Metodoloji şeffaflığı sınırlıdır; Corbado kendi müşteri trafiğini kullanmakta ile ülke ve dikey kırılımlar ücretli katmandadır. Ancak Windows'un felaket olduğu yönü Google huni verisiyle tutarlıdır ile teknik olarak açıklanabilirdir; Windows 10'da Bluetooth ve hibrit taşıma eksikliği vardır.
 
-**Neden başarısız oluyor:** hybrid transport kullanıcıdan iki donanımı, bir kamerayı, bir radyoyu ve daha önce hiç görmediği bir zihinsel modeli koordine etmesini istiyor. Bluetooth yoksa, tarayıcı davranışı platforma göre değişiyorsa veya kurumsal ağ yolu kısıtlıysa kullanıcı **yalnızca jenerik bir timeout** görüyor ([Corbado — QR login failure](https://www.corbado.com/blog/qr-login-failure)).
+Neden başarısız olduğu şudur: hibrit taşıma kullanıcıdan iki donanımı, bir kamerayı, bir radyoyu ile daha önce hiç görmediği bir zihinsel modeli koordine etmesini istemektedir. Bluetooth yoksa, tarayıcı davranışı platforma göre değişiyorsa ya da kurumsal ağ yolu kısıtlıysa kullanıcı yalnızca jenerik bir zaman aşımı görmektedir.
 
-⚠️ **DOĞRULANMADI:** "FIDO Alliance user testing (2024–2025) katılımcıların yaklaşık yarısının telefonu almaya gitmekten caydığını buldu" — MojoAuth üzerinden ikinci elden aktarılıyor, FIDO'nun kendi yayınında doğrulanamadı.
+Bir doğrulanamayan nokta vardır: FIDO Alliance'ın 2024 ile 2025 kullanıcı testlerinin katılımcıların yaklaşık yarısının telefonu almaya gitmekten caydığını bulduğu iddiası ikinci elden aktarılmakta ile FIDO'nun kendi yayınında doğrulanamamaktadır.
 
-### 2.5 Signal API (WebAuthn L3) — hangi UX problemini çözüyor
+### 2.5 Sinyal API'si, WebAuthn üçüncü seviye, hangi kullanıcı deneyimi problemini çözmektedir
 
-[Chrome for Developers — Signal API](https://developer.chrome.com/docs/identity/webauthn-signal-api):
-
-| Metot | Çözdüğü problem | Kritik uyarı |
+| Yöntem | Çözdüğü problem | Kritik uyarı |
 |---|---|---|
-| `signalUnknownCredential()` | Sunucuda silinen credential'ı passkey provider hâlâ öneriyor → başarısız giriş denemeleri. Başarısız denemeden sonra çağrılır, provider yereldeki kaydı siler. | **Oturum kapalıyken çağrılması güvenli** — tek bir credential ID'ye referans verir, kullanıcının kaç passkey'i olduğunu sızdırmaz |
-| `signalAllAcceptedCredentials()` | Kullanıcı ayarlarda passkey silince provider listesi tutarsız kalıyor | **Asla kısmi listeyle çağırma.** Eksik credential'lar gizlenir ve meşru girişleri bloklar; boş liste tüm passkey'leri gizler. Yalnızca **doğrulanmış kullanıcı** için, **tam liste** ile |
-| `signalCurrentUserDetails()` | Kullanıcı adı/görünen ad değişince provider metadata'sı eskiyor | Kullanıcının provider içindeki manuel düzenlemeleri otoriter kabul edilir, RP ezemez |
+| Bilinmeyen kimlik bilgisi sinyali | Sunucuda silinen bir kimlik bilgisini geçiş anahtarı sağlayıcısı hâlâ önermekte ile başarısız giriş denemeleri oluşmaktadır. Başarısız denemeden sonra çağrılmakta ile sağlayıcı yereldeki kaydı silmektedir | Oturum kapalıyken çağrılması güvenlidir; tek bir kimlik bilgisi tanımlayıcısına referans vermekte ile kullanıcının kaç geçiş anahtarı olduğunu sızdırmamaktadır |
+| Tüm kabul edilen kimlik bilgileri sinyali | Kullanıcı ayarlarda geçiş anahtarı silince sağlayıcı listesi tutarsız kalmaktadır | Asla kısmi bir listeyle çağrılmamalıdır; eksik kimlik bilgileri gizlenmekte ile meşru girişler bloklanmaktadır, boş liste tüm geçiş anahtarlarını gizlemektedir. Yalnızca doğrulanmış kullanıcı için ile tam listeyle çağrılmalıdır |
+| Mevcut kullanıcı detayları sinyali | Kullanıcı adı ya da görünen ad değişince sağlayıcı metadata'sı eskimektedir | Kullanıcının sağlayıcı içindeki elle düzenlemeleri otoriter kabul edilmekte ile bağlı taraf bunu ezememektedir |
 
-**Destek:** Chrome 132 ve Edge 132 (Ocak 2025). Safari 26 destekleyici sinyaller verdi ama implemente etmedi. Firefox görüş bildirmedi. Google Password Manager üçünü de destekliyor; üçüncü taraf eklentiler kendi karar veriyor.
+Destek Chrome 132 ile Edge 132'dedir, Ocak 2025. Safari 26 destekleyici sinyaller vermiş ancak gerçeklememiştir. Firefox görüş bildirmemiştir. Google parola yöneticisi üçünü de desteklemekte ile üçüncü taraf eklentiler kendi karar vermektedir.
 
-Bu doğrudan "hangi cihazda passkey'im var" ve "passkey'i sildim ama hâlâ görünüyor" problemlerinin ilacı — ama **enumeration açısından da önemli**: `signalUnknownCredential` bilinçli olarak sızıntısız tasarlanmış, `signalAllAcceptedCredentials` ise değil (bu yüzden auth gerektiriyor).
+Bu doğrudan hangi cihazda geçiş anahtarım var ile geçiş anahtarını sildim ama hâlâ görünüyor problemlerinin ilacıdır. Numaralandırma açısından da önemlidir: bilinmeyen kimlik bilgisi sinyali bilinçli olarak sızıntısız tasarlanmıştır, tüm kabul edilenleri sinyalleyen yöntem ise değildir; bu yüzden kimlik doğrulama gerektirmektedir.
 
-### 2.6 Passkey + parola bir arada, "varsayılan yap" hamleleri
+### 2.6 Geçiş anahtarıyla parolanın bir arada olması ile varsayılan yap hamleleri
 
-- **Google, Ekim 2023:** passkey'ler kişisel hesaplar için varsayılan; kullanıcılar "skip password when possible" seçeneğini açık görüyor ([Google blog](https://blog.google/technology/safety-security/passkeys-default-google-accounts/))
-- **Microsoft, 1 Mayıs 2025:** yeni Microsoft hesapları **passwordless by default** — hiç parola kaydetmeden açılıyor; mevcut kullanıcılar ayarlardan parolayı silebiliyor ([Microsoft Security Blog](https://www.microsoft.com/en-us/security/blog/2025/05/01/pushing-passkeys-forward-microsofts-latest-updates-for-simpler-safer-sign-ins/))
-- **Entra:** parola kutusu Microsoft-managed tenant'larda varsayılan olmaktan çıkıyor, tam dağıtım Haziran 2026 sonu ⚠️ bu tarih ikincil kaynaklardan (Trackr.Live, PCWorld); Microsoft'un birincil duyurusunda doğrulanamadı
+Google Ekim 2023'te geçiş anahtarlarını kişisel hesaplar için varsayılan yapmıştır; kullanıcılar mümkün olduğunda parolayı atla seçeneğini açık görmektedir.
 
-**FIDO'nun resmî desen kütüphanesi** ([Passkey Central — Design Guidelines](https://www.passkeycentral.org/design-guidelines/)):
-- **Zorunlu desenler (2):** (1) Account Settings içinde passkey oluşturma/görme/yönetme, (2) passkey ile giriş + **diğer yöntemlere zarif fallback**
-- **Opsiyonel desenler:** hesap kurtarmadan sonra passkey oluşturma, cross-device sign-in, SMS OTP'yi devre dışı bırakma, passkey-first hesap oluşturma, passkey silme, cross-platform sign-in
+Microsoft 1 Mayıs 2025'te yeni hesapları varsayılan olarak parolasız yapmıştır; hesaplar hiç parola kaydetmeden açılmakta ile mevcut kullanıcılar ayarlardan parolayı silebilmektedir.
 
-Araştırma süreci: UX Working Group (32 şirketten 128 kişi), yıllık Ocak–Mayıs, 60–90 dk birebir uzaktan görüşmeler, ABD 18–70 yaş. **2023 araştırması kör/az gören, TalkBack/VoiceOver kullanan katılımcıları içeriyordu.**
+Entra tarafında parola kutusu Microsoft yönetimli kiracılarda varsayılan olmaktan çıkmakta ile tam dağıtım Haziran 2026 sonudur. Bu tarih ikincil kaynaklardandır ile Microsoft'un birincil duyurusunda doğrulanamamıştır.
+
+FIDO'nun resmî desen kütüphanesi iki zorunlu desen tanımlamaktadır: hesap ayarları içinde geçiş anahtarı oluşturma, görme ile yönetme; ile geçiş anahtarıyla giriş artı diğer yöntemlere zarif bir yedek yol. İsteğe bağlı desenler hesap kurtarmadan sonra geçiş anahtarı oluşturma, cihazlar arası giriş, kısa mesaj tek kullanımlık şifreyi devre dışı bırakma, önce geçiş anahtarıyla hesap oluşturma, geçiş anahtarı silme ile platformlar arası giriştir.
+
+Araştırma süreci şöyledir: kullanıcı deneyimi çalışma grubu 32 şirketten 128 kişiden oluşmakta, yıllık olarak Ocak ile Mayıs arasında çalışmakta ile 60 ile 90 dakikalık birebir uzaktan görüşmeler yapmaktadır; katılımcılar ABD'de 18 ile 70 yaş arasındadır. 2023 araştırması kör ile az gören, ekran okuyucu kullanan katılımcıları içermekteydi.
 
 ---
 
-## 3. MFA UX VE GÜVENLİK TAKASLARI
+## 3. Çok faktörlü kimlik doğrulama deneyimi ile güvenlik takasları
 
-### 3.1 MFA fatigue / push bombing
+### 3.1 Çok faktörlü yorgunluk ile anlık bildirim bombardımanı
 
-Saldırı Lapsus$ ve Yanluowang tarafından Microsoft, Cisco ve Uber ihlallerinde kanıtlanmış durumda ([BleepingComputer](https://www.bleepingcomputer.com/news/microsoft/microsoft-enforces-number-matching-to-fight-mfa-fatigue-attacks/)).
+Saldırı Lapsus$ ile Yanluowang tarafından Microsoft, Cisco ile Uber ihlallerinde kanıtlanmış durumdadır.
 
-**Number matching — Microsoft'un mevcut durumu (birincil kaynak, güncelleme 13 Şubat 2026):** [Microsoft Entra — How number matching works](https://learn.microsoft.com/en-us/entra/identity/authentication/how-to-mfa-number-match)
+Sayı eşleştirme konusunda Microsoft'un mevcut durumu, 13 Şubat 2026 güncellemesiyle, şudur.
 
-- **"Number matching is enabled for all Authenticator push notifications."** Zorunlu, kapatılamaz. "Can users opt out of number matching? **No.**"
-- Kapsam: MFA, SSPR, birleşik kayıt, AD FS adapter, NPS extension
-- **Kapsam dışı:** Apple Watch ve Android wearable — kullanıcı telefonu kullanmak zorunda
-- **Same-device istisnası:** Kullanıcı Teams/Outlook gibi Microsoft mobil uygulamalarında Authenticator ile **aynı cihazda** giriş yapıyorsa Yes/No yeterli. Gerekçe açıkça belirtiliyor: "There's no increased risk... because the prompt only shows on the device that initiated the sign in." Edge/Chrome/Safari'de sayı girmek zorunlu.
-- Eski Authenticator sürümü = kimlik doğrulama çalışmaz (yumuşak geçiş yok)
-- Azure MFA Server'da desteklenmiyor (deprecated)
+Sayı eşleştirme tüm kimlik doğrulama uygulaması anlık bildirimlerinde etkindir. Zorunludur ile kapatılamamaktadır; kullanıcılar devre dışı bırakamamaktadır. Kapsamı çok faktörlü doğrulama, kendin yap parola sıfırlama, birleşik kayıt, federasyon adaptörü ile ağ politika sunucusu uzantısıdır. Kapsam dışı olanlar Apple ile Android giyilebilir cihazlardır; kullanıcı telefonu kullanmak zorundadır. Aynı cihaz istisnası vardır: kullanıcı Teams ya da Outlook gibi Microsoft mobil uygulamalarında kimlik doğrulama uygulamasıyla aynı cihazda giriş yapıyorsa evet ile hayır yeterlidir. Gerekçe açıkça belirtilmektedir: istem yalnızca girişi başlatan cihazda gösterildiği için artan bir risk bulunmamaktadır. Tarayıcılarda sayı girmek zorunludur. Eski bir kimlik doğrulama uygulaması sürümü kimlik doğrulamanın çalışmaması demektir; yumuşak bir geçiş yoktur. Kullanımdan kaldırılmış sunucu ürününde desteklenmemektedir.
 
-**Argus için doğrudan uygulanabilir kural:** Push onayında ekran-cihaz eşleşmesi tespit edilebiliyorsa number matching gereksiz; edilemiyorsa zorunlu. Bu, Microsoft'un gerekçelendirdiği ve ölçtüğü bir ayrım.
+Argus için doğrudan uygulanabilir kural şudur: anlık bildirim onayında ekranla cihazın eşleştiği tespit edilebiliyorsa sayı eşleştirme gereksizdir; edilemiyorsa zorunludur. Bu, Microsoft'un gerekçelendirdiği ile ölçtüğü bir ayrımdır.
 
-CISA da number matching'i ayrı bir fact sheet ile öneriyor ([CISA](https://www.cisa.gov/sites/default/files/publications/fact-sheet-implement-number-matching-in-mfa-applications-508c.pdf)).
+CISA da sayı eşleştirmeyi ayrı bir bilgi notuyla önermektedir.
 
-⚠️ **DOĞRULANMADI:** "number matching canlı müşteri ortamlarında MFA fatigue saldırılarını **ortadan kaldırdı**" iddiası — ikincil kaynaklarda dolaşıyor, Microsoft'un birincil yayınında sayısal karşılığı bulunamadı.
+Bir doğrulanamayan nokta vardır: sayı eşleştirmenin canlı müşteri ortamlarında çok faktörlü yorgunluk saldırılarını ortadan kaldırdığı iddiası ikincil kaynaklarda dolaşmakta ancak Microsoft'un birincil yayınında sayısal karşılığı bulunamamaktadır.
 
-### 3.2 Adaptive / risk-based MFA'nın UX etkisi
+### 3.2 Uyarlanabilir ile riske dayalı çok faktörlü doğrulamanın kullanıcı deneyimi etkisi
 
-**En iyi birincil kaynak akademik:** Wiefling, Dürmuth, Lo Iacono — *"More Than Just Good Passwords? A Study on Usability and Security Perceptions of Risk-based Authentication"*, ACSAC 2020 ([arXiv:2010.00339](https://arxiv.org/abs/2010.00339), [PDF](https://www.acsac.org/2020/files/web/2b-1_wiefling_morethanjustgoodpasswords.pdf)).
+En iyi birincil kaynak akademiktir: Wiefling, Dürmuth ile Lo Iacono'nun ACSAC 2020'deki riske dayalı kimlik doğrulamanın kullanılabilirlik ile güvenlik algıları üzerine çalışması, arXiv 2010.00339.
 
-- Metodoloji: gruplar arası laboratuvar çalışması, **n=65**; iki RBA varyantı, bir 2FA varyantı, sadece-parola
-- Bulgu: RBA, incelenen 2FA varyantlarından **daha kullanılabilir** algılanıyor; sadece-paroladan **daha güvenli**, 2FA ile **karşılaştırılabilir güvenlikte** algılanıyor
-- RBA "daha az zaman alıcı" olarak algılanıyor
-- Yazarlar RBA'ya özgü kullanılabilirlik problemleri de gözlemleyip azaltma önerileri veriyor
+Metodolojisi gruplar arası bir laboratuvar çalışmasıdır; 65 katılımcı, iki riske dayalı varyant, bir iki faktörlü varyant ile yalnızca parola koşulu bulunmaktadır. Bulgusu şudur: riske dayalı kimlik doğrulama, incelenen iki faktörlü varyantlardan daha kullanılabilir algılanmaktadır; yalnızca paroladan daha güvenli, iki faktörlüyle karşılaştırılabilir güvenlikte algılanmaktadır. Daha az zaman alıcı olarak algılanmaktadır. Yazarlar bu yaklaşıma özgü kullanılabilirlik problemleri de gözlemleyip azaltma önerileri vermektedir.
 
-Bu, alandaki tek ciddi hakemli kullanılabilirlik verisi. Küçük örneklem (n=65), laboratuvar ortamı, 2020 — sınırları var ama satıcı içeriğinden kat kat güvenilir.
+Bu, alandaki tek ciddi hakemli kullanılabilirlik verisidir. Küçük örneklem, laboratuvar ortamı ile 2020 tarihi sınırlarıdır; ancak satıcı içeriğinden kat kat güvenilirdir.
 
-⚠️ **DOĞRULANMADI:** Adaptive MFA'nın prompt sayısını yüzde kaç azalttığına dair üretim verisi bulunamadı. LoginRadius/Palo Alto/miniOrange gibi kaynaklardaki "≤3 prompt/kullanıcı/hafta" gibi KPI'lar **hedef değerler**, ölçüm değil.
+Bir doğrulanamayan nokta vardır: uyarlanabilir çok faktörlü doğrulamanın istem sayısını yüzde kaç azalttığına dair üretim verisi bulunamamıştır. Satıcı kaynaklarındaki haftada kullanıcı başına üç istemin altı gibi göstergeler hedef değerlerdir, ölçüm değildir.
 
-### 3.3 "Beni hatırla" — nasıl güvenli implemente edilir
+### 3.3 Beni hatırla, nasıl güvenli gerçeklenmelidir
 
-**Microsoft'un konumu ve ölçülmüş takası** ([Entra — MFA prompts and session lifetime](https://learn.microsoft.com/en-us/entra/identity/authentication/concepts-azure-multi-factor-authentication-prompts-session-lifetime), güncelleme 13 Şubat 2026):
-
-En önemli cümle — bu tüm "sık sık yeniden doğrula" sezgisini tersine çeviriyor:
+Microsoft'un konumu ile ölçülmüş takası, 13 Şubat 2026 güncellemesiyle şöyledir. En önemli cümle tüm sık sık yeniden doğrula sezgisini tersine çevirmektedir.
 
 > "Asking users for credentials often seems like a sensible thing to do, but it can backfire. If users are trained to enter their credentials without thinking, they can unintentionally supply them to a malicious credential prompt."
 
-- **Varsayılan sign-in frequency: 90 günlük kayan pencere**
-- **"Remember multifactor authentication": 1–365 gün yapılandırılabilir**, kullanıcı "Don't ask again for X days" seçince **kalıcı çerez** koyar
-- **"Stay signed in?"** ayrı bir kalıcı çerez — hem birinci hem ikinci faktörü hatırlar, yalnızca tarayıcı istekleri için
-- **En kısıtlayıcı politika kazanır:** "Stay signed in" + "Remember MFA 14 gün" birlikteyse kullanıcı 14 günde bir yeniden doğrular
-- Microsoft **"Remember MFA"den Conditional Access Sign-in frequency'ye göçü** öneriyor; P1/P2 varsa yalnızca CA politikaları kullanılmalı
-- Uyarı: "Remember MFA"yi 90 günden kısa ayarlamak Office istemcileri için prompt sayısını **artırır**
-- Oturum, IT politikası ihlalinde (parola değişimi, uyumsuz cihaz, hesap devre dışı) **otomatik iptal ediliyor** — asıl güvenlik mekanizması bu, süre değil
-- Microsoft'un kendi tavsiyesi (Entra recommendation dokümanı): 90 gün ⚠️ ikincil kaynaktan aktarım
+Varsayılan giriş sıklığı 90 günlük kayan bir penceredir. Çok faktörlü doğrulamayı hatırla ayarı bir ile 365 gün arasında yapılandırılabilmekte ile kullanıcı belirli bir süre boyunca tekrar sorma seçeneğini işaretlediğinde kalıcı bir çerez konmaktadır. Oturumu açık tut ayrı bir kalıcı çerezdir; hem birinci hem ikinci faktörü hatırlamakta ile yalnızca tarayıcı istekleri için geçerlidir. En kısıtlayıcı politika kazanmaktadır: oturumu açık tut ile 14 günlük çok faktörlü hatırlama birlikteyse kullanıcı 14 günde bir yeniden doğrulamaktadır. Microsoft, çok faktörlü hatırlamadan koşullu erişim giriş sıklığına göçü önermektedir; birinci ya da ikinci kademe lisans varsa yalnızca koşullu erişim politikaları kullanılmalıdır. Bir uyarı vardır: çok faktörlü hatırlamayı 90 günden kısa ayarlamak Office istemcileri için istem sayısını artırmaktadır. Oturum, bilgi teknolojileri politikası ihlalinde, yani parola değişimi, uyumsuz cihaz ya da hesabın devre dışı bırakılmasında otomatik iptal edilmektedir; asıl güvenlik mekanizması budur, süre değil. Microsoft'un kendi tavsiyesi 90 gündür; bu ikincil kaynaktan aktarılmıştır.
 
-**Auth0'ın implementasyonu** ([Auth0 — Customize MFA](https://auth0.com/docs/secure/multi-factor-authentication/customize-mfa)):
-- **Çerez tabanlı**
-- Idle timeout: varsayılan **7 gün** (1 saat – 30 gün aralığı)
-- Maximum lifetime: varsayılan **30 gün** (1 saat – 90 gün aralığı)
-- İki katmanlı: idle + absolute — doğru desen bu
-- API: `/api/v2/guardian/settings`; Actions içinde `allowRememberBrowser`
-- Auth0'ın yasal uyarısı: "Customers are responsible for any diminishment in security posture resulting from a change to the 'Remember Me' Session Behavior lifespan"
+Auth0'ın gerçeklemesi şöyledir: çerez tabanlıdır. Boşta kalma zaman aşımı varsayılanı yedi gündür, bir saatle 30 gün arasında ayarlanabilmektedir. Azami ömür varsayılanı 30 gündür, bir saatle 90 gün arasında ayarlanabilmektedir. İki katmanlıdır, yani boşta kalma artı mutlak; doğru desen budur. Yönetim API'sindeki koruma ayarları uç noktasıyla ile eylemler içindeki tarayıcıyı hatırlamaya izin ver bayrağıyla kontrol edilmektedir. Auth0'ın yasal uyarısı şudur: müşteriler, beni hatırla oturum davranışı ömrünü değiştirmekten kaynaklanan güvenlik duruşu zayıflamasından sorumludur.
 
-**Argus için sentez:** çerez + idle timeout + absolute lifetime + politika olayında (parola değişimi, MFA yöntemi değişimi, cihaz uyumsuzluğu, admin iptali) **zorunlu geçersizleştirme**. Auth0'ın 7/30 gün varsayılanları makul bir başlangıç noktası; Microsoft'un 1–365 gün aralığı fazla geniş.
+Argus için sentez şudur: çerez artı boşta kalma zaman aşımı artı mutlak ömür artı politika olayında zorunlu geçersizleştirme. Politika olayları parola değişimi, çok faktörlü yöntem değişimi, cihaz uyumsuzluğu ile yönetici iptalidir. Auth0'ın yedi ile 30 gün varsayılanları makul bir başlangıç noktasıdır; Microsoft'un bir ile 365 gün aralığı fazla geniştir.
 
-### 3.4 Step-up authentication — RFC 9470
+### 3.4 Yükseltilmiş kimlik doğrulama, RFC 9470
 
-[RFC 9470, Eylül 2023](https://www.rfc-editor.org/info/rfc9470/) — Vittorio Bertocci (Auth0/Okta) ve Brian Campbell (Ping).
+RFC 9470, Eylül 2023, yazarları Auth0 ve Okta'dan Vittorio Bertocci ile Ping'den Brian Campbell'dır.
 
-Çözdüğü problem: authorization server yetkilendirme anında bildiğine göre karar verir; ama API, isteğin riskli olup olmadığını **istek anında** öğrenir.
+Çözdüğü problem şudur: yetkilendirme sunucusu yetkilendirme anında bildiğine göre karar vermektedir; ancak API, isteğin riskli olup olmadığını istek anında öğrenmektedir.
 
-Mekanizma:
-- Resource server `401` + `WWW-Authenticate` içinde **`insufficient_user_authentication`** hata kodu döner
-- İki challenge parametresi: **`acr_values`** (kimlik doğrulama gücü) ve **`max_age`** (tazelik) — OIDC authorization request parametrelerini yeniden kullanır
-- Client, kullanıcı ajanını AS'ye bu parametrelerle yönlendirir
+Mekanizması şöyledir: kaynak sunucu 401 ile birlikte kimlik doğrulama yetersiz hata kodunu bir kimlik doğrulama başlığında döndürmektedir. İki meydan okuma parametresi bulunmaktadır: kimlik doğrulama gücünü belirten bağlam sınıfı değerleri ile tazeliği belirten azami yaş; ikisi de OIDC yetkilendirme isteği parametrelerini yeniden kullanmaktadır. İstemci, kullanıcı aracısını bu parametrelerle yetkilendirme sunucusuna yönlendirmektedir.
 
-**Kritik ayrım:** `acr_values` **tavsiye niteliğinde**, `max_age` **zorlanabilir**. OIDC'ye göre AS `acr_values`ı karşılamayı *deneyebilir* (MAY) ama `max_age` aşıldığında yeniden kimlik doğrulamayı **denemek zorundadır** (MUST) ([WorkOS açıklaması](https://workos.com/blog/rfc-9470-step-up-authentication-challenge), [Authlete](https://www.authlete.com/developers/stepup_authn/)).
+Kritik ayrım şudur: bağlam sınıfı değerleri tavsiye niteliğindedir, azami yaş zorlanabilirdir. OIDC'ye göre sunucu bağlam sınıfı değerlerini karşılamayı deneyebilir ancak azami yaş aşıldığında yeniden kimlik doğrulamayı denemek zorundadır.
 
-**UX'e yansıması:** Kullanıcı akışın ortasında (örn. para transferi onaylarken) aniden yeniden doğrulamaya atılıyor. Argus'ta bunun kullanıcıya **neden** olduğunu açıklayan bir ekran gerekiyor — aksi halde phishing'den ayırt edilemez. Microsoft'un yukarıdaki "kullanıcıyı düşünmeden credential girmeye alıştırma" uyarısı tam da buraya bakıyor.
+Kullanıcı deneyimine yansıması şudur: kullanıcı akışın ortasında, örneğin bir para transferini onaylarken, aniden yeniden doğrulamaya atılmaktadır. Argus'ta bunun kullanıcıya neden olduğunu açıklayan bir ekran gerekmektedir; aksi hâlde kimlik avından ayırt edilememektedir. Microsoft'un yukarıdaki kullanıcıyı düşünmeden kimlik bilgisi girmeye alıştırma uyarısı tam da buraya bakmaktadır.
 
 ---
 
-## 4. HOSTED LOGIN vs EMBEDDED (SDK)
+## 4. Barındırılan girişle gömülü girişin karşılaştırması
 
-### 4.1 Neden hosted daha güvenli — birincil kaynak argümanları
+### 4.1 Barındırılanın neden daha güvenli olduğu, birincil kaynak argümanları
 
-**Okta'nın resmî konumu** ([Okta — Redirect vs embedded authentication](https://developer.okta.com/docs/concepts/redirect-vs-embedded/)):
-- "Okta recommends the Okta-hosted widget for most integrations"
-- Redirect: XSS yüzeyini azaltır, güvenlik güncellemelerini Okta yönetir
-- Embedded: "slightly increased risk in security" — Okta doğru implementasyonu garanti edemez; **"XSS attacks on your app may result in stolen sign-in credentials"**
-- Embedded ile **kaybedilenler**: uygulamalar arası otomatik SSO, Okta kontrollü politika güncellemeleri, kod değişikliği olmadan yeni özelliklere erişim
-- Okta'nın hosted widget'ı "the recommended method for the highest levels of identity security"
+Okta'nın resmî konumu şudur: çoğu tümleştirme için Okta barındırmalı bileşen önerilmektedir. Yönlendirme XSS yüzeyini azaltmakta ile güvenlik güncellemelerini Okta yönetmektedir. Gömülü yaklaşım güvenlikte hafif bir risk artışı getirmektedir; Okta doğru gerçeklemeyi garanti edememekte ile uygulamanızdaki XSS saldırıları çalınmış giriş kimlik bilgileriyle sonuçlanabilmektedir. Gömülüyle kaybedilenler uygulamalar arası otomatik çoklu oturum açma, Okta kontrollü politika güncellemeleri ile kod değişikliği olmadan yeni özelliklere erişimdir. Okta'nın barındırılan bileşeni en yüksek kimlik güvenliği seviyeleri için önerilen yöntem olarak tanımlanmaktadır.
 
-**Auth0'ın konumu** ([Auth0 — Hosted vs embedded login](https://auth0.com/docs/authenticate/login/universal-vs-embedded-login)): temel argüman **otomatik güncelleme** — "Auth0 delivers security updates to the login experience transparently"; embedded'da güncellemeleri sen dağıtırsın. Ayrıca yerleşik cross-application SSO.
+Auth0'ın konumunda temel argüman otomatik güncellemedir: Auth0 giriş deneyimine güvenlik güncellemelerini şeffaf biçimde teslim etmekte, gömülüde güncellemeleri siz dağıtmaktasınız. Ayrıca yerleşik uygulamalar arası çoklu oturum açma vardır.
 
-**Embedded'ın somut, belgelenmiş kırılganlığı** ([Auth0 — Cross-Origin Authentication](https://auth0.com/docs/authenticate/login/cross-origin-authentication)):
-- Cross-origin auth **üçüncü taraf çerezlere** bağımlı
-- "Modern browsers (including Firefox, Safari with ITP, and Chromium-based browsers) restrict or block third-party cookies by default"
-- Sonuç: "Web applications relying on third-party cookies for cross-origin authentication **may fail** in those browsers"
-- Çözüm: uygulama ve tenant aynı **top-level domain**'de olmalı (`example.com` + `login.example.com`) → çerez first-party olur
-- **Yalnızca username/password directory doğrulaması** için çalışır; sosyal ve kurumsal federasyon zaten redirect kullanır
+Gömülünün somut ile belgelenmiş kırılganlığı kökenler arası kimlik doğrulamadır. Bu, üçüncü taraf çerezlere bağımlıdır. Auth0'ın kendi ifadesiyle modern tarayıcılar, yani Firefox, akıllı izleme önlemeli Safari ile Chromium tabanlı tarayıcılar, üçüncü taraf çerezleri varsayılan olarak kısıtlamakta ya da engellemektedir. Sonuç, kökenler arası kimlik doğrulama için üçüncü taraf çerezlere dayanan web uygulamalarının o tarayıcılarda başarısız olabilmesidir. Çözüm, uygulamayla kiracının aynı üst düzey alan adında olmasıdır; böylece çerez birinci taraf olmaktadır. Yalnızca kullanıcı adı ile parola dizin doğrulaması için çalışmaktadır; sosyal ile kurumsal federasyon zaten yönlendirme kullanmaktadır.
 
-Yani embedded login 2026'da yalnızca custom domain ile ayakta duruyor — ki bu zaten hosted'a doğru bir adım.
+Yani gömülü giriş 2026'da yalnızca özel alan adıyla ayakta durmaktadır; ki bu zaten barındırılana doğru bir adımdır.
 
-**Gerçek riskler (sentez):** (a) credential uygulama koduna değer → uygulamadaki her XSS bir credential hırsızlığıdır; (b) kullanıcı artık "doğru origin'de miyim" kontrolünü yapamaz → phishing direnci kaybolur; (c) WebAuthn RP ID uygulama origin'ine bağlanır → çok-origin dağıtımda passkey parçalanır.
+Gerçek riskler sentez olarak şunlardır: kimlik bilgisi uygulama koduna değmekte ile uygulamadaki her XSS bir kimlik bilgisi hırsızlığı olmaktadır; kullanıcı artık doğru kökende miyim kontrolünü yapamamakta ile kimlik avı direnci kaybolmaktadır; ile WebAuthn bağlı taraf kimliği uygulama kökenine bağlanmakta ve çok kökenli dağıtımda geçiş anahtarları parçalanmaktadır.
 
-### 4.2 RFC 10017 — Browser-Based Apps BCP (Ağustos 2026)
+### 4.2 RFC 10017, tarayıcı tabanlı uygulamalar en iyi uygulama belgesi, Ağustos 2026
 
-**BCP 212, RFC 10017**, yazarlar A. Parecki, P. De Ryck, D. Waite; 49 sayfa; IETF OAuth WG ([RFC Editor](https://www.rfc-editor.org/info/rfc10017/)).
+BCP 212, yani RFC 10017, yazarları A. Parecki, P. De Ryck ile D. Waite; 49 sayfadır ile IETF OAuth çalışma grubundandır.
 
-Önerilen mimariler:
+Önerilen mimariler şunlardır.
 
 | Mimari | Bölüm | Değerlendirme |
 |---|---|---|
-| **Backend for Frontend (BFF)** | §6.1 | **En güvenli.** BFF confidential client'tır, token'ları sunucuda tutar, tüm resource isteklerini proxy'ler. Token hırsızlığını ve saldırganın taze token almasını engeller; client hijacking'i engelleyemez |
-| **Token-Mediating Backend** | §6.2 | Orta yol. Backend confidential client olarak token alır ama access token'ı tarayıcıya verir. Refresh token hırsızlığını engeller, **access token'ı XSS'e açık bırakır** |
-| **Browser-Based OAuth Client** | §6.3 | Tüm OAuth tarayıcıda, public client. "Significantly increases the attack surface" ve **"not recommended for business applications, sensitive applications, and applications that handle personal data"** (§6.3.4.3) |
+| Ön yüz için arka uç | 6.1 | En güvenlidir. Arka uç gizli bir istemcidir, token'ları sunucuda tutmakta ile tüm kaynak isteklerini vekillemektedir. Token hırsızlığını ile saldırganın taze token almasını engellemekte ancak istemci ele geçirmeyi engelleyememektedir |
+| Token aracılı arka uç | 6.2 | Orta yoldur. Arka uç gizli istemci olarak token almakta ancak erişim token'ını tarayıcıya vermektedir. Yenileme token'ı hırsızlığını engellemekte, erişim token'ını XSS'e açık bırakmaktadır |
+| Tarayıcı tabanlı OAuth istemcisi | 6.3 | Tüm OAuth tarayıcıdadır ile açık istemcidir. Saldırı yüzeyini anlamlı ölçüde artırmaktadır ile iş uygulamaları, hassas uygulamalar ve kişisel veri işleyen uygulamalar için önerilmemektedir |
 
-Diğer kritik hükümler:
-- **§7.2: "Browser-based clients MUST NOT use the Implicit grant type"**
-- **§7.3:** Resource Owner Password Credentials — önerilmiyor
-- **§7.4:** OAuth akışını Service Worker'da yürütmek önerilmiyor
-- **§6.3.2.3:** Tarayıcı client'ları refresh token kullanıyorsa **rotation veya sender-constrained** zorunlu; AS refresh token ömrünü ilk verilme ömrüyle sınırlamalı
-- **§5.1.3:** Hiçbir depolama yaklaşımı en tehlikeli saldırıyı — saldırganın bağımsız bir OAuth akışı başlatarak **taze token alması**nı — engellemez
-- **§6.3.4.2.2:** DPoP çalınan access token'ın dışa aktarımını engeller ama saldırganın kendi anahtar çiftiyle taze token almasını engellemez
-- **§7.1 (First-Party Same-Domain Applications):** Frontend ve backend aynı domain'deyse **OAuth gereksiz olabilir**. "Simple applications are made needlessly complex by using OAuth to replace the concept of session management." Cookie tabanlı session yeterli.
+Diğer kritik hükümler şunlardır. Tarayıcı tabanlı istemciler örtük yetki tipini kullanmamalıdır. Kaynak sahibi parola kimlik bilgileri önerilmemektedir. OAuth akışını bir servis işçisinde yürütmek önerilmemektedir. Tarayıcı istemcileri yenileme token'ı kullanıyorsa rotasyon ya da gönderen kısıtlama zorunludur ile sunucu yenileme token'ı ömrünü ilk verilme ömrüyle sınırlamalıdır. Hiçbir depolama yaklaşımı en tehlikeli saldırıyı, yani saldırganın bağımsız bir OAuth akışı başlatarak taze token almasını engellememektedir. DPoP çalınan bir erişim token'ının dışa aktarımını engellemekte ancak saldırganın kendi anahtar çiftiyle taze token almasını engellememektedir. Birinci taraf aynı alan adlı uygulamalar bölümünde şu denmektedir: ön yüzle arka uç aynı alan adındaysa OAuth gereksiz olabilir; basit uygulamalar oturum yönetimi kavramını OAuth ile değiştirerek gereksiz yere karmaşıklaştırılmaktadır. Çerez tabanlı oturum yeterlidir.
 
-**Argus için:** §7.1 doğrudan bizim admin console'umuz ve hosted login sayfamız hakkında. Aynı domain'deki first-party UI'lar için OAuth değil, doğrudan session cookie kullanmalıyız. SPA müşterilerimize ise BFF önermeliyiz ve dokümantasyonumuzda §6.3.4.3'ün "iş uygulamaları ve kişisel veri işleyen uygulamalar için önerilmez" ifadesini alıntılamalıyız.
+Argus için bu bölüm doğrudan yönetim konsolumuz ile barındırılan giriş sayfamız hakkındadır. Aynı alan adındaki birinci taraf arayüzler için OAuth değil doğrudan oturum çerezi kullanılmalıdır. Tek sayfa uygulaması müşterilerimize ön yüz için arka uç önerilmeli ile dokümantasyonumuzda iş uygulamaları ve kişisel veri işleyen uygulamalar için önerilmez ifadesi alıntılanmalıdır.
 
-### 4.3 Native uygulamalar — RFC 8252 hâlâ geçerli mi? Evet, ama bir nüansla
+### 4.3 Yerel uygulamalar: RFC 8252 hâlâ geçerli midir? Evet, bir nüansla
 
-[RFC 8252](https://www.rfc-editor.org/rfc/rfc8252.html) (Ekim 2017): native uygulamalardan OAuth authorization request'leri **yalnızca harici user-agent** (sistem tarayıcısı) üzerinden yapılmalı; embedded WebView phishing'e açıktır çünkü uygulama UI'ı kontrol eder ve credential'ı yakalayabilir.
+RFC 8252, Ekim 2017, yerel uygulamalardan OAuth yetkilendirme isteklerinin yalnızca harici bir kullanıcı aracısı, yani sistem tarayıcısı üzerinden yapılmasını istemektedir; gömülü web görünümü kimlik avına açıktır, çünkü uygulama arayüzü kontrol etmekte ile kimlik bilgisini yakalayabilmektedir.
 
-**Nüans — RFC 8252 yazarlarından William Denniss'in açıklaması (Kasım 2024, 2026'da hâlâ geçerli):** RFC 8252'nin hedefi **native uygulama içindeki embedded OAuth akışıydı**; politika, WebView'ı bir implementasyon detayı olarak kullanan **tarayıcı uygulamalarına** uygulanmak üzere yazılmadı. Ayrım: embedded WebView OAuth akışının sonunda kapsayıcı native uygulama bir **OAuth token** alır (ve umulur ki session cookie'yi atar); in-app browser'da ise kullanıcı IdP'de **oturum açık kalır** ve bu, o in-app browser'ın cookie jar'ında herhangi bir tarayıcı gibi kalıcıdır ([wdenniss.com — In-app browsers and RFC 8252](https://wdenniss.com/in-app-browsers-and-rfc-8252)).
+Nüans, RFC 8252 yazarlarından William Denniss'in Kasım 2024 tarihli açıklamasıdır ile 2026'da hâlâ geçerlidir: RFC'nin hedefi yerel uygulama içindeki gömülü OAuth akışıydı; politika, web görünümünü bir gerçekleme detayı olarak kullanan tarayıcı uygulamalarına uygulanmak üzere yazılmamıştır. Ayrım şudur: gömülü web görünümü OAuth akışının sonunda kapsayıcı yerel uygulama bir OAuth token'ı almakta ile umulur ki oturum çerezini atmaktadır; uygulama içi tarayıcıda ise kullanıcı sağlayıcıda oturumu açık kalmakta ile bu, o tarayıcının çerez kavanozunda herhangi bir tarayıcı gibi kalıcı olmaktadır.
 
-### 4.4 First-Party Apps draft'ı dengeyi nasıl değiştiriyor
+### 4.4 Birinci taraf uygulamalar taslağı dengeyi nasıl değiştirmektedir
 
-**draft-ietf-oauth-first-party-apps-04**, yayın **1 Temmuz 2026**, Standards Track, son kullanma 2 Ocak 2027 ([IETF Datatracker](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-first-party-apps-04)).
+`draft-ietf-oauth-first-party-apps-04`, yayın 1 Temmuz 2026, standartlar yolu, son kullanma 2 Ocak 2027.
 
-Authorization Challenge Endpoint tanımlıyor: first-party client kullanıcıdan yetkilendirmeyi **native bir deneyimle** alabilir — "an entirely browserless OAuth 2.0 experience", yalnızca beklenmedik/yüksek riskli/hata durumlarında tarayıcıya devrediyor.
+Bir yetkilendirme meydan okuması uç noktası tanımlamaktadır: birinci taraf istemci kullanıcıdan yetkilendirmeyi yerel bir deneyimle alabilmektedir, yani tamamen tarayıcısız bir OAuth deneyimi; yalnızca beklenmedik, yüksek riskli ya da hatalı durumlarda tarayıcıya devretmektedir.
 
-**Spec'in kendi güvenlik uyarıları — bunlar Argus için karar verici:**
-1. **Kötü niyetli uygulama taklidi:** sahte uygulama kullanıcıyı credential'ı doğrudan kendisine vermeye kandırabilir
-2. **Kullanıcı kafa karışıklığı:** "a new place the user is expected to enter their credentials" yaratıldığı için güvenli giriş konusunda kullanıcı eğitmek zorlaşıyor
-3. **Client impersonation:** güçlü client authentication olmadan saldırgan meşru uygulamayı taklit edebilir; spec **işletim sistemi attestation API'lerini** öneriyor
-4. **Credential stuffing:** doğrudan credential işleme yeni bir brute-force vektörü; session başına rate limiting öneriliyor
-5. AS **her aşamada** kendi risk değerlendirmesine göre redirect tabanlı akış talep **edebilir** (`redirect_to_web` hatası; client bunu ele almak zorunda)
-6. "designed to be used only for first-party applications when the authorization server also has a high degree of trust of the client"
+Şartnamenin kendi güvenlik uyarıları Argus için karar vericidir.
 
-**Yorum:** Bu draft, hosted login'in phishing direncini bilinçli olarak **feda ediyor** ve karşılığında UX alıyor. Argus'ta destekleyeceksek, client attestation zorunlu olmalı ve varsayılan kapalı olmalı.
+1. Kötü niyetli uygulama taklidi: sahte bir uygulama kullanıcıyı kimlik bilgisini doğrudan kendisine vermeye kandırabilmektedir.
+2. Kullanıcı kafa karışıklığı: kullanıcının kimlik bilgisini girmesi beklenen yeni bir yer yaratıldığı için güvenli giriş konusunda kullanıcı eğitmek zorlaşmaktadır.
+3. İstemci taklidi: güçlü istemci kimlik doğrulaması olmadan saldırgan meşru uygulamayı taklit edebilmektedir; şartname işletim sistemi kanıtlama API'lerini önermektedir.
+4. Kimlik bilgisi doldurma: doğrudan kimlik bilgisi işleme yeni bir kaba kuvvet vektörüdür; oturum başına hız sınırlama önerilmektedir.
+5. Sunucu her aşamada kendi risk değerlendirmesine göre yönlendirme tabanlı akış talep edebilmektedir; istemci bunu ele almak zorundadır.
+6. Şartname yalnızca birinci taraf uygulamalar için ile sunucunun istemciye yüksek derecede güven duyduğu durumlarda kullanılmak üzere tasarlanmıştır.
+
+Yorum şudur: bu taslak, barındırılan girişin kimlik avı direncini bilinçli olarak feda etmekte ile karşılığında kullanıcı deneyimi almaktadır. Argus'ta destekleneceksek istemci kanıtlaması zorunlu olmalı ile varsayılan kapalı olmalıdır.
 
 ---
 
-## 5. MARKALAMA, ÖZELLEŞTİRME VE ÇOK KİRACILIK
+## 5. Markalama, özelleştirme ile çok kiracılık
 
 ### 5.1 Üç ürünün yaklaşımı
 
 | Ürün | Motor | Kapsam | Kısıt |
 |---|---|---|---|
-| **Keycloak** | Apache FreeMarker | 5 tema tipi: login, account, admin, email, welcome. Realm başına seçilir; client login tema override edebilir | Tema JAR olarak `providers/` dizinine veya `themes/` klasörüne konur |
-| **Auth0 Universal Login** | **Liquid** page template | Prompt etrafındaki içerik (login box, MFA challenge). Tüm sayfalarda aynı template | **Custom Domain zorunlu**; yalnızca Management API ile güncellenebilir; Liquid'de JavaScript desteği sınırlı; `{%- auth0:head -%}` zorunlu |
-| **Okta** | Sign-In Widget + custom HTML/CSS/JS | Admin Console'da kod editörü; brand başına | **CSP zorlaması**; Enforced / Report-only modları |
+| Keycloak | Apache FreeMarker | Beş tema tipi: giriş, hesap, yönetim, e-posta ile karşılama. Alan başına seçilmekte ile istemci giriş temasını ezebilmektedir | Tema bir JAR olarak sağlayıcılar dizinine ya da temalar klasörüne konmaktadır |
+| Auth0 evrensel giriş | Liquid sayfa şablonu | İstemin etrafındaki içerik, yani giriş kutusu ile çok faktörlü meydan okuma. Tüm sayfalarda aynı şablon kullanılmaktadır | Özel alan adı zorunludur; yalnızca yönetim API'siyle güncellenebilmektedir; Liquid'de JavaScript desteği sınırlıdır ile belirli bir baş etiketi zorunludur |
+| Okta | Giriş bileşeni artı özel HTML, CSS ile JavaScript | Yönetim konsolunda bir kod düzenleyici bulunmakta ile marka başına yapılandırılmaktadır | İçerik güvenlik politikası zorlanmaktadır; zorlanan ile yalnızca rapor modları vardır |
 
-### 5.2 Özelleştirmenin güvenlik maliyeti — evet, gerçek bir vektör
+### 5.2 Özelleştirmenin güvenlik maliyeti, evet gerçek bir vektördür
 
-**Keycloak — en sert uyarı, kendi dokümanlarından** ([Keycloak — Working with themes](https://www.keycloak.org/ui-customization/themes)):
+Keycloak'ın kendi dokümanlarından en sert uyarı şudur.
 
 > "Themes contain FreeMarker templates that the server renders at runtime, so a malicious template can run code as the Keycloak process."
 
-Öneri: "Install themes only from trusted sources, and restrict write access to the `themes` directory."
+Önerisi temaların yalnızca güvenilir kaynaklardan kurulması ile temalar dizinine yazma erişiminin kısıtlanmasıdır.
 
-**Bu, çok kiracılı bir IdP için ölümcül bir bulgu.** Keycloak'ın tema modeli **kiracı-sağlamalı özelleştirme için tasarlanmamış** — server-side template execution demek, kiracının RCE alması demek. Argus çok kiracılı olacaksa Keycloak'ın FreeMarker modelini **kopyalamamalı**.
+Bu, çok kiracılı bir kimlik sağlayıcı için ölümcül bir bulgudur. Keycloak'ın tema modeli kiracının sağladığı özelleştirme için tasarlanmamıştır; sunucu tarafı şablon çalıştırma, kiracının uzaktan kod çalıştırma alması demektir. Argus çok kiracılı olacaksa Keycloak'ın bu modelini kopyalamamalıdır.
 
-**Auth0'ın yaklaşımı** ([Auth0 — Customize Universal Login Page Templates](https://auth0.com/docs/customize/login-pages/universal-login/customize-templates)): Liquid, kasıtlı olarak **templating dili, script dili değil**. Auth0'ın kendi güvenlik notu: URL'lerde değer kullanmadan önce JavaScript/data şemalarına karşı doğrulama yapılmalı; "the character allowlist does not eliminate all XSS risk in every rendering context".
+Auth0'ın yaklaşımında Liquid kasıtlı olarak bir şablonlama dilidir, bir betik dili değildir. Auth0'ın kendi güvenlik notu şudur: adreslerdeki değerler kullanılmadan önce JavaScript ile veri şemalarına karşı doğrulanmalıdır ile karakter izin listesi her işleme bağlamında tüm XSS riskini ortadan kaldırmamaktadır.
 
-**Okta'nın yaklaşımı** — CSP allowlist:
-- Sign-in ve error sayfalarından hangi URL'lere link verilebileceği kontrol ediliyor
-- "All external resources that aren't in this list are considered untrusted and aren't allowed to appear"
-- **Enforced** vs **Not enforced (Report-only)** modları + violation report URI
-- Gerekçe: "prevents the introduction of potentially malicious code to these pages"
-- Meta tag ile CSP özelleştirmesi önerilmiyor; Admin Console'daki trusted resources listesi kullanılmalı
-- ⚠️ "Maksimum 20 URI" ve HTTP header boyut limiti uyarısı arama sonuç özetinde geçti ama Okta'nın fetch edilen sayfasında doğrulanamadı — **DOĞRULANMADI**
-- Not: Okta'nın kendi widget'ı runtime'da inline script/style blokları enjekte ediyor ve bu sıkı CSP'yi ihlal edebiliyor; `cspNonce` parametresi bunun için var ([Okta Sign-In Widget](https://github.com/okta/okta-signin-widget)). Yani widget'ın kendisi CSP ile gerilim içinde.
+Okta'nın yaklaşımı bir içerik güvenlik politikası izin listesidir. Giriş ile hata sayfalarından hangi adreslere bağlantı verilebileceği kontrol edilmektedir. Bu listede olmayan tüm dış kaynaklar güvenilmez sayılmakta ile görünmelerine izin verilmemektedir. Zorlanan ile yalnızca rapor modları artı bir ihlal rapor adresi bulunmaktadır. Gerekçe bu sayfalara potansiyel olarak kötü amaçlı kod girmesini önlemektir. Meta etiketiyle politika özelleştirmesi önerilmemekte ile yönetim konsolundaki güvenilir kaynaklar listesi kullanılmalıdır. En fazla 20 adres ile HTTP başlık boyutu limiti uyarısı arama sonuç özetinde geçmiş ancak Okta'nın çekilen sayfasında doğrulanamamıştır. Bir not gerekmektedir: Okta'nın kendi bileşeni çalışma zamanında satır içi betik ile stil blokları enjekte etmekte ile bu, sıkı bir politikayı ihlal edebilmektedir; bunun için bir tek kullanımlık değer parametresi bulunmaktadır. Yani bileşenin kendisi politikayla gerilim içindedir.
 
-**Argus için model:** Okta'nın CSP-allowlist + Auth0'ın script-siz templating dili kombinasyonu. Kiracıya **asla** server-side template execution verme. Kiracı-sağlamalı JS varsa, ayrı bir origin'de sandbox'lanmış iframe dışında kabul etme.
+Argus için model şudur: Okta'nın izin listesiyle Auth0'ın betiksiz şablonlama dilinin birleşimi. Kiracıya asla sunucu tarafı şablon çalıştırma verilmemelidir. Kiracının sağladığı JavaScript varsa ayrı bir kökende kum havuzuna alınmış bir çerçeve dışında kabul edilmemelidir.
 
-### 5.3 Kiracı başına custom domain — passkey RP ID sonucu
+### 5.3 Kiracı başına özel alan adı ile geçiş anahtarı bağlı taraf kimliği sonucu
 
-Bu, çok kiracılıkta en sert kısıt.
+Bu, çok kiracılıkta en sert kısıttır.
 
-**Okta'nın belgelediği kurallar** ([Okta — Passkeys and custom domains](https://developer.okta.com/docs/guides/custom-passkeys/main/)):
-- RP ID, çağıran origin'in **effective domain'i** ya da onun **kaydedilebilir bir alan adı soneki (registrable domain suffix)** olmalı. `login.example.com` origin'i için `login.example.com` **ve** `example.com` geçerlidir; `com` geçerli **değildir** — eTLD+1 alt sınırdır. ⚠️ *Düzeltme (2. inceleme turu): bu satır önceden ilişkiyi ters kuruyordu ("eTLD+1 veya onun suffix'i"), ki bu okuma `com`'u geçerli RP ID gösterirdi.*
-- Okta custom domain (`login.globex.com`): standart custom domain kurulumuyla zaten doğrulanmış
-- Root domain (`globex.com`): altında doğrulanmış bir custom domain **ve** ayrı TXT record doğrulaması gerekir
-- **RP ID değişirse:** "Existing passkey enrollments aren't deleted when you set a new RP ID. Those enrollments remain in the system, but **the browser doesn't present them at sign-in**." → kullanıcı yeniden kaydolmak zorunda
-- Auth0 tarafında da aynı: RP ID özelleştirilince diğer domain'lerdeki tüm passkey'ler kullanılamaz hale gelir; **custom domain passkey'lerden ÖNCE yapılandırılmalı** ([Auth0 passkey docs](https://auth0.com/docs/authenticate/database-connections/passkeys/configure-passkey-policy))
+Okta'nın belgelediği kurallar şunlardır. Bağlı taraf kimliği, çağıran kökenin etkin alan adı ya da onun kaydedilebilir bir alan adı soneki olmalıdır. Bir giriş alt alan adı kökeni için hem o alt alan adı hem apeks alan adı geçerlidir; üst düzey alan adının kendisi geçerli değildir, yani etkin üst düzey alan artı bir alt sınırdır. Okta özel alan adı standart kurulumla zaten doğrulanmıştır. Kök alan adı için altında doğrulanmış bir özel alan adı ile ayrı bir metin kaydı doğrulaması gerekmektedir. Bağlı taraf kimliği değişirse mevcut geçiş anahtarı kayıtları silinmemekte, sistemde kalmakta ancak tarayıcı bunları girişte sunmamaktadır; kullanıcı yeniden kaydolmak zorundadır. Auth0 tarafında da aynıdır: bağlı taraf kimliği özelleştirilince diğer alan adlarındaki tüm geçiş anahtarları kullanılamaz hâle gelmektedir ile özel alan adı geçiş anahtarlarından önce yapılandırılmalıdır.
 
-**Çok-domain çözümü: Related Origin Requests (ROR)** ([passkeys.dev — Related Origins](https://passkeys.dev/docs/advanced/related-origins/)):
-- RP, RP ID domain'i altında `/.well-known/webauthn` barındırır (örn. `https://shopping.com/.well-known/webauthn`)
-- Dosya, o RP ID kapsamında geçerli origin dizisini içerir
-- Origin RP ID ile eşleşmezse client bu endpoint'i sorgular
-- **Label limiti:** WebAuthn en az 5 benzersiz label desteği şart koşuyor; **5'ten fazlasını destekleyen bilinen client yok — 5 pratik maksimum**. Label başına onlarca ccTLD olabilir
-- Runtime tespit: `PublicKeyCredential.getClientCapabilities()` içinde `relatedOrigins`
-- Okta root domain RP ID için dosyayı **sen** barındırırsın; Okta custom domain için Okta barındırır
+Çok alan adlı çözüm ilgili köken istekleridir. Bağlı taraf, kendi kimlik alan adı altında iyi bilinen bir WebAuthn dosyası barındırmaktadır. Dosya, o kimlik kapsamında geçerli kökenlerin dizisini içermektedir. Köken kimlikle eşleşmezse istemci bu uç noktayı sorgulamaktadır. Etiket limiti şudur: WebAuthn en az beş benzersiz etiket desteğini şart koşmaktadır ile beşten fazlasını destekleyen bilinen bir istemci yoktur; beş pratik azamidir. Etiket başına onlarca ülke alan adı olabilmektedir. Çalışma zamanı tespiti istemci yetenekleri çağrısındaki ilgili kökenler bayrağıyla yapılmaktadır. Okta'da kök alan adı kimliği için dosyayı siz barındırmakta, özel alan adı için Okta barındırmaktadır.
 
-**Argus için sonuç:** Kiracı başına custom domain + passkey birlikte tasarlanmalı, sonradan eklenemez. Kiracı sayısı 5 label'ı aşacaksa (ki aşacak), her kiracı **kendi RP ID'sini** almalı — paylaşımlı RP ID + ROR ölçeklenmiyor. Bu da "kiracı domain değiştirirse passkey'leri ölür" gerçeğini kalıcı kılıyor; kiracı onboarding'inde domain kararı **geri dönülemez** olarak işaretlenmeli.
+Argus için sonuç şudur: kiracı başına özel alan adıyla geçiş anahtarı birlikte tasarlanmalıdır, sonradan eklenememektedir. Kiracı sayısı beş etiketi aşacaksa, ki aşacaktır, her kiracı kendi bağlı taraf kimliğini almalıdır; paylaşımlı kimlikle ilgili kökenler ölçeklenmemektedir. Bu da kiracı alan adı değiştirirse geçiş anahtarlarının öleceği gerçeğini kalıcı kılmaktadır; kiracı katılımında alan adı kararı geri dönülemez olarak işaretlenmelidir.
 
 ### 5.4 Yerelleştirme
 
-**Auth0 Universal Login** ([Auth0 — Universal Login internationalization](https://auth0.com/docs/customize/internationalization-and-localization/universal-login-internationalization)):
-- **80+ dil**, bölgesel varyantlar dahil
-- **RTL:** Arapça (standart, Mısır, Suudi Arabistan), İbranice, Farsça, Urduca. **"Right-to-left language support is available in Early Access"** — WCAG 2.2 AA uyumu gerektiriyor ve HTML template'lerde `dir` elemanı olmalı
-- Dil seçim önceliği: `ui_locales` → tenant'ta etkin diller → tarayıcı `Accept-Language` → varsayılan
-- `enabled_locales` Management API ile ayarlanıyor
-- **Sınırlar:** `ui_locales` yalnızca OAuth 2.0'da çalışır (SAML/WS-Fed'de değil); **upstream IdP'lere iletilmez**; consent sayfasındaki scope'lar yerelleştirilemez
+Auth0 evrensel giriş tarafında durum şöyledir: bölgesel varyantlar dahil 80'den fazla dil desteklenmektedir. Sağdan sola diller Arapçanın üç varyantı, İbranice, Farsça ile Urducadır; sağdan sola dil desteği erken erişimdedir, WCAG 2.2 ikinci seviye uyumu gerektirmekte ile HTML şablonlarında yön özniteliği bulunmalıdır. Dil seçim önceliği arayüz yerel ayarı parametresi, kiracıda etkin diller, tarayıcının kabul edilen dil başlığı ile varsayılandır. Etkin yerel ayarlar yönetim API'siyle belirlenmektedir. Sınırları şunlardır: arayüz yerel ayarı parametresi yalnızca OAuth 2.0'da çalışmakta, SAML ile WS-Federation'da çalışmamaktadır; yukarı akış sağlayıcılara iletilmemektedir; ile rıza sayfasındaki kapsamlar yerelleştirilememektedir.
 
-**Keycloak** ([Keycloak Server Admin Guide — Themes/i18n](https://www.keycloak.org/docs/latest/server_admin/index.html#_themes)):
-- Realm Settings > Localization'dan realm başına açılır
-- Locale öncelik zinciri (7 kademe): kullanıcı UI seçimi → kullanıcı profil tercihi → client `ui_locales` → tarayıcı çerezi → `Accept-Language` → realm varsayılanı → İngilizce
-- `kc_locale` parametresi de destekleniyor; seçim **kalıcı çerezde** saklanıyor
-- Realm'e özgü metinler Localization sekmesinden **tema dosyalarını değiştirmeden** override edilebiliyor
-- ⚠️ Varsayılan gelen locale listesi dokümanda açıkça listelenmiyor — **DOĞRULANMADI**
+Keycloak tarafında yerelleştirme alan ayarlarından alan başına açılmaktadır. Yerel ayar öncelik zinciri yedi kademelidir: kullanıcı arayüz seçimi, kullanıcı profil tercihi, istemci arayüz yerel ayarı, tarayıcı çerezi, kabul edilen dil başlığı, alan varsayılanı ile İngilizce. Bir yerel ayar parametresi de desteklenmekte ile seçim kalıcı bir çerezde saklanmaktadır. Alana özgü metinler yerelleştirme sekmesinden tema dosyaları değiştirilmeden ezilebilmektedir. Varsayılan gelen yerel ayar listesi dokümanda açıkça listelenmemektedir ile doğrulanamamıştır.
 
-**Argus için:** Auth0'ın 7 kademeli fallback zinciri ve "realm/tenant-specific text override" (dosya değil, veri) modeli doğru desen. RTL'i Early Access'e bırakmak Auth0'ın bile 2026'da zorlandığını gösteriyor — Argus'ta baştan `dir` desteği ile başlamak daha ucuz.
+Argus için ders şudur: Auth0'ın yedi kademeli yedek zinciri ile kiracıya özgü metin ezme modeli, yani dosya değil veri modeli, doğru desendir. Sağdan sola desteğinin erken erişimde bırakılması Auth0'ın bile 2026'da zorlandığını göstermektedir; Argus'ta baştan yön desteğiyle başlamak daha ucuzdur.
 
 ---
 
-## 6. HATA MESAJLARI VE KURTARMA UX'İ
+### 5.5 Betiksiz özelleştirmenin mekanizması, akış düğümü sözleşmesi
 
-### 6.1 OAuth hataları kullanıcıya ne zaman gösterilir
+Buraya kadarki bölüm kiracıya betik ya da şablon çalıştırtmanın neden reddedildiğini kurmaktadır. Reddedilen şeyin yerine ne konacağı ise açıkta kalmaktadır; 19. karar ile 28. sonraki karar bir yasak ile bir ürün kararıdır, bir mekanizma değildir. Mekanizma Ory Kratos'ta çalışan hâliyle mevcuttur.
 
-[RFC 6749 §4.1.2.1](https://www.rfc-editor.org/rfc/rfc6749#section-4.1.2.1):
+Ne yaptığı şudur. Bir kendi kendine hizmet akışı başlatıldığında Kratos JSON döndürmektedir. Yanıt bir arayüz nesnesi taşımakta, bu nesne bir eylem adresi, bir HTTP yöntemi ile bir düğüm dizisi içermektedir. İstemci formu bu bilgiyle kendisi çizmektedir. Kimlik şemasında tanımlanan alanlar doğrudan form girdi öğelerine ayrıştırılmaktadır. Referans arayüz gerçeklemesi giriş, kayıt, ayarlar, kurtarma ile doğrulama akışlarının tamamını aynı sözleşmeyle kapsamaktadır. Kaynak Ory'nin kendi kendine hizmet dokümanı ile referans arayüz deposudur, erişim 13 Eylül 2026.
+
+Argus için önemi şudur. Sunucu hiçbir şey çizmemektedir; yalnızca ne çizileceğini bildiren tipli bir yapı döndürmektedir. Şablon motoru ortadan kalkmakta, dolayısıyla 19. kararın gerekçesindeki uzaktan kod çalıştırma riski bir azaltma değil yapısal bir imkânsızlık hâline gelmektedir. Kiracı markalaması ile alan düzeni, sunucuda hiçbir kiracı kodu koşmadan istemci tarafında yapılabilmektedir.
+
+İkinci bir kazanç daha vardır ile 8. bölümün 30. maddesine bağlanmaktadır: akış bir nesne olduğunda o nesne kalıcılaştırılabilmekte ile yeniden yüklenebilmektedir. Askıya alınabilir kimlik doğrulama, ayrı bir mekanizma değil bu sözleşmenin doğal sonucudur.
+
+Üç sınır not edilmelidir. Birincisi, düğüm sözleşmesi bir güvenlik sınırı değildir; istemcinin hangi düğümü çizdiği sunucunun kararını değiştirmemelidir. Sunucu, istemcinin göndermediği ya da uydurduğu alanları reddetmelidir. İkincisi, sözleşme bir genel arayüz olduğu için sürüm uyumluluğu gerektirmektedir; düğüm tipi eklemek geriye dönük uyumludur, düğüm tipi kaldırmak değildir. Üçüncüsü, barındırılan girişin kendisi bu sözleşmenin bir tüketicisidir; yani Argus'un kendi giriş sayfası, kiracının yazabileceği bir istemciyle aynı yüzeyi kullanmalıdır, aksi hâlde sözleşme test edilmeden çürümektedir.
+
+## 6. Hata mesajları ile kurtarma deneyimi
+
+### 6.1 OAuth hataları kullanıcıya ne zaman gösterilmektedir
+
+RFC 6749'un 4.1.2.1 bölümü şunu söylemektedir.
 
 > "the authorization server SHOULD inform the resource owner of the error and MUST NOT automatically redirect the user-agent to the invalid redirection URI."
 
-Yani `redirect_uri` veya `client_id` geçersizse **redirect yasak**, kullanıcıya doğrudan hata gösterilmeli. Diğer tüm hatalar redirect ile client'a döner.
+Yani yönlendirme adresi ya da istemci kimliği geçersizse yönlendirme yasaktır ile kullanıcıya doğrudan hata gösterilmelidir. Diğer tüm hatalar yönlendirmeyle istemciye dönmektedir.
 
-Authorization endpoint hata kodları: `invalid_request`, `unauthorized_client`, `access_denied`, `unsupported_response_type`, `invalid_scope`, `server_error`, `temporarily_unavailable`.
+Yetkilendirme uç noktası hata kodları geçersiz istek, yetkisiz istemci, erişim reddedildi, desteklenmeyen yanıt tipi, geçersiz kapsam, sunucu hatası ile geçici olarak kullanılamaz değerleridir.
 
-**Pratik ayrım:**
-- **Kullanıcıya gösterilir:** geçersiz redirect_uri/client_id (redirect edilemez), `access_denied` (kullanıcının kendi kararı), `temporarily_unavailable`
-- **Client'a redirect edilir, kullanıcıya ham gösterilmez:** `invalid_scope`, `unsupported_response_type`, `invalid_request` — bunlar geliştirici hataları; kullanıcıya "uygulama yanlış yapılandırılmış" tarzı bir mesaj + korelasyon ID gösterilmeli
-- RFC 10017 §7.1'e göre first-party same-domain uygulamalarda bu karmaşıklığın çoğu zaten gereksiz
+Pratik ayrım şudur. Kullanıcıya gösterilenler geçersiz yönlendirme adresi ile istemci kimliği, ki yönlendirilememektedir; erişim reddedildi, ki kullanıcının kendi kararıdır; ile geçici olarak kullanılamaz durumudur. İstemciye yönlendirilen ancak kullanıcıya ham gösterilmeyenler geçersiz kapsam, desteklenmeyen yanıt tipi ile geçersiz istektir; bunlar geliştirici hatalarıdır ile kullanıcıya uygulama yanlış yapılandırılmış tarzı bir mesaj artı bir korelasyon kimliği gösterilmelidir. RFC 10017'nin birinci taraf aynı alan adı bölümüne göre bu karmaşıklığın çoğu zaten gereksizdir.
 
-### 6.2 "Bu hesap kilitli" vs jenerik — giriş tarafında ne yapılıyor
+### 6.2 Bu hesap kilitli mesajıyla jenerik mesajın karşılaştırması
 
-**OWASP:** kilitli ve devre dışı hesaplar dahil **her durumda aynı mesaj** ([OWASP Authentication Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html)). Ayrıca HTTP response **kodu** farklı olursa jenerik HTML'e rağmen sızıntı devam eder — kod da aynı olmalı. Zamanlama da eşitlenmeli.
+OWASP kilitli ile devre dışı hesaplar dahil her durumda aynı mesajı istemektedir. Ayrıca HTTP yanıt kodu farklı olursa jenerik HTML'e rağmen sızıntı devam etmektedir; kod da aynı olmalıdır. Zamanlama da eşitlenmelidir.
 
-**Keycloak'ın pratiği bunu doğruluyor:** brute-force ile kilitlenen kullanıcı giriş denediğinde **"Invalid username or password"** görüyor — geçersiz kullanıcı ve geçersiz parolayla **aynı mesaj**, saldırganın hesabın devre dışı olduğunu anlamaması için ([Keycloak brute-force docs](https://github.com/keycloak/keycloak/blob/main/docs/documentation/server_admin/topics/threat/brute-force.adoc)). Keycloak brute-force korumasını yalnızca **password, OTP ve recovery code**'lara uyguluyor.
+Keycloak'ın pratiği bunu doğrulamaktadır: kaba kuvvetle kilitlenen kullanıcı giriş denediğinde geçersiz kullanıcı adı ya da parola görmektedir; geçersiz kullanıcı ile geçersiz parolayla aynı mesajdır ile saldırganın hesabın devre dışı olduğunu anlamaması içindir. Keycloak kaba kuvvet korumasını yalnızca parola, tek kullanımlık şifre ile kurtarma kodlarına uygulamaktadır.
 
-**Çatışma OWASP tarafından açıkça kabul ediliyor:** jenerik mesajlar UX sürtünmesi yaratır, meşru kullanıcı kafası karışıp uygulamayı terk edebilir. Öneri: kritikliğe göre karar ver, jenerik mesajı CAPTCHA ile birleştir.
+Çatışma OWASP tarafından açıkça kabul edilmektedir: jenerik mesajlar kullanıcı deneyimi sürtünmesi yaratmakta ile meşru kullanıcı kafası karışıp uygulamayı terk edebilmektedir. Öneri kritikliğe göre karar vermek ile jenerik mesajı bir bot kontrolüyle birleştirmektir.
 
-**Clerk'ün ürünleşmiş çözümü** (yukarıda, §1.2) bu çatışmayı bir **konfigürasyon boyutuna** çeviriyor — Argus'un almalı olduğu ders bu.
+Clerk'ün ürünleşmiş çözümü bu çatışmayı bir yapılandırma boyutuna çevirmektedir; Argus'un alması gereken ders budur.
 
-**Auth0'ın katmanları** ([Auth0 — Attack Protection](https://auth0.com/docs/secure/attack-protection)):
-- **Bot Detection** — bot şüphesi olan IP'den geldiğinde CAPTCHA adımı tetikler
-- **Suspicious IP Throttling** — çok sayıda hesapta hızlı identifier/parola denemesi
-- **Brute-force Protection** — tek hesaba tekrarlı denemeler
-- **Breached Password Detection** — üçüncü taraf ihlal veritabanları
-- **Monitoring mode** — engellemeden yalnızca loglar (rollout için doğru desen)
-- ⚠️ Varsayılan eşikler bu sayfada belgelenmiyor
+Auth0'ın katmanları şunlardır: bot tespiti, bot şüphesi olan bir IP'den gelindiğinde bir bot kontrolü adımı tetiklemektedir; şüpheli IP kısıtlaması, çok sayıda hesapta hızlı tanımlayıcı ile parola denemelerini yakalamaktadır; kaba kuvvet koruması tek hesaba tekrarlı denemeleri yakalamaktadır; ihlal edilmiş parola tespiti üçüncü taraf ihlal veritabanlarını kullanmaktadır; ile izleme modu engellemeden yalnızca günlüğe yazmaktadır, ki dağıtım için doğru desendir. Varsayılan eşikler bu sayfada belgelenmemektedir.
 
-### 6.3 Kullanıcı nerede takılıyor — gerçek dropoff verisi
+### 6.3 Kullanıcı nerede takılmaktadır, gerçek terk verisi
 
-**Doğrulanmış olan:**
-- Android cross-device QR: tarayıcı prompt'undan QR taramasına **%29** geçiş — funnel'ın tek büyük kopuş noktası (§2.4)
-- Windows web'de passkey başarısı **%45–60**, girişlerin **%40–65**'i cross-device gerektiriyor (Corbado Q1 2026)
-- FIDO 2026: **%47** parola hatırlayamadığında satın almayı terk etme eğiliminde (anket, davranış değil)
+Doğrulanmış olanlar şunlardır. Android cihazlar arası karekod akışında tarayıcı isteminden karekod taramasına geçiş %29'dur; huninin tek büyük kopuş noktasıdır. Windows web'de geçiş anahtarı başarısı %45 ile %60 arasındadır ile girişlerin %40 ile %65'i cihazlar arası akış gerektirmektedir. FIDO'nun 2026 anketine göre kullanıcıların %47'si parola hatırlayamadığında satın almayı terk etme eğilimindedir; bu bir anket beyanıdır, davranış ölçümü değildir.
 
-⚠️ **DOĞRULANMADI — bunlar satıcı içeriği, kullanmayın:**
-- "Parola tabanlı akışlarda tamamlanma %60–75, parola+SMS 2FA %50–65, passwordless %85–95"
-- "Parola giriş adımında %15–25 terk"
-- "%24 hesap oluşturmaya zorlanınca terk ediyor"
-- "%21 giriş bilgilerini unuttuğu için satın almayı terk etti"
-- "%46 ABD tüketicisi kimlik doğrulama başarısızlığı yüzünden işlemi tamamlamıyor"
+Doğrulanamayanlar şunlardır ile satıcı içeriğidir, kullanılmamalıdır: parola tabanlı akışlarda tamamlanmanın %60 ile %75, parola artı kısa mesajlı iki faktörlüde %50 ile %65, parolasızda %85 ile %95 olduğu iddiası; parola giriş adımında %15 ile %25 terk olduğu iddiası; hesap oluşturmaya zorlanınca %24 terk olduğu iddiası; giriş bilgilerini unuttuğu için %21 satın alma terki olduğu iddiası; ile ABD tüketicilerinin %46'sının kimlik doğrulama başarısızlığı yüzünden işlemi tamamlamadığı iddiası. Bunların hiçbiri için birincil bir metodoloji bulunamamıştır.
 
-Bunların hiçbiri için birincil metodoloji bulunamadı.
-
-**Sonuç:** Genel giriş funnel dropoff'u için güvenilir kamuya açık veri **yok**. Argus'un kendi telemetrisini kurması şart — ve conditional UI'ın sessiz başarısızlığı (§2.2) yüzünden bu telemetri özel tasarım gerektiriyor.
+Sonuç şudur: genel giriş hunisi terki için güvenilir, kamuya açık bir veri yoktur. Argus'un kendi telemetrisini kurması şarttır; koşullu arayüzün sessiz başarısızlığı nedeniyle bu telemetri özel bir tasarım gerektirmektedir.
 
 ---
 
-## 7. ERİŞİLEBİLİRLİK
+## 7. Erişilebilirlik
 
-### 7.1 WCAG 2.2 SC 3.3.8 — ne yasaklıyor
+### 7.1 WCAG 2.2'nin erişilebilir kimlik doğrulama kriteri, ne yasaklamaktadır
 
-[W3C — Understanding SC 3.3.8 Accessible Authentication (Minimum), Level AA](https://www.w3.org/WAI/WCAG22/Understanding/accessible-authentication-minimum.html):
+W3C'nin ikinci seviye erişilebilir kimlik doğrulama kriteri şunu söylemektedir.
 
 > "Authentication that relies on a cognitive function test does not block access to content or functionality."
 
-Bir cognitive function test, adımlardan biri şunlardan **en az birini** sağlamadıkça istenemez:
-1. **Alternative** — cognitive function test'e dayanmayan başka bir yöntem
-2. **Mechanism** — testi tamamlamaya yardımcı olan bir mekanizma
-3. **Object Recognition** — test, nesneleri tanımaktan ibaretse
-4. **Personal Content** — kullanıcının kendi sağladığı metin dışı içeriği tanımaksa
+Bir bilişsel işlev testi, adımlardan biri şunlardan en az birini sağlamadıkça istenememektedir: bilişsel işlev testine dayanmayan bir alternatif; testi tamamlamaya yardımcı olan bir mekanizma; testin yalnızca nesne tanımaktan ibaret olması; ya da kullanıcının kendi sağladığı metin dışı içeriği tanımak olması.
 
-**"Cognitive function test" tanımı:** "A task that requires the user to remember, manipulate, or transcribe information" — ezberleme, transkripsiyon, doğru yazım, hesaplama, bulmaca çözme. **İsim, e-posta ve telefon numarası gibi yaygın identifier'lar cognitive function test sayılmaz.**
+Bilişsel işlev testinin tanımı şudur: kullanıcının bilgiyi hatırlamasını, işlemesini ya da kopyalamasını gerektiren bir görev; yani ezberleme, kopyalama, doğru yazım, hesaplama ile bulmaca çözme. İsim, e-posta ile telefon numarası gibi yaygın tanımlayıcılar bilişsel işlev testi sayılmamaktadır.
 
-**Sorularınıza doğrudan yanıtlar:**
+Doğrudan yanıtlar şunlardır.
 
-- **"Parolanızın 3. karakterini girin" → EVET, YASAK.** Doküman açıkça diyor: kopyalanan metin ile input alanı arasında farklı format kullanmak (örn. "Enter the 1st, 3rd, and 5th character of your password") kullanıcıyı transkripsiyona zorlar ve **başka bir yöntem mevcut değilse bu kriteri geçemez**.
-- **CAPTCHA → tamamen yasak değil, koşullu.** AA seviyesinde object recognition ve personal content **istisna**. Yani "arabaları seç" tipi CAPTCHA AA'da geçer. Ama **AAA (SC 3.3.9) bu istisnaları kaldırıyor** — object/image recognition orada da yasak ([Understanding SC 3.3.9](https://www.w3.org/WAI/WCAG22/Understanding/accessible-authentication-enhanced.html)).
-- **Password manager / autofill engellemek → başarısızlık.** Site, user agent ve password manager'ların alanları otomatik doldurmasına izin vermeli. Aktif olarak engelleniyorsa ve alternatif yoksa sayfa kalıyor. SC 1.3.5 (Input Purpose) ve 4.1.2 (Name, Role, Value) ile birlikte değerlendirilmeli.
-- **Paste engellemek → başarısızlık.** "Copy and paste can be relied on to avoid transcription."
-- **OTP / 2FA:** "A service that requires **manual** transcription of a verification code is not compliant." Kullanıcı kodu yapıştırabilmeli. Donanım cihazı, biyometri, OS kimlik doğrulaması cognitive function test **değil**.
-- **Çok adımlı akışlarda tüm adımlar uyumlu olmalı.**
+Parolanızın üçüncü karakterini girin türü bir istem yasaktır. Doküman açıkça şunu söylemektedir: kopyalanan metinle girdi alanı arasında farklı bir format kullanmak kullanıcıyı kopyalamaya zorlamakta ile başka bir yöntem mevcut değilse bu kriteri geçememektedir.
 
-**WebAuthn bir "sufficient technique"** — passkey desteklemek bu kriteri otomatik karşılıyor ([Passkey Central — Passkey Accessibility](https://www.passkeycentral.org/resources-and-tools/passkey-accessibility)).
+CAPTCHA tamamen yasak değildir, koşulludur. İkinci seviyede nesne tanıma ile kişisel içerik istisnadır; yani arabaları seç tipi bir CAPTCHA ikinci seviyede geçmektedir. Ancak üçüncü seviye bu istisnaları kaldırmaktadır; nesne ile görüntü tanıma orada da yasaktır.
 
-**W3C'nin CAPTCHA notu** ([Inaccessibility of CAPTCHA, Group Draft Note, 16 Aralık 2021](https://www.w3.org/TR/turingtest/)): görme, işitme ve bilişsel engelli kullanıcılar için bariyer; ses alternatifleri de bozulmuş olduğu için anlaşılmaz. Önerilen alternatifler: **etkileşimsiz yöntemler** (spam filtreleme, proof-of-work, sezgisel yöntemler, honeypot, rate limiting — "non-interactive solutions pose no accessibility challenges"), **WebAuthn ile kriptografik personhood attestation**, Privacy Pass token'ları, federated identity.
+Parola yöneticisi ya da otomatik doldurmayı engellemek bir başarısızlıktır. Site, kullanıcı aracısı ile parola yöneticilerinin alanları otomatik doldurmasına izin vermelidir. Aktif olarak engelleniyorsa ile bir alternatif yoksa sayfa kriteri karşılamamaktadır. Girdi amacı ile ad, rol ve değer kriterleriyle birlikte değerlendirilmelidir.
 
-**Argus için doğrudan tasarım kısıtı:** OWASP jenerik-hata + CAPTCHA önerisi (§6.2) ile WCAG 3.3.8 çatışıyor. Çözüm W3C'nin kendi önerisi: CAPTCHA yerine **etkileşimsiz** bot savunması (rate limiting, proof-of-work, honeypot, device signals) — bunlar hem erişilebilir hem enumeration'a karşı etkili.
+Yapıştırmayı engellemek bir başarısızlıktır: kopyala yapıştır, kopyalamayı önlemek için güvenilebilecek bir yöntemdir.
 
-### 7.2 EU Accessibility Act (EAA)
+Tek kullanımlık şifre ile iki faktörlü doğrulamada şu geçerlidir: bir doğrulama kodunun elle kopyalanmasını gerektiren bir hizmet uyumlu değildir. Kullanıcı kodu yapıştırabilmelidir. Donanım cihazı, biyometri ile işletim sistemi kimlik doğrulaması bilişsel işlev testi değildir.
 
-**Kapsam** ([Avrupa Komisyonu — European Accessibility Act](https://commission.europa.eu/strategy-and-policy/policies/justice-and-fundamental-rights/disability/union-equality-strategy-rights-persons-disabilities-2021-2030/european-accessibility-act_en)): bilgisayarlar ve işletim sistemleri, ATM'ler, biletleme ve check-in makineleri, akıllı telefonlar, dijital TV ekipmanı, telefon hizmetleri, görsel-işitsel medya erişimi, hava/otobüs/demiryolu/su yolu yolcu taşıma hizmetleri, **bankacılık hizmetleri**, e-kitaplar, **e-ticaret**. Üye devletlere ulusal hukuka aktarma tarihi Haziran 2022.
+Çok adımlı akışlarda tüm adımlar uyumlu olmalıdır.
 
-**28 Haziran 2025 — yürürlüğe girdi mi? Evet.** ⚠️ Ancak bu tarihi yalnızca ikincil kaynaklardan doğrulayabildim; EUR-Lex'e üç farklı URL üzerinden erişilemedi (boş içerik döndü), dolayısıyla **Article 31 metni birincil kaynaktan doğrulanamadı**.
+WebAuthn yeterli bir tekniktir; geçiş anahtarı desteklemek bu kriteri otomatik karşılamaktadır.
 
-İkincil kaynaklara göre ([Pivotal Accessibility, Eylül 2025](https://www.pivotalaccessibility.com/2025/09/eaa-enforcement-in-europe-following-the-june-2025-deadline/); [Level Access](https://www.levelaccess.com/compliance-overview/european-accessibility-act-eaa/)):
-- Uygulama **28 Haziran 2025**'te başladı, 27 üye devletin tamamı transpoze etti
-- 2025'in ikinci yarısında çoğu ulusal otorite kapasite kurdu; bazıları denetim yapıp resmî bildirim çıkardı
-- **Kimi kapsıyor:** özel sektör — e-ticaret, bankacılık, telekom, ulaşım, **EU tüketicilerine hizmet veren SaaS platformları, şirketin merkezi nerede olursa olsun**
-- **Muafiyet:** yalnızca mikro-işletmeler — **10'dan az çalışan ve €2 milyon altı ciro**
+W3C'nin CAPTCHA notu, 16 Aralık 2021 tarihli grup taslağı, şunu söylemektedir: görme, işitme ile bilişsel engelli kullanıcılar için bir bariyerdir; ses alternatifleri de bozulmuş olduğu için anlaşılmazdır. Önerilen alternatifler etkileşimsiz yöntemlerdir, yani istenmeyen ileti süzme, iş kanıtı, sezgisel yöntemler, bal küpü ile hız sınırlama; etkileşimsiz çözümler hiçbir erişilebilirlik zorluğu çıkarmamaktadır. Ayrıca WebAuthn ile kriptografik kişilik kanıtlaması, Privacy Pass belirteçleri ile federe kimlik önerilmektedir.
 
-⚠️ **Mikro-işletme muafiyetinin tam metni (Article 4(5)) ve EN 301 549 ile ilişkisi birincil kaynaktan DOĞRULANMADI.**
+Argus için doğrudan tasarım kısıtı şudur: OWASP'ın jenerik hata artı CAPTCHA önerisiyle erişilebilirlik kriteri çatışmaktadır. Çözüm W3C'nin kendi önerisidir: CAPTCHA yerine etkileşimsiz bot savunması, yani hız sınırlama, iş kanıtı, bal küpü ile cihaz sinyalleri kullanılmalıdır; bunlar hem erişilebilir hem numaralandırmaya karşı etkilidir.
 
-**Argus'a etkisi:** Argus bir SaaS IdP olarak, EU tüketicilerine hizmet veren müşterilerinin giriş akışını sağlıyor. Müşterimiz kapsamdaysa **bizim login sayfamız da fiilen kapsamda** — çünkü kullanıcının gördüğü ekran bizim. Bu, WCAG 2.2 AA'yı bir "nice to have" değil **satış engeli** yapıyor. Auth0'ın RTL desteğini "WCAG 2.2 AA compliance gerektirir" diye şartlaması da aynı baskının işareti.
+### 7.2 Avrupa Birliği erişilebilirlik yasası
 
-### 7.3 Ekran okuyucu ile WebAuthn deneyimi
+Kapsamı şudur: bilgisayarlar ile işletim sistemleri, bankamatikler, biletleme ile giriş makineleri, akıllı telefonlar, dijital televizyon ekipmanı, telefon hizmetleri, görsel işitsel medya erişimi, hava, otobüs, demiryolu ile su yolu yolcu taşıma hizmetleri, bankacılık hizmetleri, elektronik kitaplar ile elektronik ticaret. Üye devletlere ulusal hukuka aktarma tarihi Haziran 2022'dir.
 
-**FIDO Alliance / Passkey Central denetimi** ([Passkey Accessibility](https://www.passkeycentral.org/resources-and-tools/passkey-accessibility)):
+28 Haziran 2025'te yürürlüğe girmiş midir sorusunun cevabı evettir. Ancak bu tarih yalnızca ikincil kaynaklardan doğrulanabilmiştir; EUR-Lex'e üç farklı adres üzerinden erişilememiş, boş içerik dönmüştür; dolayısıyla ilgili madde metni birincil kaynaktan doğrulanamamıştır.
 
-Test matrisi: Windows/Chrome/JAWS, Windows/Chrome/NVDA, Windows/Edge, Mac/Safari/VoiceOver, iPhone varyantları.
+İkincil kaynaklara göre uygulama 28 Haziran 2025'te başlamış ile 27 üye devletin tamamı aktarmıştır. 2025'in ikinci yarısında çoğu ulusal otorite kapasite kurmuş, bazıları denetim yapıp resmî bildirim çıkarmıştır. Kapsadığı kesim özel sektördür: elektronik ticaret, bankacılık, telekomünikasyon, ulaşım ile Avrupa Birliği tüketicilerine hizmet veren bulut platformları, şirketin merkezi nerede olursa olsun. Muafiyet yalnızca mikro işletmeleredir, yani 10'dan az çalışanı ile iki milyon avronun altında cirosu olanlara.
 
-Bulgular:
-- **İyi haber:** "Passkey registration and sign-in procedures were consistently accessible" — platform yönetimi sürtünmeyi azaltıyor
-- **Kötü haber 1 — autofill:** conditional UI canlı dağıtımlarda **tutarsız implemente edilmiş**, ekran okuyucu kullanıcıları için tutarsız deneyim. Doğru davranış: ekran okuyucuya **"has popup"** duyurulmalı ki kullanıcı aşağı ok tuşuyla gezinebileceğini bilsin
-- **Kötü haber 2 — QR kodları:** "QR codes introduce barriers for individuals with mobility limitations or with vision limitations" — cihazı sabit tutmak veya kodu görsel olarak bulmak gerekiyor
-- **Kötü haber 3:** erişilebilirlik kusurları çoğunlukla **sitenin genelinde** yaygın, sadece kimlik doğrulamada değil
+Mikro işletme muafiyetinin tam metni ile uyumlu Avrupa standardıyla ilişkisi birincil kaynaktan doğrulanamamıştır.
 
-FIDO'nun 2023 kullanılabilirlik araştırması kör/az gören, TalkBack/VoiceOver kullanan katılımcıları içeriyordu ([Passkey Central Design Guidelines](https://www.passkeycentral.org/design-guidelines/)).
+Argus'a etkisi şudur: Argus bir bulut kimlik sağlayıcı olarak, Avrupa Birliği tüketicilerine hizmet veren müşterilerinin giriş akışını sağlamaktadır. Müşterimiz kapsamdaysa bizim giriş sayfamız da fiilen kapsamdadır, çünkü kullanıcının gördüğü ekran bizimdir. Bu, ikinci seviye erişilebilirlik uyumunu bir güzel olur özelliği değil bir satış engeli yapmaktadır. Auth0'ın sağdan sola desteğini bu uyuma şartlaması da aynı baskının işaretidir.
 
-**Argus için:** QR tabanlı cross-device akışı **tek yol olamaz** — hem %29 dönüşüm (§2.4) hem erişilebilirlik nedeniyle. Her zaman bir alternatif (e-posta magic link, TOTP, recovery code) sunulmalı.
+### 7.3 Ekran okuyucuyla WebAuthn deneyimi
+
+FIDO Alliance ile Passkey Central'ın denetimi şu test matrisini kullanmaktadır: Windows'ta Chrome ile iki farklı ekran okuyucu, Windows'ta Edge, Mac'te Safari ile ekran okuyucu ile telefon varyantları.
+
+Bulguları şunlardır. İyi haber şudur: geçiş anahtarı kayıt ile giriş prosedürleri tutarlı biçimde erişilebilirdir; platform yönetimi sürtünmeyi azaltmaktadır. Birinci kötü haber otomatik doldurmadır: koşullu arayüz canlı dağıtımlarda tutarsız gerçeklenmiştir ile ekran okuyucu kullanıcıları için tutarsız bir deneyim doğurmaktadır. Doğru davranış ekran okuyucuya bir açılır pencere bulunduğunun duyurulmasıdır, böylece kullanıcı aşağı ok tuşuyla gezinebileceğini bilmektedir. İkinci kötü haber karekodlardır: hareket ya da görme kısıtlı kişiler için bariyer oluşturmaktadır, çünkü cihazı sabit tutmak ya da kodu görsel olarak bulmak gerekmektedir. Üçüncü kötü haber, erişilebilirlik kusurlarının çoğunlukla sitenin genelinde yaygın olmasıdır, yalnızca kimlik doğrulamada değil.
+
+FIDO'nun 2023 kullanılabilirlik araştırması kör ile az gören, ekran okuyucu kullanan katılımcıları içermekteydi.
+
+Argus için sonuç şudur: karekod tabanlı cihazlar arası akış tek yol olamaz; hem %29 dönüşüm hem erişilebilirlik nedeniyle. Her zaman bir alternatif, yani e-posta sihirli bağlantısı, tek kullanımlık şifre ya da kurtarma kodu sunulmalıdır.
 
 ---
 
-## 8. ARGUS İÇİN GİRİŞ AKIŞI TASARIM KARARLARI
+## 8. Argus için giriş akışı tasarım kararları
 
-**1. Identifier-first varsayılan olsun, ama enumeration davranışı kiracı başına yapılandırılabilir bir MOD olsun — tek bir davranış değil.**
-Clerk'ün "bulk protection" (rate limit + normal UX) / "strict protection" (varlık gizli, sahte kod gönderilmez) ikilisini modelle. Strict modun neyi imkânsız kıldığını (username identifier, password başlangıç stratejisi, invite-only) dokümante et. Kaynak: [Clerk](https://clerk.com/docs/guides/secure/user-enumeration-protection)
+1. Önce tanımlayıcı varsayılan olmalı ancak numaralandırma davranışı kiracı başına yapılandırılabilir bir mod olmalıdır, tek bir davranış değil. Clerk'ün toplu koruma ile katı koruma ikilisi modellenmelidir. Katı modun neyi imkânsız kıldığı, yani kullanıcı adı tanımlayıcısı, parolayla başlangıç stratejisi ile yalnızca davetle katılım, dokümante edilmelidir.
 
-**2. Identifier adımının çıktısını sabit yap: aynı HTTP status, aynı gövde boyutu, aynı gecikme.**
-OWASP hem "quick exit" zamanlama sızıntısını hem de jenerik HTML'e rağmen farklı HTTP kodunun sızdırdığını açıkça belirtiyor. Kilitli ve devre dışı hesap dahil tek mesaj. Kaynak: [OWASP Authentication Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html)
+2. Tanımlayıcı adımının çıktısı sabitlenmelidir: aynı HTTP durumu, aynı gövde boyutu ile aynı gecikme. OWASP hem hızlı çıkış zamanlama sızıntısını hem jenerik HTML'e rağmen farklı HTTP kodunun sızdırdığını açıkça belirtmektedir. Kilitli ile devre dışı hesap dahil tek bir mesaj verilmelidir.
 
-**3. Identifier-first'ü atlayan bir "Passkey ile giriş yap" yolu her zaman sun.**
-Boş `allowCredentials` + discoverable credential ile sunucuya hiçbir identifier sızmaz; enumeration yüzeyi sıfırlanır. Kaynak: [Corbado](https://www.corbado.com/blog/passkey-login-best-practices/account-enumeration-risk-passkeys), [web.dev](https://web.dev/articles/passkey-form-autofill)
+3. Önce tanımlayıcıyı atlayan bir geçiş anahtarıyla giriş yap yolu her zaman sunulmalıdır. Boş kimlik bilgisi listesiyle keşfedilebilir kimlik bilgisi kullanıldığında sunucuya hiçbir tanımlayıcı sızmamakta ile numaralandırma yüzeyi sıfırlanmaktadır.
 
-**4. Home Realm Discovery'yi varsayılan olarak KAPALI tut; açıksa hedef kiracıyı kullanıcıya onaylat.**
-Microsoft auto-acceleration'a karşı tavsiye veriyor (FIDO'yu engelliyor, guest'leri kırıyor) ve Nisan 2023'ten beri domain confirmation dialog gösteriyor — bunu "security hardening" olarak tanımlıyor. Kaynak: [Microsoft Entra HRD](https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/home-realm-discovery-policy)
+4. Ev alanı keşfi varsayılan olarak kapalı tutulmalı; açıksa hedef kiracı kullanıcıya onaylatılmalıdır. Microsoft otomatik hızlandırmaya karşı tavsiye vermekte, çünkü FIDO'yu engellemekte ile misafirleri kırmaktadır; Nisan 2023'ten beri bir alan adı onay penceresi göstermekte ile bunu güvenlik sertleştirmesi olarak tanımlamaktadır.
 
-**5. Client'ın gönderdiği `domain_hint`/`login_hint` benzeri parametreler kiracı politikasını EZMESİN.**
-Microsoft'ta domain hint HRD policy'yi eziyor ve bunu düzeltmek için ayrı bir `DomainHintPolicy` (Ignore/Respect × Domains/Apps) katmanı gerekti. Argus'ta baştan doğru sırayı kur: kiracı politikası > client hint. Kaynak: [Microsoft — Disable auto-acceleration](https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/prevent-domain-hints-with-home-realm-discovery)
+5. İstemcinin gönderdiği alan adı ya da giriş ipucu benzeri parametreler kiracı politikasını ezmemelidir. Microsoft'ta alan adı ipucu keşif politikasını ezmekte ile bunu düzeltmek için ayrı bir politika katmanı gerekmiştir. Argus'ta baştan doğru sıra kurulmalıdır: kiracı politikası istemci ipucundan önce gelmelidir.
 
-**6. Conditional UI'ı destekle ama ASLA tek yol yapma; her zaman açık bir passkey butonu + `AbortController`.**
-Conditional UI Windows 10, eski ChromeOS ve in-app browser'larda sessizce hiçbir şey göstermez; site bunu ölçemez bile. Kaynak: [web.dev](https://web.dev/articles/passkey-form-autofill), [Corbado](https://www.corbado.com/blog/webauthn-conditional-ui-passkeys-autofill)
+6. Koşullu arayüz desteklenmeli ancak asla tek yol yapılmamalıdır; her zaman açık bir geçiş anahtarı düğmesi ile bir iptal denetleyicisi bulunmalıdır. Koşullu arayüz Windows 10, eski ChromeOS ile uygulama içi tarayıcılarda sessizce hiçbir şey göstermemekte ile site bunu ölçememektedir.
 
-**7. Telemetriyi conditional UI'ın körlüğünü telafi edecek şekilde tasarla.**
-"Dropdown göründü mü, boş mu geldi, kullanıcı yok saydı mı" ayırt edilemiyor. Bunun yerine: `getClientCapabilities()` sonucunu, identifier alanına odaklanma olayını, ve conditional promise'in çözülüp çözülmediğini ayrı ayrı ölç. Kaynak: [Corbado](https://www.corbado.com/blog/webauthn-conditional-ui-passkeys-autofill)
+7. Telemetri koşullu arayüzün körlüğünü telafi edecek şekilde tasarlanmalıdır. Açılır listenin görünüp görünmediği, boş gelip gelmediği ya da kullanıcının yok sayıp saymadığı ayırt edilememektedir. Bunun yerine istemci yetenekleri sonucu, tanımlayıcı alanına odaklanma olayı ile koşullu sözün çözülüp çözülmediği ayrı ayrı ölçülmelidir.
 
-**8. Platform tespit et ve cross-device QR'ı son çare yap — özellikle Windows'ta.**
-Windows web'de passkey başarısı %45–60 ve girişlerin %40–65'i cross-device gerektiriyor; Android'de tarayıcı prompt'undan QR taramasına geçiş sadece %29. Windows kullanıcısına passkey'i tek yol olarak dayatma. Kaynak: [Corbado Benchmark 2026](https://www.corbado.com/passkey-benchmark-2026/passkey-authentication-success-rate), [Google Authenticate 2025 funnel](https://mojoauth.com/blog/cross-device-passkey-qr-flow-where-users-drop-off)
+8. Platform tespit edilmeli ile cihazlar arası karekod son çare yapılmalıdır, özellikle Windows'ta. Windows web'de başarı %45 ile %60 ile girişlerin %40 ile %65'i cihazlar arası akış gerektirmektedir; Android'de tarayıcı isteminden karekod taramasına geçiş yalnızca %29'dur. Windows kullanıcısına geçiş anahtarı tek yol olarak dayatılmamalıdır.
 
-**9. WebAuthn Signal API'yi 1. günden implemente et — ama `signalAllAcceptedCredentials`'ı sadece doğrulanmış kullanıcı ve TAM listeyle çağır.**
-`signalUnknownCredential` oturum kapalıyken güvenli (tek credential ID, sayı sızdırmaz) — başarısız passkey denemesinden sonra çağır. Kısmi liste meşru passkey'leri gizler. Chrome/Edge 132+. Kaynak: [Chrome for Developers](https://developer.chrome.com/docs/identity/webauthn-signal-api)
+9. WebAuthn sinyal API'si birinci günden gerçeklenmelidir; ancak tüm kabul edilen kimlik bilgilerini sinyalleyen yöntem yalnızca doğrulanmış kullanıcı için ile tam listeyle çağrılmalıdır. Bilinmeyen kimlik bilgisi sinyali oturum kapalıyken güvenlidir, yani tek bir kimlik bilgisi tanımlayıcısı taşımakta ile sayı sızdırmamaktadır; başarısız bir geçiş anahtarı denemesinden sonra çağrılmalıdır. Kısmi liste meşru geçiş anahtarlarını gizlemektedir. Destek Chrome ile Edge 132 ve üstündedir.
 
-**10. Push onayında number matching'i zorunlu yap; tek istisna aynı-cihaz tespiti.**
-Microsoft'ta artık tüm Authenticator push'larında zorunlu, opt-out yok. Aynı cihazda başlatılan girişte Yes/No'ya izin veriyor ve bunun risk artırmadığını gerekçelendiriyor. Wearable'lar kapsam dışı. Kaynak: [Microsoft — Number matching](https://learn.microsoft.com/en-us/entra/identity/authentication/how-to-mfa-number-match)
+10. Anlık bildirim onayında sayı eşleştirme zorunlu yapılmalı ile tek istisna aynı cihaz tespiti olmalıdır. Microsoft'ta artık tüm anlık bildirimlerde zorunludur ile devre dışı bırakılamamaktadır. Aynı cihazda başlatılan girişte evet ile hayıra izin verilmekte ile bunun riski artırmadığı gerekçelendirilmektedir. Giyilebilir cihazlar kapsam dışıdır.
 
-**11. "Beni hatırla"yı iki katmanlı yap: idle timeout + absolute lifetime, ve politika olayında zorunlu iptal.**
-Auth0: idle 7 gün (1s–30g), absolute 30 gün (1s–90g). Microsoft: 1–365 gün tek katman + "en kısıtlayıcı politika kazanır". Asıl güvenlik mekanizması süre değil, **olay tabanlı iptal** (parola değişimi, MFA yöntemi değişimi, cihaz uyumsuzluğu, admin revoke). Kaynak: [Auth0](https://auth0.com/docs/secure/multi-factor-authentication/customize-mfa), [Microsoft](https://learn.microsoft.com/en-us/entra/identity/authentication/concepts-azure-multi-factor-authentication-prompts-session-lifetime)
+11. Beni hatırla iki katmanlı yapılmalıdır: boşta kalma zaman aşımı artı mutlak ömür, ile politika olayında zorunlu iptal. Auth0'da boşta kalma yedi gün, mutlak 30 gündür. Microsoft'ta bir ile 365 gün arası tek katman ile en kısıtlayıcı politika kazanır kuralı vardır. Asıl güvenlik mekanizması süre değil olay tabanlı iptaldir: parola değişimi, çok faktörlü yöntem değişimi, cihaz uyumsuzluğu ile yönetici iptali.
 
-**12. Agresif yeniden kimlik doğrulamadan kaçın — Microsoft bunu bir güvenlik RİSKİ olarak belgeliyor.**
-"If users are trained to enter their credentials without thinking, they can unintentionally supply them to a malicious credential prompt." Entra varsayılanı 90 günlük kayan pencere. Sık prompt phishing'e yardım eder. Kaynak: [Microsoft](https://learn.microsoft.com/en-us/entra/identity/authentication/concepts-azure-multi-factor-authentication-prompts-session-lifetime)
+12. Agresif yeniden kimlik doğrulamadan kaçınılmalıdır; Microsoft bunu bir güvenlik riski olarak belgelemektedir. Kullanıcılar düşünmeden kimlik bilgisi girmeye alıştırılırsa bunları istemeden kötü amaçlı bir isteme verebilmektedir. Entra varsayılanı 90 günlük kayan bir penceredir. Sık istem kimlik avına yardım etmektedir.
 
-**13. RFC 9470 step-up'ı destekle ve `acr_values` ile `max_age` arasındaki zorlama farkını doğru uygula.**
-`acr_values` tavsiye (MAY), `max_age` zorunlu (MUST re-authenticate). Ve step-up ekranında kullanıcıya **neden** yeniden doğrulama istendiğini açıkla — aksi halde madde 12'deki phishing riskini kendin yaratırsın. Kaynak: [RFC 9470](https://www.rfc-editor.org/info/rfc9470/)
+13. RFC 9470 yükseltmesi desteklenmeli ile bağlam sınıfı değerleriyle azami yaş arasındaki zorlama farkı doğru uygulanmalıdır. Bağlam sınıfı değerleri tavsiyedir, azami yaş zorunludur. Yükseltme ekranında kullanıcıya neden yeniden doğrulama istendiği açıklanmalıdır; aksi hâlde on ikinci maddedeki kimlik avı riski kendi elinizle yaratılmaktadır.
 
-**14. Hosted (redirect) login'i tek desteklenen üretim modu yap; embedded'ı desteklersen custom domain zorunlu kıl.**
-Okta: embedded'da "XSS attacks on your app may result in stolen sign-in credentials"; hosted "the recommended method for the highest levels of identity security". Auth0 cross-origin auth üçüncü taraf çerezlere bağlı ve modern tarayıcılarda **başarısız olabilir** — çözüm aynı top-level domain. Kaynak: [Okta](https://developer.okta.com/docs/concepts/redirect-vs-embedded/), [Auth0](https://auth0.com/docs/authenticate/login/cross-origin-authentication)
+14. Barındırılan, yani yönlendirmeli giriş tek desteklenen üretim modu yapılmalıdır; gömülü desteklenecekse özel alan adı zorunlu kılınmalıdır. Okta'ya göre gömülüde uygulamanızdaki XSS saldırıları çalınmış giriş kimlik bilgileriyle sonuçlanabilmekte ile barındırılan en yüksek kimlik güvenliği seviyeleri için önerilen yöntemdir. Auth0'da kökenler arası kimlik doğrulama üçüncü taraf çerezlere bağlıdır ile modern tarayıcılarda başarısız olabilmektedir; çözüm aynı üst düzey alan adıdır.
 
-**15. SPA müşterilerine BFF'i resmî öneri yap; dokümantasyonda RFC 10017'nin kendi ifadesini alıntıla.**
-§6.1 BFF en güvenli; §6.3.4.3 tarayıcı-içi OAuth client "not recommended for business applications, sensitive applications, and applications that handle personal data". Implicit grant **MUST NOT**. Refresh token varsa rotation veya sender-constrained zorunlu. Kaynak: [RFC 10017](https://www.rfc-editor.org/info/rfc10017/)
+15. Tek sayfa uygulaması müşterilerine ön yüz için arka uç resmî öneri yapılmalı ile dokümantasyonda RFC 10017'nin kendi ifadesi alıntılanmalıdır. Bu mimari en güvenlidir; tarayıcı içi OAuth istemcisi iş uygulamaları, hassas uygulamalar ile kişisel veri işleyen uygulamalar için önerilmemektedir. Örtük yetki tipi yasaktır. Yenileme token'ı varsa rotasyon ya da gönderen kısıtlama zorunludur.
 
-**16. Argus'un kendi admin console'u ve hosted login'i için OAuth değil, doğrudan session cookie kullan.**
-RFC 10017 §7.1: "Simple applications are made needlessly complex by using OAuth to replace the concept of session management." Aynı domain'deki first-party UI'da OAuth gereksiz karmaşıklık. Kaynak: [RFC 10017 §7.1](https://www.rfc-editor.org/info/rfc10017/)
+16. Argus'un kendi yönetim konsolu ile barındırılan girişi için OAuth değil doğrudan oturum çerezi kullanılmalıdır. RFC 10017'nin ifadesiyle basit uygulamalar oturum yönetimini OAuth ile değiştirerek gereksiz yere karmaşıklaştırılmaktadır.
 
-**17. Native SDK'da sistem tarayıcısı zorunlu; First-Party Apps akışını destekleyeceksen varsayılan KAPALI + client attestation zorunlu.**
-RFC 8252 hâlâ geçerli. Authorization Challenge Endpoint draft'ının kendi güvenlik bölümü uygulama taklidi, kullanıcı kafa karışıklığı, client impersonation ve credential stuffing risklerini sayıyor ve OS attestation API'lerini öneriyor; AS her aşamada `redirect_to_web` ile tarayıcıya düşürebilmeli. Kaynak: [RFC 8252](https://www.rfc-editor.org/rfc/rfc8252.html), [draft-ietf-oauth-first-party-apps-04](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-first-party-apps-04)
+17. Yerel geliştirme kitinde sistem tarayıcısı zorunlu olmalıdır; birinci taraf uygulamalar akışı desteklenecekse varsayılan kapalı olmalı ile istemci kanıtlaması zorunlu tutulmalıdır. RFC 8252 hâlâ geçerlidir. İlgili taslağın kendi güvenlik bölümü uygulama taklidi, kullanıcı kafa karışıklığı, istemci taklidi ile kimlik bilgisi doldurma risklerini saymakta ile işletim sistemi kanıtlama API'lerini önermektedir; sunucu her aşamada tarayıcıya düşürebilmelidir.
 
-**18. Kiracıya ASLA server-side template execution verme — Keycloak'ın FreeMarker modelini kopyalama.**
-Keycloak kendi dokümanında: "a malicious template can run code as the Keycloak process." Bu, kiracı-sağlamalı temalarda RCE demektir. Kaynak: [Keycloak — Working with themes](https://www.keycloak.org/ui-customization/themes)
+18. Kiracıya asla sunucu tarafı şablon çalıştırma verilmemelidir; Keycloak'ın FreeMarker modeli kopyalanmamalıdır. Keycloak kendi dokümanında kötü niyetli bir şablonun süreç olarak kod çalıştırabileceğini söylemektedir. Bu, kiracının sağladığı temalarda uzaktan kod çalıştırma demektir.
 
-**19. Özelleştirmeyi script-siz templating (Liquid tarzı) + CSP allowlist ile sınırla; Report-only modu sun.**
-Auth0 Liquid'i "templating, not complex scripts" olarak konumlandırıyor ve yine de "character allowlist does not eliminate all XSS risk in every rendering context" uyarısı veriyor. Okta CSP'de Enforced/Report-only + violation report URI sunuyor — rollout için doğru desen. Kaynak: [Auth0](https://auth0.com/docs/customize/login-pages/universal-login/customize-templates), [Okta CSP](https://help.okta.com/oie/en-us/content/topics/security/healthinsight/csp-customization.htm)
+19. Özelleştirme betiksiz bir şablonlama diliyle ile bir içerik güvenlik politikası izin listesiyle sınırlanmalı; yalnızca rapor modu sunulmalıdır. Auth0 Liquid'i karmaşık betikler değil şablonlama olarak konumlandırmakta ile yine de karakter izin listesinin her işleme bağlamında tüm XSS riskini ortadan kaldırmadığı uyarısını vermektedir. Okta zorlanan ile yalnızca rapor modları artı bir ihlal rapor adresi sunmaktadır; dağıtım için doğru desendir.
 
-**20. Kiracı custom domain'ini passkey'lerden ÖNCE zorunlu kıl ve domain değişimini geri dönülemez olarak işaretle.**
-Okta: RP ID değişince eski kayıtlar silinmiyor ama "the browser doesn't present them at sign-in" — kullanıcı yeniden kaydolmak zorunda. Auth0 aynı. ROR (`/.well-known/webauthn`) pratikte **5 label** ile sınırlı, çok kiracılıkta ölçeklenmiyor → her kiracı kendi RP ID'sini almalı. Kaynak: [Okta — Passkeys and custom domains](https://developer.okta.com/docs/guides/custom-passkeys/main/), [passkeys.dev ROR](https://passkeys.dev/docs/advanced/related-origins/)
+20. Kiracı özel alan adı geçiş anahtarlarından önce zorunlu kılınmalı ile alan adı değişimi geri dönülemez olarak işaretlenmelidir. Okta'ya göre bağlı taraf kimliği değişince eski kayıtlar silinmemekte ancak tarayıcı bunları girişte sunmamaktadır; kullanıcı yeniden kaydolmak zorundadır. Auth0 aynıdır. İlgili kökenler mekanizması pratikte beş etiketle sınırlıdır ile çok kiracılıkta ölçeklenmemektedir; her kiracı kendi bağlı taraf kimliğini almalıdır.
 
-**21. Geçersiz `redirect_uri`/`client_id`'de redirect etme, kullanıcıya hata göster; diğer OAuth hatalarını kullanıcıya ham gösterme.**
-RFC 6749 §4.1.2.1: "MUST NOT automatically redirect the user-agent to the invalid redirection URI." Geliştirici hataları için kullanıcıya sadece korelasyon ID'li nazik bir mesaj. Kaynak: [RFC 6749](https://www.rfc-editor.org/rfc/rfc6749#section-4.1.2.1)
+21. Geçersiz yönlendirme adresi ya da istemci kimliğinde yönlendirme yapılmamalı ile kullanıcıya hata gösterilmelidir; diğer OAuth hataları kullanıcıya ham gösterilmemelidir. RFC 6749 geçersiz yönlendirme adresine otomatik yönlendirmeyi yasaklamaktadır. Geliştirici hataları için kullanıcıya yalnızca korelasyon kimliği taşıyan nazik bir mesaj verilmelidir.
 
-**22. CAPTCHA yerine etkileşimsiz bot savunması kullan — hem WCAG hem etkinlik açısından.**
-W3C: "non-interactive solutions pose no accessibility challenges" — rate limiting, proof-of-work, honeypot, sezgisel yöntemler, WebAuthn ile personhood attestation. CAPTCHA AA'da object recognition istisnasıyla geçer ama AAA'da geçmez. Kaynak: [W3C Inaccessibility of CAPTCHA](https://www.w3.org/TR/turingtest/), [Understanding SC 3.3.9](https://www.w3.org/WAI/WCAG22/Understanding/accessible-authentication-enhanced.html)
+22. CAPTCHA yerine etkileşimsiz bot savunması kullanılmalıdır; hem erişilebilirlik hem etkinlik açısından. W3C'ye göre etkileşimsiz çözümler hiçbir erişilebilirlik zorluğu çıkarmamaktadır: hız sınırlama, iş kanıtı, bal küpü, sezgisel yöntemler ile WebAuthn ile kişilik kanıtlaması. CAPTCHA ikinci seviyede nesne tanıma istisnasıyla geçmekte ancak üçüncü seviyede geçmemektedir.
 
-**23. Paste'i asla engelleme; password manager autofill'i asla bloklama; OTP alanlarını tek-alan yapıştırılabilir yap.**
-SC 3.3.8: manuel transkripsiyon gerektiren doğrulama kodu uyumlu değil; "Enter the 1st, 3rd, and 5th character" **doğrudan başarısız**. `autocomplete` ve SC 1.3.5 Input Purpose'a uy. Kaynak: [W3C Understanding SC 3.3.8](https://www.w3.org/WAI/WCAG22/Understanding/accessible-authentication-minimum.html)
+23. Yapıştırma asla engellenmemeli, parola yöneticisi otomatik doldurması asla bloklanmamalı ile tek kullanımlık şifre alanları tek alanlı ve yapıştırılabilir yapılmalıdır. İlgili kriter, elle kopyalama gerektiren bir doğrulama kodunun uyumlu olmadığını söylemektedir; belirli karakterleri girin türü bir istem doğrudan başarısızdır. Otomatik tamamlama ile girdi amacı kriterine uyulmalıdır.
 
-**24. WCAG 2.2 AA'yı satış gereksinimi olarak ele al, kozmetik olarak değil.**
-EAA 28 Haziran 2025'ten beri uygulanıyor; e-ticaret, bankacılık ve EU tüketicilerine hizmet veren SaaS kapsamda, şirket merkezi neresi olursa olsun; muafiyet yalnızca 10 kişiden az / €2M altı mikro-işletmeler. Auth0 bile RTL desteğini WCAG 2.2 AA şartına bağlıyor. Kaynak: [Avrupa Komisyonu](https://commission.europa.eu/strategy-and-policy/policies/justice-and-fundamental-rights/disability/union-equality-strategy-rights-persons-disabilities-2021-2030/european-accessibility-act_en), [Auth0 i18n](https://auth0.com/docs/customize/internationalization-and-localization/universal-login-internationalization)
+24. İkinci seviye erişilebilirlik uyumu bir satış gereksinimi olarak ele alınmalıdır, kozmetik olarak değil. Erişilebilirlik yasası 28 Haziran 2025'ten beri uygulanmaktadır; elektronik ticaret, bankacılık ile Avrupa Birliği tüketicilerine hizmet veren bulut hizmetleri kapsamdadır, şirket merkezi neresi olursa olsun; muafiyet yalnızca 10 kişiden az çalışanı ile iki milyon avronun altında cirosu olan mikro işletmeleredir. Auth0 bile sağdan sola desteğini bu uyum şartına bağlamaktadır.
 
-**25. Conditional UI'da ekran okuyucuya "has popup" duyur; QR'ı tek yol yapma.**
-FIDO denetimi: passkey kayıt/giriş prosedürleri tutarlı biçimde erişilebilir, ama **autofill tutarsız implemente edilmiş** ve QR kodları hareket/görme kısıtlı kullanıcılar için bariyer. Kaynak: [Passkey Central — Accessibility](https://www.passkeycentral.org/resources-and-tools/passkey-accessibility)
+25. Koşullu arayüzde ekran okuyucuya bir açılır pencere bulunduğu duyurulmalı ile karekod tek yol yapılmamalıdır. FIDO denetimine göre geçiş anahtarı kayıt ve giriş prosedürleri tutarlı biçimde erişilebilirdir ancak otomatik doldurma tutarsız gerçeklenmiştir ile karekodlar hareket ya da görme kısıtlı kullanıcılar için bir bariyerdir.
 
-**26. Yerelleştirmeyi çok kademeli fallback + tenant-level metin override ile kur; `dir` desteğini baştan koy.**
-Keycloak 7 kademeli zincir (kullanıcı seçimi → profil → `ui_locales` → çerez → `Accept-Language` → realm varsayılanı → İngilizce) ve tema dosyası değiştirmeden realm-specific override sunuyor. Auth0 80+ dil ama RTL hâlâ Early Access ve `ui_locales` upstream IdP'lere iletilmiyor — Argus bunu iletmeyi hedeflemeli. Kaynak: [Keycloak](https://www.keycloak.org/docs/latest/server_admin/index.html#_themes), [Auth0](https://auth0.com/docs/customize/internationalization-and-localization/universal-login-internationalization)
+26. Yerelleştirme çok kademeli bir yedek zinciriyle ile kiracı seviyesinde metin ezmeyle kurulmalı ile yön desteği baştan konulmalıdır. Keycloak yedi kademeli bir zincir ile tema dosyası değiştirmeden alana özgü ezme sunmaktadır. Auth0 80'den fazla dil sunmakta ancak sağdan sola hâlâ erken erişimdedir ile arayüz yerel ayarı yukarı akış sağlayıcılara iletilmemektedir; Argus bunu iletmeyi hedeflemelidir.
 
-**27. FIDO'nun iki "zorunlu deseni"ni ürün gereksinimi olarak kabul et.**
-(1) Account Settings'te passkey oluşturma/görme/yönetme, (2) passkey ile giriş + **zarif fallback**. "Fallback yok" bir seçenek değil. Kaynak: [Passkey Central Design Guidelines](https://www.passkeycentral.org/design-guidelines/)
+27. FIDO'nun iki zorunlu deseni ürün gereksinimi olarak kabul edilmelidir: hesap ayarlarında geçiş anahtarı oluşturma, görme ile yönetme; ile geçiş anahtarıyla giriş artı zarif bir yedek yol. Yedek yok bir seçenek değildir.
 
-**28. Attack protection'a "monitoring mode" ekle.**
-Auth0 bot detection / suspicious IP throttling / brute-force / breached password'ün her birini engellemeden yalnızca loglayan bir modda çalıştırabiliyor. Kiracı bir korumayı açmadan önce etkisini ölçebilmeli. Kaynak: [Auth0 Attack Protection](https://auth0.com/docs/secure/attack-protection)
+28. Saldırı korumasına bir izleme modu eklenmelidir. Auth0 bot tespiti, şüpheli IP kısıtlaması, kaba kuvvet koruması ile ihlal edilmiş parola tespitinin her birini engellemeden yalnızca günlüğe yazan bir modda çalıştırabilmektedir. Kiracı bir korumayı açmadan önce etkisini ölçebilmelidir.
+
+29. Kiracı özelleştirmesi bir şablon motoruyla değil bir düğüm sözleşmesiyle verilmelidir. Sunucu ne çizileceğini bildiren tipli bir yapı döndürmeli, çizimi istemci yapmalıdır; mekanizma 5.5'tedir. On dokuzuncu madde bir yasaktır, bu madde onun yerine konan şeydir. Sunucu, istemcinin göndermediği ya da uydurduğu alanları reddetmelidir; düğüm sözleşmesi bir güvenlik sınırı değildir.
+
+30. Askıya alınabilir ile yeniden başlatılabilir kimlik doğrulama birinci sınıf modellenmelidir. Bu bir yapılandırma kolaylığı değil bir ürün gereksinimidir: sihirli bağlantı, bant dışı onay ile geri kanal kimlik doğrulaması akışın ortasında duraklayıp başka bir cihazda ya da başka bir zamanda sürdürülmesini gerektirmektedir. Ping'in 2026'da eklediği geri kanal yolculukları tam olarak bunu yapmaktadır, iki yeni düğümle. Argus'un tipli durum makinesi bu durumu modellemek zorundadır ile modellemezse sihirli bağlantı akışları durum makinesinin dışında, yani denetlenmeyen bir yan kanalda gerçeklenmektedir. Askıya alınan durum için dört kural konmalıdır: durum sunucuda tutulmalı ile istemciye verilen tek şey opak bir tanıtıcı olmalıdır; tanıtıcı tek kullanımlık olmalıdır; askı penceresinin mutlak bir ömrü olmalıdır; ile sürdürme, askıya alma anındaki güvence seviyesini yükseltmemelidir, yani askıya alınan bir akış sürdürüldüğünde eksik faktörler hâlâ eksiktir.
+
+31. Durum makinesi ile token üretimi arasındaki arayüz tipli tek bir değer olmalıdır, serbest bir talep haritası değil. Değer hangi yöntemin kullanıldığını, ulaşılan güvence seviyesini, bağlanan kimlik doğrulayıcıyı ile kiracı bağlamını taşımalıdır; token üretimi kimlik doğrulama yolunun kendisine erişememelidir. Desen PingFederate'in bağdaştırıcıdan token üreticisine giden politika sözleşmesinde ile AD FS'in üç aşamalı talep işleme hattında mevcuttur; ikisinin de ayrıntıları birincil kaynaktan doğrulanmamıştır. Kazanç §1 §5.1'de açıklanmıştır.
+
+32. On sekizinci maddedeki yasak şablona özgü okunmamalıdır. Kiracının sunucu sürecinde kod çalıştırması üç şablon olmayan yüzeyde de gerçekleşmektedir: WSO2 Identity Server'ın uyarlanabilir kimlik doğrulama betikleri, Zitadel'in eylemleri ile authentik'in ifade politikaları. Üçü de kiracının yazdığı kodu kimlik sağlayıcı sürecinde koşturmaktadır. Yasak bu yüzeyleri de kapsamalı ile 19. karar buna göre genişletilmiştir.
+
+33. Akış kompozisyonu kiracıya açılmamalıdır, askıya alınabilirlik ise açılmalıdır. Bu ikisi yolculuk ürünlerinde tek bir özellik gibi sunulmaktadır ancak farklı şeylerdir. Kompozisyon, yani adım sırasını kiracının değiştirebilmesi, Keycloak'ın 40744 numaralı hatasının sınıfını üretmektedir ile reddedilmiştir. Bir çekince kayda geçirilmelidir: reddin gerekçesi tek bir üründeki tek bir hatadır ile Ping'in on yıllık yolculuk ürününün aynı hata sınıfını üretip üretmediği incelenmemiştir. Üçüncü bir tasarım noktası da çürütülmeden bırakılmıştır; Janssen'in Agama'sı akışı yapılandırma değil bir dilde yazılmış kaynak metin yapmakta ile bu, atlatma hatasını çalışma zamanından derleme zamanına taşıyabilmektedir. Argus ikinci bir dil ile onun derleyicisini bakım yüzeyi olarak kabul etmediği için reddetmektedir; gerekçe "akış motoru bunu engelleyemez" değildir.
 
 ---
 
-## 9. DOĞRULANAMAYANLAR
+## 9. Doğrulanamayanlar
 
-**Benimseme / dönüşüm rakamları:**
-1. ⚠️ FIDO 2026 raporundaki tüm yüzdeler **anket verisi** (Sapio Research, n=11.000 tüketici + 1.400 karar verici), telemetri değil. "%75 passkey etkinleştirdi" beyan, ölçüm değil.
-2. ⚠️ FIDO Passkey Index'in "%30 dönüşüm artışı / %93 vs %63" rakamı **9 FIDO üyesine yapılan gizli anketten** agrege; bağımsız denetim yok.
-3. ⚠️ Corbado Passkey Benchmark 2026'nın platform bazlı başarı oranları — metodoloji ayrıntıları ücretli katmanda; örneklem bileşimi bilinmiyor.
-4. ⚠️ "Google Authenticate 2025 funnel verisi" Corbado üzerinden ikinci elden; Google'ın orijinal sunumu doğrulanamadı.
-5. ⚠️ Google (%63,8/%13,8) ve Microsoft (%98/%32) rakamları birincil ama **seçim yanlılığı** içeriyor — passkey kuran kullanıcı zaten aktif ve cihazı elinde olan kullanıcı.
-6. ⚠️ "Parola akışlarında tamamlanma %60–75, passwordless %85–95", "%24 hesap zorunluluğunda terk", "%21 şifre unutunca terk", "%46 auth başarısızlığından terk" — hepsi satıcı içeriği, birincil metodoloji yok. **Kullanmayın.**
-7. ⚠️ Conditional UI'ın dönüşüm etkisine dair bağımsız sayısal veri **yok**. "Benimsemedeki en büyük kaldıraç" iddiası doğrulanamadı.
-8. ⚠️ "FIDO kullanıcı testi (2024–2025): katılımcıların ~yarısı telefonu almaya gitmekten caydı" — MojoAuth üzerinden aktarım, FIDO'nun kendi yayınında bulunamadı.
+Benimseme ile dönüşüm rakamları tarafında şunlar doğrulanamamıştır.
 
-**Ürün / tarih detayları:**
-9. ⚠️ Entra'da parola kutusunun Haziran 2026 sonuna kadar kaldırılacağı — ikincil kaynaklar (Trackr.Live, PCWorld); Microsoft'un birincil duyurusunda doğrulanamadı.
-10. ⚠️ Okta CSP'de "maksimum 20 trusted URI" ve HTTP header boyut limiti — arama özetinde geçti, Okta'nın fetch edilen sayfasında doğrulanamadı.
-11. ⚠️ Auth0 attack protection varsayılan eşikleri belgelenmemiş.
-12. ⚠️ Keycloak'ın varsayılan gelen locale listesi resmî dokümanda açıkça listelenmiyor.
-13. ⚠️ Microsoft'un "Remember MFA için 90 gün önerisi" — ikincil kaynaktan; fetch edilen Entra dokümanında bu sayı geçmiyor (doküman CA Sign-in frequency'ye göçü öneriyor).
-14. ⚠️ "Number matching canlı ortamlarda MFA fatigue saldırılarını ortadan kaldırdı" — Microsoft'un birincil yayınında sayısal karşılık bulunamadı.
+1. FIDO'nun 2026 raporundaki tüm yüzdeler anket verisidir, yani 11.000 tüketici ile 1.400 karar verici; telemetri değildir. Geçiş anahtarı etkinleştirdim oranı bir beyandır, bir ölçüm değildir.
+2. FIDO geçiş anahtarı endeksinin dönüşüm artışı ile başarı oranı rakamları dokuz üyeye yapılan gizli bir anketten toplanmıştır; bağımsız bir denetim yoktur.
+3. Corbado'nun platform bazlı başarı oranlarının metodoloji ayrıntıları ücretli katmandadır ile örneklem bileşimi bilinmemektedir.
+4. Google'ın 2025 huni verisi Corbado üzerinden ikinci eldendir; orijinal sunum doğrulanamamıştır.
+5. Google ile Microsoft rakamları birincildir ancak seçim yanlılığı içermektedir; geçiş anahtarı kuran kullanıcı zaten aktif ile cihazı elinde olan kullanıcıdır.
+6. Parola akışlarında tamamlanma oranları, hesap zorunluluğunda terk, şifre unutunca terk ile kimlik doğrulama başarısızlığından terk iddialarının hepsi satıcı içeriğidir ile birincil bir metodolojisi yoktur; kullanılmamalıdır.
+7. Koşullu arayüzün dönüşüm etkisine dair bağımsız bir sayısal veri yoktur. Benimsemedeki en büyük kaldıraç olduğu iddiası doğrulanamamıştır.
+8. FIDO'nun 2024 ile 2025 kullanıcı testinde katılımcıların yaklaşık yarısının telefonu almaya gitmekten caydığı iddiası bir aktarımdır ile FIDO'nun kendi yayınında bulunamamıştır.
 
-**Mevzuat:**
-15. ⚠️ **EAA Article 31 (uygulama tarihi), Article 2 (kapsam), Article 4(5) (mikro-işletme muafiyeti), Article 15 (harmonize standartlar) birincil metinden DOĞRULANMADI** — EUR-Lex'e üç farklı URL formatıyla erişilemedi (boş içerik). 28 Haziran 2025 tarihi ve €2M/10 çalışan eşiği yalnızca ikincil kaynaklardan. **Hukuki karar vermeden önce EUR-Lex'ten doğrulanmalı.**
-16. ⚠️ EAA'nın EN 301 549 ve WCAG ile resmî ilişkisi birincil kaynaktan doğrulanamadı.
+Ürün ile tarih detayları tarafında şunlar doğrulanamamıştır.
 
-**Tarihsel:**
-17. ⚠️ Google'ın 2015 identifier-first geçişine ait resmî tasarım gerekçesi bulunamadı.
+9. Entra'da parola kutusunun Haziran 2026 sonuna kadar kaldırılacağı ikincil kaynaklardandır ile Microsoft'un birincil duyurusunda doğrulanamamıştır.
+10. Okta içerik güvenlik politikasındaki azami 20 güvenilir adres ile HTTP başlık boyutu limiti arama özetinde geçmiş ancak çekilen sayfada doğrulanamamıştır.
+11. Auth0 saldırı koruması varsayılan eşikleri belgelenmemiştir.
+12. Keycloak'ın varsayılan gelen yerel ayar listesi resmî dokümanda açıkça listelenmemektedir.
+13. Microsoft'un çok faktörlü hatırlama için 90 gün önerisi ikincil kaynaktandır; çekilen dokümanda bu sayı geçmemekte, doküman koşullu erişim giriş sıklığına göçü önermektedir.
+14. Sayı eşleştirmenin canlı ortamlarda çok faktörlü yorgunluk saldırılarını ortadan kaldırdığı iddiasının Microsoft'un birincil yayınında sayısal bir karşılığı bulunamamıştır.
+
+Mevzuat tarafında şunlar doğrulanamamıştır.
+
+15. Erişilebilirlik yasasının uygulama tarihi, kapsamı, mikro işletme muafiyeti ile harmonize standartlar maddeleri birincil metinden doğrulanamamıştır; EUR-Lex'e üç farklı adres biçimiyle erişilememiş ile boş içerik dönmüştür. 28 Haziran 2025 tarihi ile eşik değerleri yalnızca ikincil kaynaklardandır. Hukuki bir karar vermeden önce birincil kaynaktan doğrulanmalıdır.
+16. Yasanın ilgili Avrupa standardı ile erişilebilirlik kılavuzuyla resmî ilişkisi birincil kaynaktan doğrulanamamıştır.
+
+Tarihsel tarafta bir nokta doğrulanamamıştır.
+
+17. Google'ın 2015 önce tanımlayıcı geçişine ait resmî bir tasarım gerekçesi bulunamamıştır.

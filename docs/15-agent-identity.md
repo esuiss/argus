@@ -1,95 +1,86 @@
-# 15. AI ajan kimliği
+# §15 — AI ajan kimliği
 
-> `ARGUS.md` §15'den taşındı. Numaralandırma korundu; bu dosyanın
-> içindeki `§15 §X` referansları aynı anlamda.
+Bu bölüm önceden ARGUS.md içindeydi; numaralandırma korunmuştur ve dosya içindeki §X referansları aynı anlamdadır.
 
-
-**Kapsam:** ~60 birincil kaynak — IETF Datatracker API, spec ham metinleri, IETF 126 (Viyana) slaytları ve tutanakları, MCP `ext-auth` repo dosyaları, AuthZEN taslakları, Entra Agent ID docs.
+**Kapsam.** Yaklaşık 60 birincil kaynak kullanılmıştır: IETF Datatracker API'si, spesifikasyon ham metinleri, IETF 126 Viyana slaytları ile tutanakları, MCP `ext-auth` depo dosyaları, AuthZEN taslakları ve Entra Agent ID dokümanları.
 
 ---
 
-## 0. Yönetici özeti — beş cümlelik gerçek
+## 0. Yönetici özeti, beş cümlelik gerçek
 
-1. **IETF OAuth WG Haziran 2026'da yeniden charter'landı ve "Complex Delegation" resmen çalışma programına girdi** — ama Eylül 2026 itibarıyla **hiçbir ajan-özel doküman WG tarafından adopte edilmedi.**
-2. Buna karşılık **200'den fazla ajan-ilgili I-D** IETF'e akmış; chairs bunu işleyemediklerini açıkça söylüyor.
-3. **Bugün gerçekten implemente edilmesi gereken tek ajan-özel şey ID-JAG'dır** — MCP'nin `Enterprise-Managed Authorization` uzantısı **STABLE** ve doğrudan onu profilliyor. **Keycloak'ta ID-JAG *üretme* yeteneği yok** — en net rekabet açığı.
-4. Geri kalan her şey (delegation_chain, attenuation, agent registry, agent claims) **yakınsamamış**; en az 6 rakip yaklaşım var.
-5. **Hiçbir düzenleme bugün bir IdP'yi ajan kimliğine zorlamıyor** — baskı tedarik/ihale ve OWASP/CSA baseline'ından geliyor.
+1. **IETF OAuth çalışma grubu Haziran 2026'da yeniden charter'lanmış ve karmaşık delegasyon resmen çalışma programına girmiştir.** Ancak Eylül 2026 itibarıyla hiçbir ajana özgü doküman çalışma grubu tarafından kabul edilmemiştir.
+2. Buna karşılık 200'den fazla ajanla ilgili internet taslağı IETF'e akmıştır ve başkanlar bunu işleyemediklerini açıkça söylemektedir.
+3. **Bugün gerçekten implemente edilmesi gereken tek ajana özgü şey ID-JAG'dır.** MCP'nin Enterprise-Managed Authorization uzantısı stabildir ve doğrudan onu profillemektedir. Keycloak'ta ID-JAG üretme yeteneği yoktur; bu en net rekabet açığıdır.
+4. Geri kalan her şey, yani delegasyon zinciri, yetki daraltma, ajan kaydı ve ajan claim'leri, yakınsamamıştır; en az altı rakip yaklaşım vardır.
+5. **Hiçbir düzenleme bugün bir IdP'yi ajan kimliğine zorlamamaktadır.** Baskı tedarik ile ihaleden ve OWASP ile CSA taban çizgisinden gelmektedir.
 
 ### Argus için beş kritik karar
 
 | # | Karar | Gerekçe |
 |---|---|---|
-| 1 | ID-JAG'ı **hem üret hem tüket** | Keycloak sadece tüketiyor (preview); MCP EMA stable |
-| 2 | CIMD'yi birinci sınıf yap, DCR'ı legacy tut | MCP 2026-07-28 DCR'ı deprecate etti |
-| 3 | Token'da `sub` (insan) + `act` (ajan) **ayrı** olsun | Dual-identity, RFC 8693'te zaten var |
-| 4 | Bearer'ı varsayılan yapma: DPoP + mTLS-bound birinci sınıf | WIMSE WIT: `MUST NOT be used as a bearer token` |
-| 5 | Delegasyon zinciri için **kendi imzalı yapını** kur, `act`'e güvenme | `act` spec gereği yetki kararı için kullanılamaz |
+| 1 | ID-JAG hem üretilir hem tüketilir | Keycloak yalnızca tüketmektedir, o da önizleme olarak; MCP EMA stabildir |
+| 2 | CIMD birinci sınıf yapılır, DCR eski olarak tutulur | MCP 2026-07-28 DCR'ı kullanımdan kaldırmıştır |
+| 3 | Token'da insan için `sub`, ajan için `act` ayrı olur | İkili kimlik RFC 8693'te zaten vardır |
+| 4 | Bearer varsayılan yapılmaz; DPoP ile mTLS'e bağlı token birinci sınıftır | WIMSE WIT şöyle der: "MUST NOT be used as a bearer token" |
+| 5 | Delegasyon zinciri için kendi imzalı yapımız kurulur, `act`'e güvenilmez | `act`, spesifikasyon gereği yetki kararı için kullanılamaz |
 
 ---
 
-## 1. IETF OAuth WG — süreç ve durum
+## 1. IETF OAuth çalışma grubu, süreç ve durum
 
-### 1.0 Charter: ajan işi ARTIK kapsam içinde
+### 1.0 Charter: ajan işi artık kapsam içindedir
 
-`charter-ietf-oauth-06`, **Onaylandı, 2026-06-04**
+`charter-ietf-oauth-06` 4 Haziran 2026'da onaylanmıştır.
 
-Charter metninden birebir:
-> *"As automated agents increasingly act on behalf of users, organizations, or both, these delegation patterns become increasingly involved and complex."*
+Charter metninden birebir alıntı: "As automated agents increasingly act on behalf of users, organizations, or both, these delegation patterns become increasingly involved and complex."
 
-Work Program maddesi:
-> ***"Complex Delegation:** Developing new mechanisms or/and extensions for authorization of automated agents working on behalf of users, including addressing scenarios where automated agents act across multiple administrative domains."*
+Çalışma programı maddesi şudur: "Complex Delegation: Developing new mechanisms or/and extensions for authorization of automated agents working on behalf of users, including addressing scenarios where automated agents act across multiple administrative domains."
 
-Koordinasyon maddesi WIMSE'yi açıkça sayıyor.
+Koordinasyon maddesi WIMSE'yi açıkça saymaktadır.
 
-**→ Ajan işi OAuth WG'de meşru. Ama charter ≠ adopte edilmiş doküman.**
+Yani ajan işi OAuth çalışma grubunda meşrudur, ancak charter kabul edilmiş doküman demek değildir.
 
-### 1.0.1 Chairs'in gerçek durumu — IETF 126 (Viyana, 23-24 Temmuz 2026)
+### 1.0.1 Başkanların gerçek durumu, IETF 126, Viyana, 23 ile 24 Temmuz 2026
 
-Chairs Update slaytlarından (PDF'ten çıkarıldı):
-> *"We received a very large number of requests for presentation. We expect this to be the case for a few more meetings. To give your request a better chance at getting WG time: We need to see discussion on the mailing list."*
+Başkanların güncelleme slaytlarından: "We received a very large number of requests for presentation. We expect this to be the case for a few more meetings. To give your request a better chance at getting WG time: We need to see discussion on the mailing list."
 
-Aaron Parecki + George Fletcher'ın **"Clustering of OAuth WG Work"** sunumu:
-> *"Large numbers of new individual drafts are being submitted to the working group. **More than can reasonably be processed.**"*
+Aaron Parecki ile George Fletcher'ın "Clustering of OAuth WG Work" sunumundan: "Large numbers of new individual drafts are being submitted to the working group. More than can reasonably be processed."
 
-Önerilen 9 cluster: Client/Server API · Client Identity, Authentication, and Registration · Token Formats/Types · Token Lifecycle · Security · Discovery · Proof of Possession · Same-Domain Chaining · Cross-Domain Chaining.
+Önerilen dokuz küme şunlardır: Client ile Server API; Client Identity, Authentication, and Registration; Token Formats ile Types; Token Lifecycle; Security; Discovery; Proof of Possession; Same-Domain Chaining; Cross-Domain Chaining.
 
-Slayt 9: *"Where does the new work land? ... May need to create a new one? **Complex-Delegation??**"*
+Dokuzuncu slayt şunu sormaktadır: "Where does the new work land? ... May need to create a new one? Complex-Delegation??"
 
-### 1.0.2 Ölçek: 200+ ajan draft'ı
+### 1.0.2 Ölçek: 200'den fazla ajan taslağı
 
-IETF 126 agentproto BoF'unda sunulan "IETF agent landscape" 160+ → **200+ ajan-ilgili draft** sayıyor. Datatracker API taraması: **60+ aktif ajan-kimlik/delegasyon draft'ı**.
+IETF 126'daki agentproto BoF oturumunda sunulan IETF ajan manzarası 160'tan 200'ün üzerine çıkan ajanla ilgili taslak saymaktadır. Datatracker API taramasında 60'tan fazla aktif ajan kimliği ve delegasyon taslağı bulunmuştur.
 
 ---
 
-## 2. Aktif OAuth WG dokümanları (Eylül 2026)
+## 2. Aktif OAuth çalışma grubu dokümanları, Eylül 2026
 
-| Draft | Rev | Tarih | WG Durumu |
+| Taslak | Revizyon | Tarih | Çalışma grubu durumu |
 |---|---|---|---|
-| `draft-ietf-oauth-v2-1` | **16** | 2026-09-03 | **Milestone: Ara 2026'da IESG'ye** |
-| `draft-ietf-oauth-attestation-based-client-auth` | **11** | 2026-09-03 | WG Doc (New) |
-| `draft-ietf-oauth-transaction-tokens` | **11** | 2026-07-30 | **WG Consensus: Waiting for Write-Up** |
-| `draft-ietf-oauth-first-party-apps` | **04** | 2026-07-01 | **WG Consensus: Waiting for Write-Up** |
-| `draft-ietf-oauth-client-id-metadata-document` | **02** | 2026-07-06 | WG Doc |
-| `draft-ietf-oauth-identity-assertion-authz-grant` | **04** | 2026-05-21 | WG Doc |
-| `draft-ietf-oauth-spiffe-client-auth` | **02** | 2026-06-15 | WG Doc |
-| `draft-ietf-oauth-security-topics-update` | 03 | 2026-07-05 | WG Doc |
-| `draft-ietf-oauth-refresh-token-expiration` | 03 | 2026-07-06 | WG Doc |
-| `draft-ietf-oauth-rar-metadata-remediation` | **00** | 2026-08-23 | WG Doc (yeni adopte) |
+| `draft-ietf-oauth-v2-1` | 16 | 3 Eylül 2026 | Kilometre taşı: Aralık 2026'da IESG'ye |
+| `draft-ietf-oauth-attestation-based-client-auth` | 11 | 3 Eylül 2026 | WG Doc, yeni |
+| `draft-ietf-oauth-transaction-tokens` | 11 | 30 Temmuz 2026 | WG uzlaşısı, yazım bekliyor |
+| `draft-ietf-oauth-first-party-apps` | 04 | 1 Temmuz 2026 | WG uzlaşısı, yazım bekliyor |
+| `draft-ietf-oauth-client-id-metadata-document` | 02 | 6 Temmuz 2026 | WG Doc |
+| `draft-ietf-oauth-identity-assertion-authz-grant` | 04 | 21 Mayıs 2026 | WG Doc |
+| `draft-ietf-oauth-spiffe-client-auth` | 02 | 15 Haziran 2026 | WG Doc |
+| `draft-ietf-oauth-security-topics-update` | 03 | 5 Temmuz 2026 | WG Doc |
+| `draft-ietf-oauth-refresh-token-expiration` | 03 | 6 Temmuz 2026 | WG Doc |
+| `draft-ietf-oauth-rar-metadata-remediation` | 00 | 23 Ağustos 2026 | WG Doc, yeni kabul edilmiştir |
 
-**RFC kuyruğunda:** `identity-chaining-17`, `rfc7523bis-11`, `sd-jwt-vc-19` (Last Call 15 Eyl 2026'da bitiyor), `status-list-21`.
-**Yeni RFC'ler:** RFC 10017 (Browser-Based Apps BCP, Ağu 2026), RFC 10027 (Cross-Device Flows BCP, Ağu 2026).
+RFC kuyruğunda `identity-chaining-17`, `rfc7523bis-11`, `sd-jwt-vc-19` (son çağrısı 15 Eylül 2026'da bitmektedir) ile `status-list-21` bulunmaktadır. Yeni RFC'ler RFC 10017 (Browser-Based Apps BCP, Ağustos 2026) ile RFC 10027'dir (Cross-Device Flows BCP, Ağustos 2026).
 
----
+### 2.1 ID-JAG, `draft-ietf-oauth-identity-assertion-authz-grant-04`
 
-### 2.1 ⭐ ID-JAG — `draft-ietf-oauth-identity-assertion-authz-grant-04`
+Identity Assertion JWT Authorization Grant, revizyon 04, 21 Mayıs 2026, süre bitişi 22 Kasım 2026. Yazarları A. Parecki (Okta), K. McGuinness ile B. Campbell'dır (Ping).
 
-**Identity Assertion JWT Authorization Grant** · Rev 04 · 21 Mayıs 2026 · Süre bitişi 22 Kasım 2026
-**Yazarlar:** A. Parecki (Okta), K. McGuinness, B. Campbell (Ping)
+**Ne çözer.** Kurumsal IdP'nin, A uygulamasının B uygulamasının API'sine kullanıcı adına erişmesini merkezî politikayla yönetmesini sağlar. `draft-ietf-oauth-identity-chaining` belgesinin bir profilidir.
 
-**Ne çözüyor:** Kurumsal IdP'nin, A uygulamasının B uygulamasının API'sine kullanıcı adına erişmesini merkezî politikayla yönetmesi. `draft-ietf-oauth-identity-chaining`'in bir profili.
+**Token yapısı**, birincil metinden doğrulanmıştır:
 
-**Token yapısı (birincil metinden doğrulandı):**
 ```
 Header: { "typ": "oauth-id-jag+jwt" }        ← ZORUNLU, tip karışıklığına karşı
 Payload:
@@ -104,56 +95,34 @@ Payload:
   email / aud_sub  JIT provisioning için               ÖNERİLEN
 ```
 
-**Akış:**
-1. `POST /token` @ IdP: `grant_type=...token-exchange`, `requested_token_type=urn:ietf:params:oauth:token-type:id-jag`, `audience=<Resource AS issuer>`, `subject_token=<ID Token|SAML|Refresh Token>`
-2. Yanıt: `{"issued_token_type":"...id-jag","access_token":"<JWT>","token_type":"N_A","expires_in":300}` — `token_type: N_A` çünkü bu bir bearer token değil, bir **grant**
-3. `POST /token` @ Resource AS: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer`, `assertion=<ID-JAG>`
-4. Resource AS audience-kısıtlı access token verir
+**Akış.** Önce IdP'nin token endpoint'ine `POST /token` yapılır; `grant_type=...token-exchange`, `requested_token_type=urn:ietf:params:oauth:token-type:id-jag`, `audience=<Resource AS issuer>` ile `subject_token=<ID Token, SAML veya Refresh Token>` gönderilir. Yanıt `{"issued_token_type":"...id-jag","access_token":"<JWT>","token_type":"N_A","expires_in":300}` biçimindedir; `token_type` değeri `N_A`'dır, çünkü bu bir bearer token değil bir grant'tır. Sonra Resource AS'in token endpoint'ine `POST /token` yapılır; `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer` ile `assertion=<ID-JAG>` gönderilir. Resource AS audience kısıtlı bir access token verir.
 
-**Discovery metadata:**
-- IdP AS: `identity_chaining_requested_token_types_supported` içinde `urn:ietf:params:oauth:token-type:id-jag`
-- Resource AS: `authorization_grant_profiles_supported` içinde `urn:ietf:params:oauth:grant-profile:id-jag`
+**Keşif metadata'sı.** IdP AS tarafında `identity_chaining_requested_token_types_supported` içinde `urn:ietf:params:oauth:token-type:id-jag` bulunur. Resource AS tarafında `authorization_grant_profiles_supported` içinde `urn:ietf:params:oauth:grant-profile:id-jag` bulunur.
 
-**Önemli sınırlama:** Spec, Token Exchange isteğinde opsiyonel `actor_token` parametresine izin veriyor ama **"this specification does not define normative processing requirements"** diyor. Güvenlik bölümü, geçerli bir `subject_token`'ı alakasız bir `actor_token` ile eşleyerek abartılı yetki elde etme riskini uyarıyor.
+**Önemli sınırlama.** Spesifikasyon, token takası isteğinde opsiyonel bir `actor_token` parametresine izin vermekte ancak "this specification does not define normative processing requirements" demektedir. Güvenlik bölümü, geçerli bir `subject_token`'ı alakasız bir `actor_token` ile eşleyerek abartılı yetki elde etme riskini uyarmaktadır.
 
-> **ID-JAG bugün ajan delegasyonunu ÇÖZMÜYOR; kullanıcı SSO'sunun cross-app taşınmasını çözüyor. Ajan bağlantısı MCP EMA profili üzerinden geliyor.**
+> ID-JAG bugün ajan delegasyonunu çözmemektedir; kullanıcı çoklu oturum açmasının uygulamalar arası taşınmasını çözmektedir. Ajan bağlantısı MCP EMA profili üzerinden gelmektedir.
 
-**IdP'de implemente edilmesi gerekenler:**
-- Token endpoint'te `requested_token_type=...id-jag` desteği + ID-JAG minting (`typ` header dahil)
-- Cross-app connection policy: `(requesting_client_id, resource_as_issuer, resource_identifier, allowed_scopes, subject_policy)` — admin-yönetimli
-- Per-connection `sub` mapper
-- Resource AS rolü: `jwt-bearer` grant ile ID-JAG kabulü + 5 adımlı doğrulama
-- **Client continuity kontrolü:** ID-JAG içindeki `client_id`, token endpoint'te kimlik doğrulanan client ile eşleşmeli (**bunu atlayan implementasyonlar var**)
-- `jti` replay cache (TTL = exp)
+**IdP'de implemente edilmesi gerekenler.** Token endpoint'inde `requested_token_type=...id-jag` desteği ile ID-JAG üretimi, `typ` başlığı dahil. Uygulamalar arası bağlantı politikası: `(requesting_client_id, resource_as_issuer, resource_identifier, allowed_scopes, subject_policy)`, yönetici tarafından yönetilir. Bağlantı başına `sub` eşleyicisi. Resource AS rolü: `jwt-bearer` grant'ıyla ID-JAG kabulü ve beş adımlı doğrulama. İstemci sürekliliği kontrolü: ID-JAG içindeki `client_id`, token endpoint'inde kimliği doğrulanan istemciyle eşleşmelidir; bunu atlayan implementasyonlar vardır. `jti` yeniden oynatma önbelleği, TTL'i `exp` değerine eşit olur.
 
-**Sınıflandırma: 🟢 BUGÜN İMPLEMENTE EDİLMELİ.**
+Sınıflandırması bugün implemente edilmelidir.
 
-**Ekosistem kanıtı:** IdP tarafı Okta, Ping, Descope, Keycloak (in progress); istemciler Claude, VS Code, WorkOS; resource app'ler Slack, Notion, Figma, Linear, Asana, Datadog, Atlassian.
+**Ekosistem kanıtı.** IdP tarafında Okta, Ping, Descope ile Keycloak (devam etmektedir) vardır; istemcilerde Claude, VS Code ile WorkOS; kaynak uygulamalarda Slack, Notion, Figma, Linear, Asana, Datadog ile Atlassian bulunmaktadır.
 
-**Keycloak açığı:** Keycloak 26.5 ID-JAG'ı **tüketebiliyor** (preview) ama **üretemiyor**; issuance önerisi keycloak#43971, hedef 26.7.0. *(İkincil kaynak — GitHub'da doğrulanmadı.)*
+**Keycloak açığı.** Keycloak 26.5 ID-JAG'ı önizleme olarak tüketebilmekte ancak üretememektedir; üretim önerisi keycloak#43971 numaralı issue'dur ve hedefi 26.7.0'dır. Bu ikincil bir kaynaktır ve GitHub'da doğrulanmamıştır.
 
----
+### 2.2 MCP Enterprise-Managed Authorization, ID-JAG'ın gerçek ajan uygulaması
 
-### 2.2 ⭐ MCP Enterprise-Managed Authorization — ID-JAG'ın gerçek ajan uygulaması
+Statüsü stabildir ve MCP `ext-auth` deposundadır.
 
-**Statü: STABLE** (MCP `ext-auth` repo'sunda)
+Spesifikasyonun kendi ifadesi şudur: "This document defines an application of the 'Identity Assertion JWT Authorization Grant' for use within enterprise deployments of the Model Context Protocol (MCP)."
 
-Spec'in kendi ifadesi:
-> *"This document defines an application of the 'Identity Assertion JWT Authorization Grant' for use within enterprise deployments of the Model Context Protocol (MCP)."*
+Rol eşlemesi şöyledir: Client MCP istemcisidir; Resource Server MCP sunucusudur; Resource Authorization Server, MCP sunucusunun RFC 9728 PRM'sinde ilan ettiği AS'tir; IdP Authorization Server kurumsal çoklu oturum açma IdP'sidir, yani biziz.
 
-Rol eşlemesi:
-- **Client** = MCP Client
-- **Resource Server** = MCP Server
-- **Resource Authorization Server** = MCP Server'ın PRM'de (RFC 9728) ilan ettiği AS
-- **IdP Authorization Server** = kurumsal SSO IdP'si → **bu biziz**
+Profil kısıtları şunlardır. `audience` değeri Resource AS'in issuer tanımlayıcısı olmalıdır (MUST). `resource` verilirse MCP sunucusunun RFC 9728 kaynak tanımlayıcısı olmalıdır (MUST). IdP, token takasında istemci kimlik doğrulamasını çoklu oturum açmadaki kadar sıkı uygulamalıdır. Ön kayıtlı değilse istemci, CIMD'sini `client_id` olarak kullanabilir.
 
-Profil kısıtları:
-- `audience` **MUST** = Resource AS'in issuer identifier'ı
-- `resource` verilirse **MUST** = MCP Server'ın RFC 9728 Resource Identifier'ı
-- IdP, token exchange'te client auth'u SSO'daki kadar sıkı uygulamalı
-- Pre-registered değilse client, **CIMD**'sini client_id olarak kullanabilir
+Spesifikasyondan birebir örnek payload:
 
-Örnek payload (spec'ten birebir):
 ```json
 { "jti":"9e43f81b64a33f20116179", "iss":"https://acme.idp.example",
   "sub":"U019488227", "email":"user@example.com",
@@ -162,404 +131,342 @@ Profil kısıtları:
   "scope":"chat.read chat.history" }
 ```
 
-> **Bu, "IdP'nin bugün ne implemente etmesi gerektiği" sorusunun en net cevabı: MCP dünyasının kurumsal auth'u = ID-JAG. Stable statüde. Şimdi.**
+> Bu, IdP'nin bugün ne implemente etmesi gerektiği sorusunun en net cevabıdır: MCP dünyasının kurumsal yetkilendirmesi ID-JAG'dır, stabil statüdedir ve şimdi gereklidir.
 
----
+### 2.3 Identity Chaining, `draft-ietf-oauth-identity-chaining-17`
 
-### 2.3 Identity Chaining — `draft-ietf-oauth-identity-chaining-17`
+Durumu IESG'ye gönderilmiş ve RFC Editor kuyruğundadır; Proposed Standard, 19 Temmuz 2026.
 
-**Durum: IESG'ye gönderildi, RFC Editor kuyruğunda** · Proposed Standard · 19 Temmuz 2026
+RFC 8693 ile RFC 7523'ü birleştirerek güven alanları arasında kimlik ve yetki taşır. ID-JAG'ın üst kümesidir. Yeni metadata alanı `identity_chaining_requested_token_types_supported`'tır.
 
-RFC 8693 + RFC 7523'ü birleştirerek trust domain'ler arası kimlik/yetki taşıyor. ID-JAG'ın üst kümesi. Yeni metadata: `identity_chaining_requested_token_types_supported`.
+Bugün implemente edilmelidir, çünkü RFC olmak üzeredir ve ID-JAG'ın temelidir.
 
-**🟢 BUGÜN İMPLEMENTE EDİLMELİ** — RFC olmak üzere, ID-JAG'ın temeli.
+### 2.4 CIMD, `draft-ietf-oauth-client-id-metadata-document-02`
 
----
+Detaylar için §14'ün beşinci bölümüne bakınız.
 
-### 2.4 CIMD — `draft-ietf-oauth-client-id-metadata-document-02`
+Not olarak CIMD -02 metninde AI ajanından veya MCP'den hiç bahis yoktur; genel amaçlı bir spesifikasyondur. Ajan ekosisteminin ona bağımlılığı MCP tarafından gelmektedir.
 
-Detaylar için bkz. 14-mcp-authorization.md §5 (§14).
+Bugün implemente edilmelidir.
 
-**Not:** CIMD-02 metninde **AI agent veya MCP'den hiç bahis yok** — genel amaçlı bir spec. Ajan ekosisteminin ona bağımlılığı MCP tarafından geliyor.
+### 2.5 FiPA, `draft-ietf-oauth-first-party-apps-04`
 
-**🟢 BUGÜN İMPLEMENTE EDİLMELİ.**
+Durumu WG uzlaşısıdır ve yazım beklemektedir; çalışma grubu son çağrısı geçilmiştir. Ajanla ilgili en olgun çalışma grubu dokümanıdır. Yazarları Parecki (Okta), Fletcher (Practical Identity) ile Kasselman'dır (Defakto).
 
----
+**Ne getirir.** Authorization Challenge Endpoint'i getirir; yerel bir uygulamanın tarayıcıya gitmeden kullanıcı kimlik doğrulamasını kendi arayüzünde yürütmesini sağlar. HTTP POST ile form kodlaması kullanır ve authorization code veya hata döner. `auth_session` aynı istemci örneğinden gelen ardışık istekleri bağlayan opak bir değerdir; cihaza bağlı olmalıdır ve DPoP ile bağlanabilir. Hata kodları `invalid_session`, `insufficient_authorization` ile `redirect_to_web`'dir (HTTP 403).
 
-### 2.5 FiPA — `draft-ietf-oauth-first-party-apps-04`
+**Ajan alakası.** Doğrudan bir ajan spesifikasyonu değildir, ancak tarayıcısız ve başsız istemci için resmî OAuth desenidir. Tek sayfa uygulamalarında kullanımı XSS nedeniyle önerilmemektedir.
 
-**Durum: WG Consensus: Waiting for Write-Up** — WGLC geçmiş. **En olgun ajan-alakalı WG dokümanı.**
-**Yazarlar:** Parecki (Okta), Fletcher (Practical Identity), Kasselman (Defakto)
+Arayüzü hazırlanmalıdır.
 
-**Ne getiriyor:** **Authorization Challenge Endpoint** — native uygulamanın tarayıcıya gitmeden kullanıcı auth'unu kendi UI'ında yürütmesi.
-- HTTP POST, form-encoded; authorization code veya hata döner
-- **`auth_session`**: aynı client instance'ından gelen ardışık istekleri bağlayan opak değer; **device-bound olmalı**, DPoP ile bağlanabilir
-- Hata kodları: `invalid_session`, `insufficient_authorization`, `redirect_to_web` (HTTP 403)
+### 2.6 Token Exchange (RFC 8693) ile `act`, delegasyonun zayıf halkası
 
-**Ajan alakası:** Doğrudan ajan spec'i değil — ama **tarayıcısız/headless client** için resmî OAuth deseni. SPA'larda kullanımı **NOT RECOMMENDED** (XSS).
+Yapısal zaaf spesifikasyonun kendi ifadesindedir, §4.1: tüketiciler yalnızca üst düzey claim'lere ve `act` ile tanımlanan mevcut aktöre bakmalıdır; önceki aktörler yalnızca bilgilendiricidir ve erişim kontrolü kararlarında dikkate alınmamalıdır.
 
-**🟡 ARAYÜZÜ HAZIRLANMALI.**
+> `act` bir denetim izidir, yetki kanıtı değildir. Bu tasarım gereğidir.
 
----
+**Delegation Chain Splicing saldırısı.** IETF OAuth posta listesindeki "Security Consideration: Delegation Chain Splicing in RFC 8693 Token Exchange" başlıklı konu doğrulanmıştır; başlatan `cbchhaya`, 27 Şubat 2026, tartışma Mart 2026 boyunca sürmüştür.
 
-### 2.6 Token Exchange (RFC 8693) + `act` — DELEGASYONUN ZAYIF HALKASI
+Mekanizması şöyledir: ele geçirilmiş bir aracı, farklı delegasyon bağlamlarından bir `subject_token` ile bir `actor_token` sunar. Güvenlik token servisi her ikisini bağımsız doğrular, geçerli bulur ve hiç gerçekleşmemiş bir zinciri iddia eden, usulüne uygun imzalanmış bir token üretir.
 
-**Yapısal zaaf (spec'in kendi ifadesi, §4.1):** Tüketiciler yalnızca top-level claim'lere ve `act` ile tanımlanan **mevcut** aktöre bakmalı; önceki aktörler **sadece bilgilendirici**, erişim kontrolü kararlarında dikkate alınmamalı.
+Kök neden şudur: RFC 8693 iki token arasında çapraz doğrulama zorunlu kılmamaktadır.
 
-> **`act` bir audit izidir, yetki kanıtı DEĞİLDİR. Bu tasarım gereğidir.**
+Önerilen azaltma posta listesindendir, spesifikasyondan değildir: `aud[N] == sub[N+1]` kriptografik eşleşmesi, kısa TTL ve arka kanal iptali.
 
-#### Delegation Chain Splicing saldırısı
+Birincil mesaj gövdesine erişilememiştir, çünkü mail-archive.com bloke olmuştur. Mekanizma açıklaması ikincil bir kaynaktandır; WorkOS, 27 Nisan 2026. Doğrulama kısmidir.
 
-IETF OAuth mailing list, thread doğrulandı: *"Security Consideration: Delegation Chain Splicing in RFC 8693 Token Exchange"*, başlatan `cbchhaya`, **27 Şubat 2026**; tartışma Mart 2026 boyunca.
+**Çözüm taslakları**, hepsi bireyseldir ve hiçbiri kabul edilmemiştir.
 
-Mekanizma: Ele geçirilmiş bir aracı, **farklı delegasyon bağlamlarından** `subject_token` ve `actor_token` sunar. STS her ikisini **bağımsız** doğrular, geçerli bulur ve **hiç gerçekleşmemiş bir zinciri iddia eden, usulüne uygun imzalanmış** token üretir.
-
-**Kök neden: RFC 8693 iki token arasında çapraz doğrulama zorunlu kılmıyor.**
-
-Önerilen mitigasyon (mailing list, **spec değil**): `aud[N] == sub[N+1]` kriptografik eşleşmesi + kısa TTL + back-channel revocation.
-
-⚠️ Birincil mesaj gövdesine erişilemedi (mail-archive.com bloke). Mekanizma açıklaması ikincil kaynaktan (WorkOS, 27 Nisan 2026). **DOĞRULAMA: KISMÎ.**
-
-#### Çözüm draft'ları — hepsi bireysel, hiçbiri adopte değil
-
-| Draft | Rev/Tarih | Yaklaşım |
+| Taslak | Revizyon ve tarih | Yaklaşım |
 |---|---|---|
-| `draft-liu-oauth-chain-delegation` | 00 / 8 Haz 2026 | `delegation_chain` claim'i; **çift imza** (`as_signature` + `delegator_signature`), detached JWS + JCS (RFC 8785); `record[i].delegator_id == record[i-1].delegatee_id`; max 5 hop. Yazarlar: Dapeng Liu, Judy Zhu, Suresh Krishnan, **Aaron Parecki** |
-| `draft-mcguinness-oauth-actor-profile` | 00 / 30 Nis 2026 | `act` için **tutarlı profil**: `sub`=yetkilendiren, en dıştaki `act.sub`=doğrudan aktör, kanonik aktör kimliği = `(act.iss, act.sub)`. **Minimum depth 4**. İki presenter-geçiş modu: **continuation** ve **rebind** |
-| `draft-asor-wimse-agent-delegation-chain` | 01 / 3 Eyl 2026 | Ed25519/ES256/**ML-DSA**; `del_depth`, `del_max_depth`, `par_hash` (ebeveynin SHA-256'sı), `cnf`. **8 adımlı offline doğrulama**, AS'e temas yok |
-| `draft-niyikiza-oauth-attenuating-agent-tokens` | 01 / 15 Haz 2026 | Macaroon/biscuit ilhamlı ama **asimetrik**. 6 değişmez (I1-I6), 8 kısıt tipi, **closed-world mode** |
-| `draft-hamr-oauth-agent-delegation` | 01 / 2 Eyl 2026 | **`Agent-Delegation` HTTP header'ı**. Scope containment, floor non-relaxation, expiry non-extension. **RFC 9421 HTTP Message Signatures zorunlu** |
-| `draft-li-oauth-delegated-authorization` | 03 / 24 Tem 2026 | `cnf.jkt` key binding; client **kendi private key'iyle** çocuk token imzalar (AS'e gitmeden); DPoP zorunlu (Huawei) |
-| `draft-mcguinness-oauth-mission` | 00 / 6 Tem 2026 | **Mission**: onaylanmış göreve bağlı dayanıklı yetkilendirme artefaktı. `intent_hash` + `authority_hash` |
+| `draft-liu-oauth-chain-delegation` | 00, 8 Haziran 2026 | `delegation_chain` claim'i; çift imza (`as_signature` ile `delegator_signature`), ayrık JWS ile JCS (RFC 8785); `record[i].delegator_id == record[i-1].delegatee_id`; en fazla beş sıçrama. Yazarları Dapeng Liu, Judy Zhu, Suresh Krishnan ile Aaron Parecki'dir |
+| `draft-mcguinness-oauth-actor-profile` | 00, 30 Nisan 2026 | `act` için tutarlı bir profil: `sub` yetkilendirendir, en dıştaki `act.sub` doğrudan aktördür, kanonik aktör kimliği `(act.iss, act.sub)` ikilisidir. Asgari derinlik dörttür. İki sunucu geçiş modu vardır: continuation ile rebind |
+| `draft-asor-wimse-agent-delegation-chain` | 01, 3 Eylül 2026 | Ed25519, ES256 ile ML-DSA; `del_depth`, `del_max_depth`, ebeveynin SHA-256'sı olan `par_hash` ve `cnf`. Sekiz adımlı çevrimdışı doğrulama yapılır, AS'e temas edilmez |
+| `draft-niyikiza-oauth-attenuating-agent-tokens` | 01, 15 Haziran 2026 | Macaroon ile biscuit ilhamlıdır ancak asimetriktir. Altı değişmez (I1 ile I6 arası), sekiz kısıt tipi ve kapalı dünya modu vardır |
+| `draft-hamr-oauth-agent-delegation` | 01, 2 Eylül 2026 | `Agent-Delegation` HTTP başlığı kullanır. Scope kapsaması, taban gevşetmeme ve süre uzatmama kuralları vardır. RFC 9421 HTTP Message Signatures zorunludur |
+| `draft-li-oauth-delegated-authorization` | 03, 24 Temmuz 2026 | `cnf.jkt` ile anahtar bağlama; istemci kendi özel anahtarıyla çocuk token imzalar ve AS'e gitmez; DPoP zorunludur. Huawei kaynaklıdır |
+| `draft-mcguinness-oauth-mission` | 00, 6 Temmuz 2026 | Mission, onaylanmış göreve bağlı dayanıklı bir yetkilendirme artefaktıdır; `intent_hash` ile `authority_hash` taşır |
 
-**Yorum:** Bu, sağlıklı bir standartlaşma değil — **aynı problemin 7 rakip çözümü**. En güçlü adaylar: `draft-mcguinness-oauth-actor-profile` ve `draft-liu-oauth-chain-delegation` (yazar ağırlığı + `act` uyumu).
+**Yorum.** Bu, sağlıklı bir standartlaşma değildir; aynı problemin yedi rakip çözümüdür. En güçlü adaylar `draft-mcguinness-oauth-actor-profile` ile `draft-liu-oauth-chain-delegation`'dır; yazar ağırlığı ve `act` uyumu bunu getirmektedir.
 
-**🟡 ARAYÜZÜ HAZIRLANMALI + kendi güvenli üst kümeni kur.**
+Arayüzü hazırlanmalı ve kendi güvenli üst kümemiz kurulmalıdır. Somut öneri şudur: `act` RFC 8693 uyumlu üretilir, bu interop içindir; ek olarak `delegation_chain` alanı `draft-liu` biçiminde imzalı üretilir. `draft-mcguinness-oauth-actor-profile`'ın üç değişmezi bugünden benimsenir.
 
-Somut öneri: `act`'i RFC 8693 uyumlu üret (interop), **ek olarak** `delegation_chain`'i `draft-liu`'nun şeklinde imzalı üret. `draft-mcguinness-oauth-actor-profile`'ın üç değişmezini bugünden benimse.
+### 2.7 Transaction Tokens, `draft-ietf-oauth-transaction-tokens-11`
 
----
+Durumu WG uzlaşısıdır ve yazım beklemektedir; üçüncü bir çalışma grubu son çağrısı planlanmıştır.
 
-### 2.7 Transaction Tokens — `draft-ietf-oauth-transaction-tokens-11`
+Başlığı `typ: txntoken+jwt`'dir. Claim'leri `txn`, `sub`, `aud` (güven alanı tanımlayıcısıdır ve alanlar arası kullanımı engeller), `scope`, değişmez işlem bağlamı olan `tctx`, istek bağlamı olan `rctx` ile isteyen iş yükünün kimliği olan `req_wl`'dir. Transaction Token Service, RFC 8693 ile `requested_token_type=urn:ietf:params:oauth:token-type:txn_token` kullanır. HTTP taşımasında `Txn-Token` adlı özel bir başlık kullanılır.
 
-**Durum: WG Consensus, Waiting for Write-Up** (3. WGLC planlı)
+Ajan alakası şudur: bir ajan görevinin mikroservis zinciri boyunca daraltılmış ve göreve bağlı yetkiyi taşımasını sağlar.
 
-- Header `typ: txntoken+jwt`
-- Claim'ler: `txn`, `sub`, `aud` (**Trust Domain identifier** — cross-domain kullanımı engeller), `scope`, **`tctx`** (immutable transaction context), **`rctx`** (request context), **`req_wl`** (requesting workload id)
-- **Transaction Token Service (TTS)**, RFC 8693 ile: `requested_token_type=urn:ietf:params:oauth:token-type:txn_token`
-- HTTP taşıma: **`Txn-Token` özel header'ı**
+Arayüzü hazırlanmalıdır.
 
-**Ajan alakası:** Bir ajan görevinin mikroservis zinciri boyunca **daralmış, göreve bağlı** yetkiyi taşıması.
+### 2.8 Attestation tabanlı istemci kimlik doğrulaması, revizyon 11, 3 Eylül 2026
 
-**🟡 ARAYÜZÜ HAZIRLANMALI.**
+Client Attestation JWT, Client Attester'dan gelen ve örneğin anahtarına bağlı imzalı bir beyandır. Client Attestation PoP JWT, örneğin o anahtarla ürettiği sahiplik kanıtıdır. Başlıkları `OAuth-Client-Attestation`, `OAuth-Client-Attestation-PoP` ile `OAuth-Client-Attestation-Challenge`'tır. Claim'leri `cnf`, `sub`, `aud` ile opsiyonel `challenge`'tır.
 
----
+DPoP birleşik modu şöyle tanımlanmıştır: "the Client Instance Key and the DPoP Key are the same asymmetric key pair". Yani tek bir DPoP kanıtı hem attestation hem gönderici kısıtlaması görevi görür.
 
-### 2.8 Attestation-Based Client Auth — rev 11, 3 Eylül 2026
+> **Doğru mimari desen.** Donanım attestation'ı kayıt anında bir kez anahtarın donanımda yaşadığını kanıtlar; sonra her istekte DPoP kanıtı o anahtarın kullanıldığını kanıtlar.
 
-- **Client Attestation JWT**: Client Attester'dan gelen, instance'ın anahtarına bağlı imzalı beyan
-- **Client Attestation PoP JWT**: Instance'ın o anahtarla ürettiği sahiplik kanıtı
-- Header'lar: `OAuth-Client-Attestation`, `OAuth-Client-Attestation-PoP`, `OAuth-Client-Attestation-Challenge`
-- Claim'ler: `cnf`, `sub`, `aud`, opsiyonel `challenge`
+DPoP çevresindeki bireysel taslakların neredeyse hepsi süresi dolmuş durumdayken tek canlı standartlaşma çalışması budur.
 
-🔑 **"DPoP combined mode":** *"the Client Instance Key and the DPoP Key are the same asymmetric key pair"* — tek DPoP proof'u hem attestation hem sender-constraint görevi görüyor.
+Arayüzü hazırlanmalıdır.
 
-> **Doğru mimari desen: donanım attestation kayıt anında bir kez anahtarın donanımda yaşadığını kanıtlar; sonra her istekte DPoP proof'u o anahtarın kullanıldığını kanıtlar.**
+### 2.9 SPIFFE istemci kimlik doğrulaması, `draft-ietf-oauth-spiffe-client-auth-02`
 
-DPoP çevresindeki bireysel taslakların neredeyse hepsi expired iken **tek canlı standartlaşma çalışması budur.**
+Yazarları Arndt Schwenkschuster, Pieter Kasselman, Scott Rose (NIST), Stian Thorgersen (IBM, Keycloak kurucusu) ile Nancy Cam-Winget'tir (Cisco).
 
-**🟡 ARAYÜZÜ HAZIRLANMALI.**
+Üç SVID kimlik doğrulama yöntemi vardır. JWT-SVID, `client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-spiffe` kullanır. X.509-SVID mTLS kullanır ve SPIFFE kimliği sertifikanın SAN URI alanındadır. WIT-SVID, WIMSE Workload Identity Token ile Client Attestation PoP JWT kullanır.
 
----
+Anahtar dağıtımında SPIFFE Bundle Endpoint zorunludur; HTTPS üzerinden JWKS ve WebPKI kullanılır.
 
-### 2.9 ⭐ SPIFFE Client Auth — `draft-ietf-oauth-spiffe-client-auth-02`
+Implementasyon durumunda Keycloak listelenmektedir.
 
-**Yazarlar:** Arndt Schwenkschuster, Pieter Kasselman, **Scott Rose (NIST)**, **Stian Thorgersen (IBM — Keycloak kurucusu)**, Nancy Cam-Winget (Cisco)
+Bugün implemente edilmelidir. Stian Thorgersen'ın yazar olması, Keycloak'ın bunu ciddiye aldığının kanıtıdır.
 
-**Üç SVID auth yöntemi:**
-1. **JWT-SVID**: `client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-spiffe`
-2. **X.509-SVID**: mTLS, SPIFFE ID sertifikanın **SAN URI**'sinde
-3. **WIT-SVID**: WIMSE Workload Identity Token + Client Attestation PoP JWT
+### 2.10 Diğer çalışma grubu dokümanları
 
-**Anahtar dağıtımı: SPIFFE Bundle Endpoint zorunlu** (JWKS over HTTPS, WebPKI).
+`draft-ietf-oauth-refresh-token-expiration-03` (Nick Watson, Google) `refresh_token_timeout` ile `authorization_expires_in` alanlarını getirir: "The refresh token MUST NOT expire later than the user authorization expires." Uzun süren ajan görevleri için doğrudan alakalıdır ve arayüzü hazırlanmalıdır.
 
-**Implementation Status: Keycloak** listeleniyor.
+`draft-ietf-oauth-rar-metadata-remediation-00` (Yaron Zehavi, RBI) `authorization_details_types_metadata_endpoint` alanını, `insufficient_authorization` hata kodunu ve `authorization_remediation` mekanizmasını getirir. Ajanın hangi `authorization_details` değerini istemesi gerektiğini keşfetmesi içindir ve arayüzü hazırlanmalıdır.
 
-**🟢 BUGÜN İMPLEMENTE EDİLMELİ.** Stian Thorgersen'ın yazar olması, Keycloak'ın bunu ciddiye aldığının kanıtı.
+`draft-ietf-oauth-v2-1-16`'nın kilometre taşı Aralık 2026'da IESG'ye gitmektir. MCP spesifikasyonu hâlâ `draft-13`'e referans vermektedir, yani üç revizyon geridedir.
 
 ---
 
-### 2.10 Diğer WG dokümanları
+## 3. Ajana özgü bireysel taslaklar, zoo haritası
 
-**`draft-ietf-oauth-refresh-token-expiration-03`** (Nick Watson/Google): `refresh_token_timeout` ve `authorization_expires_in`. *"The refresh token MUST NOT expire later than the user authorization expires."* **Uzun süren ajan görevleri için doğrudan alakalı.** 🟡
+Hiçbiri çalışma grubu dokümanı değildir. Ajan kimliği ve yetkilendirmesiyle doğrudan ilgili en az 30 aktif taslak vardır.
 
-**`draft-ietf-oauth-rar-metadata-remediation-00`** (Yaron Zehavi/RBI): `authorization_details_types_metadata_endpoint` + `insufficient_authorization` hata kodu + `authorization_remediation`. **Ajanın "hangi authorization_details'i istemeliyim"i keşfetmesi için.** 🟡
+### 3.1 `draft-klrc-aiagent-auth-03`, AIMS
 
-**`draft-ietf-oauth-v2-1-16`:** Milestone Aralık 2026'da IESG'ye. ⚠️ **MCP spec'i hâlâ `draft-13`'e referans veriyor — 3 revizyon geride.**
+6 Temmuz 2026 tarihli bireysel bir internet taslağıdır. Yazarları Pieter Kasselman (Defakto), Jeff Lombardo (AWS), Yaroslav Rosomakho (Zscaler), Brian Campbell (Ping), Nick Steele (OpenAI) ile Aaron Parecki'dir (Okta).
 
----
+Bu, endüstri uzlaşısının nereye gittiğinin en güçlü göstergesidir. Yeni bir protokol icat etmemekte, WIMSE ile OAuth ve SPIFFE'i birleştirmektedir.
 
-## 3. Ajan-özel bireysel draft'lar — zoo haritası
+AIMS, yani Agent Identity Management System, bir ajan iş yükünün kimliğini ve izinlerini tesis etmek, sürdürmek ve değerlendirmek için gereken fonksiyonlar kümesini tanımlayan kavramsal modeldir. Yedi bileşeni vardır: ajan tanımlayıcıları, kimlik bilgileri, sağlama, kimlik doğrulama, yetkilendirme, gözlemlenebilirlik ile düzeltme ve uyum ölçümü.
 
-Hiçbiri WG dokümanı değil. **Ajan kimliği/yetkilendirmesiyle doğrudan ilgili en az 30 aktif draft var.**
+Ham metinden birebir alıntılar şunlardır.
 
-### 3.1 ⭐⭐ `draft-klrc-aiagent-auth-03` — AIMS
+> "The Large Language Model MUST NOT have access to an agent's credentials or to credentials that may be needed to access tools and services. This prevents the Large Language Model from using, exposing, or being manipulated via prompt injection into disclosing the credentials." (§8, satır 540)
 
-**6 Temmuz 2026** · Bireysel I-D
-**Yazarlar:** Pieter Kasselman (Defakto), **Jeff Lombardo (AWS)**, Yaroslav Rosomakho (Zscaler), **Brian Campbell (Ping)**, **Nick Steele (OpenAI)**, **Aaron Parecki (Okta)**
+> "An identifier alone is insufficient unless it can be verified to be controlled by the communicating agent through a cryptographic binding."
 
-Bu, **endüstri konsensüsünün nereye gittiğinin en güçlü göstergesi.** Yeni protokol icat etmiyor; WIMSE + OAuth + SPIFFE'i kompoze ediyor.
+Döngüde insan bölümü, yani §10.7, bizim için en değerli kısımdır.
 
-**AIMS (Agent Identity Management System)** = *"bir ajan workload'unun kimliğini ve izinlerini tesis etmek, sürdürmek ve değerlendirmek için gereken fonksiyonlar kümesini tanımlayan kavramsal model."* Yedi bileşen: agent identifiers, credentials, provisioning, authentication, authorization, observability/remediation, compliance measurement.
+> "An Agent, acting as an OAuth client, can use the OpenID Client Initiated Backchannel Authentication (CIBA) protocol. This triggers an out-of-band interaction allowing the user to approve or deny the requested operation without exposing credentials to the agent."
 
-**Ham metinden birebir alıntılar:**
+> "Such interactions do not by themselves constitute authorization and MUST be bound to a verifiable authorization grant issued by the authorization server... the agent MUST NOT treat local UI confirmation alone as sufficient authorization."
 
-> *"The Large Language Model **MUST NOT** have access to an agent's credentials or to credentials that may be needed to access tools and services. This prevents the Large Language Model from using, exposing, or being manipulated via prompt injection into disclosing the credentials."* (§8, satır 540)
+> "Note: Additional specification or design work may be needed... CIBA itself only accounts for client initiation, which doesn't map well to cases that envision the need for User confirmation to occur mid-execution."
 
-> *"An identifier alone is insufficient unless it can be verified to be controlled by the communicating agent through a cryptographic binding."*
+> Bu, ajan görevinin ortasında insan onayı probleminin resmî kabulüdür. CIBA yetmemektedir ve bu açık bir problemdir.
 
-**Human-in-the-Loop bölümü (§10.7) — bizim için en değerli kısım:**
+Agent Mission, yani §10.1, şunu söyler: ajan bir Mission alır ve bu genelde doğal dildedir. Mission'ın yetkilendirme gereksinimlerine çevrilmesi spesifikasyon kapsamı dışındadır.
 
-> *"An Agent, acting as an OAuth client, can use the OpenID Client Initiated Backchannel Authentication (CIBA) protocol. This triggers an out-of-band interaction allowing the user to approve or deny the requested operation without exposing credentials to the agent."*
+Yetkilendirme senaryoları, yani §10.4, üç tanedir: kullanıcının yetkilendirmeyi devretmesi, oltalamaya dirençli kimlik doğrulamayla authorization code grant'ı kullanılarak; ajanın kendi yetkilendirmesini alması, client credentials veya JWT grant'ıyla; ajanlara sistemler veya diğer ajanlar tarafından erişilmesi.
 
-> *"Such interactions do not by themselves constitute authorization and **MUST** be bound to a verifiable authorization grant issued by the authorization server... the agent **MUST NOT** treat local UI confirmation alone as sufficient authorization."*
+> **Önemli düzeltme.** Çift kimlik kimlik bilgisi ile üç delegasyon akışı bu belgede değildir; grep ile doğrulanmıştır. Bunlar ayrı bir belgeye aittir ve aşağıda ele alınmaktadır.
 
-> ***"Note:*** Additional specification or design work may be needed... **CIBA itself only accounts for client initiation, which doesn't map well to cases that envision the need for User confirmation to occur mid-execution.**"
+### 3.2 `draft-ni-wimse-ai-agent-identity-02`, ikili kimlik
 
-> **Bu, "ajan görevinin ortasında insan onayı" probleminin resmî kabulü. CIBA yetmiyor. Bu AÇIK bir problem.**
+28 Şubat 2026 tarihli ve Huawei kaynaklıdır. Süre bitişi 1 Eylül 2026'dır, yani şu an süresi dolmuştur.
 
-**Agent Mission (§10.1):** Ajan bir Mission alır, genelde doğal dilde. Mission'ın yetkilendirme gereksinimlerine çevrilmesi **spec kapsamı dışı**.
+Dual-Identity Credential, ajanın kimliğini sahibinin kimliğine kriptografik olarak bağlayan bir kimlik bilgisidir.
 
-**Yetkilendirme senaryoları (§10.4):** (1) User Delegates Authorization — phishing-dirençli auth ile authorization code grant; (2) Agent Obtains Own Authorization — client credentials / JWT grant; (3) Agents Accessed by Systems or Other Agents.
-
-⚠️ **Önemli düzeltme:** "Çift kimlik credential'ı" ve "üç delegasyon akışı" bu belgede **DEĞİL** (grep ile doğrulandı). Bunlar ayrı bir belgeye ait — aşağıda.
-
-### 3.2 `draft-ni-wimse-ai-agent-identity-02` — Dual-Identity
-
-**28 Şubat 2026** · Huawei · ⚠️ Süre bitişi **1 Eylül 2026 → ŞU AN SÜRESİ DOLMUŞ**
-
-**Dual-Identity Credential:** Ajanın kimliğini sahibinin kimliğine kriptografik olarak bağlayan credential.
-
-**Üç bağlama modeli:**
+Üç bağlama modeli vardır.
 
 | Model | Mekanizma | Saldırı yüzeyi |
 |---|---|---|
-| **Agent-Mediated** (Owner-Pre-Signed) | Sahip, ajanın credential isteğini **gönderilmeden önce yerel olarak** imzalar. Offline onay, FIDO/HSM | Ele geçirilmiş imzalama anahtarları |
-| **Owner-Mediated** (Gateway Mode) | Sahip, proxy ile sunucu arasında denetleyici aracı | **Tek hata noktası**, DoS |
-| **Server-Mediated** (Challenge-Response) | Identity server, sahibi **out-of-band kanalla doğrudan arayarak** bağlamayı orkestre eder | Out-of-band kanal güvenliği, replay |
+| Ajan aracılı, sahip tarafından önceden imzalı | Sahip, ajanın kimlik bilgisi isteğini gönderilmeden önce yerel olarak imzalar. Çevrimdışı onay, FIDO veya HSM kullanılır | Ele geçirilmiş imzalama anahtarları |
+| Sahip aracılı, ağ geçidi modu | Sahip, vekil ile sunucu arasında denetleyici bir aracıdır | Tek hata noktasıdır; hizmet reddine açıktır |
+| Sunucu aracılı, meydan okuma ve yanıt | Kimlik sunucusu, sahibi bant dışı bir kanalla doğrudan arayarak bağlamayı orkestre eder | Bant dışı kanal güvenliği ile yeniden oynatma |
 
-> **Argus için doğrudan eşleme:** Agent-Mediated = "owner assertion" (sahip anahtarıyla imzalı JWT / WebAuthn). Owner-Mediated = admin konsolu + policy engine. **Server-Mediated = tam olarak CIBA'dır.** Bu üçünü ayrı akışlar olarak destekle ve böyle konumlandır.
+> **Argus için doğrudan eşleme.** Ajan aracılı model sahip beyanıdır, yani sahip anahtarıyla imzalı JWT veya WebAuthn. Sahip aracılı model yönetim konsolu ile politika motorudur. Sunucu aracılı model tam olarak CIBA'dır. Bu üçü ayrı akışlar olarak desteklenmeli ve böyle konumlandırılmalıdır.
 
-Akademik eleştiri: *"WIMSE Dual-Identity Credential'ı tanıtıyor, iki-taraflı etkileşimleri çözüyor ama **multi-hop delegasyonu çözmüyor**."*
+Akademik eleştiri şudur: WIMSE Dual-Identity Credential'ı tanıtmakta, iki taraflı etkileşimleri çözmekte ancak çok sıçramalı delegasyonu çözmemektedir.
 
-### 3.3 McGuinness serisi — en tutarlı tasarım kümesi
+### 3.3 McGuinness serisi, en tutarlı tasarım kümesi
 
-Karl McGuinness (bağımsız, eski Okta CTO'su) tek başına bir spec ailesi yazıyor:
+Karl McGuinness, bağımsız olarak ve Okta'nın eski teknoloji direktörü sıfatıyla tek başına bir spesifikasyon ailesi yazmaktadır.
 
-| Draft | Rev/Tarih | İçerik |
+| Taslak | Revizyon ve tarih | İçerik |
 |---|---|---|
-| `draft-mora-oauth-entity-profiles` | 01 / 15 Nis 2026 | **`client_profile` ve `sub_profile` claim'leri.** 7 kayıtlı değer: `user`, `device`, `native_app`, `web_app`, `browser_app`, `service`, **`ai_agent`**. AS metadata: `entity_profiles_supported`. Yazarlar: Mora, **Pamela Dingle (Microsoft)**, McGuinness |
-| `draft-mcguinness-oauth-actor-profile` | 00 / 30 Nis 2026 | §2.6'da |
-| `draft-mcguinness-oauth-client-instance-assertion` | 01 / 23 Haz 2026 | **Client Instance Assertion**: bir OAuth client'ın somut runtime instance'ını tanımlayan imzalı JWT |
-| `draft-mcguinness-oauth-ai-agent-instance` | 00 / 4 Tem 2026 | **AI Agent Instance Profile.** Problem: *"every agent session collapses into one identity, defeating per-agent authorization, audit attribution, incident response, and abuse containment."* Claim'ler: **`agent_instance_id`** (zorunlu), `agent_platform`, `agent_model`, `agent_runtime` (EAT). **`sub_profile` her zaman `["ai_agent","client_instance"]`** |
-| `draft-mcguinness-oauth-mission` | 00 / 6 Tem 2026 | Mission claim'i, `intent_hash` |
-| `draft-mcguinness-oauth-id-continuation-assertion` | 01 / 26 Ağu 2026 | **Identity Continuation Assertion**: kullanıcı gittikten sonra kimlik yayılımı. Kısa ömürlü (**max 300s**), **sender-constrained (DPoP)**, **tek kullanımlık + replay tespiti** |
-| `draft-mcguinness-oauth-token-exchange-cnf` | 00 / 19 Tem 2026 | Token Exchange için `cnf` yanıt parametresi |
-| `draft-mcguinness-oauth-rfc9728bis` | 01 / 28 Ağu 2026 | PRM resource identifier doğrulaması |
+| `draft-mora-oauth-entity-profiles` | 01, 15 Nisan 2026 | `client_profile` ile `sub_profile` claim'leri. Yedi kayıtlı değer: `user`, `device`, `native_app`, `web_app`, `browser_app`, `service` ile `ai_agent`. AS metadata alanı `entity_profiles_supported`'tır. Yazarları Mora, Pamela Dingle (Microsoft) ile McGuinness'tir |
+| `draft-mcguinness-oauth-actor-profile` | 00, 30 Nisan 2026 | 2.6'da ele alınmıştır |
+| `draft-mcguinness-oauth-client-instance-assertion` | 01, 23 Haziran 2026 | Client Instance Assertion, bir OAuth istemcisinin somut çalışma zamanı örneğini tanımlayan imzalı bir JWT'dir |
+| `draft-mcguinness-oauth-ai-agent-instance` | 00, 4 Temmuz 2026 | AI Agent Instance Profile. Problem şöyle konmuştur: "every agent session collapses into one identity, defeating per-agent authorization, audit attribution, incident response, and abuse containment." Claim'leri zorunlu `agent_instance_id`, `agent_platform`, `agent_model` ile EAT biçiminde `agent_runtime`'dır. `sub_profile` her zaman `["ai_agent","client_instance"]` olur |
+| `draft-mcguinness-oauth-mission` | 00, 6 Temmuz 2026 | Mission claim'i ile `intent_hash` |
+| `draft-mcguinness-oauth-id-continuation-assertion` | 01, 26 Ağustos 2026 | Identity Continuation Assertion, kullanıcı gittikten sonra kimlik yayılımını sağlar. Kısa ömürlüdür, en fazla 300 saniyedir; göndericiye kısıtlıdır, yani DPoP kullanır; tek kullanımlıktır ve yeniden oynatma tespiti vardır |
+| `draft-mcguinness-oauth-token-exchange-cnf` | 00, 19 Temmuz 2026 | Token takası için `cnf` yanıt parametresi |
+| `draft-mcguinness-oauth-rfc9728bis` | 01, 28 Ağustos 2026 | PRM kaynak tanımlayıcısı doğrulaması |
 
-> **Bu set, ajan kimliğinin "doğru" tasarımı hakkında en tutarlı görüşü sunuyor: sub=insan, act=ajan, agent_instance_id=çalışan kopya, mission=görev sınırı, sub_profile=varlık tipi.**
+> Bu set, ajan kimliğinin doğru tasarımı hakkında en tutarlı görüşü sunmaktadır: `sub` insandır, `act` ajandır, `agent_instance_id` çalışan kopyadır, mission görev sınırıdır ve `sub_profile` varlık tipidir.
 
-**🟡 `sub_profile: "ai_agent"` ve `agent_instance_id`'yi bugünden token'a koy — maliyeti sıfıra yakın.**
+`sub_profile: "ai_agent"` ile `agent_instance_id` bugünden token'a konur; maliyeti sıfıra yakındır ve arayüzü hazırlanmalıdır.
 
-### 3.4 Diğer notable draft'lar
+### 3.4 Diğer dikkat çeken taslaklar
 
-| Draft | Rev/Tarih | Özet |
+| Taslak | Revizyon ve tarih | Özet |
 |---|---|---|
-| `draft-chen-oauth-agent-authz-use-cases` | 03 / 25 Ağu 2026 | **Gap analysis, adoption istendi ama chairs erken buldu.** 11 use case. Üç boşluk: **Authorization Context Gap** (kullanıcının talimatı ile ajanın izin isteği arasındaki zamansal kopukluk), **Delegation Chain Gap**, **Mass Revocation Gap** |
-| `draft-carleton-workload-authz-grant` | 00 / 3 Ağu 2026 | **Paul Carleton (Anthropic).** AIMS profili: müşteri başına birden çok ajan instance'ı barındıran platformlar için. *"Trust in the platform's issuer is established once, by reference, and thereafter agents are accepted on first presentation with **no per-agent registration step**."* |
-| `draft-liu-ai-agent-authorization-integration` | 00 / 6 Tem 2026 | **Alibaba + Cisco + Okta (Parecki).** Altı uzantıyı entegre ediyor: SPIFFE client auth + ID-JAG + JWT Grant Interaction Response + Rego policy via RAR + Authorization Evidence + Delegation Chain |
-| `draft-parecki-oauth-jwt-grant-interaction-response` | 00 / 25 Mar 2026 | **HITL için en temiz mekanizma.** `{"error":"interaction_required","interaction_uri":"https://...","interval":5,"expires_in":600}`. İki tamamlama: polling veya **sinyal redirect'i** (*"No authorization code or other parameters are included"*) |
-| `draft-rosomakho-oauth-txn-challenge` | 00 / 25 Haz 2026 | **OAuth Transaction Authorization Challenge.** Korunan kaynak imzalı JWT challenge üretir → client AS'e taşır → AS onay alıp o işleme bağlı scoped token verir. *"useful when requests are mediated by agents, automated workflows, or delegated services"* |
-| `draft-gerber-oauth-deferred-token-response` | 00 / 23 Haz 2026 | **Deferred Token Response.** `completion_mode=deferred` → `400 authorization_pending` + `deferral_code` + `expires_in` (saatler/günler). **Deferral code sender-constrained olmalı** |
-| `draft-zhu-oauth-async-delegation` | 05 / 3 Ağu 2026 | **Delegated Refresh Tokens** (Atlassian). Mutlak delegation deadline, **task-scoped revocation** |
-| `draft-jia-oauth-scope-aggregation` | 01 / 14 Ağu 2026 | Multi-step ajan iş akışlarında scope'ları önden toplama. Riskler: **residual privilege** ve **user blind signing** |
-| `draft-gazitt-oauth-authzen-token-exchange` | 01 / 2 Eyl 2026 | AuthZEN'i RFC 8693'e bağlıyor. **İki ayrı değerlendirme:** Subject Gate + **Requesting Party Gate** |
-| `draft-abbey-scim-agent-extension` | 00 / 16 Eki 2025 | **SCIM Agents Extension.** Macy Abbey, Rafael S. Cohen (Okta). `/Agents` ve `/AgenticApplications`. Attribute'lar: `agentType`, **`owners`**, `roles`, **`protocols`** (OpenAPI/A2A/MCP-Server), `x509Certificates`, **`subject`** (OIDC `sub` korelasyonu) |
-| `draft-sharif-openid-agent-identity` | 01 / 27 Ağu 2026 | 10 ajan claim'i: `agent_trust_score` (0-100), `agent_trust_level` (L0-L4), `agent_spend_limit`... **Tek yazarlı, spekülatif** |
-| `draft-drake-agent-identity-registry` | 03 / 22 May 2026 | Federated registry; **donanım-çapalı** (TPM 2.0/PIV/enclave, 5 trust tier). Kimlik **kalıcı ve iptal edilemez**. Tek yazarlı, **spekülatif** |
-| `draft-mishra-oauth-agent-grants` (DAAP) | 02 / 30 Ağu 2026 | PAR zorunlu, PKCE S256, kimliği doğrulanmış insan consent'i (**policy engine ile ikame edilemez**), DPoP/mTLS |
+| `draft-chen-oauth-agent-authz-use-cases` | 03, 25 Ağustos 2026 | Boşluk analizidir; kabul istenmiş ancak başkanlar erken bulmuştur. On bir kullanım senaryosu vardır. Üç boşluk tanımlar: yetkilendirme bağlamı boşluğu, yani kullanıcının talimatı ile ajanın izin isteği arasındaki zamansal kopukluk; delegasyon zinciri boşluğu; toplu iptal boşluğu |
+| `draft-carleton-workload-authz-grant` | 00, 3 Ağustos 2026 | Paul Carleton, Anthropic. AIMS profilidir ve müşteri başına birden çok ajan örneği barındıran platformlar içindir: "Trust in the platform's issuer is established once, by reference, and thereafter agents are accepted on first presentation with no per-agent registration step." |
+| `draft-liu-ai-agent-authorization-integration` | 00, 6 Temmuz 2026 | Alibaba, Cisco ile Okta'dan Parecki. Altı uzantıyı entegre eder: SPIFFE istemci kimlik doğrulaması, ID-JAG, JWT Grant Interaction Response, RAR üzerinden Rego politikası, Authorization Evidence ile Delegation Chain |
+| `draft-parecki-oauth-jwt-grant-interaction-response` | 00, 25 Mart 2026 | Döngüde insan için en temiz mekanizmadır: `{"error":"interaction_required","interaction_uri":"https://...","interval":5,"expires_in":600}`. İki tamamlama yolu vardır: yoklama veya sinyal yönlendirmesi ("No authorization code or other parameters are included") |
+| `draft-rosomakho-oauth-txn-challenge` | 00, 25 Haziran 2026 | OAuth Transaction Authorization Challenge. Korunan kaynak imzalı bir JWT challenge üretir, istemci bunu AS'e taşır ve AS onay alıp o işleme bağlı kapsamlı bir token verir: "useful when requests are mediated by agents, automated workflows, or delegated services" |
+| `draft-gerber-oauth-deferred-token-response` | 00, 23 Haziran 2026 | Deferred Token Response. `completion_mode=deferred` gönderildiğinde `400 authorization_pending` ile `deferral_code` ve saatler veya günler süren `expires_in` dönülür. Erteleme kodu göndericiye kısıtlı olmalıdır |
+| `draft-zhu-oauth-async-delegation` | 05, 3 Ağustos 2026 | Delegated Refresh Tokens, Atlassian kaynaklıdır. Mutlak delegasyon son tarihi ile göreve kapsamlı iptal getirir |
+| `draft-jia-oauth-scope-aggregation` | 01, 14 Ağustos 2026 | Çok adımlı ajan iş akışlarında scope'ları önden toplamayı ele alır. Riskleri artık ayrıcalık ile kullanıcının kör imzalamasıdır |
+| `draft-gazitt-oauth-authzen-token-exchange` | 01, 2 Eylül 2026 | AuthZEN'i RFC 8693'e bağlar. İki ayrı değerlendirme yapar: özne kapısı ile isteyen taraf kapısı |
+| `draft-abbey-scim-agent-extension` | 00, 16 Ekim 2025 | SCIM Agents Extension. Macy Abbey ile Rafael S. Cohen (Okta). `/Agents` ile `/AgenticApplications` uç noktalarını getirir. Nitelikleri `agentType`, `owners`, `roles`, `protocols` (OpenAPI, A2A, MCP-Server), `x509Certificates` ile OIDC `sub` korelasyonu sağlayan `subject`'tir |
+| `draft-sharif-openid-agent-identity` | 01, 27 Ağustos 2026 | On ajan claim'i tanımlar: `agent_trust_score` (0 ile 100 arası), `agent_trust_level` (L0 ile L4 arası), `agent_spend_limit` ve diğerleri. Tek yazarlıdır ve spekülatiftir |
+| `draft-drake-agent-identity-registry` | 03, 22 Mayıs 2026 | Federe bir kayıt defteridir ve donanıma çapalıdır: TPM 2.0, PIV veya enclave ile beş güven katmanı. Kimlik kalıcıdır ve iptal edilemez. Tek yazarlıdır ve spekülatiftir |
+| `draft-mishra-oauth-agent-grants`, yani DAAP | 02, 30 Ağustos 2026 | PAR zorunludur, PKCE S256 kullanılır, kimliği doğrulanmış insan onayı gerekir ve bu bir politika motoruyla ikame edilemez; DPoP veya mTLS kullanılır |
 
 ---
 
-## 4. IETF WIMSE WG
+## 4. IETF WIMSE çalışma grubu
 
-| Draft | Rev | Tarih | Durum |
+| Taslak | Revizyon | Tarih | Durum |
 |---|---|---|---|
-| `draft-ietf-wimse-arch` | **08** | 2026-07-06 | WG Doc, 33 sayfa |
-| `draft-ietf-wimse-http-signature` | **06** | 2026-08-04 | WG Doc |
-| `draft-ietf-wimse-identifier` | **03** | 2026-07-06 | WG Doc |
-| `draft-ietf-wimse-mutual-tls` | **02** | 2026-07-06 | WG Doc |
-| `draft-ietf-wimse-workload-creds` | **02** | 2026-07-02 | WG Doc, 27 sayfa |
-| `draft-ietf-wimse-wpt` | **02** | 2026-08-27 | WG Doc (New) |
-| `draft-ietf-wimse-workload-identity-practices` | **06** | 2026-08-11 | **AD Evaluation** → Informational RFC |
+| `draft-ietf-wimse-arch` | 08 | 6 Temmuz 2026 | WG Doc, 33 sayfa |
+| `draft-ietf-wimse-http-signature` | 06 | 4 Ağustos 2026 | WG Doc |
+| `draft-ietf-wimse-identifier` | 03 | 6 Temmuz 2026 | WG Doc |
+| `draft-ietf-wimse-mutual-tls` | 02 | 6 Temmuz 2026 | WG Doc |
+| `draft-ietf-wimse-workload-creds` | 02 | 2 Temmuz 2026 | WG Doc, 27 sayfa |
+| `draft-ietf-wimse-wpt` | 02 | 27 Ağustos 2026 | WG Doc, yeni |
+| `draft-ietf-wimse-workload-identity-practices` | 06 | 11 Ağustos 2026 | Alan direktörü değerlendirmesinde; Informational RFC olacaktır |
 
-**→ WIMSE'den henüz HİÇ RFC çıkmadı.**
+WIMSE'den henüz hiç RFC çıkmamıştır.
 
-### 4.1 WIT — Workload Identity Token
+### 4.1 WIT, Workload Identity Token
 
-Ham metinden birebir:
-> *"The workload MUST prove possession of the corresponding private key when presenting the WIT to another party. **As such, it MUST NOT be used as a bearer token** and is not intended for use in the Authorization header."*
+Ham metinden birebir: "The workload MUST prove possession of the corresponding private key when presenting the WIT to another party. As such, it MUST NOT be used as a bearer token and is not intended for use in the Authorization header."
 
-- JOSE header: `alg` asimetrik (asla `none`), **`typ: wit+jwt`**
-- Claim'ler: `sub` (WIMSE Workload Identifier URI), `exp`, **`cnf`** (public key, `jwk`; `jwk` içinde `alg` **MUST**), `iss`, `jti`
-- Ayrı HTTP header'lar (Authorization değil)
+JOSE başlığında `alg` asimetriktir ve asla `none` olmaz; `typ` değeri `wit+jwt`'dir. Claim'leri `sub` (WIMSE iş yükü tanımlayıcısı URI'si), `exp`, `cnf` (public key, `jwk` biçiminde; `jwk` içinde `alg` zorunludur), `iss` ile `jti`'dir. Ayrı HTTP başlıkları kullanılır, `Authorization` kullanılmaz.
 
-**Bearer geçiş stratejisi (§5.3):** WIT yeni header'lar tanımladığı için bearer JWT header'larıyla **birlikte** sunulabilir. Uyarı: *"the decision which token to prefer is made when the caller's identity has still not been authenticated, and needs to be revalidated following the authentication step."*
+Bearer geçiş stratejisi §5.3'tedir: WIT yeni başlıklar tanımladığı için bearer JWT başlıklarıyla birlikte sunulabilir. Uyarısı şudur: "the decision which token to prefer is made when the caller's identity has still not been authenticated, and needs to be revalidated following the authentication step."
 
-### 4.2 WPT — Workload Proof Token
+### 4.2 WPT, Workload Proof Token
 
-**27 Ağustos 2026** · Brian Campbell (Ping), Arndt Schwenkschuster (Defakto)
+27 Ağustos 2026 tarihlidir; yazarları Brian Campbell (Ping) ile Arndt Schwenkschuster'dır (Defakto).
 
-- `typ: application/wpt+jwt`, `alg` WIT'in `cnf` anahtarıyla eşleşmeli
-- Claim'ler: `aud` (HTTP hedef URI), `exp`, `jti`, **`wth`** (WIT'in base64url SHA-256'sı), **`tth`** (Transaction Token hash'i), **`oth`**
-- Taşıma: yeni **`WPT` authentication scheme**'i. Hata: `401` + `WWW-Authenticate: WPT`
+`typ` değeri `application/wpt+jwt`'dir ve `alg`, WIT'in `cnf` anahtarıyla eşleşmelidir. Claim'leri `aud` (HTTP hedef URI'si), `exp`, `jti`, WIT'in base64url SHA-256'sı olan `wth`, işlem token'ının hash'i olan `tth` ile `oth`'tur. Taşımada yeni bir `WPT` kimlik doğrulama şeması kullanılır; hata durumunda 401 ile `WWW-Authenticate: WPT` dönülür.
 
-### 4.3 Workload Identifier
+### 4.3 İş yükü tanımlayıcısı
 
-- URI tabanlı: `spiffe://trust-domain/service` ve yeni kaydedilen **`wimse://<trust-domain>/<path>`**
-- **Yasaklar:** query string, fragment, userinfo, port yok
-- 2048 bayta kadar; **tam URI karşılaştırması**
-- *"Identifiers require cryptographic credential context to be considered authenticated"*
+URI tabanlıdır: `spiffe://trust-domain/service` ile yeni kaydedilen `wimse://<trust-domain>/<path>`. Yasaklar sorgu dizesi, fragment, userinfo ile porttur. 2048 bayta kadar olabilir ve tam URI karşılaştırması yapılır. Spesifikasyon şunu söyler: "Identifiers require cryptographic credential context to be considered authenticated".
 
-### 4.4 WIMSE Architecture — AI ajanları açıkça ele alınıyor
+### 4.4 WIMSE mimarisi, AI ajanları açıkça ele alınmaktadır
 
-**§3.4.11'de AI aracıları "delegated workload'ların özel bir hali" olarak konumlandırıyor:**
-- Açıkça yetkilendirilmedikçe upstream güvenlik bağlamını **yaymalı**
-- Otonom eylemleri delegasyonlu olanlardan **ayrı kimliklerle** ayırmalı
-- **"cryptographic binding of delegation tokens or attestation"**
-- Multi-agent zincirlerinde **her hop'ta güvenlik bağlamını yeniden bağlamalı**
+§3.4.11 AI aracılarını delegasyonlu iş yüklerinin özel bir hâli olarak konumlandırmaktadır. Açıkça yetkilendirilmedikçe upstream güvenlik bağlamı yayılmalıdır. Otonom eylemler delegasyonlu olanlardan ayrı kimliklerle ayrılmalıdır. Metin "cryptographic binding of delegation tokens or attestation" demektedir. Çok ajanlı zincirlerde her sıçramada güvenlik bağlamı yeniden bağlanmalıdır.
 
-**Sınıflandırma:**
-- WIT/WPT: 🟡 **ARAYÜZÜ HAZIRLANMALI** (RFC yok ama yön net: bearer ölüyor)
-- Workload Identifier şeması: 🟢 **BUGÜN BENİMSE** — ajanlara `spiffe://` veya `wimse://` tarzı hiyerarşik URI kimlikler ver, opak UUID değil. Policy yazımı (`spiffe://acme.example/agent/finance/*`) muazzam kolaylaşır
-- SPIFFE client auth: 🟢 **BUGÜN**
+Sınıflandırma şöyledir. WIT ile WPT için arayüz hazırlanmalıdır; henüz RFC yoktur ancak yön nettir, bearer ölmektedir. İş yükü tanımlayıcısı şeması bugün benimsenmelidir: ajanlara opak UUID yerine `spiffe://` veya `wimse://` tarzı hiyerarşik URI kimlikler verilir, çünkü politika yazımı, örneğin `spiffe://acme.example/agent/finance/*`, muazzam kolaylaşır. SPIFFE istemci kimlik doğrulaması bugün yapılmalıdır.
 
-### 4.5 WIMSE'deki ajan delegasyon draft'ları
+### 4.5 WIMSE'deki ajan delegasyon taslakları
 
-| Draft | Rev/Tarih | İçerik |
+| Taslak | Revizyon ve tarih | İçerik |
 |---|---|---|
-| `draft-reece-wimse-cross-org-delegation` | 02 / 31 Ağu 2026 | **Problem statement + requirements.** 7 problem: recursive delegation, org sınırları, **offline doğrulama**, principal binding, revocation/freshness, composable audit, **execution-time human authorization**. 10 gereksinim |
-| `draft-asor-wimse-agent-delegation-chain` | 01 / 3 Eyl 2026 | §2.6'da |
-| `draft-sweeney-wimse-credential-delegation` | 00 / 3 Eyl 2026 | **İçeriği incelenmedi — DOĞRULANMADI** |
-| `draft-rampalli-cross-org-delegation-mapping` | 05 / 6 Tem 2026 | Layered requirements mapping |
+| `draft-reece-wimse-cross-org-delegation` | 02, 31 Ağustos 2026 | Problem tanımı ile gereksinimler. Yedi problem sayar: özyinelemeli delegasyon, organizasyon sınırları, çevrimdışı doğrulama, principal bağlama, iptal ile tazelik, birleştirilebilir denetim ve çalıştırma anında insan yetkilendirmesi. On gereksinim tanımlar |
+| `draft-asor-wimse-agent-delegation-chain` | 01, 3 Eylül 2026 | 2.6'da ele alınmıştır |
+| `draft-sweeney-wimse-credential-delegation` | 00, 3 Eylül 2026 | İçeriği incelenmemiştir ve doğrulanmamıştır |
+| `draft-rampalli-cross-org-delegation-mapping` | 05, 6 Temmuz 2026 | Katmanlı gereksinim eşlemesi |
 
-IETF 126 WIMSE oturumu: **AIMS**, "Heterogeneous Credential Verification", "PEDIGREE: per-hop delegation", "Offline workload access for user-owned resources without refresh tokens", "SOOS: Mandate JWT & Cross-Principal Transaction ID (XPID)".
+IETF 126 WIMSE oturumunda AIMS, "Heterogeneous Credential Verification", "PEDIGREE: per-hop delegation", "Offline workload access for user-owned resources without refresh tokens" ile "SOOS: Mandate JWT & Cross-Principal Transaction ID (XPID)" sunulmuştur.
 
 ---
 
-## 5. agentproto BoF — yeni bir WG doğuyor (ama henüz yok)
+## 5. agentproto BoF, yeni bir çalışma grubu doğuyor ancak henüz yok
 
-**IETF 126, Viyana, 23 Temmuz 2026 — WG-forming BoF**
+IETF 126, Viyana, 23 Temmuz 2026'da çalışma grubu kurmaya yönelik bir BoF oturumu yapılmıştır.
 
-**Oda anketi sonuçları:**
+Oda anketi sonuçları şöyledir.
 
 | Soru | Evet | Hayır |
 |---|---|---|
-| IETF doğru mekân mı | 158 | — |
-| Net interop ihtiyacı var mı | 155 | — |
-| WG kurulsun mu | **154** | **51** |
-| Mevcut kapsam doğru mu | **38** | **124** ⚠️ |
+| IETF doğru mekân mıdır | 158 | — |
+| Net bir interop ihtiyacı var mıdır | 155 | — |
+| Çalışma grubu kurulsun mu | 154 | 51 |
+| Mevcut kapsam doğru mudur | 38 | 124 |
 
-**Kimlik/yetkilendirme tartışması** çekişmeli geçmiş. Öne çıkan endişeler:
-- **Durable Ownership Problem:** Credential'lar runtime tabanlıyken ve oturumlar sona ererken, ajan eylemlerinden sorumlu tarafın nasıl tanımlanacağı
-- **Authorization Attenuation**
-- **Delegation Mechanisms**
+Kimlik ve yetkilendirme tartışması çekişmeli geçmiştir. Öne çıkan endişeler dayanıklı sahiplik problemi (kimlik bilgileri çalışma zamanı tabanlıyken ve oturumlar sona ererken ajan eylemlerinden sorumlu tarafın nasıl tanımlanacağı), yetki daraltma ile delegasyon mekanizmalarıdır.
 
-**Sonuç:** Grup kimlik/yetkilendirmeyi **mevcut çalışmalara (WIMSE, OAuth) yönlendirdi**, yeni iş yaratmadı.
+Sonuç olarak grup kimlik ile yetkilendirmeyi mevcut çalışmalara, yani WIMSE ile OAuth'a yönlendirmiş ve yeni iş yaratmamıştır. Eylül 2026 itibarıyla henüz charter'lanmamıştır.
 
-**Eylül 2026: Henüz chartered DEĞİL.**
+Ayrıca reddedilen bir BoF vardır: `bofreq-kuhlewind-agent-use-of-delegation-and-interaction-traceability-audit`, yani AUDIT. Önericileri Mirja Kühlewind, Henk Birkholz ile Pam Dingle'dır. Kapsamı dağıtık denetim için birlikte çalışabilir protokol mekanizmaları ile RATS ve SCITT profillemesidir. Durumu reddedilmiştir.
 
-**Ayrıca reddedilen bir BoF:** `bofreq-kuhlewind-agent-use-of-delegation-and-interaction-traceability-audit` — **AUDIT**. Önericiler: **Mirja Kühlewind, Henk Birkholz, Pam Dingle**. Kapsam: dağıtık audit için interoperable protokol mekanizmaları; RATS/SCITT profilleme. **Durum: DECLINED.**
-
-> **Ajan denetlenebilirliği (non-repudiation) IETF'te henüz mekân bulamadı.**
+> Ajan denetlenebilirliği, yani inkâr edilemezlik, IETF'te henüz mekân bulamamıştır.
 
 ---
 
 ## 6. MCP ve A2A
 
-### 6.1 MCP Authorization — revizyon 2026-07-28
+### 6.1 MCP yetkilendirmesi, revizyon 2026-07-28
 
-Detaylar için bkz. 14-mcp-authorization.md (§14).
+Detaylar için §14'e bakınız. Bu tamamen bugünkü iştir; MCP yerlisi olmak bu IdP'nin pazara giriş kancasıdır.
 
-**🟢 TAMAMEN BUGÜN.** MCP-native olmak, bu IdP'nin pazara giriş kancası.
+### 6.2 A2A protokolü
 
-### 6.2 A2A Protokolü
+Linux Foundation yönetimindedir. v1.0 tarihi çelişkilidir: site Ağustos 2026, blog duyurusu 12 Mart 2026 demektedir ve kesin genel kullanım tarihi doğrulanamamıştır. 27 Ağustos 2026'da Agentic AI Foundation'a katıldığı bilgisi vardır.
 
-- Linux Foundation yönetiminde. ⚠️ **v1.0 tarihi ÇELİŞKİLİ:** site "August 2026", blog duyurusu "12 Mart 2026". **Kesin GA tarihi DOĞRULANAMADI.** 27 Ağustos 2026'da Agentic AI Foundation'a katıldığı bilgisi var
-- **Agent Card (`/.well-known/agent-card.json`):** Zorunlu `id`, `name`, `interfaces[]`; **`securitySchemes`**: `map<string, SecurityScheme>` — OpenAPI 3 ile birebir aynı şekil; **`security`**: skill bazında granülerlik; **`signature`**: `AgentCardSignature`
-- **SecurityScheme tipleri:** `apiKey`, `http`, `oauth2`, `openIdConnect`, `mutualTls`
-- **OAuth flow'ları:** `authorizationCode`, `clientCredentials`, **`deviceCode`**. **`implicit` ve `password` YOK** — OAuth 2.1 uyumlu
-- **Signed Agent Cards:** **RFC 8785 JCS** ile kanonikleştirilip **JWS** ile imzalanır
-- **HITL:** `TASK_STATE_INPUT_REQUIRED` ve `TASK_STATE_AUTH_REQUIRED` — **ama onayın nasıl toplanacağı, işleme nasıl kriptografik bağlanacağı TANIMSIZ**
+Agent Card, yani `/.well-known/agent-card.json`, zorunlu `id`, `name` ile `interfaces[]` alanlarını taşır. `securitySchemes` alanı `map<string, SecurityScheme>` tipindedir ve OpenAPI 3 ile birebir aynı şekildedir. `security` alanı beceri bazında granülerlik sağlar. `signature` alanı bir `AgentCardSignature` taşır.
 
-⚠️ **Kritik boşluk:** A2A spec'inde **SPIFFE/SPIRE geçmiyor.** `mutualTls` var ama sertifikadaki SPIFFE ID'nin ajan kimliğine nasıl bağlanacağına dair **normatif kural yok.**
+SecurityScheme tipleri `apiKey`, `http`, `oauth2`, `openIdConnect` ile `mutualTls`'tir. OAuth akışları `authorizationCode`, `clientCredentials` ile `deviceCode`'dur; `implicit` ile `password` yoktur, yani OAuth 2.1 uyumludur. İmzalı ajan kartları RFC 8785 JCS ile kanonikleştirilip JWS ile imzalanır. Döngüde insan için `TASK_STATE_INPUT_REQUIRED` ile `TASK_STATE_AUTH_REQUIRED` durumları vardır, ancak onayın nasıl toplanacağı ve işleme nasıl kriptografik bağlanacağı tanımsızdır.
 
-**MCP ile temel fark:** A2A auth şemasını **agent'ın kendi kartında bildirimsel** tanımlar; MCP **OAuth keşif zincirini** zorunlu kılar. **MCP'nin modeli daha katı ve daha OAuth-yerlisidir.**
+> **Kritik boşluk.** A2A spesifikasyonunda SPIFFE ile SPIRE geçmemektedir. `mutualTls` vardır ancak sertifikadaki SPIFFE kimliğinin ajan kimliğine nasıl bağlanacağına dair normatif bir kural yoktur.
 
-**🟡 A2A bir IdP protokolü değil — bizim işimiz onun `securitySchemes`'inde görünmek.** Somut: `openIdConnectUrl` discovery + `deviceCode` + `clientCredentials` + `authorizationCode` + **RFC 8705 mTLS-bound token (SAN URI'den SPIFFE ID çıkarımı)** → bu son madde A2A↔SPIFFE boşluğunu doldurur ve **kimsenin yapmadığı bir şey**.
+MCP ile temel fark şudur: A2A yetkilendirme şemasını ajanın kendi kartında bildirimsel olarak tanımlar; MCP ise OAuth keşif zincirini zorunlu kılar. MCP'nin modeli daha katı ve daha OAuth yerlisidir.
+
+A2A bir IdP protokolü değildir; bizim işimiz onun `securitySchemes` alanında görünmektir ve arayüzü hazırlanmalıdır. Somut olarak `openIdConnectUrl` keşfi, `deviceCode`, `clientCredentials`, `authorizationCode` ile RFC 8705 mTLS'e bağlı token desteklenir; sonuncusunda SAN URI'sinden SPIFFE kimliği çıkarılır. Bu son madde A2A ile SPIFFE arasındaki boşluğu doldurur ve kimsenin yapmadığı bir şeydir.
 
 ---
 
-## 7. Endüstri — teknik karşılaştırma
+## 7. Endüstri, teknik karşılaştırma
 
 ### 7.1 Microsoft Entra Agent ID
 
-**GA: Nisan 2026**
+Nisan 2026'da genel kullanıma açılmıştır.
 
 | Kavram | Tanım |
 |---|---|
-| **Agent identity** | Özel bir **service principal**. Kendi credential'ı **YOK** |
-| **Agent identity blueprint** | Yeniden kullanılabilir şablon; **credential'ları BLUEPRINT tutar** |
-| **Blueprint principal** | Blueprint tenant'a eklendiğinde oluşan Entra nesnesi; **asıl token alan ve audit log'da görünen** |
-| **Sponsor** | Ajandan sorumlu insan kullanıcı/grup |
-| **Agent's user account** | Opsiyonel, **1:1**, gerçek user object gerektiren sistemler için |
+| Agent identity | Özel bir service principal'dır ve kendi kimlik bilgisi yoktur |
+| Agent identity blueprint | Yeniden kullanılabilir bir şablondur; kimlik bilgilerini blueprint tutar |
+| Blueprint principal | Blueprint kiracıya eklendiğinde oluşan Entra nesnesidir; asıl token alan ve denetim kaydında görünen odur |
+| Sponsor | Ajandan sorumlu insan kullanıcı veya gruptur |
+| Ajanın kullanıcı hesabı | Opsiyoneldir, birebirdir ve gerçek bir kullanıcı nesnesi gerektiren sistemler içindir |
 
-**Token davranışı (docs'tan birebir):**
-> *"Request agent tokens... **The subject of the access token is the agent identity.**"*
-> *"Request user tokens for an authenticated user. **The subject of the token is a user, while the actor is the agent identity.**"*
+Token davranışı dokümanlardan birebir şöyledir: "Request agent tokens... The subject of the access token is the agent identity." ve "Request user tokens for an authenticated user. The subject of the token is a user, while the actor is the agent identity."
 
-> **Microsoft, `sub`=kullanıcı + `actor`=ajan modelini üretimde kullanıyor. RFC 8693 `act` semantiğiyle örtüşüyor.**
+> Microsoft, `sub` kullanıcı ile `actor` ajan modelini üretimde kullanmaktadır ve bu RFC 8693 `act` semantiğiyle örtüşmektedir.
 
-**Design pattern derslerinden — doğrudan uygulanabilir:**
-- **Scale-out replikalar ayrı agent identity GEREKTİRMEZ** — *"Creating a separate agent identity per replica adds directory objects and management overhead without any audit, access control, or accountability benefit."*
-- **Memory/context yönetimi ayrı kimlik gerektirmez** — session id ile filtreleme yeterli
-- **Yüksek-hacimli per-object agent identity pratik değil** — *"use shared agent identities and rely on session or context identifiers at the application layer"*
-- **Ephemeral agent identity** varyantı var ama "nondeterministic latency" uyarısı
+Tasarım deseni derslerinden doğrudan uygulanabilir olanlar şunlardır. Ölçeklenen replikalar ayrı bir ajan kimliği gerektirmez: "Creating a separate agent identity per replica adds directory objects and management overhead without any audit, access control, or accountability benefit." Bellek ile bağlam yönetimi ayrı kimlik gerektirmez; oturum kimliğiyle filtreleme yeterlidir. Yüksek hacimli ve nesne başına ajan kimliği pratik değildir: "use shared agent identities and rely on session or context identifiers at the application layer". Geçici ajan kimliği varyantı vardır ancak deterministik olmayan gecikme uyarısı taşır.
 
-⚠️ **Standartlaşma: SIFIR.** Entra Agent ID tamamen proprietary Graph modeli. ID-JAG, MCP EMA veya WIMSE desteği **docs'ta bulunamadı — DOĞRULANAMADI.**
+Standartlaşma tarafında durum sıfırdır: Entra Agent ID tamamen tescilli bir Graph modelidir. ID-JAG, MCP EMA veya WIMSE desteği dokümanlarda bulunamamış ve doğrulanamamıştır.
 
 ### 7.2 Okta
 
-- **Okta for AI Agents GA: 30 Nisan 2026** (ayrı ücretli ürün) — ajan keşfi/kaydı Universal Directory'de, Privileged Credential Management, **Universal Logout for AI Agents**
-- **Agent SSO GA: 24 Ağustos 2026**, **çekirdek SSO planlarına dahil, ek ücretsiz**
+Okta for AI Agents 30 Nisan 2026'da genel kullanıma açılmıştır ve ayrı ücretli bir üründür; ajan keşfi ile kaydı Universal Directory'de yapılır, Privileged Credential Management ile Universal Logout for AI Agents sunulur. Agent SSO 24 Ağustos 2026'da genel kullanıma açılmıştır ve çekirdek SSO planlarına dahildir, ek ücret alınmaz.
 
-**Üretim kanıtı:** Atlassian Rovo MCP, XAA/ID-JAG ile canlı (29 Haziran 2026). Doğrulama adımları: (1) imza+issuer JWKS'ten, (2) `typ`=`oauth-id-jag+jwt`, (3) `aud` bizi göstermeli, (4) **client continuity**, (5) `exp`/`iat`/`jti` tekilliği.
+Üretim kanıtı olarak Atlassian Rovo MCP, XAA ile ID-JAG üzerinden 29 Haziran 2026'da canlıya çıkmıştır. Doğrulama adımları şunlardır: imza ile issuer JWKS'ten doğrulanır; `typ` değerinin `oauth-id-jag+jwt` olduğu kontrol edilir; `aud` bizi göstermelidir; istemci sürekliliği doğrulanır; `exp`, `iat` ile `jti` tekilliği kontrol edilir.
 
 ### 7.3 Auth0
 
-- **Auth0 for AI Agents GA: 19 Kasım 2025**; **Auth for MCP GA: 6 Mayıs 2026**
-- Dört bileşen: User Authentication, **Token Vault**, **Asynchronous Authorization (CIBA)**, FGA for RAG
+Auth0 for AI Agents 19 Kasım 2025'te, Auth for MCP 6 Mayıs 2026'da genel kullanıma açılmıştır. Dört bileşeni vardır: kullanıcı kimlik doğrulaması, Token Vault, CIBA tabanlı asenkron yetkilendirme ile RAG için ince taneli yetkilendirme.
 
-**Token Vault — RFC 8693 tabanlı ama proprietary URN'ler:**
+Token Vault RFC 8693 tabanlıdır ancak tescilli URN'ler kullanır:
+
 ```
 grant_type=urn:auth0:params:oauth:grant-type:token-exchange:federated-connection-access-token
 subject_token=<AUTH0_REFRESH_TOKEN>
 requested_token_type=http://auth0.com/oauth/token-type/federated-connection-access-token
 connection=google-oauth2
 ```
-Saklama: **"tokenset"** — her (kullanıcı × connection) için konteyner. Ajan hiçbir zaman 3. parti refresh token'a dokunmaz. 35+ sağlayıcı.
 
-**CIBA + RAR kombinasyonu (en öğretici kısım):**
+Saklama birimi tokenset'tir; her kullanıcı ve bağlantı çifti için bir konteynerdir. Ajan hiçbir zaman üçüncü taraf refresh token'a dokunmaz. Otuz beşten fazla sağlayıcı desteklenir.
+
+CIBA ile RAR kombinasyonu en öğretici kısımdır:
+
 ```
 POST /bc-authorize
 login_hint={"format":"iss_sub","iss":"https://{tenant}/","sub":"{USER_ID}"}
@@ -567,183 +474,176 @@ binding_message=Confirm payment of 2500
 authorization_details=[{"type":"money_transfer","instructedAmount":{"amount":2500,"currency":"USD"},
   "sourceAccount":"...1234","destinationAccount":"...9876","beneficiary":"Hanna Herwitz"}]
 ```
-**Kritik:** Onay verilince **`authorization_details` dizisi access token içinde aynen taşınıyor** — RS "ne onaylandı"yı token'dan doğrulayabiliyor.
+
+Kritik nokta şudur: onay verilince `authorization_details` dizisi access token içinde aynen taşınır ve kaynak sunucusu neyin onaylandığını token'dan doğrulayabilir.
 
 ### 7.4 Descope Agentic Identity Hub
 
-**Hub 2.0: Ocak 2026.** Veri modeli en kopyalanmaya değer olan — **iki eksenli:**
-- **Resources (inbound):** korunan API'ler/MCP sunucuları; `audience URL` + `scopes`; kısa ömürlü scope-sınırlı token **verir**
-- **Connections (outbound):** downstream servisler için credential vault; uzun ömürlü 3. parti credential'ları **yönetir**
-- **Önerilen desen:** ajan → Resource → Connection vault. **Ajan asla vault'a doğrudan erişmez.**
+Hub 2.0 Ocak 2026'da çıkmıştır. Veri modeli en kopyalanmaya değer olandır ve iki eksenlidir.
 
-Client registration dört yol: pre-registered, **cloud workload OIDC token'ları (AWS/GCP)**, DCR, CIMD.
+Resources, yani gelen yön, korunan API'ler ile MCP sunucularıdır; audience URL'i ile scope'lar taşır ve kısa ömürlü, scope sınırlı token verir. Connections, yani giden yön, downstream servisler için bir kimlik bilgisi kasasıdır ve uzun ömürlü üçüncü taraf kimlik bilgilerini yönetir. Önerilen desen ajandan Resource'a, oradan Connection kasasına gitmektir; ajan asla kasaya doğrudan erişmez.
 
-### 7.5 SPIFFE/SPIRE — mevcut durum ve sınırlar
+İstemci kaydı dört yolla yapılır: ön kayıt, bulut iş yükü OIDC token'ları (AWS ile GCP), DCR ile CIMD.
 
-**JWT-SVID kuralları:**
-- `sub` = workload'un SPIFFE ID'si (**MUST**)
-- `aud` **MUST** bulunsun; doğrulayıcı kendi identifier'ı yoksa **reddeder**
-- `exp` **MUST**; `exp`'siz token **reddedilmeli**
-- Anahtar keşfi: SPIFFE bundle'da RFC 7517 JWK; **`use` = `jwt-svid`**
+### 7.5 SPIFFE ve SPIRE, mevcut durum ve sınırlar
 
-**WIT-SVID** (SPIFFE spec setinde **"Incubating"**) — JWT-SVID'in adayı halefi:
+JWT-SVID kuralları şunlardır: `sub` iş yükünün SPIFFE kimliği olmalıdır; `aud` bulunmalıdır ve doğrulayıcı kendi tanımlayıcısını bulamazsa reddeder; `exp` zorunludur ve `exp` içermeyen token reddedilmelidir; anahtar keşfi SPIFFE bundle'ındaki RFC 7517 JWK ile yapılır ve `use` değeri `jwt-svid` olur.
+
+WIT-SVID, SPIFFE spesifikasyon setinde kuluçka aşamasındadır ve JWT-SVID'in aday halefidir.
 
 | | JWT-SVID | WIT-SVID |
 |---|---|---|
-| Tip | **Bearer** | **Proof-of-Possession** |
-| `cnf` | yok | **ZORUNLU** |
-| `aud` | zorunlu | **yasak** |
+| Tip | Bearer | Sahiplik kanıtı |
+| `cnf` | Yoktur | Zorunludur |
+| `aud` | Zorunludur | Yasaktır |
 
-**SPIFFE'in ajanlar için sınırları:**
-1. SPIRE **adanmış altyapı** ister — çoğu ajan dağıtımı için ağır
-2. **X.509 issuance gecikmesi, efemer ajan yaratımıyla uyumsuz**
-3. **Cross-protocol identity flow yok**
-4. **Delegasyonu hiç modellemez** — "bu process nedir"i çözer, "kimin adına"yı çözmez
+SPIFFE'in ajanlar için sınırları dörttür. SPIRE adanmış altyapı ister ve çoğu ajan dağıtımı için ağırdır. X.509 üretim gecikmesi geçici ajan yaratımıyla uyumsuzdur. Protokoller arası kimlik akışı yoktur. Delegasyonu hiç modellemez; bu süreç nedir sorusunu çözer, kimin adına sorusunu çözmez.
 
-> **Doğru mimari: SPIFFE = L1 (bu process kim). Argus = L2 (kimin adına, ne yetkiyle). SVID → token exchange → delegasyon taşıyan access token.**
+> **Doğru mimari.** SPIFFE birinci katmandır ve bu sürecin kim olduğunu söyler. Argus ikinci katmandır ve kimin adına, ne yetkiyle sorusunu cevaplar. Akış SVID'den token takasına, oradan delegasyon taşıyan access token'a gider.
 
 ### 7.6 OpenID Foundation
 
-**AIIM CG** — OIDF board Nisan 2025'te görevlendirdi. Ekim 2025'te whitepaper (arXiv:2510.25819, Tobin South + 20 yazar). Eş başkanlar: Atul Tulshibagwale (CrowdStrike), Jeff Lombardo (AWS). **Mart 2026'da NIST RFI'ye resmî yanıt verdi.** Kapsam dışı: protokol standardı geliştirmek.
+AIIM topluluk grubunu OIDF yönetim kurulu Nisan 2025'te görevlendirmiştir. Ekim 2025'te bir teknik rapor yayımlanmıştır (arXiv 2510.25819, Tobin South ve 20 yazar). Eş başkanları Atul Tulshibagwale (CrowdStrike) ile Jeff Lombardo'dur (AWS). Mart 2026'da NIST'in bilgi talebine resmî yanıt verilmiştir. Kapsam dışı olan şey protokol standardı geliştirmektir.
 
-**AuthZEN WG — 15 Haziran 2026'da iki WG Draft onaylandı:**
+AuthZEN çalışma grubunda 15 Haziran 2026'da iki çalışma grubu taslağı onaylanmıştır.
 
-**AARP (Access Request and Approval Profile)** — Draft 1, Eylül 2026
-- **Requestable denial context:** PDP, reddederken `access_request` nesnesi ekleyerek reddin talebe uygun olduğunu bildirir
-- **Access request endpoint** + **task handle** (opak, asenkron; *"survives PEP restart, replacement, or handoff"*)
-- **Re-evaluation mode:** onay sonrası PEP taze AuthZEN değerlendirmesi yapar — **PDP enforcement anında otoriter kalır**
-- Reddedilmiş karar **reddedilmiş kalır (MUST NOT)**
+**AARP**, yani Access Request and Approval Profile, Draft 1, Eylül 2026. Talep edilebilir ret bağlamı sunar: politika karar noktası reddederken bir `access_request` nesnesi ekleyerek reddin talebe uygun olduğunu bildirir. Bir erişim talebi endpoint'i ile opak ve asenkron bir görev tutamağı vardır: "survives PEP restart, replacement, or handoff". Yeniden değerlendirme modunda onay sonrası politika uygulama noktası taze bir AuthZEN değerlendirmesi yapar, böylece karar noktası uygulama anında otoriter kalır. Reddedilmiş bir karar reddedilmiş kalmalıdır (MUST NOT değiştirilmelidir).
 
-**COAZ-MCP Binding** — Draft 1, Şubat 2026
-- MCP JSON-RPC mesajlarını **AuthZEN SARC** modeline eşliyor
-- `x-authzen-mapping`, **CEL** ifadeleri (`$params.arguments.id`, `$token.sub`)
-- **Subject identity trust modeli:** *"The human user is represented as the AuthZEN Subject; the AI agent appears in the Context."*
-- **Sadece doğrulanmış `subject.id` güvenilir**
+**COAZ-MCP Binding**, Draft 1, Şubat 2026. MCP JSON-RPC mesajlarını AuthZEN SARC modeline eşler. `x-authzen-mapping` ile CEL ifadeleri kullanır; örneğin `$params.arguments.id` ve `$token.sub`. Özne kimliği güven modeli şöyledir: "The human user is represented as the AuthZEN Subject; the AI agent appears in the Context." Yalnızca doğrulanmış `subject.id` güvenilirdir.
 
-**Shared Signals — SSF 1.0 + CAEP 1.0 Final, 29 Ağustos 2025**
-CAEP 1.0 Final **8 event type**. **Ajan-spesifik event tipi YOK** — bu bir boşluk.
+**Shared Signals.** SSF 1.0 ile CAEP 1.0 Final 29 Ağustos 2025'te yayımlanmıştır. CAEP 1.0 Final sekiz olay tipi tanımlar. Ajana özgü bir olay tipi yoktur ve bu bir boşluktur.
 
-⚠️ **Tuzak:** `openid.net/specs/openid-caep-specification-1_0.html` hâlâ **2021 draft-02**'yi döndürüyor. Final: `openid-caep-1_0-final.html`.
+> **Tuzak.** `openid.net/specs/openid-caep-specification-1_0.html` adresi hâlâ 2021 tarihli draft-02'yi döndürmektedir. Final sürüm `openid-caep-1_0-final.html` adresindedir.
+
+### 7.7 Teleport, attestation'ı kim yapar sorusu
+
+Teleport bir IdP değildir, ancak 2.8 ve 2.9'daki attestation tasarımına doğrudan bir sınır sorusu koyduğu için buradadır. Kaynak Teleport'un Machine & Workload Identity dokümanıdır, erişim 13 Eylül 2026.
+
+**Modeli.** Teleport kümesi içinde bir kök CA kurulur ve iş yüklerine kısa ömürlü JWT'ler ile X.509 sertifikaları verir. Kimlikler SPIFFE uyumludur ve SVID olarak adlandırılır. İş yüklerinin yakınında `tbot` adlı bir ajan çalışır; kimlik talebini ve yenilemesini o yönetir. Bir uygulama SVID istediğinde `tbot` **workload attestation** yapar: container image'ı, Kubernetes pod etiketleri gibi bilgileri keşfeder. Kimlikler dosya sistemiyle veya SPIFFE Workload API'siyle teslim edilir.
+
+**Argus için sorduğu soru.** 2.8'in mimari deseni "donanım attestation'ı kayıt anında bir kez kanıtlar, sonra DPoP her istekte kullanımı kanıtlar" der. Söylemediği şey, o ilk kanıtın kim tarafından toplandığıdır. İki cevap vardır ve ikisi farklı güven modelleri üretir:
+
+1. **Argus delili kendisi toplar.** İstemci ham attestation belgesini (TPM quote, Android KeyDescription, Apple App Attest) gönderir, Argus doğrular. Güven kökü donanım üreticisidir. Argus her platformun attestation formatını bilmek zorundadır; §21'deki `KeyDescription` ASN.1 bloğu bu maliyetin bir örneğidir.
+2. **Argus bir attester'ın imzaladığı iddiaya güvenir.** `tbot` modeli budur; kanıtı toplayan ve normalize eden taraf iş yükünün yanındaki ajandır, Argus yalnızca o ajanın imzasını doğrular. Argus platform çeşitliliğinden korunur, ama güven kökü artık donanım değil **attester'ın kendisidir**; attester ele geçirilirse her iş yükü taklit edilebilir.
+
+Bu soru dokümanda sorulmamıştır ve 2.8'in "arayüzü hazırlanmalıdır" kararı ikisi arasında seçim yapmadan verilemez. Seçim veri modelini de değiştirmektedir: ikinci modelde `AgentIdentity` içinde `trusted_instance_issuers` alanı yeterli değildir, ayrıca hangi attester'ın hangi iddia tipini imzalamaya yetkili olduğu modellenmelidir.
+
+**Ek bir gözlem.** Teleport'un değer önerisi, uzun ömürlü paylaşılan sırların altyapıdan kaldırılmasıdır. Argus'un ajan token'larının "insan token'larından çok kısa" olması kararı (11.4) aynı hedefin token tarafındaki hâlidir; ikisi birlikte tasarlanmalıdır, çünkü çok kısa ömür yenileme trafiğini ve dolayısıyla §27'deki yük profilini belirler.
 
 ---
 
-## 8. Açık problemler — ne çözüldü, ne çözülmedi
+## 8. Açık problemler, ne çözüldü ve ne çözülmedi
 
 | Problem | Durum | Kanıt |
 |---|---|---|
-| Cross-domain kimlik zinciri | 🟢 **Neredeyse çözüldü** | identity-chaining-17 RFC kuyruğunda |
-| Cross-app kullanıcı SSO taşıma | 🟢 **Çözüldü** | ID-JAG-04 + MCP EMA Stable + üretim |
-| Sender-constrained token | 🟢 **Çözüldü** | DPoP RFC 9449, mTLS RFC 8705 |
-| Sinyal/olay dağıtımı | 🟢 **Çözüldü** | SSF 1.0 + CAEP 1.0 Final |
-| Out-of-band kullanıcı onayı | 🟡 **Kısmen** | CIBA Final ama **mid-execution'a uymuyor** (AIMS §10.7 itirafı) |
-| Ölçeklenebilir revocation | 🟡 **Neredeyse** | status-list-21 RFC kuyruğunda (`VALID`/`INVALID`/**`SUSPENDED`**) |
-| **Delegasyon zinciri kriptografik doğrulanabilirliği** | 🔴 **AÇIK** | `act` yetki için kullanılamaz; **7 rakip draft, hiçbiri WG'de** |
-| **Ajan kaydı / keşfi** | 🔴 **AÇIK** | A2A registry tartışması **1+ yıldır** sonuçsuz (#741, 80+ yorum); MCP Registry **preview** |
-| **Attenuation'ın OAuth'a entegrasyonu** | 🔴 **AÇIK** | Biscuit v3.3 / UCAN 1.0 olgun ama **OAuth'la konuşmuyor**. OAuth scope'u **operatör** düzeyinde ("TRANSFER"), **operand** düzeyinde değil ("Bob'a 100$") — arXiv:2603.17170 |
-| **Mid-execution HITL, işleme kriptografik bağlı** | 🔴 **AÇIK** | CIBA `binding_message` sadece serbest metin. **Dört aday, hepsi bireysel** |
-| **Ajan-spesifik CAEP event'leri** | 🔴 **AÇIK** | CAEP 1.0'da yok |
-| **Toplu/kitlesel iptal** | 🔴 **AÇIK** | `draft-chen`'in "Mass Revocation Gap"i |
-| **Ajan denetlenebilirliği** | 🔴 **AÇIK** | AUDIT BoF **DECLINED** |
-| **Workload kimliği standardı** | 🔴 **AÇIK** | WIMSE'den **hiç RFC yok** |
-| **Prompt injection'ın yetkilendirmeye etkisi** | 🔴 **YETKİLENDİRME KATMANINDA ÇÖZÜLEMEZ** | Güçlü konsensüs |
+| Alanlar arası kimlik zinciri | Neredeyse çözülmüştür | identity-chaining-17 RFC kuyruğundadır |
+| Uygulamalar arası kullanıcı çoklu oturum açması taşıma | Çözülmüştür | ID-JAG-04 ile MCP EMA stabildir ve üretimdedir |
+| Göndericiye kısıtlı token | Çözülmüştür | DPoP RFC 9449 ile mTLS RFC 8705 |
+| Sinyal ile olay dağıtımı | Çözülmüştür | SSF 1.0 ile CAEP 1.0 Final |
+| Bant dışı kullanıcı onayı | Kısmen çözülmüştür | CIBA Final'dır ancak çalıştırma ortasına uymamaktadır; AIMS §10.7 itirafı |
+| Ölçeklenebilir iptal | Neredeyse çözülmüştür | status-list-21 RFC kuyruğundadır; `VALID`, `INVALID` ile `SUSPENDED` durumları vardır |
+| Delegasyon zincirinin kriptografik doğrulanabilirliği | Açıktır | `act` yetki için kullanılamaz; yedi rakip taslak vardır ve hiçbiri çalışma grubunda değildir |
+| Ajan kaydı ile keşfi | Açıktır | A2A kayıt defteri tartışması bir yıldan uzun süredir sonuçsuzdur, issue #741 ve 80'den fazla yorum; MCP Registry önizlemededir |
+| Yetki daraltmanın OAuth'a entegrasyonu | Açıktır | Biscuit v3.3 ile UCAN 1.0 olgundur ancak OAuth'la konuşmamaktadır. OAuth scope'u operatör düzeyindedir, örneğin TRANSFER, operand düzeyinde değildir, örneğin Bob'a 100 dolar; arXiv 2603.17170 |
+| Çalıştırma ortasında ve işleme kriptografik bağlı insan onayı | Açıktır | CIBA `binding_message` yalnızca serbest metindir. Dört aday vardır ve hepsi bireyseldir |
+| Ajana özgü CAEP olayları | Açıktır | CAEP 1.0'da yoktur |
+| Toplu ve kitlesel iptal | Açıktır | `draft-chen`'in toplu iptal boşluğu |
+| Ajan denetlenebilirliği | Açıktır | AUDIT BoF reddedilmiştir |
+| İş yükü kimliği standardı | Açıktır | WIMSE'den hiç RFC çıkmamıştır |
+| Prompt enjeksiyonunun yetkilendirmeye etkisi | Yetkilendirme katmanında çözülemez | Güçlü bir uzlaşı vardır |
 
-### 8.1 Prompt injection — dürüst değerlendirme
+### 8.1 Prompt enjeksiyonu, dürüst değerlendirme
 
-**Lethal trifecta** (Simon Willison, 16 Haziran 2025): özel veriye erişim + güvenilmeyen içeriğe maruziyet + dışarı iletişim. *"we still don't know how to 100% reliably prevent this from happening."*
+Ölümcül üçlü (Simon Willison, 16 Haziran 2025) özel veriye erişim, güvenilmeyen içeriğe maruziyet ile dışarı iletişimden oluşur: "we still don't know how to 100% reliably prevent this from happening."
 
-**AIMS'in normatif cevabı (§8):** *"The Large Language Model MUST NOT have access to an agent's credentials..."*
+AIMS'in normatif cevabı §8'dedir: "The Large Language Model MUST NOT have access to an agent's credentials..."
 
-**Ekosistemin gerçek durumu (arXiv:2605.22333, 21 Mayıs 2026, Fudan):** 7.973 canlı uzak MCP sunucusu → **%40,55'i hiçbir auth olmadan tool açıyor**; OAuth'lu 119 sunucunun **%100'ünde en az bir kusur** (toplam 325); **%96,6 DCR kusuru**.
+Ekosistemin gerçek durumu için arXiv 2605.22333 (21 Mayıs 2026, Fudan) 7.973 canlı uzak MCP sunucusu incelemiştir: %40,55'i hiçbir kimlik doğrulaması olmadan tool açmakta; OAuth kullanan 119 sunucunun %100'ünde en az bir kusur, toplam 325 kusur bulunmakta; %96,6'sında DCR kusuru bulunmaktadır.
 
-**Yetkilendirme katmanının yapabildikleri (ölçülmüş)** — arXiv:2609.00267 (31 Ağu 2026): LangGraph/CrewAI/AutoGen/MCP değerlendirmesi: **üçü hiçbir yerleşik confinement sağlamıyor.** Yazarların **authorization broker**'ı 4 tehdidi de engelliyor ve ele geçirilmiş alt-ajanın erişimini **8.100 olası eylemden ortalama 1,5'e** düşürüyor. Makalede geçen "karar başına ~2,6 µs" rakamı **160 satırlık Python'da HMAC caveat doğrulamasıdır**, ReBAC graph çözümlemesi değil — Argus'un yetkilendirme hedefi olarak alınamaz (bkz. 20-authorization-engine.md (§20) §0). Doğru okuma: *yetki token'a gömülüyse doğrulama neredeyse bedavadır.*
+Yetkilendirme katmanının yapabildikleri ölçülmüştür; arXiv 2609.00267, 31 Ağustos 2026. LangGraph, CrewAI, AutoGen ile MCP değerlendirilmiş ve üçünün hiçbir yerleşik sınırlama sağlamadığı görülmüştür. Yazarların yetkilendirme aracısı dört tehdidi de engellemekte ve ele geçirilmiş bir alt ajanın erişimini 8.100 olası eylemden ortalama 1,5'e düşürmektedir. Makalede geçen karar başına yaklaşık 2,6 mikrosaniye rakamı 160 satırlık Python'da HMAC caveat doğrulamasıdır, ilişki tabanlı erişim kontrolü graf çözümlemesi değildir; Argus'un yetkilendirme hedefi olarak alınamaz, §20'nin sıfırıncı bölümüne bakınız. Doğru okuma şudur: yetki token'a gömülüyse doğrulama neredeyse bedavadır.
 
-> **Argus'un tez cümlesi: yetkilendirmeyi modelden çıkar, deterministik bir broker'a koy.**
+> **Argus'un tez cümlesi.** Yetkilendirmeyi modelden çıkar, deterministik bir aracıya koy.
 
 ---
 
 ## 9. Düzenleyici durum
 
-**Net cevap: Bugün bir IdP'yi "AI ajanlarına ayrı kimlik ver" diye hukuken ZORLAYAN bağlayıcı düzenleme YOK.**
+Net cevap şudur: bugün bir IdP'yi AI ajanlarına ayrı kimlik vermeye hukuken zorlayan bağlayıcı bir düzenleme yoktur.
 
-| Kaynak | Bağlayıcı? | Ajan kimliği gerektiriyor mu? | Ne zaman ısırır |
+| Kaynak | Bağlayıcı mıdır | Ajan kimliği gerektiriyor mu | Ne zaman ısırır |
 |---|---|---|---|
-| **EU AI Act Md. 50** | ✅ Yürürlükte (2 Ağu 2026) | ❌ Sadece "AI'yım" ifşası | Şimdi |
-| **EU AI Act yüksek risk** | ✅ ama **2 Ara 2027'ye ertelendi** (Reg. EU 2026/1744, 27 Tem 2026) | Dolaylı | 2027-12 |
-| **Singapur CSA Securing Agentic AI Addendum** (17 Haz 2026) | ❌ *"not mandatory, prescriptive nor exhaustive"* | ✅ **Çok spesifik** | Tedarik/denetim baskısı |
-| **NIST NCCoE "Software and AI Agent Identity and Authorization"** (5 Şub 2026) | ❌ | ✅ **En teknik** — MCP, OAuth 2.0/2.1, OIDC, **SPIFFE/SPIRE, SCIM, NGAC** | 2027 federal tedarik |
-| **OWASP Agentic Top 10 (2026)** | ❌ | ✅ **ASI03 Identity & Privilege Abuse** | Şimdi (fiili baseline) |
-| **FIDO Agentic Authentication WG** (28 Nis 2026) | ❌ | ✅ Verifiable User Instructions, Trusted Delegation for Commerce | 2027+ |
+| AB Yapay Zekâ Yasası madde 50 | Evet, 2 Ağustos 2026'da yürürlüktedir | Hayır; yalnızca yapay zekâ olduğunun ifşasını ister | Şimdi |
+| AB Yapay Zekâ Yasası yüksek risk | Evet ancak 2 Aralık 2027'ye ertelenmiştir, Reg. EU 2026/1744, 27 Temmuz 2026 | Dolaylı olarak | Aralık 2027 |
+| Singapur CSA Securing Agentic AI eki, 17 Haziran 2026 | Hayır: "not mandatory, prescriptive nor exhaustive" | Evet, çok spesifiktir | Tedarik ile denetim baskısı olarak |
+| NIST NCCoE "Software and AI Agent Identity and Authorization", 5 Şubat 2026 | Hayır | Evet, en teknik olanıdır: MCP, OAuth 2.0 ile 2.1, OIDC, SPIFFE ile SPIRE, SCIM ve NGAC | 2027 federal tedariki |
+| OWASP Agentic Top 10, 2026 | Hayır | Evet; ASI03 kimlik ile ayrıcalık istismarı | Şimdi, fiilî taban çizgisidir |
+| FIDO Agentic Authentication çalışma grubu, 28 Nisan 2026 | Hayır | Evet; doğrulanabilir kullanıcı talimatları ile ticarette güvenilir delegasyon | 2027 ve sonrası |
 
-**Singapur CSA'nın somut kontrolleri:**
-- *"Maintain **trusted registry of agents** and authenticate agents using **strong, verifiable credentials**"*
-- *"Ensure **fine-grained, scoped tokens**"*; *"**time-bound or one-time-use credentials**"*
-- *"**Validate permissions on every request to each agent in the workflow**"*
-- *"**Prevent cross-agent privilege delegation**"*
-- *"**Do not share credentials with the agent**"*
+Singapur CSA'nın somut kontrolleri şunlardır: "Maintain trusted registry of agents and authenticate agents using strong, verifiable credentials"; "Ensure fine-grained, scoped tokens"; "time-bound or one-time-use credentials"; "Validate permissions on every request to each agent in the workflow"; "Prevent cross-agent privilege delegation"; "Do not share credentials with the agent".
 
-**WEF "AI Agents in Action" (Mayıs 2026) — ACAP çerçevesi.** En aksiyona dönüştürülebilir kuralı:
-> *"a downstream agent operates under the **intersection** of its own ACAP permissions and those of the agent that invoked it. **An orchestrating agent cannot delegate authority it does not itself hold.**"*
+Dünya Ekonomik Forumu'nun "AI Agents in Action" raporu (Mayıs 2026) ACAP çerçevesini getirmektedir. En aksiyona dönüştürülebilir kuralı şudur: "a downstream agent operates under the intersection of its own ACAP permissions and those of the agent that invoked it. An orchestrating agent cannot delegate authority it does not itself hold."
 
-**Dört kaynağın (CSA + NIST + OWASP + WEF) ortak paydası = bir IdP'nin roadmap'i:**
-1. Her ajana benzersiz, ayrı kimlik (service account paylaşımı yok)
-2. Kısa ömürlü, scoped, zaman-sınırlı credential
-3. Güvenilir ajan kaydı + doğrulanabilir credential
-4. Delegasyonda **kesişim, toplama değil**
-5. **Her adımda yeniden yetkilendirme** — bir kez token alıp zincir boyunca kullanmak açık anti-pattern
-6. Non-repudiation / denetlenebilirlik
-7. Merkezî enforcement plane
-8. Kullanıcı-başlatılan vs. ajan-başlatılan eylem ayrımı
+Dört kaynağın, yani CSA, NIST, OWASP ile WEF'in ortak paydası bir IdP'nin yol haritasıdır.
+
+1. Her ajana benzersiz ve ayrı bir kimlik verilir; servis hesabı paylaşımı yapılmaz.
+2. Kısa ömürlü, kapsamlı ve zaman sınırlı kimlik bilgisi kullanılır.
+3. Güvenilir bir ajan kaydı ile doğrulanabilir kimlik bilgisi tutulur.
+4. Delegasyonda kesişim alınır, toplama yapılmaz.
+5. Her adımda yeniden yetkilendirme yapılır; bir kez token alıp zincir boyunca kullanmak açık bir anti-desendir.
+6. İnkâr edilemezlik ile denetlenebilirlik sağlanır.
+7. Merkezî bir uygulama düzlemi kurulur.
+8. Kullanıcı başlatmalı eylemler ile ajan başlatmalı eylemler ayrılır.
 
 ---
 
 ## 10. Sınıflandırma
 
-### 🟢 BUGÜN İMPLEMENTE EDİLMELİ
+### Bugün implemente edilmeli
 
 | # | Öğe | Neden |
 |---|---|---|
-| 1 | **OAuth 2.1 çekirdeği** (PKCE S256 zorunlu, `plain` reddi; implicit/password YOK) | Her şeyin tabanı |
-| 2 | **RFC 8414 + OIDC Discovery** — **ikisi birden** | MCP MUST |
-| 3 | **RFC 9728 PRM** | MCP MUST |
-| 4 | **RFC 8707 `resource`** + canonical URI validasyonu + `aud`'a yansıtma | MCP MUST |
-| 5 | **RFC 9207 `iss`** (hata dahil), normalizasyon YOK | MCP MUST, yakında MUST'a yükselecek |
-| 6 | **CIMD tam implementasyonu** + `client_id_metadata_document_supported: true` | DCR deprecated |
-| 7 | **RFC 7591 DCR** (legacy, `application_type`, issuer-bound credential) | 12+ ay geriye uyum |
-| 8 | **RFC 8693 Token Exchange** — standart URN'lerle, `act` + `may_act` | Delegasyonun tabanı |
-| 9 | **ID-JAG issuance + consumption** + metadata + `jti` replay cache + **client continuity** | **Keycloak'ta issuance YOK** |
-| 10 | **SPIFFE client auth** (JWT-SVID, X.509-SVID, Bundle Endpoint) | Keycloak implemente ediyor |
-| 11 | **DPoP (RFC 9449)** `cnf.jkt` + **mTLS-bound (RFC 8705)** `cnf.x5t#S256` | 3 Ağu 2026 ölçümünde 15 issuer'dan **0'ı DPoP** ilan ediyordu |
-| 12 | **RAR (RFC 9396)** — istekte VE token claim'inde, per-type JSON Schema, consent'te insan-okunur render | Ajanlar için scope'tan kat kat önemli |
-| 13 | **CIBA** (`/bc-authorize`, `binding_message`, `authorization_pending`/`slow_down`) | Server-Mediated bağlama modelinin ta kendisi |
-| 14 | **Scope challenge motoru:** 403 + `insufficient_scope` + `scope` + `resource_metadata` | MCP MUST/SHOULD |
-| 15 | **Workload-tarzı hiyerarşik identifier'lar** (`spiffe://` / `wimse://`) | Policy wildcard'ları |
-| 16 | **RFC 7009 revocation + RFC 7662 introspection + JWKS rotation** | Temel hijyen |
-| 17 | **SSF/CAEP transmitter — Final spec (8 event)** | ⚠️ 2021 draft-02 URL tuzağı |
+| 1 | OAuth 2.1 çekirdeği: PKCE S256 zorunludur, `plain` reddedilir, implicit ile password yoktur | Her şeyin tabanıdır |
+| 2 | RFC 8414 ile OIDC Discovery, ikisi birden | MCP MUST'ıdır |
+| 3 | RFC 9728 PRM | MCP MUST'ıdır |
+| 4 | RFC 8707 `resource`, kanonik URI doğrulaması ile `aud` alanına yansıtma | MCP MUST'ıdır |
+| 5 | RFC 9207 `iss`, hata yanıtları dahil ve normalizasyon yapılmadan | MCP MUST'ıdır ve yakında MUST'a yükselecektir |
+| 6 | CIMD tam implementasyonu ile `client_id_metadata_document_supported: true` | DCR kullanımdan kaldırılmıştır |
+| 7 | RFC 7591 DCR, eski uyumluluk için; `application_type` ile issuer'a bağlı kimlik bilgisi | On iki aydan uzun geriye uyumluluk penceresi vardır |
+| 8 | RFC 8693 Token Exchange, standart URN'lerle, `act` ile `may_act` | Delegasyonun tabanıdır |
+| 9 | ID-JAG üretimi ile tüketimi, metadata, `jti` yeniden oynatma önbelleği ve istemci sürekliliği | Keycloak'ta üretim yoktur |
+| 10 | SPIFFE istemci kimlik doğrulaması: JWT-SVID, X.509-SVID ile Bundle Endpoint | Keycloak implemente etmektedir |
+| 11 | DPoP (RFC 9449) `cnf.jkt` ile mTLS'e bağlı (RFC 8705) `cnf.x5t#S256` | 3 Ağustos 2026 ölçümünde 15 issuer'dan hiçbiri DPoP ilan etmemekteydi |
+| 12 | RAR (RFC 9396), hem istekte hem token claim'inde; tip başına JSON şeması ve onayda insan okunur gösterim | Ajanlar için scope'tan kat kat önemlidir |
+| 13 | CIBA: `/bc-authorize`, `binding_message`, `authorization_pending` ile `slow_down` | Sunucu aracılı bağlama modelinin ta kendisidir |
+| 14 | Scope challenge motoru: 403 ile `insufficient_scope`, `scope` ve `resource_metadata` | MCP MUST ile SHOULD'udur |
+| 15 | İş yükü tarzı hiyerarşik tanımlayıcılar: `spiffe://` ile `wimse://` | Politika joker karakterleri içindir |
+| 16 | RFC 7009 iptali, RFC 7662 introspection'ı ile JWKS rotasyonu | Temel hijyendir |
+| 17 | SSF ile CAEP vericisi, Final spesifikasyonunun sekiz olayıyla | 2021 draft-02 URL tuzağına dikkat edilmelidir |
 
-### 🟡 ARAYÜZÜ HAZIRLANMALI
+### Arayüzü hazırlanmalı
 
-18. **`delegation_chain` claim'i** — per-hop imza, detached JWS + JCS
-19. **Actor Profile değişmezleri:** `sub`=yetkilendiren, en dıştaki `act.sub`=doğrudan aktör, kanonik id=`(act.iss, act.sub)`; min depth 4
-20. **`sub_profile` / `client_profile`** claim'leri, `ai_agent` değeri
-21. **`agent_instance_id`** + `agent_platform`/`agent_model`/`agent_runtime`
-22. **Attestation-based client auth** (`OAuth-Client-Attestation` header'ları)
-23. **Transaction Tokens** (`typ: txntoken+jwt`, `Txn-Token` header'ı, TTS)
-24. **Mid-execution HITL uzantı noktası** — üç adaydan birini seç, üçünü de destekleyebilecek soyutlama kur
-25. **AuthZEN PDP entegrasyonu** — SARC, `x-authzen-mapping`, CEL; AARP'ın task handle modeli
-26. **Delegated Refresh Token profili** — mutlak deadline, **task-scoped revocation**
-27. **`refresh_token_timeout` + `authorization_expires_in`**
-28. **RAR metadata discovery + remediation**
-29. **First-Party Apps** Authorization Challenge Endpoint + `auth_session`
-30. **SCIM `/Agents` + `/AgenticApplications`** — `owners`, `protocols`, `subject`
-31. **Üç bağlama modeli** olarak akışlar: Agent-Mediated / Owner-Mediated / **Server-Mediated (=CIBA)**
-32. **WIT/WPT desteği**
-33. **Agent Card imzalama servisi** (RFC 8785 JCS + JWS + JWKS) — **hiçbir mainstream IdP yapmıyor**
-34. **Federated credential vault ("Connection")** — envelope encryption, otomatik refresh worker
-35. **Cloud workload federasyonu** (AWS/GCP OIDC → `jwt-bearer`)
+18. `delegation_chain` claim'i: sıçrama başına imza, ayrık JWS ile JCS.
+19. Actor Profile değişmezleri: `sub` yetkilendirendir, en dıştaki `act.sub` doğrudan aktördür, kanonik kimlik `(act.iss, act.sub)` ikilisidir ve asgari derinlik dörttür.
+20. `sub_profile` ile `client_profile` claim'leri ve `ai_agent` değeri.
+21. `agent_instance_id` ile `agent_platform`, `agent_model` ve `agent_runtime`.
+22. Attestation tabanlı istemci kimlik doğrulaması, yani `OAuth-Client-Attestation` başlıkları.
+23. Transaction Tokens: `typ: txntoken+jwt`, `Txn-Token` başlığı ile token servisi.
+24. Çalıştırma ortasında insan onayı için bir uzantı noktası: üç adaydan biri seçilir ve üçünü de destekleyebilecek bir soyutlama kurulur.
+25. AuthZEN politika karar noktası entegrasyonu: SARC, `x-authzen-mapping`, CEL ile AARP'ın görev tutamağı modeli.
+26. Delegasyonlu refresh token profili: mutlak son tarih ile göreve kapsamlı iptal.
+27. `refresh_token_timeout` ile `authorization_expires_in`.
+28. RAR metadata keşfi ile düzeltme akışı.
+29. First-Party Apps Authorization Challenge Endpoint'i ile `auth_session`.
+30. SCIM `/Agents` ile `/AgenticApplications`; `owners`, `protocols` ve `subject` nitelikleri.
+31. Üç bağlama modeli akış olarak sunulur: ajan aracılı, sahip aracılı ile sunucu aracılı, yani CIBA.
+32. WIT ile WPT desteği.
+33. Agent Card imzalama servisi: RFC 8785 JCS, JWS ile JWKS. Hiçbir yaygın IdP bunu yapmamaktadır.
+34. Federe kimlik bilgisi kasası, yani Connection: zarf şifrelemesi ile otomatik yenileme işçisi.
+35. Bulut iş yükü federasyonu: AWS ile GCP OIDC'den `jwt-bearer` grant'ına.
 
-### 🔴 HENÜZ ERKEN
+### Henüz erken
 
-Attenuating tokens (4 rakip draft) · Agent registry protokolleri (NANDA, ANS, AgentDNS, `agent://`, `urn:aid:`) · Donanım-çapalı ajan kimliği · `agent_trust_score` tarzı claim'ler · Rego/policy language OAuth binding · Mission-bound authorization · Ajan-spesifik CAEP event tipleri · Global/mass revocation standardı · SD-JWT ile Agent Card selective disclosure · agentproto'nun getireceği her şey
+Yetki daraltan token'lar, dört rakip taslak vardır. Ajan kayıt protokolleri: NANDA, ANS, AgentDNS, `agent://` ile `urn:aid:`. Donanıma çapalı ajan kimliği. `agent_trust_score` tarzı claim'ler. Rego ile politika dilinin OAuth'a bağlanması. Göreve bağlı yetkilendirme. Ajana özgü CAEP olay tipleri. Küresel ve toplu iptal standardı. SD-JWT ile Agent Card seçici ifşası. agentproto'nun getireceği her şey.
 
 ---
 
@@ -751,7 +651,8 @@ Attenuating tokens (4 rakip draft) · Agent registry protokolleri (NANDA, ANS, A
 
 ### 11.1 Endpoint'ler
 
-**Standart:**
+**Standart olanlar.**
+
 ```
 GET  /.well-known/openid-configuration          OIDC Discovery (MUST — MCP)
 GET  /.well-known/oauth-authorization-server    RFC 8414 (MUST — MCP)
@@ -765,21 +666,23 @@ POST /register                                   RFC 7591 (legacy)
 GET  /userinfo
 ```
 
-**Ajan için ek:**
+**Ajan için ek olanlar.**
+
 ```
 POST /bc-authorize                              CIBA backchannel
 POST /token  (grant_type=...:ciba)              CIBA polling
-POST /authorize-challenge                       FiPA (🟡)
-GET  /.well-known/authorization-details-types   RAR metadata (🟡)
-POST /access-requests                           AuthZEN AARP (🟡)
-GET  /access-requests/{task_handle}             AARP task status (🟡)
+POST /authorize-challenge                       FiPA
+GET  /.well-known/authorization-details-types   RAR metadata
+POST /access-requests                           AuthZEN AARP
+GET  /access-requests/{task_handle}             AARP task status
 POST /agents/{id}/revoke-all                    toplu iptal (standart yok)
 GET  /ssf/.well-known/sse-configuration         SSF transmitter
-POST /agent-cards/sign                          A2A Agent Card imzalama (🟡, farklılaşma)
-SCIM /Agents, /AgenticApplications              (🟡)
+POST /agent-cards/sign                          A2A Agent Card imzalama
+SCIM /Agents, /AgenticApplications
 ```
 
-**Grant type'lar:**
+**Grant tipleri.**
+
 ```
 authorization_code                                          (PKCE S256 zorunlu)
 refresh_token
@@ -790,45 +693,47 @@ urn:openid:params:grant-type:ciba                           CIBA
 urn:ietf:params:oauth:grant-type:device_code                RFC 8628 (A2A deviceCode)
 ```
 
-**`requested_token_type` değerleri:**
+**`requested_token_type` değerleri.**
+
 ```
 urn:ietf:params:oauth:token-type:access_token
 urn:ietf:params:oauth:token-type:id_token
 urn:ietf:params:oauth:token-type:refresh_token
 urn:ietf:params:oauth:token-type:jwt
-urn:ietf:params:oauth:token-type:id-jag                     ⭐ ID-JAG üretimi
-urn:ietf:params:oauth:token-type:txn_token                  🟡
+urn:ietf:params:oauth:token-type:id-jag                     ID-JAG üretimi
+urn:ietf:params:oauth:token-type:txn_token
 ```
 
-**Client auth metotları:**
+**İstemci kimlik doğrulama metotları.**
+
 ```
 private_key_jwt                                            (CIMD ile önerilen)
 tls_client_auth / self_signed_tls_client_auth              RFC 8705
 client_secret_basic / client_secret_post                   (legacy)
-urn:ietf:params:oauth:client-assertion-type:jwt-spiffe     ⭐ JWT-SVID
-attest_jwt_client_auth                                     🟡
+urn:ietf:params:oauth:client-assertion-type:jwt-spiffe     JWT-SVID
+attest_jwt_client_auth
 ```
 
-### 11.2 Token tipleri (`typ` header'ları)
+### 11.2 Token tipleri, yani `typ` başlıkları
 
-| `typ` | Ne | Öncelik |
+| `typ` | Ne olduğu | Öncelik |
 |---|---|---|
-| `at+jwt` | Access token (RFC 9068) | 🟢 |
-| `oauth-id-jag+jwt` | **ID-JAG** | 🟢 |
-| `dpop+jwt` | DPoP proof | 🟢 |
-| `txntoken+jwt` | Transaction Token | 🟡 |
-| `wit+jwt` | WIMSE Workload Identity Token | 🟡 |
-| `application/wpt+jwt` | WIMSE Workload Proof Token | 🟡 |
-| `oauth-client-attestation+jwt` / `-pop+jwt` | Client attestation | 🟡 |
+| `at+jwt` | Access token, RFC 9068 | Bugün |
+| `oauth-id-jag+jwt` | ID-JAG | Bugün |
+| `dpop+jwt` | DPoP kanıtı | Bugün |
+| `txntoken+jwt` | Transaction Token | Arayüz hazırlanır |
+| `wit+jwt` | WIMSE Workload Identity Token | Arayüz hazırlanır |
+| `application/wpt+jwt` | WIMSE Workload Proof Token | Arayüz hazırlanır |
+| `oauth-client-attestation+jwt` ile `-pop+jwt` | İstemci attestation'ı | Arayüz hazırlanır |
 
-### 11.3 Claim seti — ajan access token'ı hedef şekli
+### 11.3 Claim seti, ajan access token'ının hedef şekli
 
 ```jsonc
 {
   // — Kimlik —
   "iss": "https://idp.acme.example/",
   "sub": "user:alice@acme.example",              // YETKİLENDİREN (insan)
-  "sub_profile": "user",                          // 🟡
+  "sub_profile": "user",
   "aud": "https://mcp.chat.example/",             // RFC 8707 resource
   "client_id": "https://app.example.com/client.json",  // CIMD URL-form
   "jti": "...", "iat": ..., "exp": ...,
@@ -837,13 +742,13 @@ attest_jwt_client_auth                                     🟡
   "act": {
     "sub": "spiffe://acme.example/agent/invoice-bot/i-7f3a",
     "iss": "https://idp.acme.example/",
-    "sub_profile": ["ai_agent", "client_instance"],   // 🟡
-    "agent_instance_id": "aai-...",                    // 🟡
+    "sub_profile": ["ai_agent", "client_instance"],
+    "agent_instance_id": "aai-...",
     "agent_platform": "...", "agent_model": {"id":"...","version":"..."},
     "act": { /* bir üst hop — min depth 4 */ }
   },
 
-  // — DELEGASYON ZİNCİRİ (imzalı) — 🟡 —
+  // — DELEGASYON ZİNCİRİ (imzalı) —
   "delegation_chain": [
     { "delegator_id":"...", "delegatee_id":"...", "iat":..., "exp":...,
       "policy": {...}, "as_signature":"<detached JWS>", "delegator_signature":"<detached JWS>" }
@@ -856,12 +761,12 @@ attest_jwt_client_auth                                     🟡
 
   // — SAHİPLİK KANITI —
   "cnf": { "jkt": "<DPoP thumbprint>" },
-  "txn": "...",                                      // 🟡
+  "txn": "...",
   "tenant": "acme"
 }
 ```
 
-**Kural:** `sub` = insan, `act` = ajan. **Otonom (kullanıcısız) ajan durumunda `sub` = ajan, `act` yok.**
+Kural şudur: `sub` insandır, `act` ajandır. Otonom, yani kullanıcısız ajan durumunda `sub` ajandır ve `act` yoktur.
 
 ### 11.4 Veri modeli
 
@@ -926,15 +831,30 @@ struct DelegationRecord {
 }
 ```
 
-**Zorunlu değişmezler (kod seviyesinde enforce et):**
-1. **Monotonic attenuation:** `child.scopes ⊆ parent.scopes`
-2. **TTL monotonluğu:** `child.exp ≤ parent.exp`
-3. **Depth monotonluğu:** `child.del_depth = parent.del_depth + 1 ≤ max_depth`
-4. **Zincir sürekliliği:** `record[i].delegator_id == record[i-1].delegatee_id`
-5. **Kesişim semantiği:** downstream ajan, kendi izinleri ∩ çağıranın izinleri
-6. **PoP:** leaf token'ın sunucusu özel anahtarı kontrol ediyor olmalı
+Kod seviyesinde zorlanması gereken değişmezler şunlardır.
 
-### 11.5 AS Metadata
+1. Tek yönlü daraltma: `child.scopes ⊆ parent.scopes`.
+2. TTL monotonluğu: `child.exp ≤ parent.exp`.
+3. Derinlik monotonluğu: `child.del_depth = parent.del_depth + 1 ≤ max_depth`.
+4. Zincir sürekliliği: `record[i].delegator_id == record[i-1].delegatee_id`.
+5. Kesişim semantiği: downstream ajan, kendi izinleriyle çağıranın izinlerinin kesişimine sahiptir.
+6. Sahiplik kanıtı: yaprak token'ı sunan taraf özel anahtarı kontrol ediyor olmalıdır.
+
+**Ajanın veri modelindeki yeri bir gün-1 sözleşmesidir ve §1'e taşınmalıdır.** Yukarıdaki `Principal` enum'u sessizce bir karar vermektedir: ajan, `User`'ın bir varyantı ya da bir bayrağı değil, ayrı bir varyanttır. Bu doğru karardır ancak §1'in kalıcı kimlik sözleşmeleri arasında kayıtlı değildir; `sub` değerinin uzayını ve her FK'nin şeklini belirlediği için sonradan değiştirilemez.
+
+Karşılaştırma noktası FusionAuth'un **Entity Management**'ıdır (erişim 13 Eylül 2026). Orada model daha geneldir: bir entity'nin bir tipi vardır — ürün dokümanının saydığı örnekler arasında kilit, araba, şirket, bölüm, bilgisayar, **AI agent** ve API bulunur. **Grant**, bir hedef entity ile bir alıcı entity veya kullanıcı arasındaki ilişkidir ve sıfır ya da daha fazla permission taşır. Entity'ler birbirlerine client credentials grant'ıyla erişir.
+
+İki model arasındaki gerçek fark şudur ve bir tercihtir:
+
+| | Argus'un `Principal` enum'u | FusionAuth'un entity/grant grafiği |
+|---|---|---|
+| Yeni aktör tipi eklemek | Şema ve kod değişikliği | Veri; yeni bir entity type satırı |
+| Ajana özgü değişmezler | Tipte taşınır; yukarıdaki altı kural derleme zamanında zorlanabilir | Genel grafikte ifade edilemez; uygulama katmanına düşer |
+| §20 ile ilişki | `Principal` bir tuple öznesi olarak eşlenir | Grant grafiği zaten bir tuple deposudur |
+
+Argus'un altı değişmezi — özellikle kesişim semantiği ve derinlik monotonluğu — genel bir grant grafiğinde ifade edilemez. Bu yüzden tipli model korunmalıdır. Ancak FusionAuth'un gösterdiği bir şey alınmalıdır: ajan, kullanıcıya *benzetilerek* modellenmemelidir. `AgentIdentity` bugün `owner_user_id` ve `sponsor_user_id` ile kullanıcıya bağlıdır; bu bağlar ilişki olarak modellenmelidir, kolon olarak değil, aksi hâlde çok sahipli ve devredilen ajanlar şema değişikliği gerektirir.
+
+### 11.5 AS metadata'sı
 
 ```json
 {
@@ -960,58 +880,48 @@ struct DelegationRecord {
 
 ---
 
-## 12. Çelişkili / yakınsamamış noktalar
+## 12. Çelişkili ve yakınsamamış noktalar
 
-1. **Mid-execution HITL: dört rakip mekanizma.** `interaction_required` + `interaction_uri` (Parecki/Campbell/Liu) · `completion_mode=deferred` + `deferral_code` (Gerber) · `transaction_challenge` (Rosomakho/Campbell/McGuinness/Kasselman) · AuthZEN AARP. **Üçü de aynı IETF 126 oturumunda sunuldu.**
-   → **Öneri:** İç mimaride tek bir "pending authorization" soyutlaması kur; dört yüzeyi de ona bağla.
-
-2. **Delegasyon zinciri: 7 rakip yaklaşım.** JWT claim vs HTTP header vs offline-doğrulanabilir capability chain vs sadece `act` profili. **Kriptografi de farklı:** çift-imza vs parent-hash zinciri vs HTTP Message Signatures.
-
-3. **Bearer mi PoP mu:** WIMSE WIT `MUST NOT be used as a bearer token` diyor; MCP hâlâ `Authorization: Bearer` üzerine kurulu. SPIFFE JWT-SVID bearer, halefi WIT-SVID PoP. **Ekosistem ikiye bölünmüş.**
-
-4. **`act` yetki için kullanılabilir mi:** RFC 8693 açıkça hayır diyor; ama neredeyse tüm ajan draft'ları `act`'i delegasyon kanıtı gibi kullanıyor. **Bu bir standart ihlali riski.**
-
-5. **A2A v1.0 tarihi çelişkili.**
-
-6. **Spec-lag:** MCP `draft-ietf-oauth-v2-1-13` ve `client-id-metadata-document-00`'a referans veriyor; güncel **-16** ve **-02**.
-
-7. **ID-JAG'ın intended status'u:** Datatracker "None" gösteriyor, draft metni "Standards Track" diyor. **Metadata tutarsızlığı.**
-
-8. **`draft-parecki-oauth-global-token-revocation-06`:** API "2026-08-28, rev 06" gösteriyor, doküman sayfası "expired, 24 Şubat 2026" diyor. **Çelişki çözülemedi.**
-
-9. **Entra Agent ID ile açık standartlar:** Microsoft üretimde `sub`/`actor` ayrımını yapıyor ama ID-JAG/MCP EMA/WIMSE desteği docs'ta **bulunamadı**.
-
-10. **"Ajan kaydı" konusunda tam kaos:** A2A registry (tartışma), MCP Registry (preview), SCIM `/Agents` (draft), Entra/Agent 365 (proprietary), `urn:aid:` (spekülatif), AgentDNS/ANS/NANDA (akademik). **Hiçbiri diğeriyle uyumlu değil.**
+1. **Çalıştırma ortasında insan onayı: dört rakip mekanizma.** `interaction_required` ile `interaction_uri` (Parecki, Campbell, Liu); `completion_mode=deferred` ile `deferral_code` (Gerber); `transaction_challenge` (Rosomakho, Campbell, McGuinness, Kasselman); AuthZEN AARP. Üçü de aynı IETF 126 oturumunda sunulmuştur. Öneri şudur: iç mimaride tek bir bekleyen yetkilendirme soyutlaması kurulur ve dört yüzey de ona bağlanır.
+2. **Delegasyon zinciri: yedi rakip yaklaşım.** JWT claim'i, HTTP başlığı, çevrimdışı doğrulanabilir yetenek zinciri ve yalnızca `act` profili birbiriyle yarışmaktadır. Kriptografi de farklıdır: çift imza, ebeveyn hash zinciri ve HTTP Message Signatures.
+3. **Bearer mi sahiplik kanıtı mı.** WIMSE WIT "MUST NOT be used as a bearer token" demektedir; MCP hâlâ `Authorization: Bearer` üzerine kuruludur. SPIFFE JWT-SVID bearer'dır, halefi WIT-SVID sahiplik kanıtıdır. Ekosistem ikiye bölünmüştür.
+4. **`act` yetki için kullanılabilir mi.** RFC 8693 açıkça hayır demektedir, ancak neredeyse tüm ajan taslakları `act`'i delegasyon kanıtı gibi kullanmaktadır. Bu bir standart ihlali riskidir.
+5. **A2A v1.0 tarihi çelişkilidir.**
+6. **Spesifikasyon gecikmesi.** MCP `draft-ietf-oauth-v2-1-13` ile `client-id-metadata-document-00` belgelerine referans vermektedir; güncelleri -16 ile -02'dir.
+7. **ID-JAG'ın hedeflenen statüsü.** Datatracker None göstermekte, taslak metni Standards Track demektedir; bir metadata tutarsızlığıdır.
+8. **`draft-parecki-oauth-global-token-revocation-06`.** API 28 Ağustos 2026 ve revizyon 06 göstermekte, doküman sayfası 24 Şubat 2026'da süresinin dolduğunu söylemektedir. Çelişki çözülememiştir.
+9. **Entra Agent ID ile açık standartlar.** Microsoft üretimde `sub` ile `actor` ayrımını yapmaktadır ancak ID-JAG, MCP EMA veya WIMSE desteği dokümanlarda bulunamamıştır.
+10. **Ajan kaydı konusunda tam kaos vardır.** A2A kayıt defteri tartışma aşamasındadır, MCP Registry önizlemededir, SCIM `/Agents` taslaktır, Entra ile Agent 365 tescillidir, `urn:aid:` spekülatiftir, AgentDNS, ANS ile NANDA akademiktir. Hiçbiri diğeriyle uyumlu değildir.
 
 ---
 
 ## 13. Doğrulanamayanlar
 
-1. OAuth WG chairs'in "ajan dokümanlarının adopsiyonu için erken" ifadesinin **tam metni**
-2. Delegation chain splicing saldırısının **birincil mesaj gövdesi**
-3. `draft-ni-wimse-ai-agent-identity`'nin **-03 revizyonu** var mı (-02 süresi 1 Eyl 2026'da doldu)
-4. AIMS'in "8 katmanlı yapısı" — ham metinde 7 bileşen sayıldı
-5. **A2A v1.0'ın kesin GA tarihi**
-6. Keycloak'ın ID-JAG issuance issue'su (keycloak#43971)
-7. Singapur CSA Addendum'un **nihai (17 Haz 2026)** metnindeki kimlik kontrolleri
-8. PSD3/PSR'de agentic AI'ya özgü hüküm — **bulunamadı**
-9. NIST SP 800-63'ün NHI güncellemesi için resmî takvim
-10. Entra Agent ID'nin açık standart desteği
-11. Auth0'da ajana özel application type; Auth for MCP'nin RFC 9728 implementasyonu
-12. Okta Agent SSO'nun GA tarihi (24 Ağu 2026 birincil; "Mayıs 2026" ikincil, çelişkili)
-13. `github.com/nomoticai/ietf-agent-landscape` içeriği (URL 404)
-14. `draft-sweeney-wimse-credential-delegation-00` içeriği
-15. UCAN 1.0'ın kesin yayın tarihi; zcap-ld'nin 2026 durumu; KERI'nin ajan bağlamındaki benimsenmesi
-16. Ping Identity, Astrix, Oasis Security'nin agentic **ürün** yaklaşımları
+1. OAuth çalışma grubu başkanlarının ajan dokümanlarının kabulü için erken olduğunu söyleyen ifadesinin tam metni.
+2. Delegation chain splicing saldırısının birincil mesaj gövdesi.
+3. `draft-ni-wimse-ai-agent-identity` için bir -03 revizyonu olup olmadığı; -02'nin süresi 1 Eylül 2026'da dolmuştur.
+4. AIMS'in sekiz katmanlı yapısı; ham metinde yedi bileşen sayılmıştır.
+5. A2A v1.0'ın kesin genel kullanım tarihi.
+6. Keycloak'ın ID-JAG üretimi issue'su, keycloak#43971.
+7. Singapur CSA ekinin 17 Haziran 2026 tarihli nihai metnindeki kimlik kontrolleri.
+8. PSD3 ile PSR'de ajansal yapay zekâya özgü hüküm; bulunamamıştır.
+9. NIST SP 800-63'ün insan olmayan kimlik güncellemesi için resmî takvim.
+10. Entra Agent ID'nin açık standart desteği.
+11. Auth0'da ajana özel uygulama tipi ile Auth for MCP'nin RFC 9728 implementasyonu.
+12. Okta Agent SSO'nun genel kullanım tarihi; 24 Ağustos 2026 birincil kaynaktır, Mayıs 2026 ikincil ve çelişkilidir.
+13. `github.com/nomoticai/ietf-agent-landscape` içeriği; URL 404 dönmektedir.
+14. `draft-sweeney-wimse-credential-delegation-00` içeriği.
+15. UCAN 1.0'ın kesin yayın tarihi; zcap-ld'nin 2026 durumu; KERI'nin ajan bağlamındaki benimsenmesi.
+16. Ping Identity, Astrix ile Oasis Security'nin ajansal ürün yaklaşımları.
 
 ---
 
 ## 14. Argus için üç stratejik hamle
 
-**1. ID-JAG'ı gün bir tam yap (issue + consume).** Keycloak sadece tüketiyor, o da preview. MCP Enterprise-Managed Authorization **Stable** ve ID-JAG'ın ta kendisi. **"MCP-native kurumsal IdP" konumlandırması bugün boş.**
+**1. ID-JAG birinci günde tam yapılır, yani hem üretilir hem tüketilir.** Keycloak yalnızca tüketmektedir, o da önizlemededir. MCP Enterprise-Managed Authorization stabildir ve ID-JAG'ın ta kendisidir. MCP yerlisi kurumsal IdP konumlandırması bugün boştur.
 
-**2. Bearer'ı varsayılan yapma.** 3 Ağustos 2026 ölçümünde discovery yanıtı veren 15 halka açık issuer'dan **10'u sadece shared-secret client auth, 3'ü private_key_jwt, 1'i mTLS, 0'ı DPoP** ilan ediyordu. DPoP + mTLS-bound + JWT-SVID kabulünü birinci sınıf yapan ilk ciddi IdP olmak, hem WIMSE'nin gittiği yön hem somut farklılaşma.
+**2. Bearer varsayılan yapılmaz.** 3 Ağustos 2026 ölçümünde keşif yanıtı veren 15 halka açık issuer'dan onu yalnızca paylaşılan sır tabanlı istemci kimlik doğrulaması, üçü `private_key_jwt`, biri mTLS ilan etmekteydi ve hiçbiri DPoP ilan etmemekteydi. DPoP, mTLS'e bağlı token ile JWT-SVID kabulünü birinci sınıf yapan ilk ciddi IdP olmak hem WIMSE'nin gittiği yöndür hem somut bir farklılaşmadır.
 
-**3. Delegasyon zincirini kendi imzalı yapınla çöz, `act`'i uyumluluk için üret.** Standart yakınsamadı ve en az 2 yıl daha yakınsamayacak. `draft-liu-oauth-chain-delegation`'ın şeklini + `draft-mcguinness-oauth-actor-profile`'ın üç değişmezini + WEF ACAP'ın kesişim kuralını + attenuation değişmezlerini (I1-I6) bugün implemente et. Hangisi standartlaşırsa geçiş ucuz; hiçbiri olmazsa zaten `act`'in güvenli üst kümesine sahip olursun.
+**3. Delegasyon zinciri kendi imzalı yapımızla çözülür, `act` yalnızca uyumluluk için üretilir.** Standart yakınsamamıştır ve en az iki yıl daha yakınsamayacaktır. `draft-liu-oauth-chain-delegation`'ın şekli, `draft-mcguinness-oauth-actor-profile`'ın üç değişmezi, WEF ACAP'ın kesişim kuralı ile daraltma değişmezleri bugün implemente edilir. Hangisi standartlaşırsa geçiş ucuzdur; hiçbiri olmazsa zaten `act`'in güvenli bir üst kümesine sahip olunur.
 
-**Ve deterministik yetkilendirme broker'ını modelin dışında, Rust'ta tut.**
+Ve deterministik yetkilendirme aracısı modelin dışında, Rust'ta tutulur.

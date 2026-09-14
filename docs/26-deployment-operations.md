@@ -1,204 +1,166 @@
-# 26. Dağıtım ve operatör deneyimi
+# §26 — Dağıtım ve operatör deneyimi
 
-> `ARGUS.md` §26'den taşındı. Numaralandırma korundu; bu dosyanın
-> içindeki `§26 §X` referansları aynı anlamda.
-
-
+Bu bölüm `ARGUS.md` dosyasının 26. kısmından taşınmıştır. Numaralandırma korunmuştur; dosya içindeki `§26 §X` referansları aynı anlamdadır.
 
 ---
 
-## 1. Kurulum ve İlk Çalıştırma Deneyimi
+## 1. Kurulum ile ilk çalıştırma deneyimi
 
-### 1.1 Keycloak'ın `build` / `start` ikiliği — neden var, ne acıtıyor
+### 1.1 Keycloak'ın derleme ile başlatma ikiliği: neden vardır, ne acıtmaktadır
 
-Keycloak, Quarkus **augmentation** modeli üzerine kurulu. Resmî doküman ayrımı net biçimde tanımlıyor: **build options** imaja kalıcı olarak gömülür, **configuration options** çalışma anında uygulanır ([keycloak.org/server/configuration](https://www.keycloak.org/server/configuration)).
+Keycloak, Quarkus artırma modeli üzerine kuruludur. Resmî doküman ayrımı net biçimde tanımlamaktadır: derleme seçenekleri imaja kalıcı olarak gömülmekte, yapılandırma seçenekleri çalışma anında uygulanmaktadır.
 
 > "This `build` command performs a set of optimizations for the startup and runtime behavior."
 > "The `--optimized` parameter tells Keycloak to assume a pre-built, already optimized Keycloak image is used. As a result, Keycloak avoids checking for and running a build directly at startup."
 
-Build adımının yaptıkları: kurulu provider'lar hakkında **closed-world assumption**, konfigürasyon dosyalarının önceden parse edilmesi (I/O azaltma), veritabanına özgü kaynakların önceden yapılandırılması.
+Derleme adımının yaptıkları şunlardır: kurulu sağlayıcılar hakkında kapalı dünya varsayımı, yapılandırma dosyalarının önceden ayrıştırılması, ki giriş çıkış azaltmaktadır, ile veritabanına özgü kaynakların önceden yapılandırılması.
 
-**Production mode "secure by default"**:
+Üretim modu varsayılan olarak güvenlidir.
+
 > "Production mode expects a hostname to be set up and an HTTPS/TLS setup to be available when started."
 > "HTTP is disabled as transport layer security (HTTPS) is essential"
 
-**Operatörlerin şikayeti — somut kanıt:** [keycloak/keycloak#30460](https://github.com/keycloak/keycloak/issues/30460) — `start-dev` ile bir kez çalıştırdıktan sonra `start` şu hatayla patlıyordu:
+Operatörlerin şikâyetinin somut kanıtı 30460 numaralı konudur: geliştirme modunda bir kez çalıştırdıktan sonra üretim başlatması şu hatayla patlamaktaydı.
 
 > "You can not 'start' the server in development mode. Please re-build the server first, using 'kc.sh build' for the default production mode."
 
-Bug/regression olarak etiketlendi, `@ahus1` tarafından PR #30461 ile kapatıldı. Ders: **iki modlu tasarım, mod geçişlerinde sessiz/kafa karıştırıcı hata sınıfları üretiyor.** Kullanıcı "aynı komutu çalıştırdım, biri oldu biri olmadı" durumuna düşüyor.
+Hata ile gerileme olarak etiketlenmiş ile bir öneriyle kapatılmıştır. Ders şudur: iki modlu tasarım, mod geçişlerinde sessiz ya da kafa karıştırıcı hata sınıfları üretmektedir. Kullanıcı aynı komutu çalıştırdım, biri oldu biri olmadı durumuna düşmektedir.
 
-**Dev veritabanı:** Keycloak'ın varsayılanı `dev-file` (H2) ve doküman açıkça "unsuitable for production and must be replaced" diyor ([keycloak.org/server/db](https://www.keycloak.org/server/db)). Getting-started sayfası tek komut veriyor ([keycloak.org/getting-started/getting-started-docker](https://www.keycloak.org/getting-started/getting-started-docker)):
+Geliştirme veritabanı tarafında Keycloak'ın varsayılanı bir dosya tabanlı H2'dir ile doküman açıkça üretime uygun olmadığını ve değiştirilmesi gerektiğini söylemektedir. Başlangıç sayfası tek bir komut vermektedir.
 
 ```
 docker run -p 127.0.0.1:8080:8080 -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
   -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin quay.io/keycloak/keycloak:26.7.3 start-dev
 ```
 
-Yani "5 dakikada IdP" hedefine Keycloak *ulaşıyor* — ama dev'den prod'a geçiş **uçurum**: farklı DB, farklı komut, zorunlu hostname + TLS, ayrı build adımı.
+Yani beş dakikada bir kimlik sağlayıcı hedefine Keycloak ulaşmaktadır; ancak geliştirmeden üretime geçiş bir uçurumdur: farklı veritabanı, farklı komut, zorunlu ana bilgisayar adı ile TLS ve ayrı bir derleme adımı.
 
-### 1.2 Rakiplerin kurulum modelleri (2026 durumu)
+### 1.2 Rakiplerin kurulum modelleri, 2026 durumu
 
-| Ürün | Süreç modeli | DB | Lisans | İlk çalıştırma |
+| Ürün | Süreç modeli | Veritabanı | Lisans | İlk çalıştırma |
 |---|---|---|---|---|
-| **Keycloak** | Tek JVM süreci (+ Operator) | PG 14–18, MySQL, MariaDB, Oracle, MSSQL, Aurora ([db docs](https://www.keycloak.org/server/db)) | Apache 2.0 | tek `docker run`, H2 |
-| **Zitadel** | 4 konteyner: Traefik + API (Go) + Login (Next.js) + Postgres ([compose docs](https://zitadel.com/docs/self-hosting/deploy/compose)) | PostgreSQL (CockroachDB v3'te düştü) | AGPL-3.0 (v3'ten beri) | "2 minutes", `docker compose up -d --wait` |
-| **authentik** | server + worker + PostgreSQL ([install docs](https://docs.goauthentik.io/install-config/install/docker-compose/)) | PostgreSQL 14–18 ([config docs](https://docs.goauthentik.io/install-config/configuration/)) | ⚠️ doğrulanmadı | compose, min **2 CPU / 2 GB RAM** |
-| **Ory** | Ayrı ayrı Kratos/Hydra/Keto/Oathkeeper | PG, MySQL, CockroachDB; **SQLite "must not be used in a production deployment"** ([self-hosted deployment](https://www.ory.com/docs/self-hosted/deployment)) | Apache 2.0 + OEL | binary 5–15 MB, "without system dependencies" ([hydra](https://github.com/ory/hydra)) |
-| **SuperTokens** | Core (:3567) + Backend SDK ([self-host docs](https://supertokens.com/docs/deployment/self-host-supertokens)) | **Sadece PostgreSQL** (Core 11.0.0 MySQL/MongoDB'yi düşürdü) | Core Apache 2.0 + lisans anahtarlı premium | tek `docker run` |
-| **Casdoor** | Tek Go binary + React SPA ([github](https://github.com/casdoor/casdoor)) | MySQL/PG/**SQLite**/MSSQL (XORM) | Apache 2.0 | `docker run -p 8000:8000 casbin/casdoor-all-in-one` → SQLite, admin/123 |
-| **Kanidm** | **Tek konteyner**, kendi DB'si ve replikasyonu ([github](https://github.com/kanidm/kanidm)) | Kendi "high-performance database and replication system" | MPL-2.0 | tek konteyner, 2-node HA replikasyon |
-| **Pocket ID** | Tek binary veya Docker ([github](https://github.com/pocket-id/pocket-id)) | SQLite/Postgres | BSD-2-Clause | passkey-only |
+| Keycloak | Tek sanal makine süreci artı operatör | PostgreSQL 14 ile 18, MySQL, MariaDB, Oracle, MSSQL ile Aurora | Apache 2.0 | Tek bir çalıştırma komutu, H2 |
+| Zitadel | Dört konteyner: ters vekil, Go API'si, Next.js giriş uygulaması ile PostgreSQL | PostgreSQL; CockroachDB üçüncü ana sürümde düşürülmüştür | AGPL 3.0, üçüncü sürümden beri | İki dakika, tek bir bileşim komutu |
+| authentik | Sunucu, işçi ile PostgreSQL | PostgreSQL 14 ile 18 | Doğrulanmamıştır | Bileşim dosyası, en az iki işlemci ile iki gigabayt bellek |
+| Ory | Ayrı ayrı kimlik, yetkilendirme, izin ile ağ geçidi bileşenleri | PostgreSQL, MySQL ile CockroachDB; SQLite üretim dağıtımında kullanılmamalıdır | Apache 2.0 artı kurumsal lisans | Beş ile 15 megabaytlık ikili dosya, sistem bağımlılığı olmadan |
+| SuperTokens | Çekirdek artı arka uç geliştirme kiti | Yalnızca PostgreSQL; çekirdeğin 11.0.0 sürümü diğerlerini düşürmüştür | Çekirdek Apache 2.0 artı lisans anahtarlı premium | Tek bir çalıştırma komutu |
+| Casdoor | Tek Go ikili dosyası artı React arayüzü | MySQL, PostgreSQL, SQLite ile MSSQL | Apache 2.0 | Hepsi bir arada imajla tek komut, SQLite ile hazır yönetici |
+| Kanidm | Tek konteyner, kendi veritabanı ile replikasyonu | Kendi yüksek performanslı veritabanı ile replikasyon sistemi | MPL 2.0 | Tek konteyner, iki düğümlü yüksek erişilebilirlik replikasyonu |
+| Pocket ID | Tek ikili dosya ya da Docker | SQLite ya da PostgreSQL | BSD iki maddeli | Yalnızca geçiş anahtarı |
 
-### 1.3 Gömülü veritabanı ile başlamak — bir IdP için mantıklı mı?
+### 1.3 Gömülü veritabanıyla başlamak bir kimlik sağlayıcı için mantıklı mıdır
 
-Sektörde **üç farklı duruş** var:
+Sektörde dört farklı duruş vardır.
 
-1. **Yasak (Ory):** "SQLite is supported (in-memory and persistent) but **must not be used in a production deployment**". Sadece dev.
-2. **Meşru (Casdoor, Pocket ID):** `casdoor-all-in-one` SQLite ile çalışır; Pocket ID SQLite'ı gerçek dağıtım seçeneği olarak sunar.
-3. **Kendi motorunu yaz (Kanidm):** "its own high-performance database and replication system, developed based on enterprise LDAP server experience" — 3.000 kullanıcıda FreeIPA'ya göre "approximately three times faster search operations".
-4. **Sahte gömülü (Keycloak):** H2 `dev-file`, prod'da açıkça yasaklı — ve bu, dev/prod uçurumunun ana kaynağı.
+1. Yasaktır, Ory'de: SQLite desteklenmektedir ancak üretim dağıtımında kullanılmamalıdır. Yalnızca geliştirme içindir.
+2. Meşrudur, Casdoor ile Pocket ID'de: hepsi bir arada imaj SQLite ile çalışmakta ile Pocket ID SQLite'ı gerçek bir dağıtım seçeneği olarak sunmaktadır.
+3. Kendi motorunu yazmaktır, Kanidm'de: kurumsal dizin sunucusu deneyimine dayalı kendi yüksek performanslı veritabanı ile replikasyon sistemi geliştirilmiştir; 3.000 kullanıcıda FreeIPA'ya göre yaklaşık üç kat hızlı arama bildirilmektedir.
+4. Sahte gömülüdür, Keycloak'ta: dosya tabanlı H2 üretimde açıkça yasaktır ile bu, geliştirme ile üretim uçurumunun ana kaynağıdır.
 
-**Argus için çıkarım:** Keycloak modelinin en büyük operasyonel bedeli, dev-mode'un prod'la **aynı kod yolunu kullanmaması**. Casdoor/Pocket ID modeli (aynı binary, aynı şema, sadece farklı DSN) daha az sürpriz üretiyor. Ancak PostgreSQL'e özgü özellikler (`ANY k` quorum sync commit, `NOT VALID` constraint, advisory lock) kullanılacaksa SQLite ile şema paritesi maliyetli olur.
+Argus için çıkarım şudur: Keycloak modelinin en büyük operasyonel bedeli, geliştirme modunun üretimle aynı kod yolunu kullanmamasıdır. Casdoor ile Pocket ID modeli, yani aynı ikili dosya, aynı şema ile yalnızca farklı bağlantı dizgisi, daha az sürpriz üretmektedir. Ancak PostgreSQL'e özgü özellikler, yani nicelikli senkron işleme, doğrulanmamış kısıt ile tavsiye kilidi kullanılacaksa SQLite ile şema paritesi maliyetli olmaktadır.
 
-### 1.4 "5 dakikada çalışan IdP" — kim en yakın?
+### 1.4 Beş dakikada çalışan bir kimlik sağlayıcıya kim en yakındır
 
-Ölçülebilir iddialar:
-- **Zitadel: "2 minutes"** (resmî compose dokümanı), varsayılan admin `zitadel-admin@zitadel.localhost` / `Password1!`
-- **Casdoor:** tek `docker run`, SQLite, demo kimlik bilgileri hazır
-- **Keycloak:** tek `docker run start-dev`
-- **authentik:** 4 adım (wget compose.yml → openssl ile parola üret → compose up → akadmin parolası ayarla)
+Ölçülebilir iddialar şunlardır: Zitadel resmî bileşim dokümanında iki dakika demektedir ile varsayılan bir yönetici hesabı sunmaktadır. Casdoor tek bir çalıştırma komutu, SQLite ile hazır demo kimlik bilgileri sunmaktadır. Keycloak tek bir geliştirme komutu sunmaktadır. authentik dört adım gerektirmektedir: bileşim dosyasını indirme, parola üretme, ayağa kaldırma ile yönetici parolasını ayarlama.
 
-Gerçekçi. Ama **hepsinin ortak kusuru:** "5 dakikada çalışan" şey, "5 dakikada production" değil. Zitadel'in masterkey uyarısı bunun tipik örneği — aşağıda (§5.2).
+Bunlar gerçekçidir. Ancak hepsinin ortak kusuru şudur: beş dakikada çalışan şey beş dakikada üretim değildir. Zitadel'in ana anahtar uyarısı bunun tipik örneğidir.
 
 ---
 
-## 2. Konteyner ve Kubernetes
+## 2. Konteyner ile Kubernetes
 
-### 2.1 Distroless / scratch imajlar — Rust için gerçek rakamlar
+### 2.1 Dağıtımsız ile sıfırdan imajlar, Rust için gerçek rakamlar
 
-[GoogleContainerTools/distroless](https://github.com/GoogleContainerTools/distroless) resmî rakamları (tümü Debian 13 tabanlı):
+Distroless projesinin resmî rakamları, hepsi Debian 13 tabanlı, şöyledir.
 
 | İmaj | Boyut | İçerik |
 |---|---|---|
-| `gcr.io/distroless/static-debian13` | **~2 MiB** | statik binary'ler için, shell/paket yöneticisi yok |
-| `gcr.io/distroless/cc-debian13` | — | C/C++ runtime kütüphaneleri (glibc) |
-| `gcr.io/distroless/base-debian13` | — | libc + **CA certificates + tzdata** |
-| `base-nossl-debian13` | — | SSL sertifika demeti olmadan |
+| Statik | Yaklaşık iki mebibayt | Statik ikili dosyalar içindir; kabuk ya da paket yöneticisi yoktur |
+| C ve C++ çalışma zamanlı | — | C ve C++ çalışma zamanı kütüphaneleri bulunmaktadır |
+| Temel | — | Standart C kütüphanesi artı sertifika otoriteleri ile saat dilimi verisi |
+| SSL'siz temel | — | Sertifika demeti olmadan |
 
-> "the smallest distroless image...is around 2 MiB. That's about 50% of the size of `alpine` (~5 MiB), and less than 2% the size of `debian` (124 MiB)."
+Proje şunu söylemektedir: en küçük dağıtımsız imaj yaklaşık iki mebibayttır; bu, Alpine'ın yaklaşık yarısı ile Debian'ın yüzde ikisinden azıdır.
 
-`:debug` varyantları busybox shell içerir; `nonroot` tag'leri düşük ayrıcalıkla çalışır. Mimariler: amd64, arm64, arm, s390x, ppc64le, riscv64.
+Hata ayıklama varyantları bir kabuk içermektedir; kök olmayan etiketler düşük ayrıcalıkla çalışmaktadır. Mimariler amd64, arm64, arm, s390x, ppc64le ile riscv64'tür.
 
-**Rust için özel rakamlar:** cargo-chef + distroless ≈ **26.2 MB**, musl + scratch ≈ **8.38 MB** — ⚠️ bu rakamlar ikincil kaynaktan ([cloudnativefolks blog](https://blog.cloudnativefolks.org/cargo-chef-speed-up-your-docker-builds-reduce-image-size-of-your-rust-project)), doğrulanmadı. [Rust Project Primer](https://rustprojectprimer.com/releasing/containers.html) sadece "a Rust binary on `debian:bookworm-slim` or `alpine` is typically under 50 MB" diyor.
+Rust için özel rakamlar şunlardır: cargo-chef ile dağıtımsız imaj yaklaşık 26,2 megabayt, musl ile sıfırdan imaj yaklaşık 8,38 megabayttır. Bu rakamlar ikincil kaynaktandır ile doğrulanmamıştır. Bir Rust proje rehberi yalnızca Debian ince ya da Alpine üzerindeki bir Rust ikili dosyasının tipik olarak 50 megabaytın altında olduğunu söylemektedir.
 
-**⚠️ musl tuzağı (kritik):** [andygrove.io, Mayıs 2020](https://andygrove.io/2020/05/why-musl-extremely-slow/) — musl ile derlenen Rust kodu çok-thread'li benchmark'ta **~30x yavaş** çalıştı. Önerilen çözüm jemalloc'a geçmek (ripgrep'in aynı sorunu böyle çözdüğü belirtiliyor), ama yazar segfault aldı ve musl'u tamamen bırakıp `debian:buster-slim`e (89 MB) döndü. Yazarın sonucu: sorun sadece allocator değil, "fundamental issues with threading in musl".
-⚠️ **DOĞRULANMADI:** Bu 2020 tarihli; musl 1.2.x sonrası mallocng iyileştirmeleri var. 2026 için yeniden ölçülmeli. Ama **Argus gibi Argon2 ağırlıklı, çok-thread'li, yoğun allocation yapan bir iş yükü için musl'a körlemesine geçmek riskli.**
+musl tuzağı kritiktir. Mayıs 2020 tarihli bir yazıya göre musl ile derlenen Rust kodu çok iş parçacıklı bir kıyaslamada yaklaşık 30 kat yavaş çalışmıştır. Önerilen çözüm jemalloc'a geçmektir, ki ripgrep'in aynı sorunu böyle çözdüğü belirtilmektedir; ancak yazar bölütleme hatası almış ile musl'u tamamen bırakıp Debian ince imajına dönmüştür. Yazarın sonucu şudur: sorun yalnızca ayırıcı değil musl'daki iş parçacığı yönetiminin temel sorunlarıdır. Bu bulgu 2020 tarihlidir ile doğrulanmamıştır; musl'un sonraki sürümlerinde ayırıcı iyileştirmeleri vardır ile 2026 için yeniden ölçülmelidir. Ancak Argus gibi Argon2 ağırlıklı, çok iş parçacıklı ile yoğun ayırma yapan bir iş yükü için musl'a körlemesine geçmek risklidir.
 
-### 2.2 cargo-chef ile build cache
+### 2.2 cargo-chef ile derleme önbelleği
 
-[cargo-chef](https://github.com/LukeMathWalker/cargo-chef) üç aşama: **planner** (`Cargo.toml`/`Cargo.lock` iskeletinden recipe üretir) → **cook** (`cargo chef cook` sadece bağımlılıkları derler, bu katman cache'lenir) → **builder** (uygulama kodu). "up to 5x" hızlanma iddiası.
+cargo-chef üç aşamalıdır: planlayıcı, manifest ile kilit dosyasının iskeletinden bir tarif üretmektedir; pişirme, yalnızca bağımlılıkları derlemekte ile bu katman önbeleklenmektedir; ile derleyici, uygulama kodunu derlemektedir. Beş kata kadar hızlanma iddia edilmektedir.
 
-**README'nin iki uyarısı:**
-1. "cargo chef cook and cargo build must be executed from the same working directory" — cargo mutlak yol metadata'sı kullandığı için.
-2. "cargo build will build local dependencies (outside of the current project) from scratch, even if they are unchanged" — timestamp tabanlı fingerprint mantığı yüzünden. **Workspace dışı path dependency kullanıyorsanız cache tutmaz.**
+Deponun iki uyarısı vardır. Birincisi, pişirme ile derleme aynı çalışma dizininden çalıştırılmalıdır, çünkü cargo mutlak yol metadata'sı kullanmaktadır. İkincisi, cargo derlemesi mevcut projenin dışındaki yerel bağımlılıkları değişmemiş olsalar bile sıfırdan derlemektedir; zaman damgası tabanlı parmak izi mantığı yüzündendir. Yani çalışma alanı dışında yol bağımlılığı kullanılıyorsa önbellek tutmamaktadır.
 
-### 2.3 Keycloak Operator (CRD modeli) — sınırlar ve gerçek arızalar
+### 2.3 Keycloak operatörü, kaynak tanımı modeli, sınırlar ile gerçek arızalar
 
-**CRD olgunluğu:** [keycloak/keycloak#45795](https://github.com/keycloak/keycloak/issues/45795) — `Keycloak` ve `KeycloakRealmImport` CRD'leri **yıllarca v2alpha1'de kaldı**; 26.6.0'da v2beta1'e terfi ettirildi (PR #45840). Gerekçe: "the CRDs are more mature and to differentiate the versioning from new CRDs, such as those needed for Clients".
+Kaynak tanımı olgunluğu tarafında 45795 numaralı konu şunu göstermektedir: ilgili tanımlar yıllarca alfa sürümünde kalmış ile 26.6.0'da beta sürümüne terfi ettirilmiştir. Gerekçe tanımların daha olgun olması ile istemciler için gerekenler gibi yeni tanımlardan sürümlemeyi ayırmaktır.
 
-**KeycloakRealmImport'un yapısal sınırı:** Realm Import CR sadece **yeni realm oluşturur** — güncellemez, silmez; Keycloak üzerinde doğrudan yapılan değişiklikler CR'a geri senkronlanmaz. Yani GitOps illüzyonu: CR'ınız gerçeğin kaynağı *değil*.
+Alan içe aktarma tanımının yapısal sınırı şudur: yalnızca yeni alan oluşturmakta, güncellememekte ile silmemektedir; Keycloak üzerinde doğrudan yapılan değişiklikler kaynağa geri senkronize edilmemektedir. Yani bir GitOps illüzyonu vardır: kaynağınız gerçeğin kaynağı değildir.
 
-**Gerçek arızalar:**
-- [#45966](https://github.com/keycloak/keycloak/issues/45966) (3 Şubat 2026, KC 26.5 / Operator 26.5.1 / K8s 1.34.2 / PostgreSQL 17): İçe aktarılan realm DB'ye yazılıyor ama Admin Console'da **StatefulSet restart edilene kadar görünmüyor**. Kök neden raportörün ifadesiyle: "the running Keycloak nodes ... do not receive an invalidation event via Infinispan/JGroups" — geçici Import Job ile çalışan pod'lar arasında cache invalidation kanalı yok. PR #46019 ile kapatıldı.
-- [#24526](https://github.com/keycloak/keycloak/issues/24526): CR'lar GitOps pipeline'ında art arda uygulandığında realm import Job'ı **operand hazır olmadan** başlıyor, backoff limiti 6'ya kadar pod başarısız oluyor.
+Gerçek arızalar şunlardır. 3 Şubat 2026 tarihli 45966 numaralı konuda içe aktarılan alan veritabanına yazılmakta ancak yönetim konsolunda durum kümesi yeniden başlatılana kadar görünmemektedir. Kök neden raportörün ifadesiyle şudur: çalışan Keycloak düğümleri bir geçersizleştirme olayı almamaktadır; geçici içe aktarma işiyle çalışan kapsüller arasında bir önbellek geçersizleştirme kanalı yoktur. Bir öneriyle kapatılmıştır. 24526 numaralı konuda ise kaynaklar bir GitOps hattında art arda uygulandığında alan içe aktarma işi, işlenen hazır olmadan başlamakta ile geri çekilme limitine kadar kapsül başarısız olmaktadır.
 
-**Ders:** CRD'lerle yönetilen bir IdP'de, *veritabanına yazan yan süreçler* (import job'ları, CLI'lar) ile *çalışan node'ların cache'i* arasındaki invalidation, tasarımın birinci sınıf parçası olmak zorunda. Keycloak bunu 26.7'de **DB-backed outbox pattern**'e taşıdı (§4.4).
+Ders şudur: kaynak tanımlarıyla yönetilen bir kimlik sağlayıcıda, veritabanına yazan yan süreçlerle çalışan düğümlerin önbelleği arasındaki geçersizleştirme, tasarımın birinci sınıf parçası olmak zorundadır. Keycloak bunu 26.7'de veritabanı destekli bir giden kutusu desenine taşımıştır.
 
-### 2.4 Helm chart vs Operator — ve Bitnami felaketi
+### 2.4 Helm paketiyle operatörün karşılaştırması ile Bitnami felaketi
 
-**Keycloak'ın resmî Helm chart'ı yok.** [Kurulum dokümanı](https://www.keycloak.org/operator/installation) sadece OLM veya:
-```
-kubectl apply -k 'github.com/keycloak/keycloak-k8s-resources/kubernetes?ref=26.7.3'
-```
-Ve güçlü bir uyarı: "strongly recommend using manual approval mode" — otomatik operator güncellemesi istenmeyen Keycloak upgrade'i tetiklemesin diye.
+Keycloak'ın resmî bir Helm paketi yoktur. Kurulum dokümanı yalnızca operatör yaşam döngüsü yöneticisini ya da bir kubectl komutunu göstermektedir. Güçlü bir uyarı vardır: elle onay modu şiddetle önerilmektedir, ki otomatik bir operatör güncellemesi istenmeyen bir Keycloak yükseltmesi tetiklemesin.
 
-**Bitnami'nin 2025 değişikliği** ([bitnami/charts#35164](https://github.com/bitnami/charts/issues/35164), 28 Ağustos 2025 yürürlük):
-- `docker.io/bitnami` → sadece "limited community-tier subset", yalnızca **latest** tag, dev kullanımı için
-- Sürümlü/eski imajlar → `docker.io/bitnamilegacy` — "will receive no further updates or support and should only be used for temporary migration purposes"
-- `docker.io/bitnamicharts` OCI Helm artifact'leri **güncelleme almıyor**; bundle edilen imajlar override edilmezse deploy'lar patlıyor
-- Public katalog silinmesi 29 Eylül 2025'e ertelendi; brownout'lar 28–29 Ağu, 2–3 Eyl, 17–19 Eyl 2025
-- GitHub'daki chart ve container kaynak kodu Apache 2.0 altında kaldı
+Bitnami'nin 2025 değişikliği, 28 Ağustos 2025 yürürlüklüdür. Ana Docker kayıt defterindeki depo yalnızca sınırlı bir topluluk alt kümesine, yalnızca en son etikete ile geliştirme kullanımına indirgenmiştir. Sürümlü ile eski imajlar bir eski depoya taşınmıştır; o depo hiçbir güncelleme ya da destek almayacak ile yalnızca geçici göç için kullanılmalıdır. OCI Helm artefaktları güncelleme almamaktadır; paketlenen imajlar geçersiz kılınmazsa dağıtımlar patlamaktadır. Açık katalog silinmesi 29 Eylül 2025'e ertelenmiş ile Ağustos ve Eylül 2025'te kesinti denemeleri yapılmıştır. GitHub'daki paket ile konteyner kaynak kodu Apache 2.0 altında kalmıştır.
 
-Doğrulama: [hub.docker.com/r/bitnamilegacy/keycloak](https://hub.docker.com/r/bitnamilegacy/keycloak) — "This repository is **no longer updated**... this repository may be removed in the future".
+Doğrulama şudur: eski depo sayfası, deponun artık güncellenmediğini ile gelecekte kaldırılabileceğini belirtmektedir.
 
-**Argus için ders:** Üçüncü taraf chart/imaj dağıtım kanalına bağımlılık, tek bir kurumsal karar ile gecede kırılabilir. **Kendi Helm chart'ınızı kendi OCI registry'nizde yayınlayın ve chart'ın imaj referansını kendi imajınıza sabitleyin.**
+Argus için ders şudur: üçüncü taraf bir paket ya da imaj dağıtım kanalına bağımlılık, tek bir kurumsal kararla gecede kırılabilmektedir. Kendi Helm paketiniz kendi OCI kayıt defterinizde yayımlanmalı ile paketin imaj referansı kendi imajınıza sabitlenmelidir.
 
-**Helm mi Operator mı?** Gözlem: Operator, *ancak* CRD'lerin çözdüğü gerçek bir problem varsa (rolling update uygunluk kararı, realm reconciliation, DB migration orkestrasyonu) değer üretiyor. Keycloak Operator'ün en çok değer kattığı yer bu üçüncüsü:
+Helm mi operatör mü sorusunun cevabı bir gözlemdir: operatör, ancak kaynak tanımlarının çözdüğü gerçek bir problem varsa değer üretmektedir; yani yuvarlanan güncelleme uygunluk kararı, alan uzlaştırması ya da veritabanı göçü orkestrasyonu. Keycloak operatörünün en çok değer kattığı yer üçüncüsüdür.
 
-### 2.5 Rolling update ve oturum kaybı
+### 2.5 Yuvarlanan güncelleme ile oturum kaybı
 
-Keycloak Operator'ün `spec.update.strategy` seçenekleri ([rolling-updates](https://www.keycloak.org/operator/rolling-updates)):
-- **`RecreateOnImageChange`** (varsayılan): imaj değişince StatefulSet'i **scale down** eder → **downtime**
-- **`Auto`**: rolling mi recreate mi gerektiğini kendisi tespit eder; bunun için geçici bir **Job** başlatır
-- **`Explicit`**: sadece `spec.update.revision` değişince rolling yapar
+Keycloak operatörünün güncelleme stratejisi seçenekleri şunlardır: imaj değişiminde yeniden oluşturma, ki varsayılandır ile durum kümesini küçültüp kesinti yaratmaktadır; otomatik, ki yuvarlanan mı yeniden oluşturma mı gerektiğini kendisi tespit etmekte ve bunun için geçici bir iş başlatmaktadır; ile açık, ki yalnızca bir revizyon alanı değişince yuvarlanan güncelleme yapmaktadır.
 
-Karar mekanizması `update-compatibility` komutu ([docs](https://www.keycloak.org/server/update-compatibility)):
-```
-bin/kc.sh update-compatibility metadata --file=/path/to/file.json   # eski sürümle
-bin/kc.sh update-compatibility check --file=/path/to/file.json      # yeni sürümle
-```
-Exit code'ları: **0** = rolling mümkün, **3** = rolling imkânsız (shutdown gerek), **4** = rolling-updates feature kapalı.
+Karar mekanizması bir güncelleme uyumluluğu komutudur; eski sürümle metadata üretilmekte ile yeni sürümle kontrol edilmektedir. Çıkış kodları şöyledir: sıfır yuvarlanan güncellemenin mümkün olduğunu, üç imkânsız olduğunu ile dört ilgili özelliğin kapalı olduğunu göstermektedir.
 
-Recreate gerektiren değişiklikler: sürüm farkı, `multi-site` / `persistent-user-sessions` / `stateless` feature toggle'ları, **db vendor / cache type / cache stack / connection parametreleri** değişimi.
+Yeniden oluşturma gerektiren değişiklikler sürüm farkı, çok bölgeli, kalıcı kullanıcı oturumları ile durumsuz özellik anahtarları ve veritabanı sağlayıcısı, önbellek tipi, önbellek yığını veya bağlantı parametreleri değişimidir.
 
-**Uyarı:** Desteklenmeyen `podTemplate` alanı kullanılıyorsa Operator, podTemplate veya ConfigMap/Volume'dan gelen secret değişikliklerinden **yanlış sonuç çıkarabilir**.
+Bir uyarı vardır: desteklenmeyen bir kapsül şablonu alanı kullanılıyorsa operatör, şablondan ya da yapılandırma ve birim kaynaklarından gelen sır değişikliklerinden yanlış sonuç çıkarabilmektedir.
 
-**Stateless tasarımda oturum kaybı:** Keycloak 26.7'nin `stateless` preview'u ile authentication session'ları, action token'ları ve brute-force sayaçları DB'ye taşındı ([Multi-Cluster v2 and Stateless Mode, Temmuz 2026](https://www.keycloak.org/2026/07/multi-cluster-v2-and-stateless-mode)) — sonuç: **"Full cluster restarts no longer reset volatile state during upgrades."** Bedeli: auth etkileşimi başına **+8-10 ms** gecikme, **DB CPU ve IOPS'un kabaca 2 katına çıkması**.
+Durumsuz tasarımda oturum kaybı konusunda Keycloak 26.7'nin durumsuz önizlemesiyle kimlik doğrulama oturumları, eylem token'ları ile kaba kuvvet sayaçları veritabanına taşınmıştır. Temmuz 2026 duyurusundaki sonuç şudur: tam küme yeniden başlatmaları artık yükseltmeler sırasında uçucu durumu sıfırlamamaktadır. Bedeli kimlik doğrulama etkileşimi başına sekiz ile 10 milisaniye gecikme ile veritabanı işlemcisi ve giriş çıkış işlemlerinin kabaca iki katına çıkmasıdır.
 
-### 2.6 Graceful shutdown — SIGTERM sonrası ne kadar beklemeli
+### 2.6 Zarif kapanış, sonlandırma sinyalinden sonra ne kadar beklenmelidir
 
-**Keycloak'ın somut değerleri** ([all-config](https://www.keycloak.org/server/all-config)):
+Keycloak'ın somut değerleri şunlardır.
 
 | Seçenek | Varsayılan | Açıklama |
 |---|---|---|
-| `shutdown-delay` (`KC_SHUTDOWN_DELAY`) | **1s** | "Length of the pre-shutdown phase during which the server prepares for shutdown" — LB reconfig + TLS/HTTP keepalive drain |
-| `shutdown-timeout` (`KC_SHUTDOWN_TIMEOUT`) | **10s** | "The shutdown period waiting for currently running HTTP requests to finish and distributed caches to settle" |
+| Kapanış gecikmesi | Bir saniye | Sunucunun kapanmaya hazırlandığı ön kapanış fazının uzunluğudur; yük dengeleyici yeniden yapılandırması ile bağlantı boşaltması içindir |
+| Kapanış zaman aşımı | 10 saniye | Çalışmakta olan HTTP isteklerinin bitmesini ile dağıtık önbelleklerin oturmasını bekleme süresidir |
 
-26.6 ile geldi: "graceful shutdown of the HTTP stack, which includes delaying a shutdown after receiving a termination signal, connection draining for HTTP/1.1 and HTTP/2 connections" ([26.6.0 release notes](https://www.keycloak.org/2026/04/keycloak-2660-released)).
+26.6 ile gelen özellik şudur: HTTP yığınının zarif kapanışı, yani sonlandırma sinyali alındıktan sonra kapanışı geciktirme ile HTTP bağlantılarının boşaltılması.
 
-**Kubernetes'teki asıl yarış koşulu** — bu ürüne özgü değil, Kubernetes'in kendi tasarımı: Pod `Terminating` işaretlenir, control plane EndpointSlice'tan çıkarır, kubelet `preStop` çalıştırır, dönünce **SIGTERM** gönderir, `terminationGracePeriodSeconds` (varsayılan **30s**) sonunda SIGKILL. Kritik nokta:
+Kubernetes'teki asıl yarış koşulu bu ürüne özgü değil Kubernetes'in kendi tasarımıdır: kapsül sonlanıyor işaretlenmekte, kontrol düzlemi uç nokta diliminden çıkarmakta, kubelet ön kapanış kancasını çalıştırmakta, dönünce sonlandırma sinyali göndermekte ile zarif kapanış süresi sonunda öldürme sinyali gelmektedir. Kritik nokta şudur.
 
 > "endpoint removal and SIGTERM are not sequenced against each other. Endpoint removal has to reach every kube-proxy, every ingress controller, and every sidecar proxy in the mesh. That propagation is eventually consistent and takes real time, often a second or more on a busy cluster, while signal delivery to a local process takes microseconds."
-> — [blog.codercops.com, 2026](https://blog.codercops.com/blog/graceful-shutdown-containers-sigterm-drain-guide-2026)
 
-Yani `preStop sleep` **uygulamanın drain mantığı için değil**, endpoint propagasyon boşluğunu kapatmak için var.
+Yani ön kapanış beklemesi uygulamanın boşaltma mantığı için değil, uç nokta yayılım boşluğunu kapatmak için vardır.
 
-**In-flight OAuth akışları için özel durum:** Authorization Code akışı **tek bir HTTP isteğinden uzun**. Kullanıcı `/authorize`'a gelir, login formunu doldurur, `/login-actions/authenticate`'e POST eder, sonra `/token`'a gider. Bu adımlar arası dakikalar geçebilir. Stateless olmayan tasarımda node ölürse akış kaybolur; **Keycloak'ın çözümü tam olarak auth session'ları DB'ye taşımak oldu.** Argus için aynı sonuç: **in-flight OAuth akışlarını graceful shutdown süresiyle korumaya çalışmayın — DB'ye yazın.**
+Uçuştaki OAuth akışları için özel bir durum vardır: yetkilendirme kodu akışı tek bir HTTP isteğinden uzundur. Kullanıcı yetkilendirme uç noktasına gelmekte, giriş formunu doldurmakta, kimlik doğrulama eylemine gönderi yapmakta, sonra token uç noktasına gitmektedir. Bu adımlar arası dakikalar geçebilmektedir. Durumsuz olmayan bir tasarımda düğüm ölürse akış kaybolmaktadır; Keycloak'ın çözümü tam olarak kimlik doğrulama oturumlarını veritabanına taşımak olmuştur. Argus için aynı sonuç geçerlidir: uçuştaki OAuth akışları zarif kapanış süresiyle korunmaya çalışılmamalı, veritabanına yazılmalıdır.
 
-### 2.7 Probe tasarımı
+### 2.7 Yoklama tasarımı
 
-Keycloak dört endpoint sunuyor, **9000 numaralı management portunda** ([observability/health](https://www.keycloak.org/observability/health)):
-- `/health/started` — "Startup probe used for initial startup of Keycloak before the liveness probe takes over"
-- `/health/live` — başarısızsa restart gerekir
-- `/health/ready` — "Checks if Keycloak is ready to process requests or not"
-- `/health` — hepsinin toplamı
+Keycloak dört uç nokta sunmaktadır ile bunlar 9000 numaralı yönetim portundadır: başlatma yoklaması, yani canlılık yoklaması devralmadan önceki ilk başlatma için; canlılık yoklaması, ki başarısızsa yeniden başlatma gerekmektedir; hazır olma yoklaması, ki Keycloak'ın istekleri işlemeye hazır olup olmadığını kontrol etmektedir; ile hepsinin toplamı.
 
-Kontrol edilenler: **DB connection pool durumu, cluster network partition durumu, graceful shutdown hazırlığı, server initialization**. Doküman `exec` liveness yerine **HTTP Probe** öneriyor; mTLS varsa `https-management-client-auth`'u `request` veya `none` yapın ki probe istekleri client sertifikası istemesin.
+Kontrol edilenler veritabanı bağlantı havuzu durumu, küme ağ bölünmesi durumu, zarif kapanış hazırlığı ile sunucu başlatmasıdır. Doküman komut çalıştırmalı canlılık yoklaması yerine HTTP yoklaması önermektedir; karşılıklı TLS varsa yönetim istemci kimlik doğrulaması gevşetilmelidir ki yoklama istekleri istemci sertifikası istemesin.
 
-26.6'da eklenen kritik detay: **"Startup and liveness probes return UP status during migrations"** — yani şema göçü sırasında pod öldürülmüyor. Bu, uzun süren migration'ın restart döngüsüne girmesini önleyen zorunlu bir davranış.
+26.6'da eklenen kritik detay şudur: başlatma ile canlılık yoklamaları göçler sırasında ayakta durumu döndürmektedir. Yani şema göçü sırasında kapsül öldürülmemektedir. Bu, uzun süren bir göçün yeniden başlatma döngüsüne girmesini önleyen zorunlu bir davranıştır.
 
-### 2.8 PDB, topology spread, anti-affinity
+### 2.8 Kesinti bütçesi, topoloji dağılımı ile karşıtlık
 
-**PodDisruptionBudget** ([k8s docs](https://kubernetes.io/docs/tasks/run-application/configure-pdb/)):
-- Sadece **gönüllü** kesintileri (node drain) korur; donanım arızası, kaynak baskısı kaynaklı eviction ve uygulama çökmesi **kapsam dışı**
-- `minAvailable` veya `maxUnavailable` — ikisi birden **değil**
-- Stateless frontend için önerilen: `minAvailable: 90%`
-- `minAvailable: 100%` / `maxUnavailable: 0` → **node drain sonsuza kadar asılı kalır**
-- Sadece **healthy** pod'lar sayılır (Running + readiness geçmiş)
-- `.spec.unhealthyPodEvictionPolicy`: varsayılan `AlwaysAllow`; `IfHealthyBudget` bütçeyi ihlal etmiyorsa evict eder
+Kapsül kesinti bütçesi yalnızca gönüllü kesintileri, yani düğüm boşaltmasını korumaktadır; donanım arızası, kaynak baskısı kaynaklı tahliye ile uygulama çökmesi kapsam dışıdır. Asgari kullanılabilir ya da azami kullanılamaz değerlerinden yalnızca biri verilebilmektedir. Durumsuz bir ön yüz için önerilen asgari %90 kullanılabilirliktir. Tam kullanılabilirlik istenirse düğüm boşaltması sonsuza kadar asılı kalmaktadır. Yalnızca sağlıklı kapsüller sayılmaktadır, yani çalışan ile hazır olma yoklamasını geçmiş olanlar. Sağlıksız kapsül tahliye politikası varsayılan olarak her zaman izin vermektedir; alternatif politika bütçeyi ihlal etmiyorsa tahliye etmektedir.
 
-**Topology spread** ([k8s docs](https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/)) — IdP için doğru desen:
+Topoloji dağılımı kısıtları için kimlik sağlayıcıya uygun doğru desen şudur.
+
 ```yaml
 topologySpreadConstraints:
   - maxSkew: 1
@@ -211,567 +173,452 @@ topologySpreadConstraints:
     whenUnsatisfiable: ScheduleAnyway    # node dağılımı YUMUŞAK
     matchLabelKeys: [pod-template-hash]
 ```
-`matchLabelKeys: [pod-template-hash]` rolling update sırasında eski ve yeni ReplicaSet'in pod'larının birbirini saymasını engeller — Deployment'larda kritik.
 
-Topology spread vs anti-affinity farkı: spread `maxSkew` ile **dengeleyici**, anti-affinity ikili (evet/hayır) **ayırıcı**; spread çok domain için tasarlanmış, anti-affinity küçük kısıtlar için daha iyi.
+Kapsül şablonu özetine göre eşleşme, yuvarlanan güncelleme sırasında eski ile yeni kopya kümelerinin kapsüllerinin birbirini saymasını engellemektedir; dağıtımlarda kritiktir.
 
-**Keycloak Operator varsayılanı:** "By default, pods receive automatic spread constraints across zones and nodes" ve CR "affinity, tolerations, topology spread constraints, and the priority class name" alanlarını expose ediyor. Varsayılan kaynak: **memory request 1700 MiB, limit 2 GiB** ([advanced-configuration](https://www.keycloak.org/operator/advanced-configuration)). PDB **native CR alanı değil** — kendiniz yazmalısınız.
+Topoloji dağılımıyla karşıtlık arasındaki fark şudur: dağılım azami sapma değeriyle dengeleyicidir, karşıtlık ise ikili, yani evet ya da hayır biçiminde ayırıcıdır. Dağılım çok alan için tasarlanmıştır, karşıtlık küçük kısıtlar için daha iyidir.
 
-**Veritabanı katmanı için:** [CloudNativePG](https://cloudnative-pg.io/docs/devel/architecture) net:
+Keycloak operatörünün varsayılanı şudur: kapsüller bölgeler ile düğümler arasında otomatik dağılım kısıtları almaktadır ile kaynak, karşıtlık, tolerasyon, topoloji dağılımı ve öncelik sınıfı alanlarını açığa çıkarmaktadır. Varsayılan kaynak bellek isteği 1700 mebibayt ile limiti iki gibibayttır. Kesinti bütçesi yerel bir alan değildir; kendiniz yazmalısınız.
+
+Veritabanı katmanı için CloudNativePG nettir.
+
 > "The multi-availability zone Kubernetes architecture with three (3) or more zones is the one that we recommend for PostgreSQL usage."
 > "Deploy Postgres nodes in multiples of three—ideally with one node per availability zone."
 
-Shared-nothing: farklı worker node, farklı AZ, **her node'da yerel disk** (paylaşımlı volume değil). Storage-level replikasyona açıkça karşı çıkıyor. Ve kritik sınır: **"CloudNativePG cannot perform any cross-cluster automated failover"** — replica cluster promote'u manuel/harici orkestrasyon gerektirir. Bu, sizin "tek bölge, 3 AZ" tercihinizi doğrudan destekliyor.
+Hiçbir şey paylaşmayan mimari önerilmektedir: farklı işçi düğüm, farklı erişilebilirlik alanı ile her düğümde yerel disk, paylaşımlı birim değil. Depolama seviyesi replikasyona açıkça karşı çıkılmaktadır. Kritik sınır şudur: bu operatör kümeler arası otomatik devralma yapamamaktadır; replika kümesinin yükseltilmesi elle ya da harici orkestrasyon gerektirmektedir. Bu, tek bölge ile üç erişilebilirlik alanı tercihini doğrudan desteklemektedir.
 
 ---
 
-## 3. Konfigürasyon Yönetimi
+## 3. Yapılandırma yönetimi
 
 ### 3.1 Sır yönetimi
 
-**External Secrets Operator** ([overview](https://external-secrets.io/latest/introduction/overview/)): `SecretStore` (namespace'li, *nasıl* erişilir) / `ClusterSecretStore` (küme geneli) / `ExternalSecret` (*ne* çekilir) / `PushSecret`. 40+ provider (AWS SM, Azure KV, Vault, GCP SM, 1Password, Bitwarden...).
+Harici sır operatörü şu kaynakları tanımlamaktadır: ad alanlı ve küme geneli sır depoları, ki nasıl erişileceğini söylemektedir; harici sır, ki neyin çekileceğini söylemektedir; ile itmeli sır. Kırktan fazla sağlayıcı desteklenmektedir.
 
-⚠️ **ESO'nun kapsam dışı bıraktığı şey kritik:** "there is no Secret Operator that handles the lifecycle of the secret" — **secret döndüğünde pod'ları yeniden başlatmak ESO'nun işi değil.** Rotation'ı gerçekten çalıştırmak için Reloader tarzı ayrı bir mekanizma veya uygulamanın kendisinin dosyayı yeniden okuması gerekir.
+Operatörün kapsam dışı bıraktığı şey kritiktir: sırrın yaşam döngüsünü yöneten bir sır operatörü yoktur. Yani sır döndüğünde kapsülleri yeniden başlatmak bu operatörün işi değildir. Rotasyonu gerçekten çalıştırmak için ayrı bir yeniden yükleme mekanizması ya da uygulamanın kendisinin dosyayı yeniden okuması gerekmektedir.
 
-**Vault PostgreSQL secrets engine** ([docs](https://developer.hashicorp.com/vault/docs/secrets/databases/postgresql)): dinamik kimlik bilgisi, lease TTL (ör. 1h), `creation_statements` ile rol tanımı:
+Vault'un PostgreSQL sır motoru dinamik kimlik bilgisi, kiralama yaşam süresi ile oluşturma ifadeleriyle rol tanımı sunmaktadır.
+
 ```sql
 CREATE ROLE "{{name}}" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}';
 ```
-**Static Roles** `rotation_period` ile root credential olmadan parola döndürür. Uygulamaya yüklediği yük: **lease süresi dolmadan yenileme + TTL bitince yeniden bağlanma mantığı.** Bu, connection pool'lu bir Rust servisinde önemsiz değildir — pool'daki mevcut bağlantılar geçerli kalır ama yeni bağlantılar yeni parolayı kullanmalıdır.
 
-**Rust'ta bellek hijyeni:**
-- [`secrecy`](https://docs.rs/secrecy/latest/secrecy/): drop'ta zeroize eder, ama açıkça — "does not provide more advanced memory protection mechanisms like those based on mlock(2)/mprotect(2)". Yani **swap'a ve core dump'a karşı koruma yok.**
-- [`zeroize`](https://docs.rs/zeroize/latest/zeroize/): derleyicinin optimize edip atmasını engelleyen taşınabilir sıfırlama. **Sınırları net:** `Vec`/`String`/`CString` implementasyonları backing buffer'ın tüm kapasitesini sıfırlar, ama **buffer reallocation ile daha önce kopya çıkarılmadığını garanti edemez** → buffer'ları doğru kapasiteyle initialize edip realloc'u engellemek gerekir. Ayrıca Spectre/Meltdown sınıfı mikromimari sızıntılara karşı **hiçbir garanti vermiyor**.
-- [`memsafe`](https://crates.io/crates/memsafe): `mmap` + `mlock`/`VirtualLock`, Linux'ta ek olarak `MADV_DONTDUMP` ve `MADV_WIPEONFORK`. **İmzalama anahtarları için doğru katman bu.**
+Statik roller bir rotasyon periyoduyla, kök kimlik bilgisi olmadan parola döndürmektedir. Uygulamaya yüklediği yük kiralama süresi dolmadan yenileme ile süre bitince yeniden bağlanma mantığıdır. Bu, bağlantı havuzlu bir Rust servisinde önemsiz değildir: havuzdaki mevcut bağlantılar geçerli kalmakta ancak yeni bağlantılar yeni parolayı kullanmalıdır.
 
-### 3.2 Konfigürasyon doğrulama: fail-fast
+Rust'ta bellek hijyeni şöyledir. Sır kütüphanesi düşürmede belleği sıfırlamaktadır ancak açıkça belirtmektedir: bellek kilitleme temelli daha gelişmiş koruma mekanizmaları sunulmamaktadır. Yani takas alanına ile çekirdek dökümüne karşı koruma yoktur. Sıfırlama kütüphanesi derleyicinin optimize edip atmasını engelleyen taşınabilir bir sıfırlama sunmaktadır; sınırları nettir: vektör, dizgi ile C dizgi gerçeklemeleri arka arabelleğin tüm kapasitesini sıfırlamakta ancak arabellek yeniden tahsisiyle daha önce kopya çıkarılmadığını garanti edememektedir. Dolayısıyla arabellekler doğru kapasiteyle başlatılıp yeniden tahsis engellenmelidir. Ayrıca mikromimari sızıntılara karşı hiçbir garanti verilmemektedir. Bellek güvenliği kütüphanesi ise bellek eşleme ile kilitleme, Linux'ta ek olarak döküme dahil etmeme ile çatallamada silme bayrakları sunmaktadır. İmzalama anahtarları için doğru katman budur.
 
-En iyi örnek Keycloak'ın production mode'u: hostname ve TLS yoksa **başlamayı reddediyor** ("startup will fail intentionally with an error message, preventing insecure deployments"). Bu doğru desen: *güvensiz konfigürasyon çalışmamalı, uyarı vermemeli.*
+### 3.2 Yapılandırma doğrulama: hızlı başarısızlık
 
-Zitadel'in karşıt örneği: masterkey **üretilmezse de başlar**, ama sonradan değiştirilemez (§5.2). Bu, "sessizce yanlış" kategorisinin ders kitabı örneği.
+En iyi örnek Keycloak'ın üretim modudur: ana bilgisayar adı ile TLS yoksa başlamayı reddetmektedir; başlatma kasıtlı olarak bir hata mesajıyla başarısız olmakta ile güvensiz dağıtımlar önlenmektedir. Doğru desen budur: güvensiz yapılandırma çalışmamalıdır, uyarı vermemelidir.
 
-### 3.3 Yanlış yapılandırma tuzakları — sessizce güvensiz hale gelen ayarlar
+Zitadel'in karşıt örneği şudur: ana anahtar üretilmezse de başlamakta ancak sonradan değiştirilememektedir. Bu, sessizce yanlış kategorisinin ders kitabı örneğidir.
 
-**(a) redirect_uri eşleştirme — kanıtlanmış ATO vektörü**
+### 3.3 Yanlış yapılandırma tuzakları, sessizce güvensiz hâle gelen ayarlar
 
-[CVE-2024-52289 / authentik](https://securityblog.omegapoint.se/en/writeup-authentik-cve-2024-52289/): authentik redirect URI'yi **regex ile** eşleştiriyordu ve nokta karakterini escape etmiyordu. `https://app.example.com/oauth2/callback` konfigürasyonu, `https://app0example.com/oauth2/callback` ile **eşleşiyordu**. Sonuç:
+Birincisi yönlendirme adresi eşleştirmesidir ile kanıtlanmış bir hesap ele geçirme vektörüdür. CVE-2024-52289'da authentik yönlendirme adresini düzenli ifadeyle eşleştirmekte ile nokta karakterini kaçırmamaktaydı. Yapılandırılmış bir alt alan adı, benzer görünen başka bir alan adıyla eşleşmekteydi. Sonuç şudur.
 
 > "If the victim is already authenticated with the IdP, they are not prompted to authenticate and are directly redirected to the attacker without further user interaction."
 
-Zaman çizelgesi: bildirim 8 Ekim 2024 → authentik'in kendi müşteri portalında PoC 31 Ekim 2024 → yama 21 Kasım 2024 (2024.10.3 ve 2024.8.5). Düzeltme: **varsayılan strict string matching**, regex ancak yönetici açıkça açarsa.
+Zaman çizelgesi şöyledir: bildirim 8 Ekim 2024, kendi müşteri portalında kavram kanıtı 31 Ekim 2024 ile yama 21 Kasım 2024'tür. Düzeltme varsayılan katı dizgi eşleştirmesidir; düzenli ifade ancak yönetici açıkça açarsa kullanılmaktadır.
 
-RFC 9700 (OAuth 2.0 Security BCP) confidential ve public client'lar için **exact match** zorunlu kılıyor ve wildcard'ları yasaklıyor. ⚠️ Yayın ayı doğrulanmadı (arama sonucu "March 2025" dedi).
+RFC 9700, gizli ile açık istemciler için tam eşleşmeyi zorunlu kılmakta ile joker karakterleri yasaklamaktadır. Yayın ayı doğrulanmamıştır.
 
-**(b) issuer / hostname — token sahteciliği**
+İkincisi veren ile ana bilgisayar adıdır; token sahteciliği riskidir. Keycloak dokümanı şunu söylemektedir.
 
-Keycloak dokümanı ([hostname v2](https://www.keycloak.org/server/hostname)):
 > "If the hostname was dynamically interpreted from a hostname header, an attacker could manipulate a URL in an email, redirect a user to a fake domain, and steal sensitive data. By explicitly setting the hostname option, we avoid a situation where tokens could be issued by a fraudulent issuer."
 
-**(c) Proxy header güveni — IP allowlist'i çökerten sessiz hata**
+Üçüncüsü vekil başlığı güvenidir; IP izin listesini çökerten sessiz hatadır. Keycloak'ın ters vekil sayfasındaki uyarılar aynen şöyledir.
 
-[keycloak.org/server/reverseproxy](https://www.keycloak.org/server/reverseproxy) uyarıları aynen:
 > "If these headers are incorrectly configured, rogue clients can inject false values and trick Keycloak into thinking the client is connecting from a different IP address than the actual one." — "especially critical if you do any deny or allow listing of IP addresses."
 > "Ensure the proxy overwrites (not just appends to) forwarded headers to prevent clients from injecting false values."
 > "Do not use `forwarded` or `xforwarded` with TLS passthrough. Misconfiguration will leave Keycloak exposed to security vulnerabilities."
 > "Restrict network access so that Keycloak accepts connections only from the proxy"
 
-Bu, brute-force sayaçları ve rate limit'i **sessizce işe yaramaz** hale getiren tuzağın ta kendisi.
+Bu, kaba kuvvet sayaçlarını ile hız sınırını sessizce işe yaramaz hâle getiren tuzağın ta kendisidir.
 
-**(d) Admin konsolunun internete açık olması:** Keycloak, admin API ve UI'nin **farklı hostname/path** üzerinde sunulmasını öneriyor ("reduce the attack surface"); `KC_HOSTNAME_ADMIN` ile ayrılıyor.
+Dördüncüsü yönetim konsolunun internete açık olmasıdır. Keycloak, yönetim API'sinin ile arayüzünün farklı bir ana bilgisayar adı veya yol üzerinde sunulmasını önermekte, saldırı yüzeyini azaltmak içindir; ayrı bir ana bilgisayar adı ayarıyla ayrılmaktadır.
 
-### 3.4 Keycloak "production mode" kontrol listesi — ne zorluyor, ne zorlamıyor
-
-[configuration-production](https://www.keycloak.org/server/configuration-production):
+### 3.4 Keycloak üretim modu kontrol listesi: ne zorlamakta, ne zorlamamaktadır
 
 | Madde | Durum |
 |---|---|
-| TLS/HTTPS | **Zorunlu** (HTTP prod'da kapalı) |
-| Hostname | **Zorunlu** (`--hostname` veya `--hostname-strict false`) |
-| Production DB | Belgelenmiş, teknik olarak **zorlanmıyor** |
-| Reverse proxy | "recommended" |
-| `/health/ready` probe | önerilir |
-| Admin/public hostname ayrımı | **sadece öneri** |
-| Load shedding, `http-max-queued-requests` | **sadece öneri** |
-| ≥2 instance | **sadece öneri** |
+| TLS ile HTTPS | Zorunludur; HTTP üretimde kapalıdır |
+| Ana bilgisayar adı | Zorunludur |
+| Üretim veritabanı | Belgelenmiştir ancak teknik olarak zorlanmamaktadır |
+| Ters vekil | Önerilmektedir |
+| Hazır olma yoklaması | Önerilmektedir |
+| Yönetim ile genel ana bilgisayar adı ayrımı | Yalnızca öneridir |
+| Yük atma ile azami kuyruk uzunluğu | Yalnızca öneridir |
+| En az iki örnek | Yalnızca öneridir |
 
-**Bu tablo Argus için bir fırsat listesi:** "sadece öneri" satırlarının çoğu, ölümcül yanlış yapılandırmalar. Argus bunları başlangıçta zorlayabilir veya en azından "insecure" bayrağı olmadan başlatmayı reddedebilir.
+Bu tablo Argus için bir fırsat listesidir: yalnızca öneri satırlarının çoğu ölümcül yanlış yapılandırmalardır. Argus bunları başlangıçta zorlayabilir ya da en azından bir güvensiz bayrağı olmadan başlatmayı reddedebilir.
 
 ---
 
-## 4. Yükseltme ve Şema Göçü
+## 4. Yükseltme ile şema göçü
 
-### 4.1 PostgreSQL'de hangi işlem kilitliyor
+### 4.1 PostgreSQL'de hangi işlem kilitlemektedir
 
-[PostgreSQL ALTER TABLE dokümanı, Notes bölümü](https://www.postgresql.org/docs/current/sql-altertable.html):
+Tablo değiştirme dokümanının notlar bölümünden kilit seviyeleri şunlardır: erişimi dışlayan kilit varsayılandır, aksi belirtilmedikçe her alt komut bunu almaktadır; paylaşımlı güncelleme dışlayan kilit istatistik ayarı, kümeleme, öznitelik seçenekleri, kısıt doğrulama ile bölüm eklemede alınmaktadır; paylaşımlı satır dışlayan kilit yabancı anahtar ekleme ile tetikleyici etkinleştirme veya devre dışı bırakmada alınmaktadır.
 
-**Kilit seviyeleri:**
-- **ACCESS EXCLUSIVE** — varsayılan, aksi belirtilmedikçe her ALTER TABLE alt komutu
-- **SHARE UPDATE EXCLUSIVE** — `SET STATISTICS`, `CLUSTER ON` / `SET WITHOUT CLUSTER`, per-attribute options, **`VALIDATE CONSTRAINT`**, `ATTACH PARTITION`
-- **SHARE ROW EXCLUSIVE** — `ADD FOREIGN KEY` (referans edilen tabloda da), trigger enable/disable
+Yeniden yazma gerektirmeyen, yani yalnızca metadata işlemleri şöyledir.
 
-**Rewrite gerektirmeyen (metadata-only) işlemler:**
 > "When a column is added with `ADD COLUMN` and a non-volatile `DEFAULT` is specified, the default value is evaluated at the time of the statement and the result stored in the table's metadata... making the `ALTER TABLE` very fast even on large tables."
 
-- Non-volatile default ile `ADD COLUMN` → rewrite **yok** (PG 11+)
-- Volatile default (`clock_timestamp()`) → **tam rewrite**
-- Stored generated column, identity column → **rewrite**
-- **Virtual generated column → asla rewrite yok**
-- `ALTER TYPE`: "if the `USING` clause does not change the column contents and the old type is either binary coercible to the new type or an unconstrained domain over the new type, a table rewrite is not needed" — aksi halde tablo *ve tüm index'leri* yeniden yazılır
+Uçucu olmayan varsayılanla sütun eklemede yeniden yazma yoktur, PostgreSQL 11 ve üstünde. Uçucu varsayılanla tam yeniden yazma olmaktadır. Saklanan üretilmiş sütun ile kimlik sütunu yeniden yazma gerektirmektedir. Sanal üretilmiş sütun asla yeniden yazma gerektirmemektedir. Tip değişiminde, dönüşüm yan tümcesi içeriği değiştirmiyorsa ile eski tip yeni tipe ikili olarak zorlanabiliyorsa yeniden yazma gerekmemektedir; aksi hâlde tablo ile tüm indeksleri yeniden yazılmaktadır.
 
-**Expand-contract'ın PostgreSQL'deki altın kuralı:**
+Genişlet ile daralt deseninin PostgreSQL'deki altın kuralı şudur.
+
 > "The main purpose of the `NOT VALID` constraint option is to reduce the impact of adding a constraint on concurrent updates. With `NOT VALID`, the `ADD CONSTRAINT` command does not scan the table and can be committed immediately."
 
-İki adımlı desen:
+İki adımlı desen şöyledir.
+
 ```sql
 ALTER TABLE distributors ADD CONSTRAINT distfk FOREIGN KEY (address)
     REFERENCES addresses (address) NOT VALID;     -- anında commit
 ALTER TABLE distributors VALIDATE CONSTRAINT distfk;  -- SHARE UPDATE EXCLUSIVE
 ```
 
-**İki tehlikeli detay:**
-1. **Rewrite eden formlar MVCC-safe değil:** "After a table rewrite, the table will appear empty to concurrent transactions, if they are using a snapshot taken before the rewrite occurred."
-2. Rewrite "will temporarily require as much as double the disk space".
+İki tehlikeli detay vardır. Birincisi yeniden yazan formlar çok sürümlü eşzamanlılık denetimi açısından güvenli değildir: bir tablo yeniden yazıldıktan sonra, yeniden yazmadan önce alınmış bir anlık görüntü kullanan eşzamanlı işlemlere tablo boş görünmektedir. İkincisi yeniden yazma geçici olarak iki katına kadar disk alanı gerektirmektedir.
 
-**PostgreSQL 18'in getirdiği (zero-downtime için en önemli değişiklik):**
-- NOT NULL constraint'leri artık gerçek `pg_constraint` kayıtları, isimlendirilebiliyor
-- **`ALTER TABLE ... ALTER COLUMN ... SET NOT NULL NOT VALID`** destekleniyor → sonra `VALIDATE CONSTRAINT` ile SHARE UPDATE EXCLUSIVE altında doğrula. Daha önce `SET NOT NULL` tüm tabloyu ACCESS EXCLUSIVE altında tarıyordu. ([PG18 release notes](https://www.postgresql.org/docs/release/18.0/))
-- Geçerli bir `CHECK` constraint NULL olmadığını kanıtlıyorsa tablo taraması atlanabilir
+PostgreSQL 18'in getirdiği, sıfır kesinti için en önemli değişiklik şudur: boş olmama kısıtları artık gerçek kısıt kayıtlarıdır ile isimlendirilebilmektedir. Doğrulanmamış olarak boş olmama kısıtı eklenebilmekte, sonra daha hafif bir kilit altında doğrulanabilmektedir. Daha önce bu işlem tüm tabloyu en ağır kilit altında taramaktaydı. Ayrıca geçerli bir kontrol kısıtı boş olmadığını kanıtlıyorsa tablo taraması atlanabilmektedir.
 
-**PostgreSQL 18 pg_upgrade:** planner istatistiklerini koruyor (upgrade sonrası uzun `ANALYZE` yok), `--jobs` ile paralel kontroller, `--swap` modu (dizin takası, en hızlı), `--set-char-signedness`.
+PostgreSQL 18'in yükseltme aracı planlayıcı istatistiklerini korumaktadır, yani yükseltme sonrası uzun bir analiz gerekmemektedir; paralel kontroller ile en hızlı yöntem olan dizin takası modu bulunmaktadır.
 
-### 4.2 Rust migration araçları — olgunluk ve rollback
+### 4.2 Rust göç araçları, olgunluk ile geri alma
 
-| Araç | Reversible | Notlar |
+| Araç | Geri alınabilir mi | Notlar |
 |---|---|---|
-| **sqlx** | ✅ `sqlx migrate add -r <name>` → `.up.sql` / `.down.sql`; "All the subsequent migrations will be reversible as well". `sqlx migrate run` / `revert` / `info`, `--source` ile dizin ([sqlx-cli README](https://github.com/launchbadge/sqlx/blob/main/sqlx-cli/README.md)) | Dosya adı `<VERSION>_<DESCRIPTION>.sql`, VERSION i64 > 0 |
-| **refinery** | ❌ "Refinery's design was based on flyway and shares its earlier philosophy on undo/rollback migrations—to undo/rollback a migration, you have to generate a new one" ([github](https://github.com/rust-db/refinery)) | postgres, tokio-postgres, mysql, mysql_async, rusqlite, tiberius; **sqlx ile de `Config` üzerinden çalışır** |
-| **diesel_migrations** | ✅ up/down | Diesel DSL'ine bağlı |
+| sqlx | Evet; yukarı ile aşağı dosyalarıyla, sonraki tüm göçler de geri alınabilir olmaktadır. Çalıştırma, geri alma ile bilgi komutları ile kaynak dizini seçeneği bulunmaktadır | Dosya adı sürüm ile açıklamadan oluşmaktadır; sürüm pozitif bir tam sayıdır |
+| refinery | Hayır; tasarımı Flyway'e dayanmakta ile onun eski felsefesini paylaşmaktadır: bir göçü geri almak için yeni bir göç üretmeniz gerekmektedir | Birçok sürücüyü desteklemekte ile sqlx ile de bir yapılandırma üzerinden çalışmaktadır |
+| diesel göçleri | Evet; yukarı ile aşağı vardır | Diesel'in kendi diline bağlıdır |
 
-⚠️ sqlx'in advisory-lock ile eşzamanlı migration koruması ve checksum/dirty-state davranışı **doküman üzerinden doğrulanamadı** — kaynak koddan teyit edilmeli.
+sqlx'in tavsiye kilidiyle eşzamanlı göç koruması ile sağlama toplamı ve kirli durum davranışı doküman üzerinden doğrulanamamıştır; kaynak koddan teyit edilmelidir.
 
-**Pratik gerçek:** Down migration'lar production'da nadiren çalıştırılır. Zero-downtime'ın gerçek cevabı rollback değil, **expand-contract**. Martin Fowler'ın [Evolutionary Database Design](https://martinfowler.com/articles/evodb.html) tanımı:
+Pratik gerçek şudur: aşağı göçler üretimde nadiren çalıştırılmaktadır. Sıfır kesintinin gerçek cevabı geri alma değil genişlet ile daralttır. Martin Fowler'ın evrimsel veritabanı tasarımı tanımı şudur.
 
 > "A transition phase is a period of time when the database supports both the old access pattern and the new ones simultaneously."
 
-Örnek: tablo yeniden adlandırma → tabloyu yeniden adlandır + **eski adla bir VIEW oluştur** → tüketiciler kendi hızlarında geçsin → view'ı düşür.
+Örnek şudur: tablo yeniden adlandırılmakta, eski adla bir görünüm oluşturulmakta, tüketiciler kendi hızlarında geçmekte ile sonra görünüm düşürülmektedir.
 
 ### 4.3 Keycloak'ın yükseltme deneyimi
 
-- **Major/minor upgrade → offline zorunlu.** [HA upgrades](https://www.keycloak.org/high-availability/multi-cluster/upgrades): "the Keycloak deployment on each site is taken offline during the upgrade procedure" ve "Deploying different Keycloak major/minor versions on each of the sites is not supported."
-- **Patch upgrade → zero-downtime**, 26.6'da "Zero-Downtime Patch Releases" *supported* seviyesine terfi etti ve **varsayılan açık** ([26.6.0 release notes](https://www.keycloak.org/2026/04/keycloak-2660-released)).
-- Manuel migration mümkün: `--spi-connections-jpa--quarkus--migration-strategy=manual` ile SQL dosyası üretilebilir ([upgrading guide](https://www.keycloak.org/docs/latest/upgrading/index.html)); `migration-strategy` değerleri `manual` / `update` / `validate`, ayrıca `initialize-empty` ve `migration-export` ([db docs](https://www.keycloak.org/server/db)).
-- **Etki büyüklüğü:** [#43252](https://github.com/keycloak/keycloak/issues/43252) — bu özelliğin hedefi "reduce annual Keycloak downtimes from approximately **20 to 4** for community users". Yılda **20 planlı kesinti**, Keycloak operatörünün 2025 öncesi gerçeğiydi.
-- Aynı issue'da belirtilen iki engel: **Infinispan 15.x zero-downtime upgrade yapamıyor** (JGroups protokolü + serialization backward-compat gerekiyor) ve **"Incompatible migrations and index creation locks can prevent old instances from joining clusters during rolling updates."**
+Ana ile küçük sürüm yükseltmeleri çevrimdışı zorunludur: her sitedeki dağıtım yükseltme prosedürü sırasında çevrimdışı alınmakta ile sitelerde farklı ana veya küçük sürümler çalıştırmak desteklenmemektedir.
 
-⚠️ "Keycloak'ın Liquibase migration'ları forward-only, geri alınamaz, restore gerekir" iddiası ikincil kaynaktan (skycloak blog) — resmî dokümanda doğrulanamadı, ama `migration-strategy` seçeneklerinde down migration olmaması bunu destekliyor.
+Yama yükseltmeleri sıfır kesintilidir; 26.6'da desteklenen seviyeye terfi etmiş ile varsayılan açık olmuştur.
 
-### 4.4 N-1 uyumluluğu: iki sürüm aynı DB'ye yazarken
+Elle göç mümkündür: bir göç stratejisi ayarıyla SQL dosyası üretilebilmektedir. Strateji değerleri elle, güncelle ile doğrula, ayrıca boş başlat ile göç dışa aktarımıdır.
 
-Keycloak'ın 26.6/26.7'de vardığı çözüm üç parçalı:
+Etki büyüklüğü şudur: 43252 numaralı konuya göre bu özelliğin hedefi topluluk kullanıcıları için yıllık Keycloak kesintilerini yaklaşık yirmiden dörde indirmektir. Yılda 20 planlı kesinti, Keycloak operatörünün 2025 öncesi gerçeğiydi.
 
-1. **Uyumluluk metadata'sı ile önceden karar:** `update-compatibility metadata` (eski konfig) → `check` (yeni konfig) → exit code. Rolling ancak sürüm aynıysa, feature toggle değişmemişse ve clustering/veri bütünlüğünü etkileyen konfig değişmemişse mümkün ([update-compatibility](https://www.keycloak.org/server/update-compatibility)).
+Aynı konuda belirtilen iki engel şudur: dağıtık önbellek kütüphanesinin ilgili sürümü sıfır kesintili yükseltme yapamamaktadır, çünkü protokol ile serileştirme geriye dönük uyumluluğu gerekmektedir; ile uyumsuz göçler ve indeks oluşturma kilitleri, yuvarlanan güncellemeler sırasında eski örneklerin kümeye katılmasını engelleyebilmektedir.
 
-2. **Volatile state'i DB'ye taşı** — 26.7 `stateless` preview: auth session'ları, action token'ları, brute-force sayaçları DB'de ([Temmuz 2026 duyurusu](https://www.keycloak.org/2026/07/multi-cluster-v2-and-stateless-mode)).
+Keycloak'ın göçlerinin yalnızca ileri yönlü, geri alınamaz olduğu ile geri yükleme gerektirdiği iddiası ikincil bir kaynaktandır ile resmî dokümanda doğrulanamamıştır; ancak strateji seçeneklerinde aşağı göç bulunmaması bunu desteklemektedir.
 
-3. **DB-backed outbox ile cache invalidation:** "The system employs a database queuing table with polling. Cross-cluster invalidation messages propagate through this outbox pattern with a default **100-millisecond** interval, eliminating direct network dependencies between clusters."
+### 4.4 Bir önceki sürümle uyumluluk: iki sürüm aynı veritabanına yazarken
 
-Multi-cluster ön koşulları: **senkron replike edilmiş veritabanı ve site'lar arası <10 ms latency**; duyuru açıkça "prioritizes consistency over availability" diyor.
+Keycloak'ın 26.6 ile 26.7'de vardığı çözüm üç parçalıdır.
 
-**Benchmark'tan latency kanıtı** ([Keycloak Performance Benchmarks 26.4, 1 Ekim 2025](https://www.keycloak.org/2025/10/keycloak-benchmark)): 20 ms RTT eklenince yanıt süresi 26.3'te **51 ms → 1076 ms**'ye fırladı; 26.4'te 130 ms'ye düşürüldü. Ağ latency'si çok-AZ IdP'de birinci sınıf tasarım kısıtı.
+1. Uyumluluk metadata'sıyla önceden karar verilmektedir: eski yapılandırmayla metadata üretilmekte, yeni yapılandırmayla kontrol edilmekte ile bir çıkış kodu alınmaktadır. Yuvarlanan güncelleme ancak sürüm aynıysa, özellik anahtarları değişmemişse ile kümeleme veya veri bütünlüğünü etkileyen yapılandırma değişmemişse mümkündür.
+2. Uçucu durum veritabanına taşınmaktadır: durumsuz önizlemede kimlik doğrulama oturumları, eylem token'ları ile kaba kuvvet sayaçları veritabanındadır.
+3. Veritabanı destekli giden kutusuyla önbellek geçersizleştirmesi yapılmaktadır: sistem yoklamalı bir veritabanı kuyruk tablosu kullanmakta, kümeler arası geçersizleştirme mesajları bu giden kutusu üzerinden varsayılan 100 milisaniyelik bir aralıkla yayılmakta ile kümeler arası doğrudan ağ bağımlılıkları ortadan kalkmaktadır.
+
+Çok kümeli ön koşullar senkron replike edilmiş bir veritabanı ile siteler arası 10 milisaniyenin altında gecikmedir; duyuru açıkça tutarlılığı erişilebilirliğe tercih ettiğini söylemektedir.
+
+Kıyaslamadan gecikme kanıtı şudur: 1 Ekim 2025 tarihli 26.4 performans kıyaslamasında 20 milisaniyelik gidiş dönüş eklenince yanıt süresi 26.3'te 51 milisaniyeden 1076 milisaniyeye fırlamış ile 26.4'te 130 milisaniyeye düşürülmüştür. Ağ gecikmesi çok bölgeli bir kimlik sağlayıcıda birinci sınıf bir tasarım kısıtıdır.
 
 ### 4.5 Sürüm politikaları
 
-| Proje | Politika | Kaynak |
-|---|---|---|
-| **Keycloak** | "Fixes are applied to the current `major.minor` release for high-severity issues, or the following release for lower-severity vulnerabilities." LTS istiyorsanız **Red Hat build of Keycloak**. Güncel: 26.7.3 | [security policy](https://github.com/keycloak/keycloak/security/policy), [documentation](https://www.keycloak.org/documentation) |
-| **Zitadel** | Major her **3 ay**, minor her **2 hafta**, patch gerektikçe; major öncesi RC; **minor sürümler arası backward compatibility**. Downgrade "will always logout all users that obtained a token after the upgrade" | [v3 announcement](https://zitadel.com/blog/zitadel-v3-announcement), [configure docs](https://zitadel.com/docs/self-hosting/manage/configure/configure) |
-| **Ory** | OSS "free to use for experimentation and non-critical workloads"; **"security releases with SLAs"** ve CVE yamaları **Ory Enterprise License** ile | [ory/hydra](https://github.com/ory/hydra) |
+| Proje | Politika |
+|---|---|
+| Keycloak | Düzeltmeler yüksek şiddetli sorunlar için güncel ana ve küçük sürüme, düşük şiddetliler için bir sonraki sürüme uygulanmaktadır. Uzun dönem destek isteniyorsa Red Hat derlemesi kullanılmalıdır. Güncel sürüm 26.7.3'tür |
+| Zitadel | Ana sürüm üç ayda bir, küçük sürüm iki haftada bir, yama gerektikçe çıkmaktadır; ana sürüm öncesi bir yayın adayı verilmektedir ile küçük sürümler arası geriye dönük uyumluluk bulunmaktadır. Sürüm düşürme, yükseltmeden sonra token almış tüm kullanıcıları her zaman çıkış yaptırmaktadır |
+| Ory | Açık kaynak sürüm deney ile kritik olmayan iş yükleri için ücretsizdir; hizmet seviyeli güvenlik sürümleri ile açık yamaları kurumsal lisansla gelmektedir |
 
-⚠️ Keycloak/Zitadel için formel LTS + destek penceresi sayfaları bulunamadı (keycloak.org/support ve zitadel.com/docs/support/version-policy → 404). **DOĞRULANMADI.**
+Keycloak ile Zitadel için formel uzun dönem destek ile destek penceresi sayfaları bulunamamıştır; ilgili adresler 404 dönmüştür. Doğrulanmamıştır.
 
 ---
 
-## 5. Yedekleme ve Felaket Kurtarma
+## 5. Yedekleme ile felaket kurtarma
 
 ### 5.1 PostgreSQL yedekleme
 
-**pgBackRest** ([user guide](https://pgbackrest.org/user-guide.html)):
-- Full / differential / incremental yedek
-- WAL archiving (asenkron batch upload ile uzak repo throughput'u)
-- **PITR**: timestamp, LSN, transaction ID veya named recovery point ile
-- **Delta restore**: SHA-1 hash karşılaştırması ile değişmemiş dosyaları koruyor — "very efficient when combined with the process-max option" → **RTO'yu en çok düşüren tek özellik**
-- Repository encryption: client-side **AES-256-CBC**
-- Çoklu repo: yerel + S3/Azure/GCS/SFTP eşzamanlı → coğrafi yedeklilik
-- `verify` komutu ile repo bütünlüğü
-- Doküman kendi tavsiyesi: **"Only restore testing can determine which repository will be most efficient"**
+pgBackRest şunları sunmaktadır: tam, fark ile artımlı yedek; WAL arşivleme, eşzamansız yığın yüklemeyle uzak depo iş hacmi; zaman damgası, günlük sıra numarası, işlem kimliği ya da adlandırılmış kurtarma noktasıyla zaman içinde geri yükleme; fark geri yüklemesi, ki SHA-1 özet karşılaştırmasıyla değişmemiş dosyaları korumaktadır ve azami süreç seçeneğiyle birleştiğinde çok verimlidir, kurtarma süresini en çok düşüren tek özelliktir; istemci tarafında AES-256 depo şifrelemesi; yerel artı bulut depolarının eşzamanlı kullanımıyla coğrafi yedeklilik; ile depo bütünlüğü doğrulaması. Dokümanın kendi tavsiyesi şudur: hangi deponun en verimli olacağını yalnızca geri yükleme testi belirleyebilmektedir.
 
-**wal-g** ([github](https://github.com/wal-g/wal-g), Apache 2.0, ~4.2k star, aktif): LZ4/LZMA/ZSTD/Brotli, delta backup, libsodium/PGP/Yandex KMS şifreleme, rate limiting, statsd metrikleri. PG dışında MySQL/MariaDB/MSSQL/Mongo/Redis/Greenplum.
+wal-g Apache 2.0 lisanslıdır, yaklaşık 4.200 yıldızlıdır ile aktiftir; dört sıkıştırma algoritması, fark yedeği, üç şifreleme seçeneği, hız sınırlama ile metrik desteği sunmaktadır. PostgreSQL dışında birçok veritabanını desteklemektedir.
 
-**`pg_dump` vs PITR:** `pg_dump` mantıksal, taşınabilir, seçici — ama **RPO = son dump'a kadar** (saatler). PITR ile RPO = son arşivlenen WAL segmenti (saniyeler–dakikalar). Bir IdP için `pg_dump` **tek başına yeterli değil**: kimlik verisi kaybı hesap kaybıdır.
+Mantıksal döküm ile zaman içinde geri yükleme karşılaştırması şudur: döküm mantıksaldır, taşınabilirdir ile seçicidir, ancak kurtarma noktası hedefi son döküme kadardır, yani saatlerdir. Zaman içinde geri yüklemeyle kurtarma noktası hedefi son arşivlenen günlük kesimidir, yani saniyeler ile dakikalardır. Bir kimlik sağlayıcı için yalnızca döküm yeterli değildir: kimlik verisi kaybı hesap kaybıdır.
 
-### 5.2 İmzalama anahtarlarının yedeklenmesi — sektörün en zayıf noktası
+### 5.2 İmzalama anahtarlarının yedeklenmesi, sektörün en zayıf noktası
 
-**Keycloak** ([Server Admin Guide, Realm Keys](https://www.keycloak.org/docs/latest/server_admin/index.html)):
-- Anahtar durumları: **Active** (yeni imza üretir) / **Passive** (mevcut imzaları doğrular) / **Disabled**
-- Rotation önerisi: her **3–6 ayda bir** yeni anahtar, eskisini **1–2 ay sonra** kaldır
-- Provider'lar: `rsa-generated` (otomatik üretim), `rsa` (PEM import), `java-keystore` (host üzerindeki JKS/PKCS12/BCFKS dosyasından)
-- **Yedekleme prosedürü dokümante edilmemiş.** Sadece "compromise durumunda yeni anahtar üret + revocation policy push et" deniyor.
+Keycloak'ta anahtar durumları aktif, yani yeni imza üretmektedir; pasif, yani mevcut imzaları doğrulamaktadır; ile devre dışıdır. Rotasyon önerisi üç ile altı ayda bir yeni anahtar üretmek ile eskisini bir ile iki ay sonra kaldırmaktır. Sağlayıcılar otomatik üretim, PEM içe aktarımı ile ana bilgisayardaki bir anahtar deposu dosyasından okumadır.
 
-Yani `rsa-generated` kullanan bir Keycloak'ta imzalama anahtarları **veritabanının içindedir** — DB yedeği kaybolursa anahtarlar da kaybolur. `java-keystore` kullanılırsa anahtar **DB dışındadır ama pod'un dosya sistemindedir** ve DB yedeğiyle senkron değildir. Her iki seçenek de operatöre tuzak kuruyor.
+Yedekleme prosedürü dokümante edilmemiştir. Yalnızca ele geçirme durumunda yeni anahtar üretmek ile bir iptal politikası itmek denmektedir.
 
-**Zitadel'in daha keskin tuzağı** ([compose docs](https://zitadel.com/docs/self-hosting/deploy/compose)):
-> masterkey "encrypts sensitive data at rest" ve **"cannot be changed" after initial setup.**
+Yani otomatik üretim kullanan bir Keycloak'ta imzalama anahtarları veritabanının içindedir; veritabanı yedeği kaybolursa anahtarlar da kaybolmaktadır. Anahtar deposu kullanılırsa anahtar veritabanı dışındadır ancak kapsülün dosya sistemindedir ile veritabanı yedeğiyle senkron değildir. Her iki seçenek de operatöre tuzak kurmaktadır.
 
-Şifrelediği alanlar ([configure docs](https://zitadel.com/docs/self-hosting/manage/configure/configure)): domain verification token'ları, IdP konfigürasyonları, OIDC token ve session'ları, SAML assertion'ları, OTP secret'ları, SMS/SMTP kimlik bilgileri, kullanıcı verisi, CSRF cookie'leri. **Masterkey kaybı = DB yedeği elinizde olsa bile kurtarılamaz veri.** Ve masterkey `docker compose up`'ta sessizce üretiliyor.
+Zitadel'in daha keskin tuzağı ana anahtardır: hareketsiz veriyi şifrelemekte ile ilk kurulumdan sonra değiştirilememektedir.
 
-**HSM/KMS seçeneği — AWS KMS** ([asymmetric key specs](https://docs.aws.amazon.com/kms/latest/developerguide/asymmetric-key-specs.html)):
-- İmzalama için: RSA_2048/3072/4096, ECC_NIST_P256/P384/P521, **ECC_NIST_EDWARDS25519 (Ed25519, sadece sign/verify)**, ECC_SECG_P256K1, ve post-quantum **ML_DSA_44/65/87** (FIPS 204)
-- "The private key never leaves AWS KMS unencrypted"
-- Public key indirilip KMS dışında doğrulama yapılabilir → **JWKS endpoint'i KMS'e her istekte gitmez**
-- ⚠️ Ters yüz: private key **hiç export edilemez** → DR planınız KMS multi-Region key veya import edilmiş key material ile yapılmalı; yoksa bölge kaybı = anahtar kaybı
+Şifrelediği alanlar alan adı doğrulama belirteçleri, kimlik sağlayıcı yapılandırmaları, OIDC token ile oturumları, SAML doğrulamaları, tek kullanımlık şifre sırları, kısa mesaj ile posta kimlik bilgileri, kullanıcı verisi ile siteler arası istek sahteciliği çerezleridir. Ana anahtar kaybı, veritabanı yedeği elinizde olsa bile kurtarılamaz veri demektir. Üstelik ana anahtar bileşim komutunda sessizce üretilmektedir.
 
-**Anahtar kaybının etkisi asimetrik:** DB kaybı → kullanıcı kaybı (kötü). İmzalama anahtarı kaybı → **tüm çıkarılmış token'lar, refresh token'lar ve oturumlar ölür, ayrıca hiçbir RP eski JWT'leri doğrulayamaz** (felaket). Bu yüzden anahtarların yedekleme yaşam döngüsü DB'den **ayrı** olmalı.
+Donanım güvenlik modülü ya da anahtar yönetim servisi seçeneğinde AWS KMS şunları sunmaktadır: imzalama için RSA'nın üç boyutu, üç NIST eliptik eğrisi, Ed25519, bir Koblitz eğrisi ile kuantum sonrası imza algoritmalarının üç seviyesi. Özel anahtar servisi hiç şifresiz terk etmemektedir. Açık anahtar indirilip servis dışında doğrulama yapılabilmektedir; yani anahtar seti uç noktası her istekte servise gitmemektedir. Ters yüzü şudur: özel anahtar hiç dışa aktarılamamaktadır; felaket kurtarma planınız çok bölgeli anahtar ya da içe aktarılmış anahtar materyaliyle yapılmalıdır, yoksa bölge kaybı anahtar kaybıdır.
 
-### 5.3 Kurtarma tatbikatı — neyi test etmek gerekir
+Anahtar kaybının etkisi asimetriktir: veritabanı kaybı kullanıcı kaybıdır, ki kötüdür. İmzalama anahtarı kaybı ise tüm çıkarılmış token'ların, yenileme token'larının ile oturumların ölmesi, ayrıca hiçbir bağlı tarafın eski JWT'leri doğrulayamaması demektir, ki felakettir. Bu yüzden anahtarların yedekleme yaşam döngüsü veritabanınkinden ayrı olmalıdır.
 
-pgBackRest'in kendi ifadesi tatbikatı zorunlu kılıyor. Bir IdP için test edilmesi gerekenler:
-1. PITR ile belirli bir zamana restore (sadece full restore değil)
-2. **Restore edilen DB ile birlikte imzalama anahtarlarının da geri gelmesi** — anahtar ayrı sistemdeyse iki restore'un tutarlı bir noktada birleşmesi
-3. Restore sonrası **JWKS'in aynı `kid`'leri sunması** (aksi halde RP'ler cache'lerindeki key ile doğrulayamaz)
-4. Migration versiyonunun binary sürümüyle uyumu (eski DB + yeni binary)
-5. Delta restore ile RTO ölçümü (`process-max` ayarlı ve ayarsız)
-6. `pgbackrest verify` ile repo bütünlüğü
+### 5.3 Kurtarma tatbikatı, neyi test etmek gerekmektedir
 
-### 5.4 Kiracı bazında geri yükleme — dürüst cevap
+pgBackRest'in kendi ifadesi tatbikatı zorunlu kılmaktadır. Bir kimlik sağlayıcı için test edilmesi gerekenler şunlardır.
 
-[`pg_restore` dokümanı](https://www.postgresql.org/docs/current/app-pgrestore.html) seçici restore araçlarını veriyor: `-t table`, `-n schema`, `-N exclude-schema`, `-a data-only`, `-L list-file`, `--filter`.
+1. Zaman içinde geri yüklemeyle belirli bir ana geri dönme, yalnızca tam geri yükleme değil.
+2. Geri yüklenen veritabanıyla birlikte imzalama anahtarlarının da geri gelmesi; anahtar ayrı bir sistemdeyse iki geri yüklemenin tutarlı bir noktada birleşmesi.
+3. Geri yükleme sonrası anahtar setinin aynı anahtar kimliklerini sunması; aksi hâlde bağlı taraflar önbelleklerindeki anahtarla doğrulayamamaktadır.
+4. Göç sürümünün ikili dosya sürümüyle uyumu, yani eski veritabanı ile yeni ikili dosya.
+5. Fark geri yüklemesiyle kurtarma süresinin ölçülmesi, paralellik ayarlı ile ayarsız.
+6. Depo bütünlüğünün doğrulanması.
 
-**Ama uyarılar ölümcül:**
-> "When `-t` is specified, pg_restore makes no attempt to restore any other database objects that the selected table(s) might depend upon. Therefore, **there is no guarantee that a specific-table restore into a clean database will succeed**."
+### 5.4 Kiracı bazında geri yükleme, dürüst cevap
 
-> "While pg_dump's `-t` flag will also dump subsidiary objects (such as indexes) of the selected table(s), pg_restore's `-t` flag **does not include such subsidiary objects**."
+Geri yükleme aracının dokümanı seçici geri yükleme seçenekleri vermektedir: tablo, şema, şema hariç tutma, yalnızca veri, liste dosyası ile süzgeç.
 
-> "pg_restore cannot restore large objects selectively... **all large objects will be restored, or none of them**."
+Ancak uyarılar ölümcüldür.
 
-`--data-only` ile FK/trigger sorunları için `--disable-triggers` gerekiyor.
+> "When `-t` is specified, pg_restore makes no attempt to restore any other database objects that the selected table(s) might depend upon. Therefore, there is no guarantee that a specific-table restore into a clean database will succeed."
 
-**Sonuç:** Tek şemada, `tenant_id` kolonuyla çok-kiracılı bir tasarımda **satır seviyesinde tek kiracıyı geri almak `pg_restore` ile mümkün değil.** Gerçekçi yollar:
-- **(a) Şema-per-tenant** → `pg_restore -n tenant_x` gerçekten çalışır, ama binlerce kiracıda katalog şişer
-- **(b) Yan restore + mantıksal kopyalama:** yedeği ayrı bir instance'a restore et, oradan `tenant_id = ?` ile satırları hedef DB'ye kopyala. Bağımlılık sırasını ve FK'ları kendin yönetmelisin. **En yaygın ve en gerçekçi yol.**
-- **(c) Uygulama seviyesinde soft-delete + audit log** — "restore" ihtiyacını en baştan azaltır
+> "While pg_dump's `-t` flag will also dump subsidiary objects (such as indexes) of the selected table(s), pg_restore's `-t` flag does not include such subsidiary objects."
+
+> "pg_restore cannot restore large objects selectively... all large objects will be restored, or none of them."
+
+Yalnızca veri seçeneğiyle yabancı anahtar ile tetikleyici sorunları için tetikleyicileri devre dışı bırakmak gerekmektedir.
+
+Sonuç şudur: tek şemada, bir kiracı kimliği sütunuyla çok kiracılı bir tasarımda satır seviyesinde tek bir kiracıyı geri almak bu araçla mümkün değildir. Gerçekçi yollar şunlardır.
+
+Birincisi kiracı başına şemadır; şema bazlı geri yükleme gerçekten çalışmaktadır ancak binlerce kiracıda katalog şişmektedir. İkincisi yan geri yükleme ile mantıksal kopyalamadır: yedek ayrı bir örneğe geri yüklenmekte, oradan kiracı kimliğiyle satırlar hedef veritabanına kopyalanmaktadır. Bağımlılık sırasını ile yabancı anahtarları kendiniz yönetmelisiniz. En yaygın ile en gerçekçi yoldur. Üçüncüsü uygulama seviyesinde yumuşak silme ile denetim günlüğüdür; geri yükleme ihtiyacını en baştan azaltmaktadır.
 
 ---
 
-## 6. Kaynak Gereksinimleri ve Boyutlandırma
+## 6. Kaynak gereksinimleri ile boyutlandırma
 
-### 6.1 Keycloak'ın kapasite formülleri (birincil kaynak)
-
-[Concepts for sizing CPU and memory resources](https://www.keycloak.org/high-availability/multi-cluster/concepts-memory-and-cpu-sizing):
+### 6.1 Keycloak'ın kapasite formülleri, birincil kaynak
 
 | Metrik | Formül | Test edilen üst sınır |
 |---|---|---|
-| **Parola ile login** | "For each **15 password-based user logins per second**, allocate 1 vCPU to the cluster" | 300/s'ye kadar |
-| **Client credential grant** | "For each **120 client credential grants per second**, 1 vCPU to the cluster" | 2000/s'ye kadar |
-| **Refresh token** | "For each **120 refresh token requests per second**, 1 vCPU" | 435/s'ye kadar |
-| **Bellek/pod** | "base memory usage for a Pod including caches of Realm data and 10,000 cached sessions is **1250 MB of RAM**" | — |
-| **Heap** | "Keycloak allocates **70% of the memory limit** for heap-based memory. It will also use approximately **300 MB of non-heap-based memory**" | — |
-| **Headroom** | "Leave **150% extra head-room** for CPU usage to handle spikes" | — |
-| **DB** | "For every 100 login/logout/refresh requests per second: Budget for **1400 Write IOPS**. Allocate between **0.35 and 0.7 vCPU**" | — |
+| Parolayla giriş | Saniyede her 15 parola tabanlı giriş için kümeye bir sanal işlemci ayrılmalıdır | Saniyede 300'e kadar |
+| İstemci kimlik bilgisi yetkisi | Saniyede her 120 yetki için bir sanal işlemci | Saniyede 2.000'e kadar |
+| Yenileme token'ı | Saniyede her 120 istek için bir sanal işlemci | Saniyede 435'e kadar |
+| Kapsül başına bellek | Alan verisi önbellekleri ile 10.000 önbeleklenmiş oturum dahil temel bellek kullanımı 1250 megabayttır | — |
+| Yığın | Bellek limitinin %70'i yığın tabanlı belleğe ayrılmakta ile yaklaşık 300 megabayt yığın dışı bellek kullanılmaktadır | — |
+| Pay | İşlemci kullanımı için ani artışları karşılamak üzere %150 ek pay bırakılmalıdır | — |
+| Veritabanı | Saniyede her 100 giriş, çıkış ya da yenileme isteği için 1400 yazma giriş çıkış işlemi bütçelenmeli ile 0,35 ile 0,7 sanal işlemci ayrılmalıdır | — |
 
-Test ortamı: **c7g.2xlarge** makine havuzu, ROSA/OpenShift 4.21.x, Amazon Aurora PostgreSQL multi-AZ, OpenJDK 21.
+Test ortamı belirli bir bulut makine havuzu, OpenShift, çok bölgeli Aurora PostgreSQL ile OpenJDK 21'dir.
 
-**En önemli sayı: 15 vs 120.** Parola login'i, client credentials grant'ten **8 kat pahalı**. Fark neredeyse tamamen **parola hash'leme**. Bu, Argus'un boyutlandırma modelinin merkezine Argon2'yi koyması gerektiğini kanıtlıyor.
+En önemli sayı 15'e karşı 120'dir. Parola girişi istemci kimlik bilgisi yetkisinden sekiz kat pahalıdır. Fark neredeyse tamamen parola özetlemedir. Bu, Argus'un boyutlandırma modelinin merkezine Argon2'yi koyması gerektiğini kanıtlamaktadır.
 
-**Benchmark rakamları** ([1 Ekim 2025](https://www.keycloak.org/2025/10/keycloak-benchmark)): 3 pod, 24–74 vCPU, 4–8 GB, OpenShift 4.17, Aurora PostgreSQL 17.5 → **12.000 req/s** (2.000 login/s + 10.000 refresh/s). "Keycloak scales vertically almost linearly in the tested range." Cache 10.000 → 200.000 entry: Aurora peak CPU **%77.77 → %63.77**.
+Kıyaslama rakamları, 1 Ekim 2025, şöyledir: üç kapsül, 24 ile 74 sanal işlemci, dört ile sekiz gigabayt bellek, OpenShift ile Aurora PostgreSQL 17.5 üzerinde saniyede 12.000 istek, yani saniyede 2.000 giriş artı 10.000 yenileme. Keycloak test edilen aralıkta neredeyse doğrusal olarak dikey ölçeklenmektedir. Önbellek 10.000'den 200.000 girdiye çıkarılınca Aurora tepe işlemcisi %77,77'den %63,77'ye düşmüştür.
 
-### 6.2 Argon2 ve worker havuzu boyutlandırması
+### 6.2 Argon2 ile işçi havuzu boyutlandırması
 
-**OWASP'ın eşdeğer parametre setleri** ([Password Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)) — hepsi p=1:
+OWASP'ın eşdeğer parametre setleri, hepsi paralellik bir olmak üzere, şöyledir.
 
-| m (KiB) | m (MiB) | t |
+| Bellek, kibibayt | Bellek, mebibayt | Yineleme |
 |---|---|---|
 | 47104 | 46 | 1 |
 | 19456 | 19 | 2 |
 | 12288 | 12 | 3 |
 | 9216 | 9 | 4 |
-| **7168** | **7** | **5** |
+| 7168 | 7 | 5 |
 
-OWASP hedefi: "calculating a hash should take less than one second".
+OWASP hedefi bir özetin hesaplanmasının bir saniyeden az sürmesidir.
 
-**Keycloak'ın seçimi:** 25.0.0'dan (Haziran 2024) beri varsayılan Argon2 ve **hash isteği başına 7 MB** ([Keycloak 25.0.0 released](https://www.keycloak.org/2024/06/keycloak-2500-released)) — yani OWASP'ın son satırı (m=7168, t=5). Ayrıca: "the parallel computation of hashes by Argon2 is by default **limited to the number of cores available to the JVM**". Keycloak 24'te PBKDF2 iterasyonu 27.5K → 210K çıkarılmış, CPU zamanı 10 kattan fazla artmıştı; Argon2 ile "better security, with almost the same CPU time".
+Keycloak'ın seçimi şudur: Haziran 2024'teki 25.0.0 sürümünden beri varsayılan Argon2'dir ile özet isteği başına yedi megabayt kullanılmaktadır, yani OWASP'ın son satırıdır. Ayrıca paralel özet hesaplaması varsayılan olarak sanal makinenin gördüğü çekirdek sayısıyla sınırlanmaktadır. Keycloak 24'te PBKDF2 yinelemesi 27.500'den 210.000'e çıkarılmış ile işlemci zamanı on kattan fazla artmıştı; Argon2 ile neredeyse aynı işlemci zamanında daha iyi güvenlik sağlanmaktadır.
 
-**OWASP'ın açık DoS uyarısı:** work factor aşırıysa saldırgan "a denial of service attack by exhausting the server's CPU with a large number of login attempts" yapabilir.
+OWASP'ın açık hizmet reddi uyarısı şudur: iş faktörü aşırıysa saldırgan çok sayıda giriş denemesiyle sunucunun işlemcisini tüketerek bir hizmet reddi saldırısı yapabilmektedir.
 
-**Zitadel'in aynı gerçeği kabul edişi** ([production docs](https://zitadel.com/docs/self-hosting/manage/production)): "password hashing can cause CPU spikes — **reserve 4 CPU cores** for this".
+Zitadel aynı gerçeği kabul etmektedir: parola özetleme işlemci tepeleri yaratabilmektedir, bunun için dört işlemci çekirdeği ayrılmalıdır.
 
-**Argus için türetme (m=7168, t=5, p=1):**
-- Eşzamanlı N hash → **N × 7 MB** tepe bellek. 64 eşzamanlı = 448 MB, sadece hash arenaları için.
-- Argon2 **CPU-bound ve bloklayıcı**; tokio async runtime'ında **asla** doğrudan çalıştırılmamalı → ayrı bir bounded thread pool (`spawn_blocking` veya rayon), semaphore ile sınırlı.
-- Havuz boyutu ≈ fiziksel çekirdek sayısı; kuyruk derinliği pod belleğine göre sınırlı; kuyruk dolunca **429 ile load-shed** (Keycloak'ın `http-max-queued-requests` mantığı).
-- Pod bellek limiti = baseline + (max_concurrent_hashes × 7 MB) + connection pool + cache. **Bu, Rust'ta JVM'siz olarak Keycloak'ın 1250 MB'ının çok altında tutulabilir** — asıl kazanç burada.
+Argus için türetme, yedi megabayt ile beş yineleme parametreleriyle, şöyledir. Eşzamanlı N özet, N çarpı yedi megabayt tepe bellek demektir; 64 eşzamanlı istek yalnızca özet arenaları için 448 megabayt eder. Argon2 işlemci bağımlı ile bloklayıcıdır; eşzamansız çalışma zamanında asla doğrudan çalıştırılmamalıdır, ayrı bir sınırlı iş parçacığı havuzunda ile bir semaforla sınırlı olmalıdır. Havuz boyutu yaklaşık fiziksel çekirdek sayısı kadar olmalı, kuyruk derinliği kapsül belleğine göre sınırlanmalı ile kuyruk dolunca 429 ile yük atılmalıdır, ki Keycloak'ın azami kuyruk mantığıdır. Kapsül bellek limiti temel değer artı azami eşzamanlı özet çarpı yedi megabayt artı bağlantı havuzu artı önbellek olmalıdır. Bu, Rust'ta sanal makinesiz olarak Keycloak'ın 1250 megabaytının çok altında tutulabilmektedir; asıl kazanç buradadır.
 
-### 6.3 PgBouncer + prepared statement — 2026'da çözüldü mü?
+### 6.3 PgBouncer ile hazırlanmış ifade sorunu 2026'da çözülmüş müdür
 
-**Evet, 1.21.0'dan beri** ([PgBouncer FAQ](https://www.pgbouncer.org/faq.html), [config](https://www.pgbouncer.org/config.html)):
+Evet, 1.21.0'dan beri.
+
 > "Since version 1.21.0 PgBouncer can track prepared statements in transaction pooling mode and make sure they get prepared on-the-fly on the linked server connection. To enable this feature, `max_prepared_statements` needs to be set to a non-zero value."
 
-- `max_prepared_statements` = tek bir server bağlantısında aktif tutulan prepared statement sayısı (LRU cache). 0 = kapalı.
-- **1.22.0**: transaction pooling'de prepared statement desteği açıkken `DISCARD ALL` ve `DEALLOCATE ALL` desteği eklendi ([1.22.0 duyurusu](https://postgresql.org/about/news/pgbouncer-1220-released-2802))
-- **Kritik sınır:** "This only works for prepared statements managed via the database protocol... It **cannot handle SQL `PREPARE <statement_name> AS …` commands** sent as simple text queries."
+Azami hazırlanmış ifade sayısı, tek bir sunucu bağlantısında aktif tutulan ifade sayısıdır ile en az kullanılan önbellek olarak çalışmaktadır; sıfır kapalı demektir. 1.22.0 sürümünde işlem havuzlamada bu destek açıkken ilgili temizleme komutları da desteklenmeye başlanmıştır. Kritik sınır şudur: bu yalnızca veritabanı protokolü üzerinden yönetilen hazırlanmış ifadelerde çalışmakta ile basit metin sorgusu olarak gönderilen hazırlama komutlarını ele alamamaktadır.
 
-sqlx extended query protocol kullandığı için bu uyumlu. ⚠️ sqlx + PgBouncer transaction mode kombinasyonunun 2026'daki pratik durumu birincil kaynaktan doğrulanmadı.
+sqlx genişletilmiş sorgu protokolünü kullandığı için bu uyumludur. sqlx ile işlem havuzlama kombinasyonunun 2026'daki pratik durumu birincil kaynaktan doğrulanamamıştır.
 
 ### 6.4 Küçükten büyüğe topoloji
 
 | Ölçek | Öneri | Dayanak |
 |---|---|---|
-| **~100 kullanıcı** (homelab, iç araç) | Tek node, tek Postgres, günlük `pg_dump` + WAL arşivi. Kanidm/Casdoor modeli: tek konteyner. Zitadel'in referansı: app "1 CPU and 512MB memory are more than enough" | [Zitadel deploy overview](https://zitadel.com/docs/self-hosting/deploy/overview) |
-| **~100K kullanıcı** | 3 stateless node (3 AZ), Postgres primary + 2 senkron standby (`ANY 1 (s1,s2)`), PgBouncer transaction mode, pgBackRest → S3. Zitadel referansı: DB ~1 core / 100 req/s, 4 GB RAM per core; 3-node HA'da node başına 4 core + 16 GB | [Zitadel production](https://zitadel.com/docs/self-hosting/manage/production) |
-| **~10M kullanıcı** | Keycloak'ın gerçek verisi: 3 pod / 24–74 vCPU ile 12.000 req/s. Argon2 iş yükü için ayrı node pool + `http-max-queued-requests` ile load shed; read replica'lar; cache boyutunu büyüt (10K→200K cache girdisi DB CPU'sunu %14 düşürdü). Aurora multi-AZ veya CloudNativePG 3 AZ | [Keycloak benchmark](https://www.keycloak.org/2025/10/keycloak-benchmark), [sizing](https://www.keycloak.org/high-availability/multi-cluster/concepts-memory-and-cpu-sizing) |
+| Yaklaşık 100 kullanıcı, ev laboratuvarı ya da iç araç | Tek düğüm, tek PostgreSQL, günlük döküm artı günlük arşivi. Kanidm ya da Casdoor modeli tek konteynerdir. Zitadel'in referansına göre uygulama için bir işlemci ile 512 megabayt fazlasıyla yeterlidir | Zitadel dağıtım genel bakışı |
+| Yaklaşık 100 bin kullanıcı | Üç erişilebilirlik alanında üç durumsuz düğüm, birincil artı iki senkron bekleme düğümlü PostgreSQL, işlem modunda havuzlayıcı ile bulut depolamaya yedek. Zitadel referansına göre veritabanı saniyede 100 istek için yaklaşık bir çekirdek ile çekirdek başına dört gigabayt bellek gerektirmekte; üç düğümlü yüksek erişilebilirlikte düğüm başına dört çekirdek ile 16 gigabayt önerilmektedir | Zitadel üretim dokümanı |
+| Yaklaşık 10 milyon kullanıcı | Keycloak'ın gerçek verisi üç kapsül ile 24 ile 74 sanal işlemcide saniyede 12.000 istektir. Argon2 iş yükü için ayrı bir düğüm havuzu ile azami kuyruk ayarıyla yük atma, okuma replikaları ile büyütülmüş önbellek gerekmektedir; önbellek büyütmesi veritabanı işlemcisini %14 düşürmüştür. Çok bölgeli yönetilen PostgreSQL ya da üç alanlı operatör kullanılmalıdır | Keycloak kıyaslaması ile boyutlandırma dokümanı |
 
-**Senkron quorum commit** ([PostgreSQL replication config](https://www.postgresql.org/docs/current/runtime-config-replication.html)):
-> "The keyword `ANY`, coupled with `num_sync`, specifies a quorum-based synchronous replication and makes transaction commits wait until their WAL records are replicated to **at least** `num_sync` listed standbys."
-> Örnek: `ANY 3 (s1, s2, s3, s4)`
+Senkron yeter sayı işlemesi şöyledir.
 
-`FIRST k (...)` öncelik tabanlı; bir standby düşerse listedeki bir sonraki en yüksek öncelikli ile **anında** değiştirilir.
+> "The keyword `ANY`, coupled with `num_sync`, specifies a quorum-based synchronous replication and makes transaction commits wait until their WAL records are replicated to at least `num_sync` listed standbys."
+
+Öncelik tabanlı varyantta bir bekleme düğümü düşerse listedeki bir sonraki en yüksek öncelikli ile anında değiştirilmektedir.
 
 > "Even when synchronous replication is enabled, individual transactions can be configured not to wait for replication by setting the `synchronous_commit` parameter to `local` or `off`."
 
-**Bu, Argus için önemli bir kaldıraç:** `synchronous_commit` **transaction bazında** ayarlanabilir. Kullanıcı kaydı / parola değişikliği / anahtar rotasyonu → `on` (quorum). Brute-force sayacı / son-giriş-zamanı / telemetri → `local`. Böylece senkron replikasyonun latency bedelini sadece gerçekten dayanıklılık gereken yazmalar öder.
+Bu, Argus için önemli bir kaldıraçtır: senkron işleme ayarı işlem bazında yapılabilmektedir. Kullanıcı kaydı, parola değişikliği ile anahtar rotasyonu yeter sayı beklemeli; kaba kuvvet sayacı, son giriş zamanı ile telemetri yerel işlemeyle yazılmalıdır. Böylece senkron replikasyonun gecikme bedelini yalnızca gerçekten dayanıklılık gereken yazmalar ödemektedir.
 
 ---
 
-## 7. Açık Kaynak Proje Operasyonu
+## 7. Açık kaynak proje operasyonu
 
-### 7.1 Lisans seçimi — IdP alanında kim ne yaptı
+### 7.1 Lisans seçimi, kimlik sağlayıcı alanında kim ne yapmıştır
 
 | Proje | Lisans | Hareket |
 |---|---|---|
-| **Keycloak** | Apache 2.0 | Değişmedi; LTS Red Hat build üzerinden ticarileşiyor |
-| **Zitadel** | **Apache 2.0 → AGPL-3.0**, v3 ile **31 Mart 2025** yürürlük ([blog](https://zitadel.com/blog/apache-to-agpl), [PR #9597](https://github.com/zitadel/zitadel/pull/9597)) | "any modifications to Zitadel used to provide a service need to be made available to the community". **Kademeli:** sadece yeni katkılar AGPL; önceki sürümler eski lisansta kalıyor; SDK/kütüphaneler mevcut lisansını koruyor; ticari lisans mevcut |
-| **Ory** | Apache 2.0 + **OEL (Ory Enterprise License)** | Open-core: "security releases with SLAs", high-performance pooling, YugabyteDB desteği OEL'e ait. "if you run Hydra as part of a business-critical system" ticari lisans öneriliyor |
-| **SuperTokens** | Core Apache 2.0 + lisans anahtarlı premium | — |
-| **Casdoor** | Apache 2.0 | — |
-| **Kanidm** | MPL-2.0 | Dosya-bazlı copyleft — AGPL'den ılımlı, Apache'den korumalı |
-| **Pocket ID** | BSD-2-Clause | — |
+| Keycloak | Apache 2.0 | Değişmemiştir; uzun dönem destek ayrı bir ticari ürün üzerinden verilmektedir |
+| Zitadel | Apache 2.0'dan AGPL 3.0'a, üçüncü ana sürümle 31 Mart 2025 yürürlüklü | Hizmet sağlamak için yapılan değişikliklerin topluluğa açılması gerekmektedir. Kademelidir: yalnızca yeni katkılar yeni lisanstadır, önceki sürümler eski lisansta kalmaktadır, geliştirme kitleri mevcut lisansını korumaktadır ile ticari lisans mevcuttur |
+| Ory | Apache 2.0 artı kurumsal lisans | Açık çekirdektir: hizmet seviyeli güvenlik sürümleri, yüksek performanslı havuzlama ile bazı veritabanı destekleri kurumsal lisanstadır. İş açısından kritik bir sistemde çalıştırılıyorsa ticari lisans önerilmektedir |
+| SuperTokens | Çekirdek Apache 2.0 artı lisans anahtarlı premium | — |
+| Casdoor | Apache 2.0 | — |
+| Kanidm | MPL 2.0 | Dosya bazlı karşılıklı paylaşımdır; AGPL'den ılımlı, Apache'den korumalıdır |
+| Pocket ID | BSD iki maddeli | — |
 
-**Gözlem:** IdP alanında **saf permissive lisans azınlıkta ve azalıyor.** İki baskın strateji: (a) AGPL + ticari çift lisans (Zitadel), (b) Apache 2.0 + kapalı "enterprise" katman (Ory, SuperTokens). Keycloak'ın Apache 2.0 kalabilmesinin nedeni, ticarileşmenin **ayrı bir üründe** (RHBK) olması.
+Gözlem şudur: kimlik sağlayıcı alanında saf izin verici lisans azınlıkta ile azalmaktadır. İki baskın strateji vardır: AGPL artı ticari çift lisans ile Apache 2.0 artı kapalı bir kurumsal katman. Keycloak'ın Apache 2.0 kalabilmesinin nedeni ticarileşmenin ayrı bir üründe olmasıdır.
 
-**Argus için pratik sonuç:** Apache 2.0, RP/SDK ekosisteminin benimsemesi için en düşük sürtünme; ama **IdP sunucusu için AGPL + SDK'lar için Apache 2.0** (Zitadel'in yaptığı ayrım) hem benimsenmeyi korur hem SaaS free-riding'i sınırlar. MPL-2.0 (Kanidm) ara yol: dosya bazlı, ağ üzerinden kullanımı tetiklemez.
+Argus için pratik sonuç şudur: Apache 2.0, bağlı taraf ile geliştirme kiti ekosisteminin benimsemesi için en düşük sürtünmedir; ancak kimlik sağlayıcı sunucusu için AGPL ile geliştirme kitleri için Apache 2.0, yani Zitadel'in yaptığı ayrım, hem benimsenmeyi korumakta hem bulut bedavacılığını sınırlamaktadır. MPL 2.0 bir ara yoldur: dosya bazlıdır ile ağ üzerinden kullanımı tetiklememektedir.
 
-### 7.2 EU Cyber Resilience Act — tarihler ve gerçek yükümlülük
+### 7.2 Avrupa Birliği siber dayanıklılık yasası, tarihler ile gerçek yükümlülük
 
-**⚠️ Görev tanımındaki bir varsayımı düzeltmem gerekiyor.** "11 Eylül 2026 raporlama yükümlülüğü" **açık kaynak steward'ları için o tarihte başlamıyor.**
+Görev tanımındaki bir varsayım düzeltilmelidir: 11 Eylül 2026 raporlama yükümlülüğü açık kaynak vekilleri için o tarihte başlamamaktadır.
 
-**CRA Madde 71 (Entry into force and application)** ([tam metin](https://www.european-cyber-resilience-act.com/Cyber_Resilience_Act_Article_71.html)):
-- **11 Haziran 2026** — Chapter IV (Madde 35–51) uygulanmaya başlar
-- **11 Eylül 2026** — **Madde 14** yürürlüğe girer
-- **11 Aralık 2027** — Regülasyonun tamamı uygulanır
+Yasanın yürürlük maddesine göre 11 Haziran 2026'da dördüncü bölüm uygulanmaya başlamakta, 11 Eylül 2026'da 14. madde yürürlüğe girmekte ile 11 Aralık 2027'de düzenlemenin tamamı uygulanmaktadır.
 
-**ENISA Single Reporting Platform FAQ** ([enisa.europa.eu](https://www.enisa.europa.eu/topics/product-security/single-reporting-platform-srp/frequently-asked-questions)) bunu netleştiriyor:
-> **Manufacturers** — 11 Eylül 2026'dan itibaren raporlar.
-> **Open-source software stewards** — raporlama yükümlülüklerine **11 Aralık 2027'de** katılır.
+ENISA'nın tek raporlama platformu sıkça sorulan soruları bunu netleştirmektedir: üreticiler 11 Eylül 2026'dan itibaren raporlamakta, açık kaynak yazılım vekilleri raporlama yükümlülüklerine 11 Aralık 2027'de katılmaktadır.
 
-Bunun nedeni yapısal: Madde 14 manufacturer'lara doğrudan uygulanır; steward'ları Madde 14'e bağlayan hüküm **Madde 24(3)**'tür ve Madde 24 ancak 11 Aralık 2027'de uygulanmaya başlar.
+Nedeni yapısaldır: 14. madde üreticilere doğrudan uygulanmakta; vekilleri bu maddeye bağlayan hüküm 24. maddenin üçüncü fıkrasıdır ile 24. madde ancak 11 Aralık 2027'de uygulanmaya başlamaktadır.
 
-**Raporlama süreleri** (her iki grup için aynı):
-- **24 saat** — early warning (farkına varıldığında)
-- **72 saat** — vulnerability notification / incident notification
-- **Final report** — düzeltici önlem hazır olduktan sonra **14 gün** (zafiyet) veya 72 saatlik bildirimden sonra **1 ay** (severe incident)
-- Portal: `portal.cra-srp.enisa.europa.eu`, EU Login hesabı ile atanmış bir **Assigned Representative** üzerinden. AB genelinde şube yapısı ne olursa olsun **olay başına tek bildirim**.
-- Bildirim, üreticinin ana AB yerleşiminin ulusal CSIRT'ine gider, oradan diğer üye devletlere dağıtılır.
+Raporlama süreleri her iki grup için aynıdır: farkına varıldığında 24 saat içinde erken uyarı, 72 saat içinde zafiyet ya da olay bildirimi ile düzeltici önlem hazır olduktan sonra 14 gün veya 72 saatlik bildirimden sonra bir ay içinde nihai rapor. Portal EU giriş hesabıyla ile atanmış bir temsilci üzerinden kullanılmaktadır. Birlik genelinde şube yapısı ne olursa olsun olay başına tek bildirim yapılmaktadır. Bildirim üreticinin ana yerleşimindeki ulusal müdahale ekibine gitmekte, oradan diğer üye devletlere dağıtılmaktadır.
 
-**"Actively exploited vulnerability"** tanımı: "reliable evidence that they have been exploited by a malicious actor".
+Aktif olarak istismar edilen zafiyet tanımı, kötü niyetli bir aktör tarafından istismar edildiğine dair güvenilir kanıt bulunmasıdır.
 
-**Kapsam dışı kalmak** ([EC cra-open-source sayfası](https://digital-strategy.ec.europa.eu/en/policies/cra-open-source)):
-> "products with digital elements qualifying as free and open-source software that are **not monetised by their manufacturers**" kapsam dışı. Kontrol etmedikleri projelere kaynak kodu katkısı yapan bireysel geliştiriciler de muaf.
+Kapsam dışı kalmak konusunda Komisyon sayfası şunu söylemektedir: üreticileri tarafından paraya çevrilmeyen özgür ile açık kaynak yazılım niteliğindeki dijital öğeli ürünler kapsam dışıdır. Kontrol etmedikleri projelere kaynak kodu katkısı yapan bireysel geliştiriciler de muaftır.
 
-**Steward tanımı ve Madde 24 yükümlülükleri** ([Article 24 metni](https://www.european-cyber-resilience-act.com/Cyber_Resilience_Act_Article_24.html)):
-- Steward = "legal persons that systematically provide support on a sustained basis for the development of specific free and open-source software **intended for commercial activities**, and that ensure the viability of those software products"
-- **§1** — belgelenmiş, doğrulanabilir bir **cybersecurity policy**: zafiyetlerin belgelenmesi, ele alınması, giderilmesi; topluluk içinde bilgi paylaşımı; gönüllü zafiyet bildiriminin teşviki
-- **§2** — pazar gözetim otoriteleriyle işbirliği; talep halinde politikayı "in a language which can be easily understood by that authority" sunmak
-- **§3** — geliştirmede rol alıyorsa Madde 14(1) (aktif istismar edilen zafiyet), geliştirme altyapısını etkileyen severe incident'lar için 14(3) ve (8)
-- **Yok olanlar:** CE marking yok, conformity assessment yok, teknik dokümantasyon saklama zorunluluğu yok, ve **Madde 64(10) uyarınca idari para cezası yok**
+Vekil tanımı ile 24. madde yükümlülükleri şöyledir. Vekil, ticari faaliyetlere yönelik belirli bir özgür ve açık kaynak yazılımın geliştirilmesine sürdürülebilir biçimde ile sistematik olarak destek veren ve bu ürünlerin yaşayabilirliğini sağlayan tüzel kişilerdir. Birinci fıkra belgelenmiş ile doğrulanabilir bir siber güvenlik politikası istemektedir: zafiyetlerin belgelenmesi, ele alınması ile giderilmesi, topluluk içinde bilgi paylaşımı ile gönüllü zafiyet bildiriminin teşviki. İkinci fıkra pazar gözetim otoriteleriyle iş birliğini ile talep hâlinde politikanın otoritenin kolayca anlayabileceği bir dilde sunulmasını istemektedir. Üçüncü fıkra, geliştirmede rol alınıyorsa aktif istismar edilen zafiyet ile geliştirme altyapısını etkileyen ciddi olaylar için bildirim yükümlülüğü getirmektedir. Olmayanlar şunlardır: uygunluk işareti yoktur, uygunluk değerlendirmesi yoktur, teknik dokümantasyon saklama zorunluluğu yoktur ile ilgili madde uyarınca idarî para cezası yoktur.
 
-**ORC WG whitepaper'ın pratik rehberi** ([orcwg/orcwg stewards-and-cra.md](https://github.com/orcwg/orcwg/blob/main/cyber-resilience-sig/whitepapers/stewards-and-cra.md)):
-- Steward, projeden ayrı **tescilli bir tüzel kişi** olmalı (şirket, vakıf vs.)
-- "most Open Source projects today, especially small ones, **do not have a steward**" — steward'ı olmayan küçük projelerin CRA yükümlülüğü yok
-- Yapılacaklar: güvenlik politikasını `SECURITY.md`'de yayınla; zafiyet bildirim ve triage sürecini tanımla; **atanmış CSIRT'i belgele** (merkez yeri veya kullanıcı yoğunluğuna göre); olay bildirimlerini kimin yapacağını belirle
-- Kullanıcıları "in a timely manner", tercihen makine-okunabilir formatta bilgilendir
+Açık düzenleyici uyum çalışma grubunun beyaz kâğıdındaki pratik rehber şudur: vekil, projeden ayrı tescilli bir tüzel kişi olmalıdır. Bugün çoğu açık kaynak projesinin, özellikle küçük olanların bir vekili yoktur; vekili olmayan küçük projelerin bir yükümlülüğü de yoktur. Yapılacaklar güvenlik politikasını bir güvenlik dosyasında yayımlamak, zafiyet bildirimi ile önceliklendirme sürecini tanımlamak, atanmış müdahale ekibini belgelemek ile olay bildirimlerini kimin yapacağını belirlemektir. Kullanıcılar zamanında, tercihen makine okunabilir bir formatta bilgilendirilmelidir.
 
-### 7.3 Zafiyet bildirimi ve CVE
+### 7.3 Zafiyet bildirimi ile güvenlik açığı numarası
 
-**GitHub CNA yolu** ([GitHub docs](https://docs.github.com/en/code-security/security-advisories/working-with-repository-security-advisories/about-repository-security-advisories)):
-- GitHub bir **CNA**'dır; draft advisory oluştururken CVE talep edilebilir, "GitHub usually reviews the request within **72 hours**"
-- CVE talebi advisory'yi public yapmaz — yayınlanana kadar gizli
-- Private fork'ta gizli düzeltme + private vulnerability reporting akışı
-- Yayınlanan advisory GitHub Advisory Database'e girer ve **Dependabot alert**'lerini tetikler
-- ⚠️ **Kısıt:** "GitHub cannot assign CVEs to your project if it is covered by another CNA"
+GitHub bir numaralandırma otoritesidir; taslak bir danışmanlık oluştururken bir numara talep edilebilmekte ile talep genellikle 72 saat içinde incelenmektedir. Numara talebi danışmanlığı açık yapmamakta; yayımlanana kadar gizli kalmaktadır. Gizli bir çatalda gizli düzeltme ile özel zafiyet bildirimi akışı bulunmaktadır. Yayımlanan danışmanlık GitHub danışmanlık veritabanına girmekte ile bağımlılık uyarılarını tetiklemektedir. Bir kısıt vardır: proje başka bir numaralandırma otoritesinin kapsamındaysa GitHub numara atayamamaktadır.
 
-**Argus için pratik:** Kendi CNA'nız olmasına gerek yok. GitHub CNA + `SECURITY.md` + private vulnerability reporting, hem CRA Madde 24 §1'in "documenting, addressing and remediating vulnerabilities" gereksinimini hem CVE numaralandırmayı karşılar.
+Argus için pratik sonuç şudur: kendi numaralandırma otoritenizin olmasına gerek yoktur. GitHub otoritesi, bir güvenlik dosyası ile özel zafiyet bildirimi hem yasanın belgeleme, ele alma ve giderme gereksinimini hem numaralandırmayı karşılamaktadır.
 
-**Örnek olarak Keycloak'ın politikası** ([security policy](https://github.com/keycloak/keycloak/security/policy)):
-- `keycloak-security@googlegroups.com`, **7 iş günü** içinde ack
-- Talep edilen: PoC (sadece scanner çıktısı değil), minimal reproducible example, düz metin gövde, bulgu başına ayrı rapor
-- Experimental feature'lar genellikle CVE almaz, normal public bug olarak yönetilir
-- Üçüncü taraf kütüphane CVE'leri → GitHub issue
-- Araştırmacıya kredi: isim/alias/şirket/GitHub kullanıcı adı — e-posta ve link değil
+Örnek olarak Keycloak'ın politikası şöyledir: bir güvenlik posta listesi kullanılmakta ile yedi iş günü içinde alındı bildirimi yapılmaktadır. Talep edilenler bir kavram kanıtı, yani yalnızca tarayıcı çıktısı değil, asgari yeniden üretilebilir bir örnek, düz metin gövde ile bulgu başına ayrı rapordur. Deneysel özellikler genellikle numara almamakta, normal açık hatalar olarak yönetilmektedir. Üçüncü taraf kütüphane açıkları bir konu olarak açılmaktadır. Araştırmacıya kredi isim, takma ad, şirket ya da kullanıcı adıyla verilmekte; e-posta ile bağlantıyla değil.
 
-### 7.4 Sürüm imzalama, SLSA, reproducible builds
+### 7.4 Sürüm imzalama, tedarik zinciri seviyeleri ile yeniden üretilebilir derlemeler
 
-**Sigstore / cosign** ([docs](https://docs.sigstore.dev/cosign/signing/signing_with_containers/)):
-- Keyless: OIDC → **Fulcio** kısa ömürlü sertifika verir → imza **Rekor** transparency log'una yazılır. Komut basit: `cosign sign $IMAGE`
-- KMS URI'leri: `awskms://`, `gcpkms://`, `azurekms://`, `k8s://<ns>/<key>`, `env://`
-- İmzalar **OCI 1.1 referrers** spesifikasyonuna göre eklenir; `cosign tree` ile bulunur, `cosign clean` ile silinir
-- Tek konteynere birden çok imza eklenebilir
+Sigstore ile cosign şöyle çalışmaktadır: anahtarsız modda bir kimlik sağlayıcı üzerinden kısa ömürlü bir sertifika alınmakta ile imza bir şeffaflık günlüğüne yazılmaktadır. Komut basittir. Anahtar yönetim servisi adresleri desteklenmektedir. İmzalar OCI referans verenler şartnamesine göre eklenmekte, bir ağaç komutuyla bulunmakta ile bir temizleme komutuyla silinmektedir. Tek bir konteynere birden çok imza eklenebilmektedir.
 
-**SLSA v1.1 build seviyeleri** ([slsa.dev](https://slsa.dev/spec/v1.1/levels)):
-- **L1** — provenance var, ama "may be incomplete and/or unsigned at L1"
-- **L2** — hosted build platform, provenance **dijital olarak imzalanır**, tüketici doğrular → "Prevents tampering after the build"
-- **L3** — hardened: "strong controls to prevent runs from influencing one another, even within the same project" + "secret material used to sign the provenance" build adımlarından erişilemez
+Tedarik zinciri seviyeleri şöyledir: birinci seviyede bir köken bilgisi bulunmakta ancak eksik veya imzasız olabilmektedir. İkinci seviyede barındırılan bir derleme platformu kullanılmakta, köken bilgisi dijital olarak imzalanmakta ile tüketici doğrulamaktadır; derlemeden sonra kurcalamayı önlemektedir. Üçüncü seviyede sertleştirme vardır: aynı proje içinde bile çalıştırmaların birbirini etkilemesini önleyen güçlü kontroller ile köken bilgisini imzalamak için kullanılan sır materyalinin derleme adımlarından erişilemez olması gerekmektedir.
 
-⚠️ **Önemli:** SLSA v1.1 seviye tanımları **hermetic/reproducible build'i gerektirmiyor.** GitHub Actions + OIDC + cosign keyless ile **L2 makul erişilebilir**; L3 için izole runner gerekir.
+Önemli bir nokta vardır: bu seviye tanımları hermetik ya da yeniden üretilebilir derleme gerektirmemektedir. GitHub Actions, kimlik sağlayıcı tümleşmesi ile anahtarsız imzalamayla ikinci seviye makul biçimde erişilebilirdir; üçüncü seviye için izole bir koşucu gerekmektedir.
 
-**Rust'ta reproducible build gerçekçi mi?**
-- Rust/cargo, [reproducible-builds.org CI test listesinde **yok**](https://reproducible-builds.org/citests/) (listede coreboot, Debian, FreeBSD, NetBSD, Arch, Guix, Go, NixOS, openSUSE, openEuler, Qubes, Yocto, Trisquel, rattler-build var)
-- [Cargo Book Build Cache bölümü](https://doc.rust-lang.org/cargo/reference/build-cache.html) reproducibility'den **hiç bahsetmiyor**
-- ⚠️ **Sonuç: Rust'ta bit-for-bit reproducible build 2026'da resmî olarak garantilenmiş bir özellik değil.** Argus'un gerçekçi hedefi: `Cargo.lock` commit + `cargo build --locked` + pinlenmiş toolchain + `--remap-path-prefix` + SLSA L2 provenance + cosign. Bit-for-bit reproducibility'yi **taahhüt etmeyin.**
+Rust'ta yeniden üretilebilir derleme gerçekçi midir sorusunun cevabı şudur: Rust ile cargo, yeniden üretilebilir derlemeler projesinin sürekli tümleştirme test listesinde yoktur; listede birçok dağıtım ile dil bulunmaktadır. Cargo kitabının derleme önbelleği bölümü yeniden üretilebilirlikten hiç bahsetmemektedir. Sonuç şudur: Rust'ta bit bit yeniden üretilebilir derleme 2026'da resmî olarak garantilenmiş bir özellik değildir. Argus'un gerçekçi hedefi kilit dosyasını işlemek, kilitli derleme yapmak, araç zincirini sabitlemek, yol öneklerini yeniden eşlemek, ikinci seviye köken bilgisi üretmek ile imzalamaktır. Bit bit yeniden üretilebilirlik taahhüt edilmemelidir.
 
-**Tedarik zinciri gerçekliği — Rust ekosisteminde 2025-2026:**
-- [**arrayref saldırısı, 20 Ağustos 2026**](https://blog.rust-lang.org/2026/08/20/supply-chain-attack-on-arrayref/): Maintainer kimlik bilgileri/bilgisayarı ele geçirildi; `arrayref` kötü amaçlı `proc-macro1` bağımlılığıyla yeniden yayınlandı — "a build script that was downloading a malicious payload". `arrayref@0.3.10` **86 dakika**, `internment@0.8.7` 90 dakika, `append-only-vec@0.1.9` 107 dakika yayında kaldı. Nextron Systems GmbH Research Team tespit etti.
-- [crates.io phishing kampanyası, 12 Eylül 2025](https://blog.rust-lang.org/2025/09/12/crates-io-phishing-campaign/)
-- Kötü amaçlı crate'ler: `faster_log`/`async_println` (24 Eyl 2025), `evm-units`/`uniswap-utils` (3 Ara 2025), `finch-rust`/`sha-rust` (5 Ara 2025)
-- [crates.io session cookie güvenlik olayı, 11 Nis 2025](https://blog.rust-lang.org/2025/04/11/crates-io-security-session-cookies/)
+Tedarik zinciri gerçekliği, Rust ekosisteminde 2025 ile 2026'da şöyledir. 20 Ağustos 2026'daki arrayref saldırısında bakımcının kimlik bilgileri ya da bilgisayarı ele geçirilmiş ile paket, kötü amaçlı bir bağımlılıkla yeniden yayımlanmıştır; bağımlılık, kötü amaçlı bir yük indiren bir derleme betiği içermekteydi. Zararlı sürümler 86 ile 107 dakika arasında yayında kalmıştır. Bir güvenlik araştırma ekibi tespit etmiştir. 12 Eylül 2025'te bir kimlik avı kampanyası yaşanmıştır. 2025'in son çeyreğinde dört ayrı kötü amaçlı crate olayı olmuştur. 11 Nisan 2025'te bir oturum çerezi güvenlik olayı yaşanmıştır.
 
-**Argus için doğrudan sonuç:** `build.rs` çalıştıran bir bağımlılık, build makinenizde keyfi kod çalıştırır. Bir IdP'nin build pipeline'ı için: `cargo-deny` ile lisans+advisory taraması, `cargo-vet`/`cargo-crev` ile bağımlılık denetimi, `cargo-auditable` ile binary'ye SBOM gömme, **vendored + pinned** bağımlılıklar ve **build.rs içeren yeni bağımlılıkların manuel incelemesi**.
+Argus için doğrudan sonuç şudur: derleme betiği çalıştıran bir bağımlılık, derleme makinenizde keyfî kod çalıştırmaktadır. Bir kimlik sağlayıcının derleme hattı için lisans ile danışmanlık taraması, bağımlılık denetimi, ikili dosyaya yazılım malzeme listesi gömme, satıcılaştırılmış ve sabitlenmiş bağımlılıklar ile derleme betiği içeren yeni bağımlılıkların elle incelenmesi gerekmektedir.
 
 ---
 
-## Argus için Dağıtım ve Operasyon Kararları
+## Argus için dağıtım ile operasyon kararları
 
-**1. `build` adımı olmasın; tek komut, tek mod.**
-Keycloak'ın `kc.sh build` / `start-dev` / `start --optimized` üçlemesi bir Quarkus augmentation artefaktıdır ve mod geçişlerinde regression üretmiştir ([#30460](https://github.com/keycloak/keycloak/issues/30460)). Rust'ta bu bedel yok — derleme zaten AOT. Argus tek binary, tek `argus serve` komutu olmalı; "dev" ile "prod" arasındaki fark yalnızca konfigürasyon değerleri olmalı, **farklı bir kod yolu değil.**
+1. Bir derleme adımı olmamalı; tek komut ile tek mod bulunmalıdır. Keycloak'ın üçlemesi bir çerçeve artefaktıdır ile mod geçişlerinde gerileme üretmiştir. Rust'ta bu bedel yoktur, çünkü derleme zaten önceden yapılmaktadır. Argus tek bir ikili dosya ile tek bir servis komutu olmalıdır; geliştirmeyle üretim arasındaki fark yalnızca yapılandırma değerleri olmalı, farklı bir kod yolu olmamalıdır.
 
-**2. Güvensiz konfigürasyonla başlamayı reddet (fail-fast), uyarma.**
-Keycloak production mode'un doğru yaptığı tek şey bu: hostname ve TLS yoksa "startup will fail intentionally with an error message, preventing insecure deployments" ([configuration](https://www.keycloak.org/server/configuration)). Argus da issuer URL'i, TLS'i ve admin arayüzü bind adresini başlangıçta doğrulamalı; eksikse `--i-know-this-is-insecure` gibi açık bir bayrak olmadan başlamamalı.
+2. Güvensiz yapılandırmayla başlamak reddedilmelidir, uyarılmamalıdır. Keycloak üretim modunun doğru yaptığı tek şey budur. Argus da veren adresini, TLS'i ile yönetim arayüzü bağlama adresini başlangıçta doğrulamalı; eksikse açık bir güvensizlik bayrağı olmadan başlamamalıdır.
 
-**3. Dev veritabanı H2/dev-file tuzağına düşme — ama SQLite'ı prod'da yasaklama konusunda Ory'yi taklit et.**
-Keycloak'ın `dev-file` (H2) varsayılanı "unsuitable for production" ([db docs](https://www.keycloak.org/server/db)) ve dev/prod uçurumunun kökeni. Ory'nin duruşu daha dürüst: "SQLite is supported (in-memory and persistent) but must not be used in a production deployment" ([Ory deployment](https://www.ory.com/docs/self-hosted/deployment)). Argus için: **tek node / <1000 kullanıcı senaryosu için SQLite'ı resmen destekle** (Casdoor all-in-one modeli), ama HA topolojisinde başlatılırsa reddet.
+3. Geliştirme veritabanı tuzağına düşülmemeli ancak gömülü veritabanını üretimde yasaklama konusunda Ory taklit edilmelidir. Keycloak'ın dosya tabanlı varsayılanı üretime uygun değildir ile uçurumun kökenidir. Ory'nin duruşu daha dürüsttür. Argus için tek düğüm ile bin kullanıcı altındaki senaryoda SQLite resmen desteklenmeli, ancak yüksek erişilebilirlik topolojisinde başlatılırsa reddedilmelidir.
 
-**4. `redirect_uri` eşleştirmesi yalnızca exact string olsun; regex ve wildcard hiçbir koşulda olmasın.**
-authentik CVE-2024-52289'da escape edilmemiş regex noktası hesap devralmaya yol açtı; düzeltme "strict string matching as the default" oldu ([Omegapoint writeup](https://securityblog.omegapoint.se/en/writeup-authentik-cve-2024-52289/)). RFC 9700 zaten exact match zorunlu kılıyor. Argus'ta regex desteği **hiç implemente edilmemeli** — "opt-in tehlikeli özellik" bile olmamalı.
+4. Yönlendirme adresi eşleştirmesi yalnızca tam dizgi olmalı; düzenli ifade ile joker karakter hiçbir koşulda bulunmamalıdır. İlgili açıkta kaçırılmamış bir düzenli ifade noktası hesap devralmaya yol açmış ile düzeltme varsayılan katı dizgi eşleştirmesi olmuştur. RFC 9700 zaten tam eşleşmeyi zorunlu kılmaktadır. Argus'ta düzenli ifade desteği hiç gerçeklenmemelidir; tercihe bağlı tehlikeli bir özellik bile olmamalıdır.
 
-**5. Proxy header güvenini varsayılan olarak KAPALI tut ve açıkken trusted-proxy CIDR listesi zorunlu olsun.**
-Keycloak'ın uyarısı: "rogue clients can inject false values"; "especially critical if you do any deny or allow listing of IP addresses"; proxy header'ları "overwrites (not just appends to)" etmeli ([reverseproxy](https://www.keycloak.org/server/reverseproxy)). Brute-force sayaçları ve rate limit doğrudan buna dayandığı için, Argus `trust_proxy_headers=true` iken `trusted_proxies` listesi boşsa **başlamamalı**.
+5. Vekil başlığı güveni varsayılan olarak kapalı tutulmalı ile açıkken güvenilir vekil adres listesi zorunlu olmalıdır. Keycloak'ın uyarısı nettir: sahte değerler enjekte edilebilmekte ile bu, özellikle IP izin ya da yasak listesi kullanılıyorsa kritiktir; vekil başlıkları eklemeli değil üzerine yazmalıdır. Kaba kuvvet sayaçları ile hız sınırı doğrudan buna dayandığı için, güven açıkken liste boşsa Argus başlamamalıdır.
 
-**6. Volatile state'i (auth session, action token, brute-force sayacı) DB'ye yaz; in-flight akışları graceful shutdown'a emanet etme.**
-Keycloak 26.7 stateless mode tam olarak bunu yaptı: "Full cluster restarts no longer reset volatile state during upgrades" ([Temmuz 2026](https://www.keycloak.org/2026/07/multi-cluster-v2-and-stateless-mode)). Bedeli auth başına +8-10 ms ve DB CPU/IOPS'un ~2 katı. Rust'ta bu bedel JVM'sizken daha da kabul edilebilir; Argus için **varsayılan** olmalı, opsiyon değil.
+6. Uçucu durum, yani kimlik doğrulama oturumu, eylem token'ı ile kaba kuvvet sayacı veritabanına yazılmalı; uçuştaki akışlar zarif kapanışa emanet edilmemelidir. Keycloak'ın durumsuz modu tam olarak bunu yapmıştır. Bedeli kimlik doğrulama başına sekiz ile 10 milisaniye ile veritabanı yükünün yaklaşık iki katıdır. Rust'ta bu bedel sanal makinesizken daha da kabul edilebilirdir; Argus için varsayılan olmalıdır, bir seçenek değil.
 
-**7. Cache invalidation'ı ağ protokolüyle değil, DB-backed outbox ile yap.**
-Keycloak'ın Infinispan/JGroups invalidation'ı, DB'ye yazan yan süreçlerle (realm import job'ı) senkronize olamadı — [#45966](https://github.com/keycloak/keycloak/issues/45966) (Şubat 2026): realm DB'de var, konsolda yok, restart gerekiyor. 26.7'nin çözümü DB kuyruğu + polling, varsayılan **100 ms** aralık. Argus: **outbox tablosu + polling** — ya da §1 §10.2'de seçilecek diğer kalıcı mekanizma. `LISTEN/NOTIFY` iptal yayınında **kullanılmaz** (§6 §4.5: PgBouncer transaction mode + dolu kuyrukta commit hatası). **Hiçbir durumda node-to-node cluster protokolü değil.**
+7. Önbellek geçersizleştirmesi bir ağ protokolüyle değil veritabanı destekli bir giden kutusuyla yapılmalıdır. Keycloak'ın dağıtık önbellek geçersizleştirmesi, veritabanına yazan yan süreçlerle senkronize olamamıştır; alan veritabanında görünmekte ancak konsolda görünmemekteydi ile yeniden başlatma gerekmekteydi. 26.7'nin çözümü bir veritabanı kuyruğu ile yoklamadır, varsayılan 100 milisaniyelik aralıkla. Argus'ta bir giden kutusu tablosu ile yoklama ya da §1'in 10.2 bölümünde seçilecek diğer kalıcı mekanizma kullanılmalıdır. Dinle ile bildir iptal yayınında kullanılmaz; §6'nın 4.5 bölümüne bakınız. Hiçbir durumda düğümden düğüme bir küme protokolü kullanılmamalıdır.
 
-**8. Graceful shutdown: `preStop sleep` + drain delay + request timeout üçlüsünü ayrı ayrı yapılandırılabilir yap.**
-Keycloak'ın somut değerleri referans: `shutdown-delay` = 1s (LB reconfig + keepalive drain), `shutdown-timeout` = 10s (in-flight istekler) ([all-config](https://www.keycloak.org/server/all-config)). Kubernetes'te endpoint kaldırma ile SIGTERM sıralı değildir ve propagasyon "often a second or more on a busy cluster" sürer. Argus önerisi: `preStop: sleep 5` + `shutdown_delay=2s` + `shutdown_timeout=15s` + `terminationGracePeriodSeconds=45`.
+8. Zarif kapanışta ön kapanış beklemesi, boşaltma gecikmesi ile istek zaman aşımı üçlüsü ayrı ayrı yapılandırılabilir olmalıdır. Keycloak'ın somut değerleri referanstır: bir saniyelik kapanış gecikmesi ile 10 saniyelik kapanış zaman aşımı. Kubernetes'te uç nokta kaldırma ile sonlandırma sinyali sıralı değildir ile yayılım yoğun bir kümede çoğu zaman bir saniye veya daha fazla sürmektedir. Argus önerisi beş saniyelik bir ön kapanış beklemesi, iki saniyelik boşaltma gecikmesi, 15 saniyelik kapanış zaman aşımı ile 45 saniyelik zarif kapanış süresidir.
 
-**9. Startup/liveness probe migration sırasında UP dönsün.**
-Keycloak 26.6 bunu düzeltti: "Startup and liveness probes return UP status during migrations" ([26.6.0](https://www.keycloak.org/2026/04/keycloak-2660-released)). Aksi halde uzun bir şema göçü sonsuz restart döngüsüne girer. Argus'ta migration durumu `/health/live` için UP, `/health/ready` için DOWN olmalı; ayrı `/health/started` startup probe'a hizmet etmeli — Keycloak'ın 9000 management portu modeli gibi **ayrı porttan** ([health docs](https://www.keycloak.org/observability/health)).
+9. Başlatma ile canlılık yoklamaları göç sırasında ayakta dönmelidir. Keycloak 26.6 bunu düzeltmiştir. Aksi hâlde uzun bir şema göçü sonsuz bir yeniden başlatma döngüsüne girmektedir. Argus'ta göç durumu canlılık için ayakta, hazır olma için kapalı olmalı; ayrı bir başlatma uç noktası başlatma yoklamasına hizmet etmeli ile Keycloak'ın ayrı yönetim portu modeli gibi ayrı bir porttan sunulmalıdır.
 
-**10. Rolling update uygunluğunu makine tarafından karar verilebilir hale getir (`argus update-check`).**
-Keycloak'ın `update-compatibility metadata` / `check` komutu ve exit code'ları (0 = rolling mümkün, 3 = shutdown gerekli) operatöre deterministik bir karar veriyor ([docs](https://www.keycloak.org/server/update-compatibility)). Argus, migration'ının **backward-compatible (expand) mi yoksa breaking (contract) mi** olduğunu binary'nin kendisi rapor edebilmeli — böylece CI/CD ve operator otomatik karar verir.
+10. Yuvarlanan güncelleme uygunluğu makine tarafından karar verilebilir hâle getirilmelidir. Keycloak'ın uyumluluk komutu ile çıkış kodları operatöre deterministik bir karar vermektedir. Argus, göçünün geriye dönük uyumlu mu yoksa kırıcı mı olduğunu ikili dosyanın kendisi raporlayabilmeli; böylece hem sürekli teslim hattı hem operatör otomatik karar vermelidir.
 
-**11. Şema göçünde expand-contract zorunlu; her release yalnızca expand veya yalnızca contract içersin, ikisi birden değil.**
-Fowler'ın transition phase tanımı ("the database supports both the old access pattern and the new ones simultaneously") N-1 uyumluluğunun tek güvenli yolu. PostgreSQL desteği: `ADD CONSTRAINT ... NOT VALID` anında commit eder ve `VALIDATE CONSTRAINT` yalnızca SHARE UPDATE EXCLUSIVE alır ([ALTER TABLE Notes](https://www.postgresql.org/docs/current/sql-altertable.html)). PG18 ile aynı desen artık **NOT NULL için de** geçerli (`SET NOT NULL NOT VALID`) → Argus'un minimum PostgreSQL hedefi **18** olmalı.
+11. Şema göçünde genişlet ile daralt zorunludur; her sürüm yalnızca genişletme ya da yalnızca daraltma içermelidir, ikisi birden değil. Fowler'ın geçiş fazı tanımı, bir önceki sürümle uyumluluğun tek güvenli yoludur. PostgreSQL desteği şudur: doğrulanmamış kısıt ekleme anında işlenmekte ile doğrulama yalnızca hafif bir kilit almaktadır. PostgreSQL 18 ile aynı desen artık boş olmama kısıtı için de geçerlidir; dolayısıyla Argus'un asgari PostgreSQL hedefi 18 olmalıdır.
 
-**12. Migration aracı olarak `sqlx migrate` seç, ama down migration'ları operasyonel kurtarma planı sayma.**
-sqlx `-r` ile `.up.sql`/`.down.sql` üretir ve `migrate revert` sunar ([sqlx-cli](https://github.com/launchbadge/sqlx/blob/main/sqlx-cli/README.md)); refinery ise Flyway felsefesiyle undo'yu reddediyor ("you have to generate a new one"). Down migration'ları test için tut; **production geri alma planı = PITR restore**, revert değil.
+12. Göç aracı olarak sqlx seçilmeli ancak aşağı göçler bir operasyonel kurtarma planı sayılmamalıdır. sqlx yukarı ile aşağı dosyaları üretmekte ile geri alma sunmaktadır; refinery ise geri almayı reddetmekte ve yeni bir göç üretmenizi istemektedir. Aşağı göçler test için tutulmalı; üretim geri alma planı zaman içinde geri yüklemedir, geri alma değildir.
 
-**13. Rolling update sırasında DDL'i uygulama başlatmasına bırakma — ayrı, tekil bir migration job'ı olsun.**
-Keycloak [#43252](https://github.com/keycloak/keycloak/issues/43252) engelleri açıkça listeliyor: "Incompatible migrations and index creation locks can prevent old instances from joining clusters during rolling updates." Argus: `argus migrate` ayrı komut/Job; uygulama süreci başlangıçta yalnızca `validate` yapsın (Keycloak'ın `migration-strategy=validate` seçeneği gibi) ve şema uyumsuzsa hızlıca ölsün.
+13. Yuvarlanan güncelleme sırasında şema değişikliği uygulama başlatmasına bırakılmamalı; ayrı ile tekil bir göç işi olmalıdır. Keycloak'ın ilgili konusu engelleri açıkça listelemektedir: uyumsuz göçler ile indeks oluşturma kilitleri, yuvarlanan güncellemeler sırasında eski örneklerin kümeye katılmasını engelleyebilmektedir. Argus'ta göç ayrı bir komut ya da iş olmalı; uygulama süreci başlangıçta yalnızca doğrulama yapmalı ile şema uyumsuzsa hızlıca ölmelidir.
 
-**14. Index'leri her zaman `CREATE INDEX CONCURRENTLY` ile ekle ve migration transaction'ının dışında tut.**
-`ALTER TABLE` varsayılanı ACCESS EXCLUSIVE'dir; rewrite eden formlar ayrıca **MVCC-safe değildir** ("the table will appear empty to concurrent transactions") ve **2 katına kadar disk** ister ([PG docs](https://www.postgresql.org/docs/current/sql-altertable.html)). Bu, kimlik verisi taşıyan bir tabloda kabul edilemez.
+14. İndeksler her zaman eşzamanlı olarak eklenmeli ile göç işleminin dışında tutulmalıdır. Tablo değiştirme varsayılanı en ağır kilittir; yeniden yazan formlar ayrıca çok sürümlü eşzamanlılık açısından güvenli değildir ile iki katına kadar disk istemektedir. Bu, kimlik verisi taşıyan bir tabloda kabul edilemez.
 
-**15. İmzalama anahtarlarını veritabanının dışına çıkar ve DB yedeğinden bağımsız yedekle.**
-Keycloak `rsa-generated` kullanınca anahtarlar DB'dedir ve doküman yedekleme prosedürü **vermiyor**; `java-keystore` ise host dosya sisteminden okur ([Realm Keys](https://www.keycloak.org/docs/latest/server_admin/index.html)). Zitadel'in masterkey'i "cannot be changed" ve `docker compose up` sırasında sessizce üretiliyor ([compose docs](https://zitadel.com/docs/self-hosting/deploy/compose)). **Anahtar kaybı DB kaybından daha yıkıcıdır** (tüm token'lar + tüm RP doğrulamaları ölür). Argus: anahtar materyali için pluggable backend (dosya / KMS / PKCS#11), varsayılan olarak DB'den ayrı, ve **başlangıçta "anahtarınızı yedeklediniz mi" onayı olmadan üretilmemeli.**
+15. İmzalama anahtarları veritabanının dışına çıkarılmalı ile veritabanı yedeğinden bağımsız yedeklenmelidir. Keycloak otomatik üretim kullanınca anahtarlar veritabanındadır ile doküman bir yedekleme prosedürü vermemektedir; anahtar deposu seçeneği ise ana bilgisayar dosya sisteminden okumaktadır. Zitadel'in ana anahtarı değiştirilememekte ile bileşim komutunda sessizce üretilmektedir. Anahtar kaybı veritabanı kaybından daha yıkıcıdır. Argus'ta anahtar materyali için takılabilir bir arka uç, yani dosya, anahtar yönetim servisi ya da donanım arayüzü bulunmalı, varsayılan olarak veritabanından ayrı olmalı ile başlangıçta anahtarınızı yedeklediniz mi onayı olmadan üretilmemelidir.
 
-**16. KMS/HSM entegrasyonu birinci sınıf olsun — ama JWKS'i KMS'e bağlama.**
-AWS KMS asimetrik imzalama RSA 2048/3072/4096, ECC P-256/384/521, **Ed25519** ve post-quantum **ML-DSA-44/65/87** (FIPS 204) destekliyor; "The private key never leaves AWS KMS unencrypted" ve public key indirilebiliyor ([KMS key specs](https://docs.aws.amazon.com/kms/latest/developerguide/asymmetric-key-specs.html)). Argus: imzalama KMS'e delege edilebilmeli, ama **JWKS endpoint'i lokal public key cache'inden servis edilmeli** (her istekte KMS çağrısı yok). DR uyarısı: KMS anahtarı export edilemez → multi-Region key veya import edilmiş key material şart.
+16. Anahtar yönetim servisi ile donanım modülü tümleşmesi birinci sınıf olmalı ancak anahtar seti servise bağlanmamalıdır. Bir bulut anahtar servisi RSA'nın üç boyutunu, üç eliptik eğriyi, Ed25519'u ile kuantum sonrası imza algoritmalarını desteklemektedir; özel anahtar servisi şifresiz terk etmemekte ile açık anahtar indirilebilmektedir. Argus'ta imzalama devredilebilmeli ancak anahtar seti uç noktası yerel bir açık anahtar önbelleğinden servis edilmelidir; her istekte servise çağrı yapılmamalıdır. Felaket kurtarma uyarısı şudur: anahtar dışa aktarılamamaktadır, dolayısıyla çok bölgeli anahtar ya da içe aktarılmış anahtar materyali şarttır.
 
-**17. Anahtar rotasyonu active/passive/disabled modeliyle, ve retire penceresi token ömründen uzun olsun.**
-Keycloak'ın modeli ve önerisi doğrudan alınabilir: 3–6 ayda bir yeni anahtar, eskisini 1–2 ay sonra kaldır ([Realm Keys](https://www.keycloak.org/docs/latest/server_admin/index.html)). Kritik nokta: passive anahtar, en uzun refresh token ömrü + RP JWKS cache TTL'i kadar yaşamalı.
+17. Anahtar rotasyonu aktif, pasif ile devre dışı modeliyle yapılmalı ile emeklilik penceresi token ömründen uzun olmalıdır. Keycloak'ın modeli ile önerisi doğrudan alınabilir: üç ile altı ayda bir yeni anahtar, eskisini bir ile iki ay sonra kaldırma. Kritik nokta şudur: pasif anahtar, en uzun yenileme token'ı ömrü artı bağlı taraf anahtar seti önbellek yaşam süresi kadar yaşamalıdır.
 
-**18. Argon2 için ayrı, sınırlı bir blocking worker havuzu ve kuyruk dolunca 429.**
-Kanıt zinciri: Keycloak sizing'de parola login'i **15/s/vCPU**, client credentials **120/s/vCPU** — 8x fark hash'lemeden ([sizing](https://www.keycloak.org/high-availability/multi-cluster/concepts-memory-and-cpu-sizing)). Keycloak Argon2 varsayılanı **istek başına 7 MB** ve paralelliği JVM çekirdek sayısıyla sınırlıyor ([25.0.0](https://www.keycloak.org/2024/06/keycloak-2500-released)). Zitadel "reserve 4 CPU cores" diyor ([production](https://zitadel.com/docs/self-hosting/manage/production)). OWASP DoS uyarısı açık. Argus: `max_concurrent_hashes` semaphore + pod bellek limiti = baseline + (N × m_cost) formülüyle hesaplanmış; kuyruk dolunca **429 + Retry-After**, kuyruğa alıp bekletme yok.
+18. Argon2 için ayrı, sınırlı bir bloklayıcı işçi havuzu olmalı ile kuyruk dolunca 429 dönülmelidir. Kanıt zinciri şudur: boyutlandırmada parola girişi saniyede 15, istemci kimlik bilgisi saniyede 120'dir; sekiz kat fark özetlemedendir. Keycloak'ın varsayılanı istek başına yedi megabayttır ile paralelliği çekirdek sayısıyla sınırlamaktadır. Zitadel dört çekirdek ayrılmasını söylemektedir. OWASP'ın hizmet reddi uyarısı açıktır. Argus'ta bir eşzamanlılık semaforu bulunmalı, kapsül bellek limiti temel değer artı azami eşzamanlı özet çarpı bellek maliyeti formülüyle hesaplanmalı ile kuyruk dolunca 429 ve yeniden dene başlığı dönülmeli, kuyruğa alıp bekletilmemelidir.
 
-**19. Argon2 parametreleri OWASP setlerinden seçilebilir olsun; m=19456/t=2 varsayılan, m=7168/t=5 "yüksek eşzamanlılık" profili.**
-OWASP beş seti eşdeğer sayıyor (m=47104/t=1 … m=7168/t=5, hepsi p=1) ve hedefi "less than one second" ([cheat sheet](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)). Keycloak m=7168/t=5'i seçmiş — bellek-verimli uç. Argus, deployment profiline göre seçtirmeli ve **seçilen profilin bellek bütçesini başlangıçta hesaplayıp loglamalı.**
+19. Argon2 parametreleri OWASP setlerinden seçilebilir olmalı; orta bir set varsayılan, en bellek verimli set yüksek eşzamanlılık profili olmalıdır. OWASP beş seti eşdeğer saymakta ile hedefi bir saniyenin altıdır. Keycloak en bellek verimli ucu seçmiştir. Argus dağıtım profiline göre seçtirmeli ile seçilen profilin bellek bütçesini başlangıçta hesaplayıp günlüğe yazmalıdır.
 
-**20. PgBouncer transaction mode'u destekle: `max_prepared_statements` > 0 gerektir, protokol seviyesi prepare kullan.**
-PgBouncer 1.21.0+ transaction pooling'de prepared statement'ları takip ediyor; 1.22.0 `DISCARD ALL`/`DEALLOCATE ALL` desteği ekledi ([FAQ](https://www.pgbouncer.org/faq.html)). Kısıt: yalnızca extended query protocol — "cannot handle SQL `PREPARE <statement_name> AS …`". Argus sqlx'in extended protokolünü kullandığı için uyumlu; ama dokümanda `max_prepared_statements=0` ile çalıştırmanın performans çöküşü uyarısı olmalı.
+20. Bağlantı havuzlayıcının işlem modu desteklenmeli; hazırlanmış ifade sayısı sıfırdan büyük gerektirilmeli ile protokol seviyesinde hazırlama kullanılmalıdır. Havuzlayıcının 1.21.0 ve üstü işlem havuzlamada hazırlanmış ifadeleri takip etmekte, 1.22.0 ilgili temizleme komutlarını desteklemektedir. Kısıt yalnızca genişletilmiş sorgu protokolüdür. sqlx bunu kullandığı için uyumludur; ancak dokümanda ilgili ayarın sıfır bırakılmasının performans çöküşü yaratacağı uyarısı bulunmalıdır.
 
-**21. `synchronous_commit`'i transaction sınıfına göre ayarla.**
-PostgreSQL "individual transactions can be configured not to wait for replication by setting the `synchronous_commit` parameter to `local` or `off`" ([replication config](https://www.postgresql.org/docs/current/runtime-config-replication.html)). Argus: kullanıcı/kimlik/anahtar yazmaları `on` + `ANY 1 (az2, az3)` quorum; brute-force sayaçları, son-giriş zamanı, telemetri `local`. Böylece 3-AZ senkron quorum'un latency bedeli sadece dayanıklılık gerektiren yazmalara yansır.
+21. Senkron işleme ayarı işlem sınıfına göre yapılmalıdır. PostgreSQL bireysel işlemlerin replikasyonu beklememesini yapılandırmaya izin vermektedir. Argus'ta kullanıcı, kimlik ile anahtar yazmaları yeter sayı beklemeli; kaba kuvvet sayaçları, son giriş zamanı ile telemetri yerel işlemeyle yazılmalıdır. Böylece üç alanlı senkron yeter sayının gecikme bedeli yalnızca dayanıklılık gerektiren yazmalara yansımaktadır.
 
-**22. Kendi konteyner imajını distroless üzerine kur, ama musl'a körlemesine geçme.**
-`gcr.io/distroless/static-debian13` ~2 MiB, alpine'ın %50'si, debian'ın %2'sinden az ([distroless](https://github.com/GoogleContainerTools/distroless)); `base` varyantı CA certs + tzdata içeriyor. ⚠️ Ama musl allocator/threading'in çok-thread'li Rust'ta ciddi yavaşlama ürettiği raporlanmış ([andygrove, 2020](https://andygrove.io/2020/05/why-musl-extremely-slow/)) — Argon2 + tokio iş yükünde **kendi benchmark'ınızı yapmadan** `x86_64-unknown-linux-musl`'a geçmeyin. Güvenli varsayılan: **glibc + `distroless/cc`**; musl+scratch opsiyonel.
+22. Kendi konteyner imajınız dağıtımsız bir tabana kurulmalı ancak musl'a körlemesine geçilmemelidir. Statik dağıtımsız imaj yaklaşık iki mebibayttır; temel varyant sertifika otoriteleri ile saat dilimi verisi içermektedir. Ancak musl ayırıcısının ile iş parçacığı yönetiminin çok iş parçacıklı Rust'ta ciddi yavaşlama ürettiği raporlanmıştır; Argon2 ile eşzamansız çalışma zamanı iş yükünde kendi kıyaslamanızı yapmadan musl'a geçilmemelidir. Güvenli varsayılan standart C kütüphaneli dağıtımsız imajdır; musl ile sıfırdan imaj isteğe bağlıdır.
 
-**23. Build'i cargo-chef ile katmanla, ama workspace-dışı path dependency kullanma.**
-cargo-chef planner/cook/builder ile "up to 5x"; iki katı kural: cook ve build **aynı working directory**'den çalışmalı, ve "cargo build will build local dependencies (outside of the current project) from scratch, even if they are unchanged" ([cargo-chef](https://github.com/LukeMathWalker/cargo-chef)). Argus'un repo düzeni tek workspace olmalı.
+23. Derleme cargo-chef ile katmanlanmalı ancak çalışma alanı dışında yol bağımlılığı kullanılmamalıdır. Aracın iki katı kuralı şudur: pişirme ile derleme aynı çalışma dizininden çalıştırılmalıdır ile proje dışındaki yerel bağımlılıklar değişmemiş olsalar bile sıfırdan derlenmektedir. Argus'un depo düzeni tek bir çalışma alanı olmalıdır.
 
-**24. Dağıtım kanalı bağımsızlığı: kendi Helm chart'ını kendi OCI registry'nde yayınla, imaj referanslarını kendi imajına sabitle.**
-Bitnami 28 Ağustos 2025'te sürümlü imajları `bitnamilegacy`'ye taşıdı ("no further updates or support") ve `bitnamicharts` OCI artefaktları güncellenmiyor; bundled imajlar override edilmezse deploy'lar patlıyor ([bitnami/charts#35164](https://github.com/bitnami/charts/issues/35164), [bitnamilegacy/keycloak](https://hub.docker.com/r/bitnamilegacy/keycloak)). Argus'un chart'ı **hiçbir üçüncü taraf imaj kataloğuna** (özellikle PostgreSQL subchart'ına) bağımlı olmamalı — DB'yi harici bir gereksinim olarak belge, kendi chart'ına gömme.
+24. Dağıtım kanalı bağımsızlığı için kendi paketiniz kendi kayıt defterinizde yayımlanmalı ile imaj referansları kendi imajınıza sabitlenmelidir. Bitnami 28 Ağustos 2025'te sürümlü imajları bir eski depoya taşımış, artefaktlar güncellenmemekte ile paketlenmiş imajlar geçersiz kılınmazsa dağıtımlar patlamaktadır. Argus'un paketi hiçbir üçüncü taraf imaj kataloğuna, özellikle bir veritabanı alt paketine bağımlı olmamalıdır; veritabanı harici bir gereksinim olarak belgelenmeli ile pakete gömülmemelidir.
 
-**25. Operator'ü Helm'in üstüne değil, Helm'in yanına koy — ve sadece CRD'nin gerçekten çözdüğü sorunlar için.**
-Keycloak'ın resmî Helm chart'ı yok; sadece Operator var ve kurulum "strongly recommend using manual approval mode" uyarısıyla geliyor ([installation](https://www.keycloak.org/operator/installation)). CRD'ler yıllarca v2alpha1'de kaldı ([#45795](https://github.com/keycloak/keycloak/issues/45795)) ve RealmImport CR yalnızca oluşturuyor, güncellemiyor/silmiyor, geri senkronlamıyor ([realm-import docs](https://www.keycloak.org/operator/realm-import)). **Argus için Helm chart birinci sınıf olmalı**; Operator'ün gerekçesi yalnızca (a) rolling-update uygunluk kararı ve (b) migration job orkestrasyonu olmalı — realm/client reconciliation'ı Terraform provider'a bırakın.
+25. Operatör Helm'in üstüne değil yanına konulmalı ile yalnızca kaynak tanımlarının gerçekten çözdüğü sorunlar için kullanılmalıdır. Keycloak'ın resmî bir paketi yoktur, yalnızca operatör vardır ile kurulum elle onay uyarısıyla gelmektedir. Kaynak tanımları yıllarca alfa sürümünde kalmış ile alan içe aktarma tanımı yalnızca oluşturmaktadır. Argus için Helm paketi birinci sınıf olmalıdır; operatörün gerekçesi yalnızca yuvarlanan güncelleme uygunluk kararı ile göç işi orkestrasyonu olmalıdır. Alan ile istemci uzlaştırması bir Terraform sağlayıcısına bırakılmalıdır.
 
-**26. PDB `maxUnavailable: 1`, topology spread zone'da `DoNotSchedule` + hostname'de `ScheduleAnyway`, `matchLabelKeys: [pod-template-hash]`.**
-PDB yalnızca gönüllü kesintileri korur ve `minAvailable: 100%` node drain'i sonsuza kadar askıya alır ([PDB docs](https://kubernetes.io/docs/tasks/run-application/configure-pdb/)). `matchLabelKeys: [pod-template-hash]` rolling update sırasında eski/yeni ReplicaSet pod'larının birbirini saymasını önler ([topology spread docs](https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/)). `unhealthyPodEvictionPolicy: AlwaysAllow` (varsayılan) bırakılmalı — aksi halde sağlıksız pod'lar drain'i kilitler.
+26. Kesinti bütçesi en fazla bir kullanılamaz kapsüle izin vermeli; topoloji dağılımı bölgede sert, ana bilgisayarda yumuşak olmalı ile kapsül şablonu özetiyle eşleşme kullanılmalıdır. Bütçe yalnızca gönüllü kesintileri korumakta ile tam kullanılabilirlik istenirse boşaltma sonsuza kadar askıda kalmaktadır. Şablon özetiyle eşleşme, yuvarlanan güncelleme sırasında eski ile yeni kopya kümelerinin kapsüllerinin birbirini saymasını önlemektedir. Sağlıksız kapsül tahliye politikası varsayılanında bırakılmalıdır; aksi hâlde sağlıksız kapsüller boşaltmayı kilitlemektedir.
 
-**27. Veritabanı topolojisi: tek Kubernetes kümesi, 3+ AZ, shared-nothing, 3'ün katı node.**
-CloudNativePG'nin resmî tavsiyesi ([architecture](https://cloudnative-pg.io/docs/devel/architecture)): "The multi-availability zone Kubernetes architecture with three (3) or more zones is the one that we recommend"; "Deploy Postgres nodes in multiples of three—ideally with one node per availability zone"; her node'da yerel disk, storage-level replikasyona hayır. Ve sınır: **"CloudNativePG cannot perform any cross-cluster automated failover"** — bu, sizin tek-bölge kararınızın doğruluğunu operatör tarafından da onaylıyor.
+27. Veritabanı topolojisi tek bir Kubernetes kümesi, üç ve üzeri erişilebilirlik alanı, hiçbir şey paylaşmayan mimari ile üçün katı düğüm olmalıdır. Operatörün resmî tavsiyesi budur; her düğümde yerel disk kullanılmalı ile depolama seviyesi replikasyon kullanılmamalıdır. Sınır şudur: bu operatör kümeler arası otomatik devralma yapamamaktadır; bu, tek bölge kararının doğruluğunu operatör tarafından da onaylamaktadır.
 
-**28. RPO/RTO'yu pgBackRest ile hedefle; `pg_dump`'ı tek yedek stratejisi yapma.**
-pgBackRest: PITR (time/LSN/xid/name), delta restore (SHA-1 karşılaştırma + `process-max`), AES-256-CBC repo şifreleme, çoklu repo (yerel + S3), `verify` komutu ([user guide](https://pgbackrest.org/user-guide.html)). Dokümanın kendi uyarısı: **"Only restore testing can determine which repository will be most efficient"** → restore tatbikatı Argus'un ops dokümantasyonunda zorunlu bir bölüm olmalı.
+28. Kurtarma noktası ile kurtarma süresi hedefleri pgBackRest ile hedeflenmeli; mantıksal döküm tek yedek stratejisi yapılmamalıdır. Araç zaman içinde geri yükleme, fark geri yüklemesi, depo şifreleme, çoklu depo ile doğrulama sunmaktadır. Dokümanın kendi uyarısı şudur: hangi deponun en verimli olacağını yalnızca geri yükleme testi belirleyebilmektedir. Dolayısıyla geri yükleme tatbikatı Argus'un operasyon dokümantasyonunda zorunlu bir bölüm olmalıdır.
 
-**29. Kiracı bazında geri yüklemeyi ürün özelliği olarak vaat etme; şema-per-tenant veya yan-restore desenini belgele.**
-`pg_restore -t` için doküman açık: "makes no attempt to restore any other database objects that the selected table(s) might depend upon" ve subsidiary objects (index'ler) dahil edilmez; large object'ler ya hep ya hiç ([pg_restore](https://www.postgresql.org/docs/current/app-pgrestore.html)). Tek şema + `tenant_id` tasarımında satır-seviyesi restore **mümkün değil**. Argus'un dürüst duruşu: yedekten ayrı instance'a restore → `tenant_id` filtreli mantıksal kopyalama runbook'u yayınla; ve uygulama katmanında soft-delete + audit log ile restore ihtiyacını azalt.
+29. Kiracı bazında geri yükleme bir ürün özelliği olarak vaat edilmemeli; kiracı başına şema ya da yan geri yükleme deseni belgelenmelidir. Geri yükleme aracının dokümanı seçici geri yüklemenin bağımlılıkları getirmediğini, yardımcı nesneleri dahil etmediğini ile büyük nesnelerde ya hep ya hiç davrandığını söylemektedir. Tek şema ile kiracı kimliği tasarımında satır seviyesi geri yükleme mümkün değildir. Argus'un dürüst duruşu şudur: yedeği ayrı bir örneğe geri yükleyip kiracı süzgeçli mantıksal kopyalama başucu kitabı yayımlamak ile uygulama katmanında yumuşak silme ve denetim günlüğüyle geri yükleme ihtiyacını azaltmaktır.
 
-**30. Lisans: sunucu için AGPL-3.0 (veya MPL-2.0), SDK/client kütüphaneleri için Apache 2.0.**
-Zitadel v3 ile Apache 2.0 → AGPL-3.0'a geçti (31 Mart 2025), sadece yeni katkılar AGPL, SDK'lar mevcut lisansını korudu, ticari lisans sunuldu ([blog](https://zitadel.com/blog/apache-to-agpl)). Alternatif model Ory'nin open-core'u: OSS "non-critical workloads" için, **CVE yamaları ve SLA'lı güvenlik release'leri OEL'de** ([hydra](https://github.com/ory/hydra)) — bu bir IdP için etik olarak tartışmalı. Kanidm'in MPL-2.0'ı (dosya bazlı copyleft, ağ kullanımını tetiklemez) ılımlı ara yol. **Argus için tavsiye: sunucu AGPL-3.0 veya MPL-2.0, SDK'lar Apache 2.0, güvenlik yamaları asla ticari katmana kilitlenmesin.**
+30. Lisans olarak sunucu için AGPL 3.0 ya da MPL 2.0, geliştirme kitleri için Apache 2.0 seçilmelidir. Zitadel üçüncü sürümle geçiş yapmış, yalnızca yeni katkıları yeni lisansa almış, geliştirme kitlerini korumuş ile ticari lisans sunmuştur. Alternatif model Ory'nin açık çekirdeğidir; ancak açık yamalarının ile hizmet seviyeli güvenlik sürümlerinin ticari katmanda olması bir kimlik sağlayıcı için etik olarak tartışmalıdır. Kanidm'in lisansı ılımlı bir ara yoldur. Argus için tavsiye sunucunun AGPL ya da MPL, geliştirme kitlerinin Apache olması ile güvenlik yamalarının asla ticari katmana kilitlenmemesidir.
 
-**31. CRA hazırlığını 11 Aralık 2027'ye göre planla, ama `SECURITY.md`'yi bugün yaz.**
-CRA Madde 71: Chapter IV 11 Haziran 2026, **Madde 14** 11 Eylül 2026, regülasyonun tamamı 11 Aralık 2027 ([Article 71](https://www.european-cyber-resilience-act.com/Cyber_Resilience_Act_Article_71.html)). ENISA açıkça belirtiyor: **manufacturer'lar 11 Eylül 2026'dan, açık kaynak steward'ları 11 Aralık 2027'den** itibaren raporlar ([ENISA SRP FAQ](https://www.enisa.europa.eu/topics/product-security/single-reporting-platform-srp/frequently-asked-questions)). Argus'un arkasında tüzel kişi yoksa steward yükümlülüğü **hiç** doğmaz ([ORC WG whitepaper](https://github.com/orcwg/orcwg/blob/main/cyber-resilience-sig/whitepapers/stewards-and-cra.md)); monetize edilmeyen FOSS zaten kapsam dışı ([EC](https://digital-strategy.ec.europa.eu/en/policies/cra-open-source)). Ama Madde 24 §1'in istediği "documented in a verifiable manner" cybersecurity policy zaten iyi mühendislik — şimdi yazın.
+31. Siber dayanıklılık hazırlığı 11 Aralık 2027'ye göre planlanmalı ancak güvenlik dosyası bugün yazılmalıdır. Yürürlük maddesine göre dördüncü bölüm 11 Haziran 2026'da, 14. madde 11 Eylül 2026'da ile tamamı 11 Aralık 2027'de uygulanmaktadır. ENISA açıkça belirtmektedir: üreticiler 11 Eylül 2026'dan, açık kaynak vekilleri 11 Aralık 2027'den itibaren raporlamaktadır. Argus'un arkasında bir tüzel kişi yoksa vekil yükümlülüğü hiç doğmamaktadır; paraya çevrilmeyen açık kaynak zaten kapsam dışıdır. Ancak 24. maddenin istediği doğrulanabilir biçimde belgelenmiş siber güvenlik politikası zaten iyi mühendisliktir; şimdi yazılmalıdır.
 
-**32. GitHub CNA + private vulnerability reporting kullan; kendi CNA'nızı kurmayın.**
-GitHub CNA'dır, draft advisory'den CVE talep edilebilir ve ~72 saatte incelenir; yayınlanan advisory Advisory Database'e ve Dependabot alert'lerine akar ([GitHub docs](https://docs.github.com/en/code-security/security-advisories/working-with-repository-security-advisories/about-repository-security-advisories)). Keycloak'ın politikası şablon olarak alınabilir: 7 iş günü ack, PoC zorunlu (scanner çıktısı kabul edilmez), bulgu başına ayrı rapor, araştırmacıya kredi ([policy](https://github.com/keycloak/keycloak/security/policy)).
+32. GitHub numaralandırma otoritesi ile özel zafiyet bildirimi kullanılmalı; kendi otoriteniz kurulmamalıdır. Taslak danışmanlıktan numara talep edilebilmekte ile yaklaşık 72 saatte incelenmektedir; yayımlanan danışmanlık veritabanına ile bağımlılık uyarılarına akmaktadır. Keycloak'ın politikası bir şablon olarak alınabilir: yedi iş günü alındı bildirimi, zorunlu kavram kanıtı, bulgu başına ayrı rapor ile araştırmacıya kredi.
 
-**33. Sürüm imzalama: cosign keyless + SLSA L2 hedefle; reproducible build TAAHHÜT ETME.**
-cosign keyless OIDC → Fulcio → Rekor zinciri ve `cosign sign $IMAGE` kadar basit ([sigstore docs](https://docs.sigstore.dev/cosign/signing/signing_with_containers/)). SLSA L2 = hosted platform + imzalı provenance; L3 = build run izolasyonu + imzalama anahtarının build adımlarından erişilemezliği ([SLSA v1.1](https://slsa.dev/spec/v1.1/levels)) — ve **hiçbiri reproducible build gerektirmiyor.** Rust/cargo reproducible-builds.org CI listesinde yok ve Cargo Book reproducibility'den bahsetmiyor. Argus'un taahhüdü: `--locked` + pinned toolchain + SLSA L2 provenance + cosign; bit-for-bit reproducibility "best effort".
+33. Sürüm imzalamada anahtarsız imzalama ile ikinci seviye tedarik zinciri hedeflenmeli; yeniden üretilebilir derleme taahhüt edilmemelidir. Anahtarsız zincir basittir. İkinci seviye barındırılan platform artı imzalı köken bilgisi, üçüncü seviye derleme izolasyonu artı imzalama anahtarının erişilemezliğidir; hiçbiri yeniden üretilebilir derleme gerektirmemektedir. Rust ilgili listede yoktur ile Cargo kitabı bundan bahsetmemektedir. Argus'un taahhüdü kilitli derleme, sabitlenmiş araç zinciri, ikinci seviye köken bilgisi ile imzalamadır; bit bit yeniden üretilebilirlik elden gelenin en iyisidir.
 
-**34. Tedarik zinciri: `build.rs` içeren her yeni bağımlılık manuel incelensin.**
-20 Ağustos 2026 arrayref saldırısında maintainer hesabı ele geçirildi ve kötü amaçlı `proc-macro1` bağımlılığı "a build script that was downloading a malicious payload" içeriyordu; zararlı sürümler 86–107 dakika yayında kaldı ([Rust blog](https://blog.rust-lang.org/2026/08/20/supply-chain-attack-on-arrayref/)). 2025'te ayrıca phishing kampanyası ve dört ayrı kötü amaçlı crate olayı yaşandı. Bir IdP için: `cargo-deny` + `cargo-vet` + `cargo-auditable` + vendored bağımlılıklar + build.rs incelemesi **isteğe bağlı değil.**
+34. Tedarik zincirinde derleme betiği içeren her yeni bağımlılık elle incelenmelidir. 20 Ağustos 2026 saldırısında bakımcı hesabı ele geçirilmiş ile kötü amaçlı bağımlılık bir yük indiren derleme betiği içermekteydi; zararlı sürümler 86 ile 107 dakika arasında yayında kalmıştır. 2025'te ayrıca bir kimlik avı kampanyası ile dört ayrı kötü amaçlı paket olayı yaşanmıştır. Bir kimlik sağlayıcı için lisans ile danışmanlık taraması, bağımlılık denetimi, denetlenebilir ikili dosya, satıcılaştırılmış bağımlılıklar ile derleme betiği incelemesi isteğe bağlı değildir.
 
-**35. Sır yönetimi: dosya tabanlı secret + `secrecy`/`zeroize`, imzalama anahtarları için `memsafe`/mlock, rotation'da pod reload'u kendin çöz.**
-`secrecy` açıkça mlock/mprotect sunmuyor; `zeroize` buffer realloc'undan önceki kopyaları garanti edemiyor ve Spectre sınıfı sızıntılara karşı garanti vermiyor ([docs.rs/secrecy](https://docs.rs/secrecy/latest/secrecy/), [docs.rs/zeroize](https://docs.rs/zeroize/latest/zeroize/)); `memsafe` mmap+mlock+`MADV_DONTDUMP`+`MADV_WIPEONFORK` yapıyor ([crates.io/memsafe](https://crates.io/crates/memsafe)). External Secrets Operator ise "there is no Secret Operator that handles the lifecycle of the secret" — **rotation sonrası pod reload ESO'nun işi değil** ([ESO overview](https://external-secrets.io/latest/introduction/overview/)). Argus: secret dosyalarını **inotify ile izleyip yeniden yüklesin**, restart gerektirmesin.
+35. Sır yönetiminde dosya tabanlı sırlar ile sır ve sıfırlama kütüphaneleri, imzalama anahtarları için bellek kilitleme kullanılmalı ile rotasyonda kapsül yeniden yüklemesi kendiniz çözülmelidir. Sır kütüphanesi bellek kilitleme sunmamakta, sıfırlama kütüphanesi yeniden tahsis öncesi kopyaları garanti edememekte ile bellek güvenliği kütüphanesi kilitleme ve döküm dışlama bayrakları sunmaktadır. Harici sır operatörü ise sırrın yaşam döngüsünü yönetmemektedir; rotasyon sonrası kapsül yeniden yüklemesi onun işi değildir. Argus sır dosyalarını dosya sistemi olaylarıyla izleyip yeniden yüklemeli ile yeniden başlatma gerektirmemelidir.
 
-**36. Vault dinamik DB kimlik bilgilerini destekle: lease yenileme + TTL bitiminde yeniden bağlanma pool'da ele alınsın.**
-Vault PostgreSQL secrets engine dinamik kullanıcıları `VALID UNTIL '{{expiration}}'` ile üretir ve static role'lerde `rotation_period` ile parola döndürür ([Vault docs](https://developer.hashicorp.com/vault/docs/secrets/databases/postgresql)). Argus'un connection pool'u, parola değiştiğinde **yeni bağlantıların yeni parolayı** kullanmasını sağlamalı ve mevcut bağlantıları gereksiz yere kapatmamalı.
+36. Vault dinamik veritabanı kimlik bilgileri desteklenmeli; kiralama yenileme ile süre bitiminde yeniden bağlanma havuzda ele alınmalıdır. İlgili sır motoru dinamik kullanıcıları bir geçerlilik tarihiyle üretmekte ile statik rollerde bir rotasyon periyoduyla parola döndürmektedir. Argus'un bağlantı havuzu, parola değiştiğinde yeni bağlantıların yeni parolayı kullanmasını sağlamalı ile mevcut bağlantıları gereksiz yere kapatmamalıdır.
 
 ---
 
-## Doğrulanamayanlar (⚠️)
+## Doğrulanamayanlar
 
-1. **Rust distroless/scratch imajlarının kesin boyutları** (26.2 MB distroless-chef, 8.38 MB musl+scratch) — yalnızca ikincil blog kaynağı ([cloudnativefolks](https://blog.cloudnativefolks.org/cargo-chef-speed-up-your-docker-builds-reduce-image-size-of-your-rust-project)). Kendi ölçümünüzü yapın.
-2. **musl allocator/threading performansının 2026'daki durumu** — tek kaynak 2020 tarihli ([andygrove.io](https://andygrove.io/2020/05/why-musl-extremely-slow/)); musl 1.2.x mallocng sonrası yeniden ölçülmeli.
-3. **RFC 9700'ün (OAuth 2.0 Security BCP) tam yayın tarihi** — arama sonucu "March 2025" dedi; RFC metninden doğrulanmadı.
-4. **Keycloak'ın Liquibase migration'larının forward-only olduğu ve rollback için DB restore gerektiği** — yalnızca ikincil kaynak (skycloak blog); resmî dokümanda açık ifade bulunamadı (ancak `migration-strategy` seçeneklerinde down yok).
-5. **Keycloak ve Zitadel için formel LTS / destek penceresi sayfaları** — `keycloak.org/support` ve `zitadel.com/docs/support/version-policy` 404 döndü.
-6. **Red Hat build of Keycloak yaşam döngüsü tarihleri** — `access.redhat.com/support/policy/updates/rhbk` 404.
-7. **authentik'in lisansı** (core MIT + enterprise?) — doğrulanmadı.
-8. **sqlx migration'larının advisory lock ile eşzamanlılık koruması ve checksum/dirty-state davranışı** — docs.rs ve sqlx-cli README'de belgelenmemiş; kaynak koddan teyit gerekir.
-9. **crates.io Trusted Publishing'in mevcut durumu ve provenance/attestation desteği** — `crates.io/docs/trusted-publishing` içerik döndürmedi; Rust blog arşivinde konuya özel yazı yok.
-10. **Keycloak'ın büyük kurulumlarda major upgrade DB migration süresi** (saatler mi?) — resmî dokümanda somut rakam yok; yalnızca ikincil kaynaklardan "migration can take significant time on large databases".
-11. **Kanidm'in veritabanı motorunun SQLite tabanlı olup olmadığı** — README "its own high-performance database" diyor, SQLite'tan bahsetmiyor.
-12. **Zitadel masterkey'in kaybı durumunda kurtarma prosedürü olup olmadığı** — "cannot be changed" ifadesi doğrulandı, ancak kayıp senaryosu için resmî prosedür bulunamadı.
-13. **Keycloak'ın imzalama anahtarları için PKCS#11/HSM desteği** — `java-keystore` provider'ı (JKS/PKCS12/BCFKS) doğrulandı; doğrudan PKCS#11/HSM desteği doğrulanamadı.
-14. **`ANY k` quorum commit ile 3-AZ arasında gerçek latency maliyeti** — PostgreSQL dokümanı sözdizimini veriyor, sayısal etki vermiyor. Keycloak benchmark'ındaki 20 ms RTT verisi dolaylı bir gösterge.
+1. Rust dağıtımsız ile sıfırdan imajlarının kesin boyutları yalnızca ikincil bir blog kaynağındandır. Kendi ölçümünüzü yapmalısınız.
+2. musl ayırıcı ile iş parçacığı performansının 2026'daki durumu doğrulanamamıştır; tek kaynak 2020 tarihlidir ile sonraki ayırıcı iyileştirmelerinden sonra yeniden ölçülmelidir.
+3. RFC 9700'ün tam yayın tarihi doğrulanamamıştır; arama sonucu bir tarih vermiş ancak RFC metninden doğrulanmamıştır.
+4. Keycloak göçlerinin yalnızca ileri yönlü olduğu ile geri alma için veritabanı geri yüklemesi gerektiği yalnızca ikincil bir kaynaktandır; resmî dokümanda açık bir ifade bulunamamıştır.
+5. Keycloak ile Zitadel için formel uzun dönem destek ile destek penceresi sayfaları bulunamamıştır; ilgili adresler 404 dönmüştür.
+6. Red Hat derlemesinin yaşam döngüsü tarihleri bulunamamıştır; ilgili adres 404 dönmüştür.
+7. authentik'in lisansı doğrulanamamıştır.
+8. sqlx göçlerinin tavsiye kilidiyle eşzamanlılık koruması ile sağlama toplamı ve kirli durum davranışı belgelenmemiştir; kaynak koddan teyit gerekmektedir.
+9. crates.io güvenilir yayımlama özelliğinin mevcut durumu ile köken ve kanıtlama desteği doğrulanamamıştır; ilgili sayfa içerik döndürmemiştir.
+10. Keycloak'ın büyük kurulumlarda ana sürüm yükseltme göç süresi doğrulanamamıştır; resmî dokümanda somut bir rakam yoktur, yalnızca ikincil kaynaklarda büyük veritabanlarında göçün önemli zaman alabileceği belirtilmektedir.
+11. Kanidm'in veritabanı motorunun SQLite tabanlı olup olmadığı doğrulanamamıştır; deposu kendi yüksek performanslı veritabanı demekte ile SQLite'tan bahsetmemektedir.
+12. Zitadel ana anahtarının kaybı durumunda bir kurtarma prosedürü olup olmadığı doğrulanamamıştır; değiştirilemez ifadesi doğrulanmış ancak kayıp senaryosu için resmî bir prosedür bulunamamıştır.
+13. Keycloak'ın imzalama anahtarları için donanım modülü arayüzü desteği doğrulanamamıştır; anahtar deposu sağlayıcısı doğrulanmıştır ancak doğrudan donanım desteği doğrulanamamıştır.
+14. Yeter sayı işlemesiyle üç erişilebilirlik alanı arasındaki gerçek gecikme maliyeti doğrulanamamıştır; PostgreSQL dokümanı sözdizimini vermekte, sayısal etkiyi vermemektedir. Keycloak kıyaslamasındaki gidiş dönüş verisi dolaylı bir göstergedir.

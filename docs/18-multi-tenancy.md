@@ -1,58 +1,53 @@
-# 18. Çok kiracılık mimarisi
+# §18 — Çok kiracılık mimarisi
 
-> `ARGUS.md` §18'den taşındı. Numaralandırma korundu; bu dosyanın
-> içindeki `§18 §X` referansları aynı anlamda.
-
-
+Bu bölüm önceden ARGUS.md içindeydi; numaralandırma korunmuştur ve dosya içindeki §X referansları aynı anlamdadır.
 
 ---
 
-### 0. YÖNETİCİ ÖZETİ — NET KARAR
+## 0. Yönetici özeti, net karar
 
-| # | Karar | Seçim | Gerekçe (tek cümle) |
+| # | Karar | Seçim | Gerekçe |
 |---|---|---|---|
-| 1 | Veri izolasyonu | **`tenant_id` + RLS (FORCE) + `SET LOCAL` + transaction pooling**, gün-1'den `placement_id` kaçış kolonuyla | Schema-per-tenant 1.200 şemada 383 ms katalog taraması ve 2 saatlik migration'a çarpıyor; satır bazlı milyonlara ölçekleniyor |
-| 2 | İmzalama anahtarı | **Tenant başına, ES256 varsayılan** — müzakere edilemez | Storm-0558 ve CVE-2026-23552, paylaşımlı anahtarda tek savunmanın RP'nin `iss` kontrolü olduğunu ve RP'lerin bunu yapmadığını kanıtladı |
-| 3 | Kullanıcı kimliği | **Tenant-yerel** (`UNIQUE(tenant_id, …)`), asla global; çapraz erişim açık `grant`/`link` ile | E-posta ile otomatik birleştirme nOAuth sınıfı hesap devralmaya açıyor |
-| 4 | Hiyerarşi | **Düz tenant listesi**; ağaç tenant İÇİNDE gruplarla | Zitadel, Auth0, Okta, Entra, WorkOS — hepsi iç içe tenant'ı reddetti; Frontegg yaptı ve miras JWT'ye sığmıyor |
-| 5 | Issuer | **Subdomain birincil** (`acme.argus.io`, wildcard sertifika), custom domain yükseltme, path-based destekli ama varsayılan değil | Ayrı origin = tarayıcı düzeyinde çerez/XSS izolasyonu; CVE-2023-6717 bunun bedelini gösterdi |
-| 6 | `client_id` | **Global benzersiz** (Keycloak'ın aksine) | RFC 6749 §2.2 client_id'yi yalnız AS içinde benzersiz kılıyor; iki bağımsız savunma katmanı gerekli |
-| 7 | Rust | Tenant tipte kodlanır; **branded lifetime** (`generativity`) ile çapraz erişim derleme hatası | Olgun mekanizma var (3,99M indirme), çok kiracılığa uygulanmış yayımlanmış örnek yok — Argus ilk olur |
+| 1 | Veri izolasyonu | `tenant_id` ile zorlanmış satır seviyesi güvenlik, `SET LOCAL` ve işlem havuzlaması; birinci günden bir `placement_id` kaçış kolonuyla | Kiracı başına şema, 1.200 şemada 383 milisaniyelik katalog taramasına ile iki saatlik migration'a çarpmaktadır; satır bazlı yaklaşım milyonlara ölçeklenmektedir |
+| 2 | İmzalama anahtarı | Kiracı başına, varsayılanı ES256; müzakere edilemez | Storm-0558 ile CVE-2026-23552, paylaşımlı anahtarda tek savunmanın ilgili tarafın `iss` kontrolü olduğunu ve ilgili tarafların bunu yapmadığını kanıtlamıştır |
+| 3 | Kullanıcı kimliği | Kiracıya yerel, yani `UNIQUE(tenant_id, …)`; asla global olmaz ve çapraz erişim açık bir yetki ile bağla verilerek yapılır | E-posta ile otomatik birleştirme nOAuth sınıfı hesap devralmaya açmaktadır |
+| 4 | Hiyerarşi | Düz kiracı listesi; ağaç, kiracının içindeki gruplarla kurulur | Zitadel, Auth0, Okta, Entra ile WorkOS'un hepsi iç içe kiracıyı reddetmiştir; Frontegg yapmıştır ve miras JWT'ye sığmamaktadır |
+| 5 | Issuer | Birincil olarak alt alan adı, yani `acme.argus.io`, joker sertifikayla; özel alan adı bir yükseltmedir; path tabanlı desteklenir ancak varsayılan değildir | Ayrı köken, tarayıcı düzeyinde çerez ile XSS izolasyonu demektir; CVE-2023-6717 bunun bedelini göstermiştir |
+| 6 | `client_id` | Küresel benzersiz, Keycloak'ın aksine | RFC 6749 §2.2 `client_id`'yi yalnızca yetkilendirme sunucusu içinde benzersiz kılmaktadır ve iki bağımsız savunma katmanı gerekmektedir |
+| 7 | Rust | Kiracı tipte kodlanır; markalı yaşam süreleriyle, yani `generativity` ile, çapraz erişim bir derleme hatası olur | Olgun bir mekanizma vardır, 3,99 milyon indirme; çok kiracılığa uygulanmış yayımlanmış bir örnek yoktur ve Argus ilk olur |
 
-**Tek cümlelik gerekçe:** Bu kararların hiçbiri "en kolay" değil; hepsi **sonradan değiştirilemeyen** kararlar ve piyasadaki her IdP bunlardan en az birinde yanlış seçim yapıp yıllarca bedelini ödedi.
+Tek cümlelik gerekçe şudur: bu kararların hiçbiri en kolay olan değildir; hepsi sonradan değiştirilemeyen kararlardır ve piyasadaki her IdP bunlardan en az birinde yanlış seçim yapıp yıllarca bedelini ödemiştir.
 
-**Bunu en iyi özetleyen tek kanıt** — Kanidm (olgun bir Rust IdP) bakımcısı William Brown, 12 Haziran 2026:
+Bunu en iyi özetleyen tek kanıt, olgun bir Rust IdP'si olan Kanidm'in bakımcısı William Brown'ın 12 Haziran 2026 tarihli ifadesidir:
 
-> "It would be a very large undertaking to add this support within Kanidm. We discussed it many years ago and the complexity and risks (**especially security wise**) were not worth it."
+> "It would be a very large undertaking to add this support within Kanidm. We discussed it many years ago and the complexity and risks (especially security wise) were not worth it."
 
-Sonuç: "not planned", 13 Haziran 2026. ([kanidm#4395](https://github.com/kanidm/kanidm/issues/4395))
+Sonuç 13 Haziran 2026'da planlanmadı olarak kapatılmasıdır; kanidm deposunda 4395 numaralı issue'dur.
 
 ---
 
-## BÖLÜM I — MEVCUT IdP'LERİN ÇOK KİRACILIK MODELLERİ
+## Bölüm I — Mevcut IdP'lerin çok kiracılık modelleri
 
-### 1.1 Keycloak realm — mimari, maliyet, tavan
+### 1.1 Keycloak realm'i: mimari, maliyet ile tavan
 
-#### Realm nedir, neyi izole eder
-
-Resmî tanım ([server_admin](https://www.keycloak.org/docs/latest/server_admin/index.html)):
+**Realm nedir ve neyi izole eder.** Resmî tanımı sunucu yönetimi dokümanındadır:
 
 > "A realm is a space where you manage objects, including users, applications, roles, and groups. A user belongs to and logs into a realm."
-> "**One Keycloak deployment can define, store, and manage as many realms as there is space for in the database.**"
+>
+> "One Keycloak deployment can define, store, and manage as many realms as there is space for in the database."
 
-Bu ikinci cümle, aşağıdaki üretim kanıtlarıyla **doğrudan çelişiyor**. Resmî dokümanın realm sayısı hakkındaki tek ifadesi bu ve yanlış.
+Bu ikinci cümle aşağıdaki üretim kanıtlarıyla doğrudan çelişmektedir. Resmî dokümanın realm sayısı hakkındaki tek ifadesi budur ve yanlıştır.
 
-**Kaynak kodundan doğruladım.** `jpa-changelog-1.0.0.Final.xml` (main branch) — ilk şema, 29 tablo:
+Kaynak kodundan doğrulanmıştır. `jpa-changelog-1.0.0.Final.xml`, ana dal, ilk şema, 29 tablo içermektedir. `REALM_ID` ayırıcı kolonunu taşıyanlar şunlardır:
 
 ```
-REALM_ID ayırıcı kolonu taşıyanlar:
 CLIENT, EVENT_ENTITY, FED_PROVIDERS, KEYCLOAK_ROLE, REALM_APPLICATION, REALM_ATTRIBUTE,
 REALM_DEFAULT_ROLES, REALM_EVENTS_LISTENERS, REALM_REQUIRED_CREDENTIAL, REALM_SMTP_CONFIG,
 REALM_SOCIAL_CONFIG, USERNAME_LOGIN_FAILURE, USER_ENTITY, USER_FEDERATION_PROVIDER,
 USER_SESSION, USER_SOCIAL_LINK
 ```
 
-**Keycloak satır bazlı çok kiracılık kullanıyor.** Schema-per-realm yok, database-per-realm yok, RLS yok. Güncel `UserEntity.java` (main):
+Keycloak satır bazlı çok kiracılık kullanmaktadır. Realm başına şema yoktur, realm başına veritabanı yoktur ve satır seviyesi güvenlik yoktur. Güncel `UserEntity.java` şöyledir:
 
 ```java
 @Table(name="USER_ENTITY", uniqueConstraints = {
@@ -63,116 +58,110 @@ USER_SESSION, USER_SOCIAL_LINK
 protected String realmId;      // ← düz String. @ManyToOne DEĞİL. FK YOK.
 ```
 
-`CLIENT` tablosunda: `UNIQUE(REALM_ID, CLIENT_ID)` → **`client_id` realm kapsamlı, global değil.**
+`CLIENT` tablosunda `UNIQUE(REALM_ID, CLIENT_ID)` vardır, yani `client_id` realm kapsamlıdır, küresel değildir.
 
-**İzole ETMEDİKLERİ** (hepsi doğrulandı):
+İzole etmedikleri, hepsi doğrulanmış olarak şunlardır.
 
-| İzole değil | Kanıt |
+| İzole değildir | Kanıt |
 |---|---|
-| DB şeması | Tek paylaşımlı şema, `REALM_ID` satır ayırıcısı |
-| Bağlantı havuzu | Tek havuz ([keycloak.org/high-availability](https://www.keycloak.org/high-availability/multi-cluster/concepts-database-connections)) |
-| JVM / heap | Tek JVM |
-| Infinispan cache'leri | `realms`, `users`, `keys` **tek global cache**, realm başına değil |
-| HTTP portu / origin | `/realms/{realm}/…` yol segmenti — **aynı origin** |
-| Tema cache'i | `ThemeKey = (name, type)` — realm'e göre anahtarlanmıyor, **sınırsız `ConcurrentHashMap`, eviction yok** |
-| Provider classloader | Sunucu başına bir kez |
+| Veritabanı şeması | Tek bir paylaşımlı şema ile `REALM_ID` satır ayırıcısı vardır |
+| Bağlantı havuzu | Tek havuzdur; keycloak.org'un yüksek erişilebilirlik dokümanı |
+| JVM ile yığın | Tek JVM'dir |
+| Infinispan önbellekleri | `realms`, `users` ile `keys` tek küresel önbellektir, realm başına değildir |
+| HTTP portu ile köken | `/realms/{realm}/…` bir yol segmentidir, yani aynı kökendir |
+| Tema önbelleği | Anahtarı isim ile tipten oluşmaktadır, realm'e göre anahtarlanmamaktadır; sınırsız bir eşleme tablosudur ve tahliye yoktur |
+| Sağlayıcı sınıf yükleyicisi | Sunucu başına bir kezdir |
 
-#### Realm başına maliyet — somut
+**Realm başına maliyet, somut olarak.**
 
-**Anahtarlar.** `DefaultKeyProviders.createProviders(RealmModel)` realm başına **dört** sağlayıcı: `rsa-generated` (SIG), `rsa-enc-generated` (ENC, RSA-OAEP), `hmac-generated-hs512`, `aes-generated`. `AbstractGeneratedRsaKeyProviderFactory`: `private int defaultKeySize = 2048;`
+Anahtarlar tarafında `DefaultKeyProviders.createProviders(RealmModel)` realm başına dört sağlayıcı kurmaktadır: `rsa-generated` imza için, `rsa-enc-generated` RSA-OAEP şifreleme için, `hmac-generated-hs512` ile `aes-generated`. `AbstractGeneratedRsaKeyProviderFactory` içinde varsayılan anahtar boyutu 2048'dir.
 
-Yani **realm başına iki adet RSA-2048 çifti**. Doküman: *"When a realm is created, a key pair and a self-signed certificate is automatically generated."*
+Yani realm başına iki adet RSA-2048 çifti üretilmektedir. Doküman şöyle demektedir: "When a realm is created, a key pair and a self-signed certificate is automatically generated."
 
-**Bu makinede ölçtüm** (macOS/Apple Silicon, LibreSSL 3.3.6; süreç başlatma tabanı 1,90 ms çıkarıldı):
+Bu makinede ölçülmüştür; macOS ile Apple Silicon, LibreSSL 3.3.6 ve süreç başlatma tabanı olan 1,90 milisaniye çıkarılmıştır.
 
 | Algoritma | Ham | Net |
 |---|---|---|
-| EC P-256 (ES256) | 2,29 ms | **~0,4 ms** |
-| Ed25519 (ssh-keygen, G/Ç dahil) | 4,43 ms | ~2,5 ms |
-| RSA-2048 | 54,99 ms | **~53 ms** |
-| RSA-4096 | 584,13 ms | ~582 ms |
+| EC P-256, yani ES256 | 2,29 ms | Yaklaşık 0,4 ms |
+| Ed25519, ssh-keygen ile ve girdi çıktı dahil | 4,43 ms | Yaklaşık 2,5 ms |
+| RSA-2048 | 54,99 ms | Yaklaşık 53 ms |
+| RSA-4096 | 584,13 ms | Yaklaşık 582 ms |
 
-**RSA-2048, P-256'dan ~130× yavaş.** Keycloak'ın realm başına 2×RSA-2048'i = ~110 ms saf CPU/tenant → 100.000 tenant = **~3 saat tek çekirdek**. ES256 ile aynı iş **~80 saniye**.
+RSA-2048, P-256'dan yaklaşık 130 kat yavaştır. Keycloak'ın realm başına iki RSA-2048 anahtarı kiracı başına yaklaşık 110 milisaniye saf işlemci demektir; 100.000 kiracı için tek çekirdekte yaklaşık üç saat eder. ES256 ile aynı iş yaklaşık 80 saniyedir.
 
-> **Literatürde tartışılmayan bağımlılık: algoritma seçimi izolasyon mimarisini belirliyor.** RSA seçersen "tenant başına anahtar" ölçeklenmez ve ekibi paylaşımlı anahtara iter — ki bu Bölüm III'te gösterdiğim üzere ölümcül.
+> **Literatürde tartışılmayan bir bağımlılık vardır: algoritma seçimi izolasyon mimarisini belirlemektedir.** RSA seçilirse kiracı başına anahtar ölçeklenmez ve ekip paylaşımlı anahtara itilir; üçüncü bölümde gösterildiği gibi bu ölümcüldür.
 
-**Cache.** `docs/guides/server/caching.adoc` (main):
+Önbellek tarafında `docs/guides/server/caching.adoc` şöyle demektedir: "Local caches for realms, users, and authorization are configured to hold up to 10,000 entries per default."
 
-> "Local caches for realms, users, and authorization are configured to hold up to **10,000 entries per default**."
+`realms` önbelleği düz, küresel ve 10.000 girdilik bir en az kullanılanı çıkaran önbellektir ve realm başına bir girdi tutmamaktadır; realm ile her istemci, istemci kapsamı, rol ve grup hem kimlik hem isimle anahtarlanmaktadır. 1 Ağustos 2024 tarihli bir forum gözlemi şöyledir:
 
-`realms` cache **düz, global, 10.000 girdilik LRU** ve realm başına bir girdi tutmuyor — realm + her client + client scope + rol + grup, hem ID hem isimle anahtarlanmış. Üretim gözlemi ([forum, 1 Ağu 2024](https://forum.keycloak.org/t/realm-cache-entries-are-greater-than-the-number-of-realms/27277)):
+> "I have one 'test' realm configured in addition to the master realm… I see that the realm cache jumps up to hundreds of entries."
 
-> "I have one 'test' realm configured in addition to the master realm… I see that the realm cache jumps up to **hundreds of entries**."
+Yüzlerce realm tavanının mekanizması budur: sabit küresel önbellek bütçesi, değişken realm başı girdi sayısına bölünmektedir.
 
-**İşte "yüzlerce realm" tavanının mekanizması budur:** sabit global cache bütçesi ÷ değişken realm-başı girdi sayısı.
+**Neden binlerce realm çalışmamaktadır, ölçülmüştür.**
 
-#### Neden binlerce realm çalışmıyor — ölçülmüş
+Proje lideri Stian Thorgersen 11 Ekim 2018'de keycloak-dev listesinde şöyle demiştir: "Keycloak simply doesn't scale well with regards to large number of realms today."
 
-Proje lideri Stian Thorgersen, keycloak-dev, **11 Ekim 2018**:
+Kök mimari kusur master realm'in O(N) bağlamasıdır. Keycloak katkıcısı Alexander Schwartz 3 Haziran 2022 tarihli 12332 numaralı tartışmada şunu açıklamıştır: her realm master içinde bir `xxx-realm` istemcisi yaratmakta ve master'a girişte bu bileşik roller değerlendirilmektedir; kalıcılık bağlamı büyümekte ve bu, Hibernate'in kirli kontrolünü yavaşlatmaktadır. Üç bin realm'de yapışkan oturumla yaklaşık 50 saniye, yapışkan oturum olmadan yaklaşık 110 saniye giriş süresi ölçülmüştür.
 
-> "**Keycloak simply doesn't scale well with regards to large number of realms today.**"
+Bakımcı stianst bu düzeltmeyi reddetmiştir: "This approach doesn't work I'm afraid as there's a clear use-case for managing all realms from the master realm." Yani O(N) bağlama kasıtlıdır ve kalıcıdır.
 
-**Kök mimari kusur — master realm O(N) bağlaması.** Keycloak collaborator Alexander Schwartz (ahus1), [Discussion #12332](https://github.com/keycloak/keycloak/discussions/12332), 3 Haz 2022: her realm `xxx` master'da `xxx-realm` client'ı yaratır; master'a login'de bu composite roller değerlendirilir. *"the persistence context grows, which slows down Hibernate's dirty checking."*
+Kronolojik ölçümler şöyledir.
 
-> **3000 realm: sticky session ile ~50 saniye login, sticky olmadan ~110 saniye.**
-
-Bakımcı **stianst bu düzeltmeyi reddetti**: *"This approach doesn't work I'm afraid as there's a clear use-case for managing all realms from the master realm."* → **O(N) bağlama kasıtlı ve kalıcı.**
-
-**Kronolojik ölçümler:**
-
-| Sürüm/Tarih | Realm | Bulgu | Kaynak |
+| Sürüm ile tarih | Realm | Bulgu | Kaynak |
 |---|---|---|---|
-| KC 4.8.1, 31 Oca 2019 | 0→350 | Realm yaratma 1104→11535 ms; **token alma 636→3197 ms (5×)**; ~470'te "basically unusable" | [SO 54465114](https://stackoverflow.com/questions/54465114/) |
-| KC 16.1, 18 Oca 2022 | 5→350 | Master admin console soğuk açılış **50 ms → 2 dakika (2400×)**; realm-yerel admin console **etkilenmiyor** | [forum 13127](https://forum.keycloak.org/t/performance-with-500-realms/13127) |
-| KC 17, 1 Nis 2022 | ~620 | Üstel bozulma, test terk edildi. Optimizasyon dalıyla 3000 realm'de lineer | [#11074](https://github.com/keycloak/keycloak/discussions/11074) |
-| KC 20.0.5, 18 Nis 2023 | 400 | Admin Console yüklenmiyor, `/admin/realms/{r}/users` timeout, JDBC leak. **"not planned" kapatıldı** | [#19793](https://github.com/keycloak/keycloak/issues/19793) |
-| KC 20, 19 May 2023 | 307 | `/admin/realms?briefRepresentation=true` **107 saniye** (KC 17'de ~15 sn → **7× regresyon**) | [#20453](https://github.com/keycloak/keycloak/issues/20453) |
-| KC 26, 29 May 2024 | 600+ | Realm dropdown açılması **~6 dakika**. Düzeltme: **UI sayfalama** (#30219), backend değil | [#29978](https://github.com/keycloak/keycloak/issues/29978) |
+| KC 4.8.1, 31 Ocak 2019 | 0'dan 350'ye | Realm yaratma 1104'ten 11535 milisaniyeye, token alma 636'dan 3197 milisaniyeye çıkmıştır, yani beş kat; yaklaşık 470'te temelde kullanılamaz hâle gelmiştir | Stack Overflow 54465114 |
+| KC 16.1, 18 Ocak 2022 | 5'ten 350'ye | Master yönetim konsolunun soğuk açılışı 50 milisaniyeden iki dakikaya çıkmıştır, yani 2400 kat; realm'e yerel yönetim konsolu etkilenmemiştir | Forum 13127 |
+| KC 17, 1 Nisan 2022 | Yaklaşık 620 | Üstel bozulma görülmüş ve test terk edilmiştir. Optimizasyon dalıyla üç bin realm'de doğrusal kalmıştır | Tartışma 11074 |
+| KC 20.0.5, 18 Nisan 2023 | 400 | Yönetim konsolu yüklenmemekte, kullanıcı listesi zaman aşımına uğramakta ve JDBC sızıntısı olmaktadır. Planlanmadı olarak kapatılmıştır | Issue 19793 |
+| KC 20, 19 Mayıs 2023 | 307 | `/admin/realms?briefRepresentation=true` isteği 107 saniye sürmektedir; KC 17'de yaklaşık 15 saniyeydi, yani yedi kat gerileme vardır | Issue 20453 |
+| KC 26, 29 Mayıs 2024 | 600'den fazla | Realm açılır listesinin açılması yaklaşık altı dakika sürmektedir. Düzeltme arka uçta değil arayüzde sayfalamadır, 30219 numaralı issue | Issue 29978 |
 
-**On yıllık aynı kusur, Temmuz 2026'da düzeldi.** [#50369](https://github.com/keycloak/keycloak/issues/50369), 26 Haz 2026, KC 26.7.0: composite rol genişletmesi `getChildRoles` N+1 + her sorgudan önce full auto-flush. Ölçüm: composite genişletme CPU payı **%62 → %5,6**; DB sorgu/sn **5526 → 614 (−%89)**.
+On yıllık aynı kusur Temmuz 2026'da düzelmiştir. 50369 numaralı issue, 26 Haziran 2026, KC 26.7.0: bileşik rol genişletmesinde `getChildRoles` N artı bir sorgusu ile her sorgudan önce tam otomatik boşaltma vardı. Ölçüm şudur: bileşik genişletmenin işlemci payı %62'den %5,6'ya, saniyedeki veritabanı sorgusu 5526'dan 614'e, yani %89 azalmıştır.
 
-**Pratik tavan konsensüsü: 200–500 realm/küme, bozulma 100–200'de başlıyor.**
+Pratik tavan uzlaşısı küme başına 200 ile 500 realm, bozulmanın 100 ile 200'de başlamasıdır.
 
 | Kaynak | Rakam |
 |---|---|
-| xgp (Phase Two), 1 Nis 2021 | "serious problems when using more than **~400 realms**" |
-| Cloud-IAM (ticari Keycloak host), 8 Oca 2025 | "Performance is degraded beyond **a hundred or so** realms" |
-| Phase Two, 21 Nis 2025 | "simply doesn't scale when you have 50, 100, or 500 tenants" |
-| Klathmon, HN, 11 Şub 2024 | "after around **200 realms** things start breaking" |
-| Üretim, KC 11.0.3, 25 Ağu 2021 | **373 realm**: login'de 20-30 sn; GC büyümesi → **aylık restart** |
-| Üretim, KC 24.0.5, 2 Eki 2024 | **31. realm'de** `/admin/serverinfo` 400 Bad Request (token/header boyutu) |
+| xgp, Phase Two, 1 Nisan 2021 | Yaklaşık 400 realm'in üzerinde ciddi sorunlar |
+| Cloud-IAM, ticari Keycloak barındırıcısı, 8 Ocak 2025 | Yüz civarı realm'in ötesinde performans bozulmaktadır |
+| Phase Two, 21 Nisan 2025 | 50, 100 veya 500 kiracıda basitçe ölçeklenmemektedir |
+| Klathmon, Hacker News, 11 Şubat 2024 | Yaklaşık 200 realm'den sonra işler bozulmaya başlamaktadır |
+| Üretim, KC 11.0.3, 25 Ağustos 2021 | 373 realm'de girişte 20 ile 30 saniye; çöp toplayıcı büyümesi aylık yeniden başlatma gerektirmektedir |
+| Üretim, KC 24.0.5, 2 Ekim 2024 | 31. realm'de `/admin/serverinfo` isteği token veya başlık boyutu nedeniyle 400 döndürmektedir |
 
-26.x ne değiştirdi? **Mimari olarak hiçbir şey.** En iyimser iddia topluluktan ([#11074](https://github.com/keycloak/keycloak/discussions/11074), 5 Eki 2025): *"With Keycloak 26.4, it should be fine to run Keycloak with 1k+ realms **as long as you keep increasing the realm cache**."* — Bu bir ayar geçici çözümü, tenant'ı heap'le satın alıyorsun. Multi-site/multi-cluster (26.7) bir DR özelliği; `realms` cache düğüm-yereldir, **site eklemek realm tavanını yükseltmez**.
+26.x ne değiştirmiştir sorusunun cevabı mimari olarak hiçbir şeydir. Topluluktan gelen en iyimser iddia 5 Ekim 2025 tarihli 11074 numaralı tartışmadadır: Keycloak 26.4 ile realm önbelleğini artırmaya devam ettiğiniz sürece bin ve üzeri realm çalıştırmak sorun olmamalıdır. Bu bir ayar geçici çözümüdür ve kiracıyı yığın belleğiyle satın almaktır. Çok bölgeli ile çok kümeli yapı, yani 26.7, bir felaket kurtarma özelliğidir; `realms` önbelleği düğüme yereldir ve bölge eklemek realm tavanını yükseltmez.
 
-**Resmî bir maksimum realm sayısı beyanı yok** `[DOĞRULANAMADI]`. Resmî 26.4 benchmark'ında **realm sayısı boyutu hiç yok** — bu boşluk başlı başına bilgi.
+Resmî bir azami realm sayısı beyanı yoktur ve bu doğrulanamamıştır. Resmî 26.4 kıyaslamasında realm sayısı boyutu hiç yoktur; bu boşluk başlı başına bir bilgidir.
 
-#### Keycloak Organizations — Keycloak'ın kendi itirafı
+**Keycloak Organizations, Keycloak'ın kendi itirafı.**
 
-KC 25 preview → **26.0.0 GA (4 Eki 2024)**. Resmî çerçeve bir CIAM boşluğu; **itiraf sözel değil, yapısal**: Keycloak realm içine ikinci bir tenancy primitifi inşa etti — org başına IdP, org başına domain, üyelik, token'da org claim'leri — çünkü realm çoğaltılamıyordu.
+KC 25'te önizleme, 26.0.0 ile genel kullanıma açılmıştır, 4 Ekim 2024. Resmî çerçeve bir müşteri kimlik yönetimi boşluğudur; itiraf sözel değil yapısaldır: Keycloak realm'in içine ikinci bir kiracılık ilkeli inşa etmiştir, yani organizasyon başına kimlik sağlayıcı, organizasyon başına alan adı, üyelik ile token'da organizasyon claim'leri, çünkü realm çoğaltılamıyordu.
 
-Dokümandan doğruladığım kritik tasarım kararları:
+Dokümandan doğrulanan kritik tasarım kararları şunlardır.
 
-- Alias: *"The alias is unique within a realm and must be URL-friendly… **Once defined, the alias cannot be changed afterwards.**"* → **değişmez tenant slug'ı.**
-- *"A domain cannot be shared by different organizations within a realm."*
-- Üyelik: *"An organization member is **basically a realm user but with a link to** one or more organizations."* → **kullanıcı realm'e ait (global), org bir üyelik bağı.**
-- Managed vs unmanaged: org silinince managed üyeler silinir, unmanaged'lar realm'de kalır. [#30747](https://github.com/keycloak/keycloak/issues/30747): *"members can have only **one managed membership**"* → **çok üyelik, ama yaşam döngüsünü tam bir tanesi sahiplenir.** Bu, "bu kullanıcıyı kim silebilir" sorusunun en temiz formülasyonu.
-- Domain eşleme: exact vs wildcard (`.example.com`), *"The most specific match wins, measured by the number of domain parts"*; en az 2, en fazla 10 parça; `com`, `*.com` reddedilir.
+Takma ad hakkında: "The alias is unique within a realm and must be URL-friendly… Once defined, the alias cannot be changed afterwards." Yani değişmez bir kiracı kısa adıdır.
 
-**Dürüst karşı-argüman** — xgp (Phase Two), [forum, 8 Tem 2025](https://forum.keycloak.org/t/best-practice-for-keycloak-multi-tenancy/12893):
+Alan adı hakkında: "A domain cannot be shared by different organizations within a realm."
 
-> "In a Realm, every user is in the same 'pool' of users. There is not a concept of 'logging into a tenant'… The Keycloak organizations functionality is essentially **a different way of associating users with a group on steroids**."
+Üyelik hakkında: "An organization member is basically a realm user but with a link to one or more organizations." Yani kullanıcı realm'e aittir, küreseldir ve organizasyon bir üyelik bağıdır.
 
-Ve Organizations'ın kendisi yeni regresyonlar üretti: [#46681](https://github.com/keycloak/keycloak/issues/46681) (27 Şub 2026, **hâlâ açık**) — `/admin/realms/{r}/users` kullanıcı başına org üyelik N+1 sorgusu tetikliyor, hiç org olmasa bile.
+Yönetilen ile yönetilmeyen üyeler hakkında: organizasyon silinince yönetilen üyeler silinir, yönetilmeyenler realm'de kalır. 30747 numaralı issue şöyle demektedir: üyeler yalnızca bir yönetilen üyeliğe sahip olabilir. Yani çok üyelik vardır ancak yaşam döngüsünü tam olarak bir tanesi sahiplenir. Bu, bu kullanıcıyı kim silebilir sorusunun en temiz formülasyonudur.
 
-Delegated admin GA'dan **iki yıl sonra** geldi (26.7.0, 9 Tem 2026): `manage-organizations` / `view-organizations` rolleri + FGAP. Kalan sınır, verbatim: *"Sub-resource permissions — such as separate control over an organization's members, groups, or identity providers — are not included in this milestone."*
+Alan adı eşlemesi hakkında: tam eşleşme ile joker karakter, yani `.example.com`, vardır; en spesifik eşleşme kazanır ve bu alan adı parçası sayısıyla ölçülür; en az iki, en fazla on parça olur ve `com` ile `*.com` reddedilir.
 
----
+Dürüst karşı argüman xgp'nin 8 Temmuz 2025 tarihli forum yazısındadır:
 
-### 1.2 Zitadel — event-sourced izolasyon, ve ondan geri dönüş
+> "In a Realm, every user is in the same 'pool' of users. There is not a concept of 'logging into a tenant'… The Keycloak organizations functionality is essentially a different way of associating users with a group on steroids."
 
-#### Gerçek DDL (kaynak koddan)
+Organizations'ın kendisi de yeni gerilemeler üretmiştir: 46681 numaralı issue, 27 Şubat 2026, hâlâ açıktır; `/admin/realms/{r}/users` isteği kullanıcı başına bir organizasyon üyelik sorgusu tetiklemektedir, hiç organizasyon olmasa bile.
 
-`cmd/initialise/sql/08_events_table.sql` (main, 8 Eyl 2026):
+Delege yönetim genel kullanıma açılmadan iki yıl sonra gelmiştir, 26.7.0, 9 Temmuz 2026: `manage-organizations` ile `view-organizations` rolleri ve ince taneli yönetim izinleri eklenmiştir. Kalan sınır birebir şöyledir: "Sub-resource permissions — such as separate control over an organization's members, groups, or identity providers — are not included in this milestone."
+
+### 1.2 Zitadel: olay kaynaklı izolasyon ve ondan geri dönüş
+
+**Gerçek DDL, kaynak koddan.** `cmd/initialise/sql/08_events_table.sql`, ana dal, 8 Eylül 2026:
 
 ```sql
 CREATE TABLE IF NOT EXISTS eventstore.events2 (
@@ -193,289 +182,243 @@ CREATE TABLE IF NOT EXISTS eventstore.events2 (
 CREATE INDEX es_projection ON eventstore.events2 (instance_id, aggregate_type, event_type, "position");
 ```
 
-Dikkatli okuyun:
+Dikkatle okunmalıdır. `instance_id` birincil anahtarın ilk kolonudur ve her indeksin başındadır; gerçek bölümleme anahtarı örnektir. `owner`, yani organizasyon, birincil anahtarda değildir ve hiçbir indekste değildir; yani organizasyon fiziksel bir sınır değil indekslenmiş bir özniteliktir. `owner` iddia edilmez, miras alınır: `commands_to_events()` içinde `CASE WHEN c.enforce_owner THEN c.owner ELSE COALESCE(e.owner, c.owner) END` ifadesi vardır ve bir agregatın organizasyonu ilk olayıyla sabitlenir. Kullanıcıların organizasyonlar arası taşınamamasının teknik nedeni tam olarak budur.
 
-- **`instance_id` birincil anahtarın ilk kolonu ve her indeksin başında.** Gerçek bölümleme anahtarı instance.
-- **`owner` (organizasyon) PK'da DEĞİL, hiçbir indekste DEĞİL.** → **Org fiziksel bir sınır değil, indekslenmiş bir öznitelik.**
-- `owner` iddia edilmez, **miras alınır**: `commands_to_events()` içinde `CASE WHEN c.enforce_owner THEN c.owner ELSE COALESCE(e.owner, c.owner) END` — bir aggregate'in org'u ilk olayıyla sabitlenir. **Kullanıcıların org'lar arası taşınamamasının teknik nedeni tam olarak budur.**
+Benzersizlik kapsamı da örnektir; `10_unique_constraints_table.sql` içinde `PRIMARY KEY (instance_id, unique_type, unique_field)` vardır. Organizasyon kapsamlı kullanıcı adı bir dize kurgusuyla sağlanmaktadır, yani `user@orgdomain.instancedomain` biçimiyle, bir veritabanı kısıtıyla değil.
 
-Benzersizlik kapsamı da instance (`10_unique_constraints_table.sql`): `PRIMARY KEY (instance_id, unique_type, unique_field)`. Org kapsamlı kullanıcı adı **dize kurgusuyla** sağlanıyor (`user@orgdomain.instancedomain`), DB kısıtıyla değil.
+> Not olarak zitadel.com'un olay deposu implementasyon sayfası hâlâ birinci sürüm `events` tablosunu belgelemektedir. SQL'e güvenilmeli, o sayfaya güvenilmemelidir.
 
-> **Not:** [zitadel.com/docs/concepts/eventstore/implementation](https://zitadel.com/docs/concepts/eventstore/implementation) hâlâ v1 `events` tablosunu belgeliyor. SQL'e güvenin, o sayfaya değil.
+**Organizasyonun izole ettikleri ile etmedikleri.** İzole ettikleri giriş davranışı, çok adımlı doğrulama, parolasız akış ile oturum ömrü, kimlik sağlayıcılar, parola karmaşıklığı ile süresi, kilitleme, markalama, mesaj metinleri, alan adları, proje yetkileri ile kullanıcı adı biçimidir. İzole etmedikleri OIDC issuer'ı, giriş alan adı, benzersizlik kapsamı, projeksiyon durumu ile hız ve kota limitleridir; hepsi örnek seviyesindedir.
 
-#### Org'un izole ettikleri, etmedikleri
+Özel alan adı dokümanı birebir şöyle demektedir: "by default, you cannot access ZITADEL at an organization's domain. Organization level domains are intended for routing users by their login methods to their correct organization."
 
-**İzole:** login davranışı/MFA/passwordless/oturum ömrü, IdP'ler, parola karmaşıklığı/süresi, kilitleme, markalama, mesaj metinleri, domain'ler, proje grant'leri, kullanıcı adı formatı.
+Organizasyon seçimi bir OIDC kapsamıyla yapılmaktadır: `urn:zitadel:iam:org:id:{id}`. Doküman şöyle der: "ZITADEL will enforce that the user is a member of the selected organization."
 
-**İzole DEĞİL:** OIDC issuer, login domain'i, benzersizlik kapsamı, projeksiyon durumu, rate/kota limitleri — hepsi instance seviyesinde.
+**Kullanıcı modeli, ikinci okul, saf hâliyle.** Doküman şöyledir:
 
-Verbatim, [custom-domain dokümanı](https://zitadel.com/docs/self-hosting/manage/custom-domain): *"by default, you cannot access ZITADEL at an organization's domain. Organization level domains are intended for routing users by their login methods to their correct organization."*
+> "Users exist strictly within one Organization." ve "It is currently not possible to move users between organizations." ve "You can reuse the same email address for different user accounts across organizations."
 
-Org seçimi OIDC scope'uyla: `urn:zitadel:iam:org:id:{id}` — *"ZITADEL will enforce that the user is a member of the selected organization."*
+Çapraz erişim harici kullanıcı yetkisiyle sağlanmaktadır: bir organizasyon başka bir organizasyonun kullanıcılarını kendi projelerine davet eder. Bu ikinci bir üyelik değil bir yetkidir.
 
-#### Kullanıcı modeli — School B, saf haliyle
+Hiyerarşi yoktur ve gerekçesi kayıttadır; 11 Haziran 2026 tarihli 12248 numaralı tartışma:
 
-> "Users exist strictly within **one** Organization." / "It is currently not possible to move users between organizations." / "**You can reuse the same email address for different user accounts across organizations.**"
-> — [zitadel.com/docs/concepts/structure/users](https://zitadel.com/docs/concepts/structure/users)
+> "zitadel orgs are flat by design (no built-in parent/child)" … "Grants only work one level deep (Parent → Child) and you can't do Parent → Child → Grandchild so pls keep your hierarchy flat."
 
-Çapraz erişim **External User Grant** ile: bir org başka org'un kullanıcılarını kendi projelerine davet eder. İkinci bir üyelik değil, bir **grant**.
+Önerilen çözüm ebeveyn ile çocuk eşlemesini kendi uygulama veritabanınızda tutmaktır.
 
-Hiyerarşi yok, ve gerekçesi kayıtta — [Discussion #12248](https://github.com/zitadel/zitadel/discussions/12248), 11 Haz 2026:
+**Birinci gün çok kiracılık iddiası ne kadar gerçektir.**
 
-> "**zitadel orgs are flat by design (no built-in parent/child)**" … "**Grants only work one level deep (Parent → Child) and you can't do Parent → Child → Grandchild so pls keep your hierarchy flat.**"
+Gerçek olan şudur: `instance_id` ile `owner` temel şemadan beri her olaydadır; sınırsız organizasyon vardır ve yayımlanmış bir organizasyon limiti yoktur.
 
-Önerilen çözüm: ebeveyn-çocuk eşlemesini **kendi uygulama veritabanında tut**.
+Gerçek olmayanlar beş maddedir.
 
-#### "Gün-1 çok kiracılık" iddiası ne kadar gerçek
+1. Organizasyon bir bölümleme değil bir kolon değeridir. Organizasyon yaratmak ucuzdur ancak organizasyon fiziksel bir izolasyon birimi değildir. Kiracı başına örnek ise bir duvardır: 70'ten fazla projeksiyonun her biri örnek başına ayrı bir durum tutmakta ve ayrı bir tavsiye kilidi almaktadır.
+2. Zitadel N üzeri N sorununu kendisi kabul etmektedir; 12 Şubat 2026 tarihli blog yazısı şöyle der: her istek için bağlam çözümlemek bir N üzeri N ölçekleme darboğazı yaratmaktadır. Çözüm önbelleklemedir, ancak o önbellek v4.17'de hâlâ deneysel betadır ve varsayılan olarak kapalıdır.
+3. Yayımlanmış bir kıyaslama yoktur: hedefler yazılıdır, yani saniyede 1000 kimlik doğrulama ile 1200 giriş, ancak sonuçlar için yukarıdaki hedefe ulaşılır ulaşılmaz belirleneceği söylenmektedir.
+4. Gerçek rakamlar mütevazıdır; 31 Ocak 2025 tarihli 9285 numaralı tartışmaya göre tek bir Postgres ile saniyede yaklaşık 175 istek karşılanmakta ve 100 sanal kullanıcıda giriş 95. yüzdelikte 4,86 saniye sürmektedir. Bakımcı fforootd darboğazı bcrypt maliyeti 12 ile 14 olarak saptamıştır.
+5. Çok organizasyonlu kullanıcı desteği hâlâ yoktur: 5822 numaralı issue 11 Mayıs 2023'ten beri açıktır ve 11 kriterden biri tamamlanmıştır. Bakımcı hifabienne 8518 numaralı tartışmada platformun doğrudan bu kullanım senaryosu için tasarlanmadığını söylemektedir.
 
-**Gerçek olan:** `instance_id` ve `owner` temel şemadan beri her olayda. Sınırsız org, yayımlanmış org limiti yok.
+**En önemlisi: v5'te projeksiyonları terk etmektedirler.** 9599 numaralı "Relational database tables" issue'su, 21 Mart 2025, kilometre taşı Zitadel v5'tir ve 66 alt görevin 47'si tamamlanmıştır. Durumu olay kaynaklı projeksiyonlardan düz ilişkisel tablolara taşımaktadırlar; olay deposu yalnızca denetim için kalmaktadır. Birebir gerekçe şöyledir:
 
-**Gerçek olmayan:**
+> "This approach gave us a number of issues… Projections can become eventual consistent… This confuses tools like terraform"
 
-1. **Org bir bölümleme değil, kolon değeri.** Org yaratmak ucuz; org fiziksel izolasyon birimi değil. Instance-per-tenant ise duvar: 70+ projeksiyonun her biri instance başına ayrı durum tutuyor ve ayrı advisory lock alıyor.
-2. Zitadel N-over-N sorununu **kendi kabul ediyor** ([blog, 12 Şub 2026](https://zitadel.com/blog/scaling-cloud-native-identity-optimizing-performance-with-caching)): *"resolving context for every request creates an 'N-over-N' scaling bottleneck"* — çözüm cache. **Ama o cache v4.17'de hâlâ "experimental beta" ve varsayılan KAPALI.**
-3. Yayımlanmış benchmark **yok**: hedefler yazılı (1000 auth/sn, 1200 login/sn), sonuçlar *"Will be established as soon as the goal described above is reached."*
-4. Gerçek rakamlar mütevazı ([#9285](https://github.com/zitadel/zitadel/discussions/9285), 31 Oca 2025): tek Postgres ~175 req/s; login p95 100 VU'da 4,86 sn. Bakımcı fforootd darboğazı bcrypt cost 12-14 olarak saptadı.
-5. Çok org'lu kullanıcı desteği **hâlâ yok**: [#5822](https://github.com/zitadel/zitadel/issues/5822) 11 May 2023'ten beri açık, 11 kriterin 1'i tamam. Bakımcı hifabienne, [#8518](https://github.com/zitadel/zitadel/discussions/8518): platform *"is not directly designed for your use case."*
+Karar günlüğü sürücüyü doğrusal ölçeklenebilirlik sorunları olarak adlandırmakta ve kiracılık şeklini sabitlemektedir: kimlik benzersizliği, 4 Kasım 2025, kimlikler yalnızca örnek seviyesinde benzersizdir ve birincil anahtarlar `instance_id` ile kaynak kimliğini kullanmaktadır.
 
-#### En önemlisi: v5'te projeksiyonları terk ediyorlar
-
-[#9599 "Relational database tables"](https://github.com/zitadel/zitadel/issues/9599), 21 Mar 2025, milestone **Zitadel v5**, 66 alt-görevin 47'si tamam. Durumu event-sourced projeksiyonlardan düz ilişkisel tablolara taşıyorlar; eventstore yalnız denetim için kalıyor. Verbatim gerekçe:
-
-> "This approach gave us a number of issues… Projections can become eventual consistent… **This confuses tools like terraform**"
-
-[Decision Log](https://github.com/zitadel/zitadel/wiki/Decision-Log) sürücüyü **"linear scalability issues"** olarak adlandırıyor ve tenancy şeklini sabitliyor: *"**ID Uniqueness (Nov 4, 2025): IDs are unique at the instance level only.** Primary keys use `instance_id + resource_id`."*
-
-v5 prototip şeması (`backend/v3/storage/database/repository/inheritance.sql`) — dikkat, **org artık kullanıcı PK'sına giriyor**:
+v5 prototip şemasında, yani `backend/v3/storage/database/repository/inheritance.sql` dosyasında, organizasyon artık kullanıcı birincil anahtarına girmektedir:
 
 ```sql
 CREATE TABLE users ( username VARCHAR(50) NOT NULL,
     PRIMARY KEY (instance_id, org_id, id) ) INHERITS (org_objects);
 ```
 
-> **Argus için ders:** Zitadel org'u projeksiyon **özniteliği** yaptı, şimdi ölçeklenebilirlik için tüm depolama katmanını yeniden yazıyor ve org'u **anahtara** geri koyuyor. Tenant'ı gün-1'de birincil anahtara koy.
+> **Argus için ders.** Zitadel organizasyonu bir projeksiyon özniteliği yapmış, şimdi ölçeklenebilirlik için tüm depolama katmanını yeniden yazmakta ve organizasyonu anahtara geri koymaktadır. Kiracı birinci günde birincil anahtara konmalıdır.
 
----
+### 1.3 Diğer ürünler, hızlı ancak kesin
 
-### 1.3 Diğer ürünler — hızlı ama kesin
+**Auth0 Organizations.** Kullanıcılar kiracı seviyesindedir ve organizasyon bir üyelik katmanıdır. Kimliği organizasyon değil bağlantı sahiplenmektedir: "Every organization that uses the Auth0 Organizations feature uses exactly one Auth0 connection."
 
-#### Auth0 Organizations
-
-Kullanıcılar **tenant seviyesinde**, org bir üyelik katmanı. Kimliği org değil **connection** sahiplenir: *"Every organization that uses the Auth0 Organizations feature uses exactly one Auth0 connection."*
-
-**Limitler, verbatim** ([Entity Limit Policy](https://auth0.com/docs/troubleshoot/customer-support/operational-policies/entity-limit-policy)):
+Varlık limiti politikasından birebir limitler şunlardır.
 
 | Varlık | Limit |
 |---|---|
-| Organizations per Tenant | **100.000** |
-| Members per Organization | **100.000** |
-| **Connections per Organization** | **10** |
-| Discovery Domains per Organization | 100 |
-| Role Assignments per Organization Member | 50 |
+| Kiracı başına organizasyon | 100.000 |
+| Organizasyon başına üye | 100.000 |
+| Organizasyon başına bağlantı | 10 |
+| Organizasyon başına keşif alan adı | 100 |
+| Organizasyon üyesi başına rol ataması | 50 |
 
-**Pazarlama sayısıyla çelişen iki gerçek limit:**
+Pazarlama sayısıyla çelişen iki gerçek limit vardır.
 
-1. **Management API 1000 kayıt tavanı.** Auth0 personeli rueben.tiow, 27 Şub 2025: *"Both the Get Organizations and Get members who belong to an organization have a **1000 record limit**."* Ve *"there is not checkpoint pagination to retrieve more than 1000 organizations."* → **100.000 org saklayabilirsin; bir kullanıcının org'larını 1.000'in ötesinde sayamazsın.**
-2. **Organization Picker 20 gösterir** (güncelleme 10 Eyl 2025): *"only 20 Organizations are shown."*
+Birincisi yönetim API'sindeki bin kayıt tavanıdır. Auth0 personelinden rueben.tiow 27 Şubat 2025'te şöyle demiştir: organizasyonları alma ile bir organizasyona ait üyeleri alma isteklerinin ikisinde de bin kayıt limiti vardır; ayrıca binden fazla organizasyon almak için kontrol noktası sayfalaması yoktur. Yani 100.000 organizasyon saklayabilirsiniz ancak bir kullanıcının organizasyonlarını binin ötesinde sayamazsınız.
 
-**`org_name` bir tuzak.** Tenant genelinde açılır, org başına açılamaz; isimler değişebilir ve yeniden kullanılabilir; *"long-lived tokens do not expire when an organization changes its name."* Ve verbatim: *"**If your API does not verify `iss` claims, an organization with the same name in a different tenant could generate tokens that are incorrectly accepted.**"* Auth0'ın kendi tavsiyesi: *"Using organization IDs for token validation remains the recommended approach."*
+İkincisi organizasyon seçicisinin yirmi tane göstermesidir; 10 Eylül 2025 güncellemesinde yalnızca 20 organizasyonun gösterildiği yazmaktadır.
 
-**Org başına custom domain YOK.** Doküman kaçış yolunu açıkça yazıyor: *"you would need to use multiple Auth0 tenants."* Ayrıca Universal Login zorunlu; ROPC, Device Flow, WS-Fed uyumsuz.
+`org_name` bir tuzaktır. Kiracı genelinde açılır, organizasyon başına açılamaz; isimler değişebilir ile yeniden kullanılabilir ve uzun ömürlü token'lar bir organizasyon adını değiştirdiğinde süresi dolmaz. Birebir uyarı şöyledir: "If your API does not verify `iss` claims, an organization with the same name in a different tenant could generate tokens that are incorrectly accepted." Auth0'ın kendi tavsiyesi şudur: "Using organization IDs for token validation remains the recommended approach."
 
-Ve altı yıl sonra hâlâ boşluk dolduruyorlar — **29 Tem 2026: Organization-Level Roles (Early Access).** O güne kadar roller tenant-global, yalnız *ataması* org kapsamlıydı.
+Organizasyon başına özel alan adı yoktur ve doküman kaçış yolunu açıkça yazmaktadır: "you would need to use multiple Auth0 tenants." Ayrıca evrensel giriş zorunludur; kaynak sahibi parola kimlik bilgisi, cihaz akışı ile WS-Fed uyumsuzdur.
 
-#### WorkOS
+Altı yıl sonra hâlâ boşluk doldurmaktadırlar: 29 Temmuz 2026'da organizasyon seviyesinde roller erken erişime açılmıştır. O güne kadar roller kiracı genelinde küreseldi ve yalnızca ataması organizasyon kapsamlıydı.
 
-En temiz org modeli, ama gerçek sınır **environment**: *"**Email addresses are unique to each WorkOS environment.**"* Kullanıcı global, `OrganizationMembership` ile çok-org.
+**WorkOS.** En temiz organizasyon modelidir ancak gerçek sınır ortamdır: "Email addresses are unique to each WorkOS environment." Kullanıcı küreseldir ve `OrganizationMembership` ile çok organizasyonlu olabilir.
 
-Ve aktif e-posta birleştirme yapıyorlar ([blog, 1 Kas 2024](https://workos.com/blog/model-your-b2b-saas-with-organizations)): *"as long as the user keeps using the same email, **WorkOS will identify the duplication and resolve it by linking these identities under the same user**."*
+Aktif e-posta birleştirmesi yapmaktadırlar; 1 Kasım 2024 tarihli blog yazısı şöyledir: kullanıcı aynı e-postayı kullandığı sürece WorkOS yinelenmeyi tespit edecek ve bu kimlikleri aynı kullanıcı altında bağlayarak çözecektir.
 
-> Bu, nOAuth'un tam olarak kötüye kullandığı primitif. Savunmaları kimlik katmanında değil, domain katmanında: *"Only one organization can include a specific domain in its domain policy per environment."* Ve *"WorkOS does not allow addition of common consumer domains, like `gmail.com`."*
+> Bu, nOAuth'un tam olarak kötüye kullandığı ilkeldir. Savunmaları kimlik katmanında değil alan adı katmanındadır: ortam başına yalnızca bir organizasyon belirli bir alan adını kendi alan adı politikasına dahil edebilir. Ayrıca WorkOS gmail.com gibi yaygın tüketici alan adlarının eklenmesine izin vermemektedir.
 
-Çok-org login akışı doğru tasarlanmış: `organization_selection_required` → `pending_authentication_token` → `urn:workos:oauth:grant-type:organization-selection`. JWT: `sub`, `sid`, `iss`, `org_id`, `role`, `permissions`.
+Çok organizasyonlu giriş akışı doğru tasarlanmıştır: `organization_selection_required` durumundan `pending_authentication_token` ile `urn:workos:oauth:grant-type:organization-selection` grant tipine gidilmektedir. JWT içeriği `sub`, `sid`, `iss`, `org_id`, `role` ile `permissions`'tır.
 
-Sert kenar: bir org'da birden çok SSO bağlantısı varsa `organization` seçicisi kırılıyor — `ambiguous_connection_selector`.
+Sert kenar şudur: bir organizasyonda birden çok çoklu oturum açma bağlantısı varsa organizasyon seçicisi kırılmakta ve `ambiguous_connection_selector` hatası dönmektedir.
 
-Limitler: 6.000 req/60s per API key; org silme 50/60s; **yayımlanmış maksimum org sayısı yok** (1,88 MB doküman dökümü tarandı) `[DOĞRULANAMADI]`.
+Limitleri API anahtarı başına 60 saniyede 6.000 istek ile organizasyon silmede 60 saniyede 50 istektir; yayımlanmış bir azami organizasyon sayısı yoktur, ki 1,88 MB'lık doküman dökümü taranmıştır ve bu doğrulanamamıştır.
 
-#### Frontegg — hiyerarşiyi gerçekten yapan tek ürün, ve bedeli
+**Frontegg, hiyerarşiyi gerçekten yapan tek üründür ve bedeli vardır.** `parentTenantId` gerçektir ve API gerçektir, yani `POST /resources/hierarchy/v1`. Rol mirası gerçektir: bir üst hesapta verilen bir rol, altındaki her alt hesaba otomatik olarak uygulanır.
 
-`parentTenantId` gerçek, API gerçek (`POST /resources/hierarchy/v1`). Rol mirası gerçek: *"a role granted at a parent account automatically applies to every sub-account beneath it."*
+Ancak taşıyıcı uyarı birebir şöyledir:
 
-**Ama taşıyıcı uyarı, verbatim:**
+> "When users are granted access to sub-accounts, the accounts where they are allowed will not appear on the user's access token (JWT) or the user's state."
 
-> "When users are granted access to sub-accounts, **the accounts where they are allowed will not appear on the user's access token (JWT) or the user's state.**"
+Uygulama, kullanıcının hangi hesaplara erişebildiğini bir API çağrısıyla hesaplamak zorundadır.
 
-Uygulama, kullanıcının hangi hesaplara erişebildiğini **API çağrısıyla hesaplamak zorunda.**
+> **Hiyerarşinin bedeli tek cümlededir: miras geçişli hâle gelince token'a sığmayı bırakır ve her yetkilendirme kararı bir graf sorgusuna dönüşür.**
 
-> **Hiyerarşinin bedeli tek cümlede: miras geçişli hale gelince token'a sığmayı bırakır ve her yetkilendirme kararı bir graf sorgusuna dönüşür.**
+Azami derinlik hiçbir yerde belgeli değildir ve doğrulanamamıştır. Ayrıca engelleyici bir sınır vardır: özel giriş kutuları etkinleştirilmiş hesaplar arasında kiracı değiştirme desteklenmemektedir. Yani kiracı başına markalı giriş ile sorunsuz kiracı değişimi arasında seçim yapmak zorunda kalırsınız.
 
-Maksimum derinlik hiçbir yerde belgeli değil `[DOĞRULANAMADI]`. Ayrıca engelleyici bir sınır: *"switchTenant is not supported between accounts that have custom login boxes enabled."* — Tenant başına markalı login ile sorunsuz tenant değişimi arasında seçim yapmak zorundasın.
+Her planda geçerli sert bir kenar daha vardır: çoklu oturum açma yapılandırması yazma işlemi dakikada beş ile on istektir, kurumsal plan dahil. Binlerce kiracının çoklu oturum açma bağlantısını sağlamak, ne kadar ödenirse ödensin kısıtlıdır.
 
-Ve her planda geçerli sert bir kenar: **SSO config yazma 5–10/dakika, Enterprise dahil.** Binlerce tenant'ın SSO bağlantısını sağlamak, ne kadar ödersen öde kısıtlı.
+**authentik'te marka çok kiracılık değil markalamadır.** Doküman sayfasının başlığı birebir markalamadır. Marka alanları `authentik/brands/models.py` içinde alan adı, varsayılan bayrağı, markalama başlığı, logosu, favicon'u, özel CSS'i ile arka planı, dokuz varsayılan akış yabancı anahtarı, varsayılan uygulama, web sertifikası, istemci sertifikaları ile öznitelikler şeklindedir.
 
-#### authentik — "brand" çok kiracılık değil, markalama
+Markadan kullanıcıya, gruba, role, sağlayıcıya, kaynağa ya da politikaya hiçbir yabancı anahtar veya çoktan çoğa ilişki yoktur. Marka, hostname başına bir sunum ile varsayılan akış kaydıdır.
 
-Doküman sayfasının başlığı literal olarak **"Branding"**. Brand alanları (`authentik/brands/models.py`): `domain`, `default`, `branding_title/logo/favicon/custom_css/background`, **dokuz varsayılan flow FK'sı**, `default_application`, `web_certificate`, `client_certificates`, `attributes`.
+İzole etmediklerinin kanıtı 20 Haziran 2023 tarihli 6020 numaralı issue'dur: uygulamalarım listesi, kullanıcının en son eriştiği kiracıya göre uygulama kümesini göstermektedir. Planlanmadı olarak kapatılmış ve eski ile düzeltilmeyecek etiketleri verilmiştir. 6140 numaralı kiracı sayımı issue'su da planlanmadı olarak kapatılmıştır.
 
-**Brand'den User, Group, Role, Provider, Source, Policy'ye hiçbir FK veya M2M yok.** Brand = hostname başına sunum + varsayılan akış kaydı.
+Gerçek çok kiracılık, yani Postgres şemaları ile `django-tenants`, alfa aşamasındadır ve kurumsal sürüme kapalıdır. Bakımcı dewi-tik 23 Aralık 2025 tarihli 19009 numaralı issue'da şöyle demiştir:
 
-Kanıt ki izole etmiyorlar — [#6020](https://github.com/goauthentik/authentik/issues/6020) (20 Haz 2023): *"The 'My Applications' listing… will show the set of applications based on the last tenant accessed by the user."* **"not planned" kapatıldı, `legacy/wontfix`.** [#6140](https://github.com/goauthentik/authentik/issues/6140) "tenant enumeration" — o da "not planned".
+> "Multi-tenancy is still in early preview and likely to remain that way for the foreseeable future. It is also likely to remain an enterprise feature. However, there's nothing preventing you from running multiple instances and syncing users between them."
 
-Gerçek çok kiracılık (Postgres şemaları, `django-tenants`) alpha ve Enterprise'a kapalı. Bakımcı dewi-tik, [#19009](https://github.com/goauthentik/authentik/issues/19009), 23 Ara 2025:
+Belgeli sınır şudur: ifade politikalarının şu anda tüm kiracılara erişimi vardır.
 
-> "Multi-tenancy is still in **early preview and likely to remain that way for the foreseeable future**. It is also likely to remain an enterprise feature. However, **there's nothing preventing you from running multiple instances** and syncing users between them."
+**Okta'nın hücre mimarisi.** Eylül 2022 tarihli yüksek erişilebilirlik mimarisi beyaz kâğıdı şöyle demektedir:
 
-Belgeli sınır: *"Expression policies currently have access to all tenants."*
+> "One of the most critical aspects of Okta's architecture is that it is completely multi-tenant. With this design, customers share the same underlying environment."
+>
+> "Each Okta environment is called a cell… Because each cell can operate independently, they form the basis of our availability strategy by helping to limit the number of customers impacted by an outage."
+>
+> "every cell is an isolated, shared-nothing, identical replica of our infrastructure, spanning routers and load-balancers within our edge to databases."
 
-#### Okta — hücre (cell) mimarisi
+status.okta.com yaklaşık 26 tanımlayıcı listelemektedir, yani onlarca hücre vardır, yüzlerce değil.
 
-[High Availability Architecture whitepaper, Eyl 2022](https://www.okta.com/sites/default/files/2022-09/Okta%20High%20Availability%20Architecture_Whitepaper.pdf):
+Organizasyon modeli şöyledir: organizasyonlar sert sınırlardır, dolayısıyla nesneler organizasyonlar arasında paylaşılamaz. Federasyonla bile kullanıcılar her organizasyonda ayrı ayrı var olmaktadır. Alt organizasyon yoktur. Tek organizasyonlu kiracılık grup ile isim konvansiyonuyla yapılır; dokümanın kendi örneği `app-1-johndoe` biçimindedir.
 
-> "One of the most critical aspects of Okta's architecture is that it is **completely multi-tenant**. With this design, customers share the same underlying environment."
-> "Each Okta environment is called a **cell**… Because each cell can operate independently, they form the basis of our availability strategy by helping to limit the number of customers impacted by an outage."
-> "every cell is an **isolated, shared-nothing, identical replica** of our infrastructure, spanning routers and load-balancers within our edge to databases."
+Hız limiti organizasyon başınadır: `/oauth2/v1/authorize` için dakikada 1200 istek, `/api/v1/users/*` için dakikada 1000 istek.
 
-`status.okta.com` ~26 tanımlayıcı listeliyor → **onlarca hücre, yüzlerce değil.**
+İhlaller veri düzleminde değil destek düzleminde olmuştur. Ekim 2023'te tehdit aktörü, son destek talepleri kapsamında bazı Okta müşterilerinin yüklediği dosyaları, yani HAR dosyaları ile oturum token'larını, görüntüleyebilmiştir. Okta destek talebi yönetim sisteminin üretim servisinden ayrı olduğunu belirtmiştir.
 
-Org modeli: *"Orgs are hard boundaries, so **objects can't be shared across orgs**."* Federasyonla bile *"the users still exist in each org separately."* **Alt-org yok.** Tek-org tenancy grup + isim konvansiyonuyla — dokümanın kendi örneği `app-1-johndoe`.
+> **Argus için ders.** Organizasyon sınırı tutmuştur; başarısız olan, müşteri kiracılarının içinde geçerli kimlik bilgisi tutan bant dışı bir sistemdi. Destek ile kimliğe bürünme araçları kasıtlı bir çapraz kiracı kontrol düzlemidir ve mimariden daha fazla inceleme hak eder.
 
-Rate limit **org başına**: `/oauth2/v1/authorize` 1200 req/dk/org; `/api/v1/users/*` 1000 req/dk/org.
+**Entra ID'de kiracı bir güvenlik sınırı, bölüm bir ölçek birimidir.** learn.microsoft.com'un mimari sayfası, tarih 7 Mayıs 2026, şöyle demektedir:
 
-**İhlaller veri düzleminde değil, destek düzleminde oldu.** Eki 2023: *"The threat actor was able to view files uploaded by certain Okta customers as part of recent support cases"* (HAR dosyaları, oturum token'ları). Okta: *"The Okta support case management system is separate from the production Okta service."*
+> "For the Microsoft Entra data tier, scale units are called partitions." Birincil replika tüm yazmaları almakta ve farklı bir veri merkezindeki ikincile anında replike etmektedir; okumalar coğrafi dağıtık ikincillerden ve asenkron yapılmaktadır.
+>
+> "The directory model is one of eventual consistency." Ve kritik olarak: "For application-only requests, Microsoft Entra ID does not provide session consistency."
 
-> **Argus için ders:** org sınırı tuttu; başarısız olan, müşteri kiracılarının İÇİNDE geçerli kimlik bilgisi tutan bant-dışı bir sistemdi. Destek/impersonation araçları kasıtlı bir çapraz-tenant kontrol düzlemidir ve mimariden daha fazla incelemeyi hak eder.
+Token seviyesinde izolasyon birebir şöyledir:
 
-#### Entra ID — tenant güvenlik sınırı, partition ölçek birimi
+> "If a single user exists in multiple tenants, the user contains a different object ID in each tenant — they're considered different accounts."
+>
+> "Don't use the `idp` claim to store information about a user in an attempt to correlate users across tenants. It doesn't work, as the `oid` and `sub` claims for a user change across tenants, by design."
 
-> "For the Microsoft Entra data tier, **scale units are called partitions**." Birincil replika tüm yazmaları alır, farklı bir veri merkezindeki ikincile anında replike eder; okumalar coğrafi dağıtık ikincillerden, asenkron.
-> "The directory model is one of **eventual consistency**." Ve kritik: *"**For application-only requests, Microsoft Entra ID does not provide session consistency.**"*
-> — [learn.microsoft.com/entra/architecture](https://learn.microsoft.com/en-us/entra/architecture/architecture) (ms.date 2026-05-07)
+Servis limitleri, tarih 29 Temmuz 2026: kullanıcı başına en fazla 500 kiracı üyeliği; 200 kiracı yaratma; doğrulanmış alan adlı kiracıda 300.000 nesne; 240 koşullu erişim politikası; SAML token'ında 150, JWT'de 200 ile koşullu erişim değerlendirmesinde 4.096 grup.
 
-Token seviyesinde izolasyon, verbatim:
+Raporun en kolay gözden kaçan mimari gerçeği şudur: External ID iki dizin ölçek modu yayımlamaktadır; standart mod 15 milyon nesneye kadardır, üstünde yüksek ölçekli mod vardır ve bu modda gelişmiş sorgular, delta sorguları ile giden SCIM sağlaması desteklenmemektedir. Doküman şöyle der: yüksek ölçekli mod, sorgu yoğun veya olay güdümlü dizin işlemleri yerine ölçekte kararlılık ile iş hacmini önceliklendirmektedir.
 
-> "If a single user exists in multiple tenants, the user contains a **different object ID in each tenant — they're considered different accounts**."
-> "Don't use the `idp` claim to store information about a user in an attempt to **correlate users across tenants. It doesn't work**, as the `oid` and `sub` claims for a user change across tenants, **by design**."
-
-Servis limitleri ([ms.date 2026-07-29](https://learn.microsoft.com/en-us/entra/identity/users/directory-service-limits-restrictions)): kullanıcı başına max **500 tenant** üyeliği; **200 tenant** yaratma; doğrulanmış domain'li tenant **300.000 nesne**; **240 Conditional Access politikası**; SAML token'da **150** grup, JWT'de **200**, CA değerlendirmesinde **4.096**.
-
-**Raporun en kolay gözden kaçan mimari gerçeği** — External ID iki dizin ölçek modu yayımlıyor: standart mod 15 milyon nesneye kadar; üstünde **HSC modu**, ve HSC'de gelişmiş sorgular, delta sorguları ve **giden SCIM sağlama DESTEKLENMİYOR**. *"HSC mode prioritizes stability and throughput at scale over query-heavy or event-driven directory operations."*
-
-#### Rust dünyası — kimse yapmıyor
+**Rust dünyasında kimse bunu yapmamaktadır.**
 
 | Proje | Durum |
 |---|---|
-| **Kanidm** | Reddetti. "not planned", 13 Haz 2026. Gerekçe yukarıda. |
-| **Rauthy** | Çok kiracılık yok. [#1678](https://github.com/sebadob/rauthy/issues/1678) kullanıcı soruyor, cevap yok. |
-| **Ory Kratos** | *"The Ory Kratos open-source version is intended for **single-tenant use only**. Its data model isn't architected to support the data isolation, scalability, and operational needs of a multi-tenant environment."* [#407](https://github.com/ory/kratos/issues/407) May 2020'den beri açık; [#3129](https://github.com/ory/kratos/issues/3129) `not_planned` kapatıldı. |
+| Kanidm | Reddetmiştir; planlanmadı, 13 Haziran 2026. Gerekçesi yukarıdadır |
+| Rauthy | Çok kiracılık yoktur. 1678 numaralı issue'da kullanıcı sormaktadır ve cevap yoktur |
+| Ory Kratos | Doküman şöyle der: Ory Kratos'un açık kaynak sürümü yalnızca tek kiracılı kullanım içindir ve veri modeli çok kiracılı bir ortamın veri izolasyonu, ölçeklenebilirlik ile operasyonel ihtiyaçlarını destekleyecek şekilde mimarlanmamıştır. 407 numaralı issue Mayıs 2020'den beri açıktır; 3129 numaralı issue planlanmadı olarak kapatılmıştır |
 
-**crates.io taraması (8 Eyl 2026):** hazır çok kiracılık altyapısı **yok**. En büyüğü `pg_multitenant` 1.617 indirme, son güncelleme 2024 (ölü). Karşılaştırma: `generativity` 3.991.685 indirme, aktif.
+crates.io taramasına göre, 8 Eylül 2026, hazır bir çok kiracılık altyapısı yoktur. En büyüğü `pg_multitenant`'tır ve 1.617 indirmesi vardır, son güncellemesi 2024'tür, yani ölüdür. Karşılaştırma olarak `generativity` 3.991.685 indirmelidir ve aktiftir.
 
----
+### 1.4 Ürün modellerinin karşılaştırması
 
-### 1.4 KARŞILAŞTIRMA TABLOSU — ürün modelleri
-
-| Ürün | Tenant birimi | İzolasyon gücü | Ölçek sınırı | Kullanıcı kapsamı | Neyi yanlış yaptı |
+| Ürün | Kiracı birimi | İzolasyon gücü | Ölçek sınırı | Kullanıcı kapsamı | Neyi yanlış yapmıştır |
 |---|---|---|---|---|---|
-| **Keycloak realm** | Realm | Veri: güçlü (ama FK'sız discriminator). Runtime: **sıfır** | **200–500/küme** | Realm-yerel | Master realm O(N) bağlaması; sabit 10k global cache; 10 yıllık Hibernate N+1 |
-| **Keycloak Organizations** | Org (realm içi) | Zayıf — paylaşımlı kullanıcı havuzu, paylaşımlı anahtar, paylaşımlı tema | "birkaç bin/realm" | Realm-global + üyelik | GA'dan 2 yıl sonra delegated admin; kendi N+1'ini üretti |
-| **Zitadel Instance** | Instance | Güçlü (PK'nın ilk kolonu) | Projeksiyon başına lineer maliyet | Instance | — |
-| **Zitadel Org** | Org | **Zayıf — indekslenmiş öznitelik**, PK'da değil | Yayımlanmamış | **Org-yerel, taşınamaz** | Org'u anahtar yapmadı → v5'te tüm depolamayı yeniden yazıyor |
-| **Auth0 Org** | Org (tenant içi) | Orta — connection kimliği sahipleniyor | 100k saklanır / **1k sayılabilir / 20 gösterilir** | Tenant-global | Connection-owned kimlik; org-scoped roller 2026'da EA |
-| **WorkOS Org** | Org (env içi) | İyi — her connection/directory/log org'a ait | Yayımlanmamış | **Env-global, e-posta ile OTOMATİK BİRLEŞTİRME** | E-posta birleştirmesi nOAuth yüzeyi |
-| **Frontegg Account** | Account + alt-account | Orta | Yayımlanmamış; SSO yazma **5-10/dk** | Env-global, otomatik birleştirme | Miras JWT'ye ulaşmıyor; custom login ↔ tenant switch çelişkisi |
-| **authentik Brand** | Brand | **YOK — sadece markalama** | — | Tek havuz | "tenant" adını markalamaya verdi; gerçek tenancy 2 yıldır alpha |
-| **Okta Org** | Org (+ hücre) | **Çok güçlü — shared-nothing hücre** | ~onlarca hücre | Org-yerel | Destek düzlemi iki kez ihlal edildi |
-| **Entra Tenant** | Tenant (+ partition) | **Çok güçlü — güvenlik sınırı** | 500 tenant/kullanıcı; 300k nesne | Tenant-yerel (`oid` tasarımca değişir) | Paylaşımlı MSA anahtarı → Storm-0558 |
-| **Stytch Org** | Org | Güçlü — Member org-yerel | Yayımlanmamış | **Org-yerel** | Genç, ilk ölçek migrasyonu önünde |
-| **Logto Org** | Org (tenant içi) | Cloud'da **RLS + tenant başına PG rolü** | — | Logto-tenant-global | RLS ya hep ya hiç: 60+ tabloda zorunlu, yoksa başlamıyor |
-| **SuperTokens Tenant** | App → Tenant | İyi — varsayılan izole havuz | — | `appId→tenantId→email` | 2023'te retrofit: 33 tablo, tüm PK'lar CASCADE ile düşürüldü, **dünya-durduran migration** |
+| Keycloak realm'i | Realm | Veride güçlüdür ancak yabancı anahtarsız bir ayırıcıdır; çalışma zamanında sıfırdır | Küme başına 200 ile 500 | Realm'e yereldir | Master realm O(N) bağlaması, sabit 10 bin küresel önbellek ile on yıllık Hibernate N artı bir sorunu |
+| Keycloak Organizations | Realm içi organizasyon | Zayıftır; paylaşımlı kullanıcı havuzu, paylaşımlı anahtar ile paylaşımlı tema vardır | Realm başına birkaç bin | Realm genelinde küresel artı üyelik | Genel kullanıma açılmadan iki yıl sonra delege yönetim gelmiştir ve kendi N artı bir sorununu üretmiştir |
+| Zitadel örneği | Örnek | Güçlüdür; birincil anahtarın ilk kolonudur | Projeksiyon başına doğrusal maliyet | Örnek | — |
+| Zitadel organizasyonu | Organizasyon | Zayıftır; indekslenmiş bir özniteliktir, birincil anahtarda değildir | Yayımlanmamıştır | Organizasyona yereldir ve taşınamaz | Organizasyonu anahtar yapmamıştır ve v5'te tüm depolamayı yeniden yazmaktadır |
+| Auth0 organizasyonu | Kiracı içi organizasyon | Ortadır; kimliği bağlantı sahiplenmektedir | 100 bin saklanır, bin sayılabilir ile 20 gösterilir | Kiracı genelinde küreseldir | Bağlantı sahipli kimlik; organizasyon kapsamlı roller 2026'da erken erişimdedir |
+| WorkOS organizasyonu | Ortam içi organizasyon | İyidir; her bağlantı, dizin ile günlük organizasyona aittir | Yayımlanmamıştır | Ortam genelinde küreseldir ve e-postayla otomatik birleştirilir | E-posta birleştirmesi bir nOAuth yüzeyidir |
+| Frontegg hesabı | Hesap ile alt hesap | Ortadır | Yayımlanmamıştır; çoklu oturum açma yazma işlemi dakikada 5 ile 10'dur | Ortam genelinde küreseldir ve otomatik birleştirilir | Miras JWT'ye ulaşmamaktadır; özel giriş ile kiracı değiştirme arasında çelişki vardır |
+| authentik markası | Marka | Yoktur; yalnızca markalamadır | — | Tek havuzdur | Kiracı adını markalamaya vermiştir ve gerçek kiracılık iki yıldır alfadır |
+| Okta organizasyonu | Organizasyon ile hücre | Çok güçlüdür; hiçbir şeyi paylaşmayan hücre yapısıdır | Yaklaşık onlarca hücre | Organizasyona yereldir | Destek düzlemi iki kez ihlal edilmiştir |
+| Entra kiracısı | Kiracı ile bölüm | Çok güçlüdür; bir güvenlik sınırıdır | Kullanıcı başına 500 kiracı, 300 bin nesne | Kiracıya yereldir; `oid` tasarım gereği değişir | Paylaşımlı Microsoft hesabı anahtarı Storm-0558'e yol açmıştır |
+| Stytch organizasyonu | Organizasyon | Güçlüdür; üye organizasyona yereldir | Yayımlanmamıştır | Organizasyona yereldir | Gençtir ve ilk ölçek göçünün önündedir |
+| Logto organizasyonu | Kiracı içi organizasyon | Bulutta satır seviyesi güvenlik ile kiracı başına Postgres rolü vardır | — | Logto kiracısı genelinde küreseldir | Satır seviyesi güvenlik ya hep ya hiçtir: 60'tan fazla tabloda zorunludur, yoksa başlamamaktadır |
+| SuperTokens kiracısı | Uygulama ile kiracı | İyidir; varsayılan olarak izole havuz vardır | — | Uygulama kimliği, kiracı kimliği ile e-posta sıralıdır | 2023'te sonradan eklenmiştir: 33 tablo ile tüm birincil anahtarlar basamaklı olarak düşürülmüş ve dünyayı durduran bir migration yapılmıştır |
 
 ---
 
-## BÖLÜM II — VERİTABANI İZOLASYON STRATEJİLERİ
+## Bölüm II — Veritabanı izolasyon stratejileri
 
-### 2.1 Üç strateji — ölçülmüş karşılaştırma
+### 2.1 Üç strateji, ölçülmüş karşılaştırma
 
-| Boyut | Satır bazlı (`tenant_id` + RLS) | Schema-per-tenant | Database-per-tenant |
+| Boyut | Satır bazlı, `tenant_id` ile satır seviyesi güvenlik | Kiracı başına şema | Kiracı başına veritabanı |
 |---|---|---|---|
-| **Pratik tenant tavanı** | **1M+** (Citus: 1–1.000.000+) | **1.000–2.000**, vendor aralığı 100–10.000 | **~50** (Crunchy: "50 customers or more steer clear") |
-| **Migration maliyeti** | **O(1)** — tek DDL | **O(N)**: 1.200 tenant = **2 saat**; 1.500 tenant = **5 saat** | O(N) + bağlantı çoğullaması |
-| **Backup/restore granülerliği** | Zayıf — mantıksal export gerekir | İyi — `DROP SCHEMA CASCADE`, ama pg_dump: **20k şema = >24 saat** | Mükemmel — `DROP DATABASE` |
-| **Connection pool** | **En iyi** — tek havuz, `SET LOCAL` sunucu-garantili | Kırılgan — `search_path` oturum durumu; PgBouncer ≥1.20 `track_extra_parameters` gerekir | En kötü — havuz çarpımı |
-| **Gürültülü komşu** | Kötü — paylaşımlı her şey; `citus_stat_tenants` tek native araç | Orta | En iyi |
-| **GDPR silme** | `DELETE` → ölü tuple + vacuum baskısı (partition'lıysa `DETACH`+`DROP`) | Anında | Anında |
-| **XID/OID wraparound** | Düşük | Düşük | **Yüksek** — "OID/XID is a single PostgreSQL clusterwide counter" |
-| **Vendor kılavuzu** | Crunchy "milyonlar"; Citus 1–1M+ | Crunchy "100'ler"; Citus 1–10k; PlanetScale "birkaç yüz" | Crunchy "50'den kaçın" |
+| Pratik kiracı tavanı | Bir milyon ve üzeri; Citus bir ile bir milyonun üzerini vermektedir | 1.000 ile 2.000; satıcı aralığı 100 ile 10.000 | Yaklaşık 50; Crunchy 50 müşteri ve üzerinde uzak durun demektedir |
+| Migration maliyeti | Sabittir, tek bir DDL yeterlidir | Kiracı sayısıyla doğrusaldır: 1.200 kiracı iki saat, 1.500 kiracı beş saat | Kiracı sayısıyla doğrusaldır, artı bağlantı çoğullaması |
+| Yedekleme ile geri yükleme ayrıntısı | Zayıftır; mantıksal dışa aktarım gerekir | İyidir, `DROP SCHEMA CASCADE` vardır; ancak pg_dump ile 20 bin şema 24 saatten uzun sürmektedir | Mükemmeldir, `DROP DATABASE` yeterlidir |
+| Bağlantı havuzu | En iyisidir; tek havuz ile `SET LOCAL` sunucu garantilidir | Kırılgandır; `search_path` bir oturum durumudur ve PgBouncer 1.20 ve üstünde `track_extra_parameters` gerekir | En kötüsüdür; havuz çarpımı olur |
+| Gürültülü komşu | Kötüdür; her şey paylaşımlıdır ve tek yerel araç `citus_stat_tenants`'tır | Ortadır | En iyisidir |
+| Kişisel veri silme | `DELETE` ölü kayıt ile vacuum baskısı üretir; bölümlenmişse ayır ve düşür yapılır | Anındadır | Anındadır |
+| İşlem kimliği ile nesne kimliği dolanması | Düşüktür | Düşüktür | Yüksektir; bunlar küme genelinde tek bir sayaçtır |
+| Satıcı kılavuzu | Crunchy milyonlar, Citus bir ile bir milyon üzeri demektedir | Crunchy yüzler, Citus bir ile on bin, PlanetScale birkaç yüz demektedir | Crunchy 50'den kaçının demektedir |
 
-Kaynaklar: [AWS Prescriptive Guidance matrisi](https://docs.aws.amazon.com/prescriptive-guidance/latest/saas-multitenant-managed-postgresql/matrix.html) · [Crunchy Data, Craig Kerstiens, 14 Kas 2023](https://www.crunchydata.com/blog/designing-your-postgres-database-for-multi-tenancy) · [Citus 12, Marco Slot, 18 Tem 2023](https://www.citusdata.com/blog/2023/07/18/citus-12-schema-based-sharding-for-postgres/) · [PlanetScale, 21 Nis 2026](https://planetscale.com/blog/approaches-to-tenancy-in-postgres)
+Kaynakları AWS öngörülü rehberlik matrisi, Crunchy Data'dan Craig Kerstiens'in 14 Kasım 2023 tarihli yazısı, Citus 12 için Marco Slot'un 18 Temmuz 2023 tarihli yazısı ile PlanetScale'in 21 Nisan 2026 tarihli yazısıdır.
 
-### 2.2 KRİTİK SAYI: PostgreSQL kaç şemayı gerçekten kaldırır?
+### 2.2 Kritik sayı: PostgreSQL kaç şemayı gerçekten kaldırmaktadır
 
-**Cevap: düşük binler. Bağlayıcı kısıt katalog tarama maliyeti + backend başına relcache + migration/backup duvar saati — depolama değil.**
+Cevap düşük binlerdir. Bağlayıcı kısıt katalog tarama maliyeti, arka uç başına ilişki önbelleği ile migration ve yedekleme duvar saatidir, depolama değildir.
 
-#### Kanıt 1 — migration katili (en aktarılabilir sayı)
+**Birinci kanıt: migration katili, en aktarılabilir sayı.** pgsql-performance listesinde Ulf Lohbrügge, 27 Haziran 2017, PostgreSQL 9.5.7. Yaklaşık 1.200 şema ile şema başına yaklaşık 200 tablo, yani yaklaşık 240.000 tablo vardır. `SELECT * FROM information_schema.tables WHERE table_schema='foo' AND table_name='bar';` sorgusunun yürütmesi 383,784 milisaniye sürmüş, `pg_class` üzerinde ardışık tarama yapılmış, 1.305.161 satır filtreyle elenmiş ve sıfır satır dönmüştür. Sebebi `information_schema` görünümlerinin satır başına `pg_has_role()` çağırmasıdır ve bu, sistem katalogları üzerinde indekslenemez. İş etkisi tüm kiracılarda Flyway migration'ının yaklaşık iki saat sürmesidir, çünkü kiracı başına on ve üzeri `information_schema` sorgusu yapılmaktadır.
 
-pgsql-performance, **Ulf Lohbrügge, 27 Haz 2017, PG 9.5.7** ([mesaj](https://www.postgresql.org/message-id/CABZYQRKnp=FxZ7tQeyytDjUOnHP9J90irxRBEAc+-XGbKdgf2A@mail.gmail.com)):
+> Bu, raporun en aktarılabilir sayısıdır: `information_schema` sorgulayan her nesne ilişkisel eşleyici ile migration aracı, her çağrıda tam bir `pg_class` taraması ödemektedir ve bu maliyet toplam ilişki sayısıyla doğrusaldır. Kiracı başına şema sorun değil, migration'ı otomatikleştir tavsiyesinin pratikte neden çöktüğünün açıklaması budur.
 
-- **~1.200 şema × ~200 tablo ≈ 240.000 tablo**
-- `SELECT * FROM information_schema.tables WHERE table_schema='foo' AND table_name='bar';`
-  → **execution 383,784 ms**, `pg_class` üzerinde **sequential scan**, **1.305.161 satır filtreyle elendi**, dönen satır: **0**
-- Sebep: `information_schema` view'ları satır başına `pg_has_role()` çağırıyor — sistem katalogları üzerinde indekslenemez
-- İş etkisi: **tüm tenant'larda Flyway migration ≈ 2 saat** (tenant başına 10+ `information_schema` sorgusu)
+Doğrulayıcı bir kaynak django-tenant-schemas deposundaki 387 numaralı issue'dur, 29 Eylül 2016: 1500'den fazla kiracıda migration beş saatten uzun sürmektedir.
 
-> **Bu, raporun en aktarılabilir sayısıdır:** `information_schema` sorgulayan her ORM/migration aracı, **her çağrıda** tam bir `pg_class` taraması öder ve bu maliyet toplam relation sayısıyla lineerdir. "Schema-per-tenant sorun değil, migration'ı otomatikleştir" tavsiyesinin pratikte neden çöktüğünün açıklaması budur.
+**İkinci kanıt: pg_dump duvarı.** pgsql-hackers listesinde "pg_dump and thousands of schemas" başlıklı konu, Mayıs ile Kasım 2012 arası. Üretimde Hugo'nun PostgreSQL 9.0 kurulumunda 20.000'den fazla şema, yaklaşık 500.000 ilişki ile 40 GB veri vardır; tek bir boş şemanın dökümü yaklaşık 12 dakika, tam döküm 24 saatten uzun sürmektedir, oysa monolitik şemadayken iki ile üç saatti; dolayısıyla günlük tutarlı bir yedek imkânsızdır. 2.311 şemalı örnek veritabanında üç saat sürmektedir. Sentetik testte Tatsuo Ishii 100.000 tabloyla PostgreSQL 9.0.2'de 188 dakika ölçmüş, sunucu tarafı kilit düzeltmesinden sonra süre dört dakikanın altına inmiştir, yani %97 azalmıştır. Mekanizması `LockReassignCurrentOwner` fonksiyonunun O(N²) olmasıdır ve PostgreSQL 9.2'de düzeltilmiştir. Ancak Denis, PostgreSQL 9.2.1 ile 6 Kasım 2012'de hâlâ tek şema dökümünde veri boyutundan bağımsız 30 ile 40 saniye görmekteydi; `pg_class`, `pg_depend` ile `pg_authid` birleştirmesi tek başına 10 ile 15 saniye sürmekteydi.
 
-Doğrulayıcı: [django-tenant-schemas #387](https://github.com/bernardopires/django-tenant-schemas/issues/387), 29 Eyl 2016 — *"more than 1500 tenants, migration takes more than 5 hours."*
+**Üçüncü kanıt: autovacuum çöküşü, 13750 numaralı hata.** David Gould, 30 Ekim 2015, PostgreSQL 9.4.5, 80 donanım iş parçacığı ile 1 TB bellek: yaklaşık 200.000 tablo ve `pg_class` içinde 500.000'den fazla satır vardır.
 
-#### Kanıt 2 — pg_dump duvarı
-
-pgsql-hackers, *"pg_dump and thousands of schemas"*, May–Kas 2012:
-
-- Üretim (Hugo, PG 9.0): **>20.000 şema, ~500.000 relation, 40 GB.** Tek boş şema dökümü **~12 dakika**; **tam döküm >24 saat** (monolitik şemayken 2-3 saat) → günlük tutarlı yedek imkânsız. 2.311 şemalı örnek DB: **3 saat**.
-- Sentetik (Tatsuo Ishii), **100.000 tablo**: PG 9.0.2 **188 dakika** → sunucu-taraflı lock düzeltmesinden sonra **4 dakikanın altı** (%97 azalma)
-- Mekanizma: `LockReassignCurrentOwner` **O(N²)** — PG 9.2'de düzeltildi. Ama Denis (PG 9.2.1, 6 Kas 2012) hâlâ tek şema dökümünde **veri boyutundan bağımsız 30-40 sn** görüyordu; `pg_class`/`pg_depend`/`pg_authid` join'i tek başına **10-15 sn**.
-
-#### Kanıt 3 — autovacuum çöküşü (BUG #13750)
-
-**David Gould, 30 Eki 2015, PG 9.4.5**, 80 HW thread / 1 TB RAM: **~200.000 tablo, `pg_class` >500.000 satır.**
-
-| autovacuum worker | işlem/saat | worker başına |
+| autovacuum işçisi | Saatte işlem | İşçi başına |
 |---|---|---|
 | 1 | 2110,1 | 2110,1 |
 | 4 | 647,3 | 161,8 |
-| **72** | **62,0** | **0,9** |
+| 72 | 62,0 | 0,9 |
 
-**Worker eklemek throughput'u DÜŞÜRÜYOR.** Belirtiler: `pg_attribute` **200 GB**'a çıktı; yeni bağlantılar başlangıçta takıldı çünkü kataloglar artık buffer cache'e sığmıyordu.
+İşçi eklemek iş hacmini düşürmektedir. Belirtileri `pg_attribute` tablosunun 200 GB'a çıkması ile yeni bağlantıların başlangıçta takılmasıdır; kataloglar artık tampon önbelleğe sığmamaktadır.
 
-#### Kanıt 4 — backend başına bellek (yoğunluk sınırı)
+**Dördüncü kanıt: arka uç başına bellek, yoğunluk sınırı.** PostgreSQL dokümanının §5.12.6 bölümü birebir şöyledir:
 
-PostgreSQL dokümanı §5.12.6, verbatim:
+> "the server's memory consumption may grow significantly over time, especially if many sessions touch large numbers of partitions. That's because each partition requires its metadata to be loaded into the local memory of each session that touches it."
 
-> "the server's memory consumption may grow significantly over time, especially if many sessions touch large numbers of partitions. That's because **each partition requires its metadata to be loaded into the local memory of each session that touches it**."
+Citus aynı mekanizmayı on binden fazla şemada bir başarısızlık modu olarak adlandırmakta ve PostgreSQL'in süreç başına katalog önbelleğinin aşırı bellek tükettiğini söylemektedir.
 
-Citus aynı mekanizmayı >10.000 şema başarısızlık modu olarak adlandırıyor: *"PostgreSQL's per-process catalog cache consuming excessive memory."*
+**Uzman uzlaşısı.** John R Pierce, 30 Eylül 2016: bin şema ile şema başına yüz tablo, postgres kataloğunun devasa şişmesine yol açar ve ayrıca önbelleklemeyi daha az etkili kılar. Jeff Janes, 1 Ekim 2016: çok veritabanlı ile çok şemalı arasındaki çalışma zamanı farkı PostgreSQL 9.3'ten sonra büyük ölçüde kapanmıştır; seçim çalışma zamanı maliyetine göre değil geri yükleme ayrıntısına göre yapılmalıdır. Paul Jungwirth, 30 Eylül 2016: kiracı başına şema, katalog sorgularıyla kiracı sayısını sızdırmaktadır.
 
-#### Uzman konsensüsü
+**Mutlak tavan PostgreSQL değil dosya sistemidir.** kspeakman, 8 Şubat 2019: 1,3 milyon tablo yaratılmış, yaklaşık 4 GB boş tablo oluşmuş ve 13 GB boş alan varken `53100: No space left on device` hatası alınmıştır, yani düğüm numaraları tükenmiştir.
 
-- **John R Pierce**, 30 Eyl 2016: 1000 şema × 100 tablo → *"massive bloat of the postgres catalog and also makes caching less effective."*
-- **Jeff Janes**, 1 Eki 2016: çok-veritabanı ile çok-şema arasındaki runtime farkı **PG 9.3'ten sonra büyük ölçüde kapandı**; seçimi *restore granülerliğine* göre yap, runtime maliyetine göre değil.
-- **Paul Jungwirth**, 30 Eyl 2016: schema-per-tenant, katalog sorgularıyla **tenant sayısını sızdırır.**
+### 2.3 sqlx 0.9'daki `sqlx.toml` gerçekte ne vermektedir
 
-#### Mutlak tavan (dosya sistemi, PostgreSQL değil)
-[kspeakman, 8 Şub 2019](https://dev.to/kspeakman/breaking-postgres-with-too-many-tables-4pg0): **1,3 milyon tablo** yaratıldı; ~4 GB boş tablo; `53100: No space left on device` — 13 GB boş alanla → **inode tükenmesi**.
+Cevap beklenenden çok azıdır.
 
-### 2.3 sqlx 0.9 `sqlx.toml` — gerçekte ne veriyor
+sqlx 0.9.0 21 Mayıs 2026'da yayımlanmıştır, crates.io API'sine göre; 0.9.0-alpha.1 ise 15 Ekim 2025 tarihlidir.
 
-**Cevap: beklediğinizin çok azını.**
+`[migrate]` anahtarları docs.rs'teki `migrate::Config` sayfasında şöyledir. `table-name` yürütülen migration'ları izlemek için kullanılan tablonun adını değiştirmektedir; varsayılanı `_sqlx_migrations`'tır ve şema nitelikli olabilir, çok kiracılı veritabanları için yararlı denmektedir. `create-schemas` zaten yoksa yaratılacak şemaların adlarını belirtmektedir. Ayrıca `migrations-dir`, `ignored-chars` ile `defaults` vardır.
 
-- **sqlx 0.9.0 yayın: 2026-05-21** (crates.io API). 0.9.0-alpha.1: 2025-10-15.
-- `[migrate]` anahtarları ([docs.rs, migrate::Config](https://docs.rs/sqlx/latest/sqlx/_config/migrate/struct.Config.html)):
-  - `table-name` — "Override the name of the table used to track executed migrations." Varsayılan `_sqlx_migrations`. "May be schema-qualified… Useful for multi-tenant databases."
-  - `create-schemas` — "Specify the names of schemas to create if they don't already exist."
-  - `migrations-dir`, `ignored-chars`, `defaults`
-
-**Ve deponun `examples/postgres/multi-tenant` örneği tenant çok kiracılığı DEĞİL.** Üç crate (main/accounts/payments) tek DB'de kendi şemasını yönetiyor. `sqlx.toml`'un tamamı:
+Deponun `examples/postgres/multi-tenant` örneği kiracı çok kiracılığı değildir. Üç crate, yani ana, hesaplar ile ödemeler, tek bir veritabanında kendi şemasını yönetmektedir. `sqlx.toml` dosyasının tamamı şudur:
 
 ```toml
 [migrate]
@@ -483,30 +426,29 @@ Citus aynı mekanizmayı >10.000 şema başarısızlık modu olarak adlandırıy
 migrations-dir = "src/migrations"
 ```
 
-Doküman ayrıca `search_path` kullanımına karşı **uyarıyor**, schema-qualified isim öneriyor: *"if `search_path` is set to `public,accounts,payments`… the migrator… would throw an error."*
+Doküman ayrıca `search_path` kullanımına karşı uyarmakta ve şema nitelikli isim önermektedir: `search_path` değeri `public,accounts,payments` olarak ayarlanırsa migration aracı bir hata fırlatacaktır.
 
-> **SONUÇ: `sqlx.toml` dinamik, tenant başına şema migration'ı VERMEZ.** Şema listesi config zamanında sabittir. N tenant için N şema migrate etmek tamamen sizin yazacağınız koddur. Bu, schema-per-tenant seçeneğinin Rust'ta ekstra maliyetidir.
+> **Sonuç: `sqlx.toml` dinamik, kiracı başına şema migration'ı vermemektedir.** Şema listesi yapılandırma zamanında sabittir. N kiracı için N şemayı migrate etmek tamamen sizin yazacağınız koddur. Bu, kiracı başına şema seçeneğinin Rust'taki ekstra maliyetidir.
 
-### 2.4 Bağlantı havuzu + oturum durumu sızıntısı — KESİN CEVAP
+### 2.4 Bağlantı havuzu ile oturum durumu sızıntısı, kesin cevap
 
-**Soru:** PgBouncer transaction mode'da `SET app.tenant_id` gerçek bir sızıntı riski mi?
+Soru şudur: PgBouncer'ın işlem modunda `SET app.tenant_id` gerçek bir sızıntı riski midir.
 
-**Cevap: `SET` → EVET, gerçek bir güvenlik açığı. `SET LOCAL` → HAYIR, ve garanti sunucudan gelir, pooler'dan değil.**
+Cevap şudur: `SET` kullanılırsa evet, gerçek bir güvenlik açığıdır; `SET LOCAL` kullanılırsa hayır ve garanti havuzlayıcıdan değil sunucudan gelmektedir.
 
-PgBouncer dokümanı, verbatim:
+PgBouncer dokümanı birebir şöyledir:
 
-> "When transaction pooling is used, **the `server_reset_query` is not used**, because in that mode, clients must not use any session-based features, since each transaction ends up in a different connection and thus gets a different session state."
+> "When transaction pooling is used, the `server_reset_query` is not used, because in that mode, clients must not use any session-based features, since each transaction ends up in a different connection and thus gets a different session state."
 
-(`server_reset_query` varsayılanı `DISCARD ALL`; `server_reset_query_always` varsayılan kapalı.)
+`server_reset_query` varsayılanı `DISCARD ALL`'dır ve `server_reset_query_always` varsayılan olarak kapalıdır. Özellik matrisinde işlem havuzlaması için `SET` ile `RESET` asla olarak işaretlidir.
 
-Feature matrisinde transaction pooling: `SET`/`RESET` = **"Never"**.
+PostgreSQL'in `SET` dokümanı birebir şöyledir:
 
-PostgreSQL `SET` dokümanı, verbatim:
+> "The effects of `SET LOCAL` last only till the end of the current transaction, whether committed or not. After `COMMIT` or `ROLLBACK`, the session-level setting takes effect again."
+>
+> "Issuing this outside of a transaction block emits a warning and otherwise has no effect."
 
-> "The effects of `SET LOCAL` last only till the end of the current transaction, **whether committed or not**. After `COMMIT` or `ROLLBACK`, the session-level setting takes effect again."
-> "**Issuing this outside of a transaction block emits a warning and otherwise has no effect.**"
-
-**Doğru kalıp:**
+Doğru kalıp şudur:
 
 ```sql
 BEGIN;
@@ -515,431 +457,409 @@ BEGIN;
 COMMIT;   -- GUC gitti, sunucu garantili
 ```
 
-**Üç ölümcül tuzak:**
+Üç ölümcül tuzak vardır. Birincisi işlem dışında `SET LOCAL` sessizce hiçbir şey yapmamakta, yalnızca uyarı vermektedir; açık bir işlem zorunludur. İkincisi `LOCAL` olmadan düz `SET`, kesinleştirmede sunucu bağlantısında kalmakta ve PgBouncer'ın işlem modunda `DISCARD ALL` çalışmadığı için bir sonraki istemci onu miras almaktadır. Üçüncüsü aynı işlemde önce `SET` sonra `SET LOCAL` kullanmaktır; PostgreSQL dokümanı şöyle der: `SET LOCAL` değeri işlemin sonuna kadar görülecek, ancak sonrasında, işlem kesinleştirilirse, `SET` değeri yürürlüğe girecektir.
 
-1. **Transaction dışında `SET LOCAL` SESSİZCE hiçbir şey yapmaz** — sadece warning. Explicit transaction zorunlu.
-2. **Düz `SET` (LOCAL'sız)** commit'te sunucu bağlantısında kalır; PgBouncer transaction mode'da `DISCARD ALL` çalışmaz → **bir sonraki client onu miras alır.**
-3. **`SET` sonra `SET LOCAL` aynı transaction'da**: PG dokümanı — *"the `SET LOCAL` value will be seen until the end of the transaction, but afterwards (if the transaction is committed) the `SET` value will take effect."*
+AWS RDS Proxy PostgreSQL için pratikte diskalifiyedir. Sabitleme dokümanı şöyle der: bir parametre ayarlamak, özellikle `SET` ile `set_config` komutlarını kullanmak, sabitlemeye yol açmaktadır. Ayrıca RDS Proxy PostgreSQL için oturum sabitleme filtrelerini desteklememektedir, yani vazgeçilemez. `SET LOCAL` muafiyeti yalnızca MySQL bölümünde yazmaktadır; PostgreSQL bölümü `SET`'i koşulsuz listelemektedir ve muafiyet doğrulanamamıştır, varsayılmamalıdır.
 
-**AWS RDS Proxy PostgreSQL için pratikte diskalifiye.** [Pinning dokümanı](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-proxy-pinning.html): *"Setting a parameter… Specifically, using `SET` and `set_config` commands"* pinning'e yol açar. Ve *"**RDS Proxy doesn't support session pinning filters for PostgreSQL**"* — vazgeçemezsiniz. `SET LOCAL` muafiyeti yalnızca MySQL bölümünde yazıyor; PostgreSQL bölümü `SET`'i koşulsuz listeliyor `[Muafiyet DOĞRULANAMADI — varsaymayın]`.
+Kiracı başına şemanın havuz hikâyesi yapısal olarak daha kırılgandır. Citus 12 için PgBouncer 1.20 ve üstü ile `track_extra_parameters = search_path` gerekmektedir. `search_path`, havuzlayıcının izleyip yeniden uygulaması gereken bir oturum durumudur ve `SET LOCAL`'ın sunucu garantisinden kesinlikle daha zayıftır.
 
-**Schema-per-tenant'ın havuz hikâyesi yapısal olarak daha kırılgan.** Citus 12 için PgBouncer **≥1.20** ve **`track_extra_parameters = search_path`** gerekiyor. `search_path`, pooler'ın *izleyip yeniden uygulaması* gereken oturum durumudur — `SET LOCAL`'ın sunucu garantisinden kesinlikle daha zayıf.
+### 2.5 Bölümlemeyle kiracı: kilitler planlamadan önce çarpmaktadır
 
-### 2.5 Partition'la tenant — kilitler planlamadan önce çarpar
+PostgreSQL dokümanının §5.12.6 bölümü şöyle der: sorgu planlayıcısı, tipik sorguların planlayıcının küçük bir bölüm dışındakileri budamasına izin verdiği varsayımıyla, birkaç bin bölüme kadar olan hiyerarşileri genelde iyi ele alabilmektedir. §5.12.4 ise şöyle der: bu aşamada yapılan bölüm budamasıyla kaldırılan bölümler, yürütmenin başında hâlâ kilitlidir.
 
-PostgreSQL dokümanı §5.12.6:
-> "The query planner is generally able to handle partition hierarchies with **up to a few thousand partitions** fairly well, provided that typical queries allow the query planner to prune all but a small number of partitions."
-> §5.12.4: "any partitions removed by the partition pruning done at this stage are **still locked** at the beginning of execution."
+Ölçüm olarak Kaarel Moppel, 18 Nisan 2023, PostgreSQL 15.2, pgbench ölçeği 5000, 56 saat: planlama süresi 16 bölümde %51,8 artmış, 4096 bölümde %128,8 artmıştır. Yürütme süresi neredeyse sabit kalmıştır, artı %4,6 ile eksi %5 arasında. `max_locks_per_transaction` değerini 64'ten 128'e çıkarmak zorunda kalınmıştır.
 
-**Ölçüm — Kaarel Moppel, 18 Nis 2023, PG 15.2**, pgbench scale 5000, 56 saat: planlama süresi 16 partition'da **+%51,8** → 4096'da **+%128,8**. Yürütme süresi neredeyse sabit (+%4,6 … −%5). `max_locks_per_transaction` 64→128 çıkarmak zorunda kaldı.
+PostgresAI'ın 3 Ekim 2024 tarihli PostgreSQL 16 ölçümüne göre yeni bir bağlantıda bin bölüm için planlama 12,435 milisaniye, yürütme 0,354 milisaniyedir, yani 35 kat fark vardır. 4 Ekim 2024 tarihli önemli düzeltmesine göre yeniden kullanılan bir bağlantıda ikinci `EXPLAIN` çağrısı bin bölümde bile 0,1 milisaniyenin altındadır. Yani bölüm planlama maliyeti bir soğuk bağlantı maliyetidir; sıcak arka uç tutan bir havuzlayıcıyla büyük ölçüde kaybolmakta, sunucusuz veya kısa ömürlü bağlantılarda ise baskın gecikme olmaktadır.
 
-**Ölçüm — PostgresAI, 3 Eki 2024, PG 16**: yeni bağlantıda **1.000 partition = planlama 12,435 ms vs yürütme 0,354 ms (35×)**. **4 Eki 2024 düzeltmesi (önemli):** *yeniden kullanılan* bağlantıda ikinci `EXPLAIN` 1.000 partition'da bile **<0,1 ms**. → **Partition planlama maliyeti soğuk-bağlantı maliyetidir.** Sıcak backend tutan pooler ile büyük ölçüde kaybolur; serverless/kısa ömürlü bağlantıda baskın gecikmedir.
+Asıl tehlike planlama değil kilittir. Kyle Hailey, Nisan 2023, PostgreSQL 13, saniyede 10.000 sorgu: 40 bölüm ile 22 indeks sorgu başına 880 kilit demektir; zirvede 150.000 kilit görülmüş, 500 oturum kilit yöneticisi hafif ağırlıklı kilidinde beklemiş ve saniyede 1.000 hata alınmıştır. Başlangıcı yalnızca yaklaşık 12 bölümde, yani 220'den fazla kilitte gerçekleşmiştir.
 
-**Asıl tehlike planlama değil, KİLİT.** Kyle Hailey, Nis 2023, PG 13, 10.000 qps: 40 partition × 22 indeks = **sorgu başına 880 kilit**; zirvede **150.000 kilit**, 500 oturum `LWLock:LockManager`'da bekliyor, **saniyede 1.000 hata**. Başlangıç sadece ~12 partition'da (>220 kilit).
+Mekanizması şudur: PostgreSQL 17'ye kadar her arka uçta tam olarak 16 hızlı yol kilit yuvası vardır. Christophe Pettus, 17 Ağustos 2026: birincil anahtarı ile 20 ikincil indeksi olan tek bir tablo sorgu başına 22 kilit gerektirmekte ve tüm hızlı yol yuvalarını doldurmaktadır.
 
-Mekanizma: **PostgreSQL 17'ye kadar her backend'de tam 16 fast-path lock slotu var.** Christophe Pettus, 17 Ağu 2026: *"A single table with a primary key and 20 secondary indexes requires 22 locks per query — filling all fast-path slots."*
+PostgreSQL 18 bunu düzeltmektedir; Tomas Vondra'nın `c4d5cb71d` commit'i hızlı yol kilitlerini `max_locks_per_transaction` değerinden boyutlanan değişken dizilere taşımaktadır, yani varsayılanla arka uç başına 64 yuva olmaktadır. PostgresAI kıyaslaması, 9 Ekim 2025, `max_locks_per_transaction=1024` ile uçurumun hiç oluşmadığını göstermektedir.
 
-**PostgreSQL 18 bunu düzeltiyor** (commit `c4d5cb71d`, Tomas Vondra): fast-path kilitleri `max_locks_per_transaction`'dan boyutlanan değişken dizilere taşındı → varsayılan 64, backend başına 64 slot. PostgresAI benchmark'ı (9 Eki 2025): `max_locks_per_transaction=1024` ile **uçurum hiç oluşmadı.**
+Bütçe formülü şudur: bölüm sayısı ile bölüm başına indeks sayısının bir fazlasının çarpımı, planlayıcının plan zamanında budayamadığı her sorgunun kilit maliyetidir.
 
-**Bütçe formülü:** `partition_sayısı × (1 + partition_başına_indeks)` = planlayıcının plan zamanında budayamadığı her sorgunun kilit maliyeti.
+### 2.6 Satır seviyesi güvenlik: gerçek performans ile gerçek atlatma yüzeyi
 
-### 2.6 RLS — gerçek performans ve gerçek bypass yüzeyi
+**Atlatma yüzeyi, PostgreSQL dokümanından birebir.**
 
-#### Bypass yüzeyi — PostgreSQL dokümanından verbatim
+> "Superusers and roles with the `BYPASSRLS` attribute always bypass the row security system when accessing a table. Table owners normally bypass row security as well, though a table owner can choose to be subject to row security with `ALTER TABLE ... FORCE ROW LEVEL SECURITY`."
 
-> "**Superusers and roles with the `BYPASSRLS` attribute always bypass** the row security system when accessing a table. **Table owners normally bypass row security as well**, though a table owner can choose to be subject to row security with `ALTER TABLE ... FORCE ROW LEVEL SECURITY`."
+> Bir numaralı sessiz başarısızlık modu budur: uygulamanız tablo sahibi olarak bağlanıyorsa, ki her migration aracının varsayılanı budur, `ENABLE ROW LEVEL SECURITY` kelimenin tam anlamıyla hiçbir şey yapmamaktadır.
 
-> **1 numaralı sessiz başarısızlık modu bu:** uygulamanız tablo sahibi olarak bağlanıyorsa (ki her migration aracının varsayılanı budur), `ENABLE ROW LEVEL SECURITY` **kelimenin tam anlamıyla hiçbir şey yapmaz.**
+> "Referential integrity checks, such as unique or primary key constraints and foreign key references, always bypass row security to ensure that data integrity is maintained. Care must be taken when developing schemas and row level policies to avoid 'covert channel' leaks of information through such referential integrity checks."
 
-> "**Referential integrity checks, such as unique or primary key constraints and foreign key references, always bypass row security** to ensure that data integrity is maintained. Care must be taken when developing schemas and row level policies to avoid **'covert channel' leaks** of information through such referential integrity checks."
+> **Argus için doğrudan sonuç doğuran türetilmiş sonuç:** küresel bir `UNIQUE(email)` kısıtı satır seviyesi güvenliği atlamakta ve bir benzersizlik ihlali hatası kiracı A'ya bu e-postanın başka bir kiracıda var olduğu bilgisini sızdırmaktadır. `UNIQUE(tenant_id, email)` bir tercih değil bir gizli kanal savunmasıdır.
 
-> **Türetilmiş sonuç — Argus için doğrudan sonuç doğuran:** global bir `UNIQUE(email)` kısıtı RLS'i **atlar** ve bir unique-violation hatası tenant A'ya "bu e-posta başka bir tenant'ta var" bilgisini sızdırır. **`UNIQUE(tenant_id, email)` bir tercih değil, bir gizli kanal savunmasıdır.**
+> "(The only exceptions to this rule are `leakproof` functions, which are guaranteed to not leak information; the optimizer may choose to apply such functions ahead of the row-security check.)"
 
-> "(The only exceptions to this rule are **`leakproof` functions**, which are guaranteed to not leak information; the optimizer may choose to apply such functions ahead of the row-security check.)"
+Sonucu pganalyze'de Lukas Fittl'in 28 Temmuz 2022 tarihli yazısında görülmektedir: sızdırma güvencesi olmayan operatörler indeks kullanımını tamamen kaybettirebilmektedir ve satır seviyesi güvenlik açılınca `ILIKE` operatörünün GIN indeksini yok saydığı belgeli bir vaka vardır. Yönetilen servislerde bir fonksiyonu sızdırma güvenceli işaretlemek süper kullanıcı gerektirmektedir, yani RDS ile Cloud SQL'de düzeltilemez.
 
-Sonuç (pganalyze, Lukas Fittl, 28 Tem 2022): **leakproof olmayan operatörler indeks kullanımını tamamen kaybettirebilir** — RLS açılınca `ILIKE`'ın GIN indeksini yok saydığı belgeli bir vaka var. Yönetilen servislerde bir fonksiyonu LEAKPROOF işaretlemek superuser gerektirir → **RDS/Cloud SQL'de düzeltilemez.**
+Görünümler varsayılan olarak tanımlayıcı güvenlikle çalışmaktadır. PostgreSQL 15 `CREATE VIEW ... WITH (security_invoker = true)` seçeneğini eklemiştir.
 
-**View'lar varsayılan `SECURITY DEFINER`'dır.** PG 15 `CREATE VIEW ... WITH (security_invoker = true)` ekledi.
+**Satır seviyesi güvenlik CVE'lerinde bir örüntü vardır.**
 
-#### RLS CVE'leri — bir örüntü var
-
-| CVE | Açıklama | Düzeltildi | CVSS |
+| CVE | Açıklama | Düzeltildiği sürümler | CVSS |
 |---|---|---|---|
-| **CVE-2026-14666** (13 Ağu 2026) | "PostgreSQL row security caching **disregards role modifications**" | 18.6, 17.11, 16.15, 15.19, 14.24 | 4.2 |
-| **CVE-2024-10976** | "row security below e.g. subqueries **disregards user ID changes**" | 17.1, 16.5, 15.9, 14.14 | 4.2 |
-| **CVE-2023-2455** | "Row security policies **disregard user ID changes** after inlining" | 15.3, 14.8 | 4.2 |
-| **CVE-2023-39418** | "MERGE fails to enforce UPDATE or SELECT row security policies" | 15.4 | 3.1 |
+| CVE-2026-14666, 13 Ağustos 2026 | Satır güvenliği önbelleklemesi rol değişikliklerini dikkate almamaktadır | 18.6, 17.11, 16.15, 15.19 ile 14.24 | 4,2 |
+| CVE-2024-10976 | Alt sorguların altındaki satır güvenliği kullanıcı kimliği değişikliklerini dikkate almamaktadır | 17.1, 16.5, 15.9 ile 14.14 | 4,2 |
+| CVE-2023-2455 | Satır güvenliği politikaları satır içine alma sonrası kullanıcı kimliği değişikliklerini dikkate almamaktadır | 15.3 ile 14.8 | 4,2 |
+| CVE-2023-39418 | MERGE güncelleme ile seçme satır güvenliği politikalarını uygulayamamaktadır | 15.4 | 3,1 |
 
-> **Dördün üçü AYNI hata sınıfı: oturum içinde etkin rol değiştiğinde RLS politika cache'inin geçersizleştirilmemesi.** Bu tam olarak transaction başına `SET ROLE` yapan bir connection pooler'ın tetiklediği şeydir. **RLS + `SET ROLE` + pooling kombinasyonu kullanıyorsanız agresif yamalayın ve minimum sürüm sabitleyin.**
+> Dördün üçü aynı hata sınıfındandır: oturum içinde etkin rol değiştiğinde satır seviyesi güvenlik politika önbelleğinin geçersizleştirilmemesi. Bu tam olarak işlem başına `SET ROLE` yapan bir bağlantı havuzlayıcısının tetiklediği şeydir. Satır seviyesi güvenlik ile `SET ROLE` ile havuzlama birlikte kullanılıyorsa agresif yamalanmalı ve asgari sürüm sabitlenmelidir.
 
-Ayrıca **CVE-2019-10130**: "leaky operator" optimizer istatistiklerinden örneklenmiş veri okuyabiliyordu — *"if this included values from rows forbidden by a row security policy, the user could effectively bypass the policy."*
+Ayrıca CVE-2019-10130 vardır: sızdıran bir operatör, planlayıcı istatistiklerinden örneklenmiş veri okuyabilmekteydi; bu veri bir satır güvenliği politikasınca yasaklanmış satırlardan değerler içeriyorsa kullanıcı politikayı etkili biçimde atlayabilmekteydi.
 
-**Komşu gerçek dünya kırılması — Heroku Postgres, 29 Eki 2025 açıklandı, 4 Kas 2025 düzeltildi:** `_heroku` şemasındaki `search_path` niteliksiz bir `SECURITY DEFINER` fonksiyonu; saldırgan `public` içinde `pg_event_trigger_ddl_commands()`'i gölgeledi, `rds_superuser` kazandı, **diğer müşterilerin veritabanlarını okuyup yazdı.** ([allistair.sh](https://allistair.sh/blog/breaking-heroku-postgres/))
+Komşu bir gerçek dünya kırılması Heroku Postgres'tedir; 29 Ekim 2025'te açıklanmış ve 4 Kasım 2025'te düzeltilmiştir. `_heroku` şemasındaki `search_path` niteliksiz bir tanımlayıcı güvenlikli fonksiyon vardı; saldırgan `public` şemasında `pg_event_trigger_ddl_commands()` fonksiyonunu gölgelemiş, `rds_superuser` yetkisi kazanmış ve diğer müşterilerin veritabanlarını okuyup yazmıştır. Kaynağı allistair.sh'tir.
 
-> **Ders: `SET search_path` olmayan `SECURITY DEFINER`, herhangi bir Postgres tenancy modelinden çıkışın standart kaçış yoludur.**
+> **Ders şudur:** `SET search_path` içermeyen bir tanımlayıcı güvenlikli fonksiyon, herhangi bir Postgres kiracılık modelinden çıkışın standart kaçış yoludur.
 
-#### RLS performansı — dört büyüklük mertebesi
-
-Supabase'in kendi benchmark'ı, 100K satırlık tablo ([kaynak](https://supabase.com/docs/guides/troubleshooting/rls-performance-and-best-practices-Z5Jjwv)):
+**Satır seviyesi güvenlik performansında dört büyüklük mertebesi vardır.** Supabase'in kendi kıyaslaması, 100 bin satırlık bir tablo üzerinde:
 
 | Optimizasyon | Önce | Sonra |
 |---|---|---|
-| RLS kolonuna indeks | 171 ms | **<0,1 ms** |
-| `auth.uid()` → `(select auth.uid())` | 179 ms | 9 ms |
-| security-definer `has_role()`'ü `select` ile sar | **178.000 ms** | **12 ms** |
-| Politikaya `TO authenticated` ekle | 170 ms | **<0,1 ms** |
+| Satır seviyesi güvenlik kolonuna indeks | 171 ms | 0,1 ms'nin altı |
+| `auth.uid()` çağrısını `(select auth.uid())` yapmak | 179 ms | 9 ms |
+| Tanımlayıcı güvenlikli `has_role()` fonksiyonunu `select` ile sarmak | 178.000 ms | 12 ms |
+| Politikaya `TO authenticated` eklemek | 170 ms | 0,1 ms'nin altı |
 
-1M satır, takım üyeliği:
+Bir milyon satır ile takım üyeliğinde:
 
 | Politika biçimi | İndeks | 10 takım | 500 takım |
 |---|---|---|---|
-| `= ANY(user_teams())` | hayır | >2 dk | >2 dk |
-| `= ANY(ARRAY(select user_teams()))` | hayır | 170 ms | 3.300 ms |
-| `= ANY(ARRAY(select user_teams()))` | **evet** | **2 ms** | **3 ms** |
+| `= ANY(user_teams())` | Yok | İki dakikanın üzeri | İki dakikanın üzeri |
+| `= ANY(ARRAY(select user_teams()))` | Yok | 170 ms | 3.300 ms |
+| `= ANY(ARRAY(select user_teams()))` | Var | 2 ms | 3 ms |
 
-**Mekanizma:** `(select ...)` ile sarmak planlayıcıya **InitPlan** kurdurur — fonksiyon satır başına değil **sorgu başına bir kez** değerlendirilir, seq scan index scan'e döner. Kısıt (dokümandan): yalnızca *"if the results of the query or function do not change based on the row data."*
+Mekanizması şudur: `(select ...)` ile sarmak planlayıcıya bir başlangıç planı kurdurmakta, fonksiyon satır başına değil sorgu başına bir kez değerlendirilmekte ve ardışık tarama indeks taramasına dönmektedir. Kısıtı dokümanda yazmaktadır: bu yalnızca sorgunun ya da fonksiyonun sonuçları satır verisine göre değişmiyorsa geçerlidir.
 
-> **RLS "yavaş" değildir. Naif yazılmış RLS felakettir, ayarlanmış RLS bedavaya yakındır.** Fark dört-beş büyüklük mertebesi ve tamamen politika biçimine bağlıdır.
+> **Satır seviyesi güvenlik yavaş değildir.** Naif yazılmış satır seviyesi güvenlik bir felakettir, ayarlanmış olanı bedavaya yakındır. Fark dört ile beş büyüklük mertebesidir ve tamamen politika biçimine bağlıdır.
 
-Bağımsız ölçüm (Scott Pierce, 5 Oca 2025): 1M blog / 1,8M üyelik — doğrudan korelasyonlu count **31,162 ms** vs `IN (subquery)` **106,628 ms** (3,4×).
+Bağımsız bir ölçüm Scott Pierce'ındır, 5 Ocak 2025: bir milyon blog ile 1,8 milyon üyelikte doğrudan ilişkili sayım 31,162 milisaniye, alt sorgulu `IN` ise 106,628 milisaniye sürmektedir, yani 3,4 kat fark vardır.
 
-**Ölçülmemiş bilinmeyen `[DOĞRULANAMADI]`:** RLS + generic plan caching. `current_setting()` STABLE'dır, yürütme başına yeniden değerlendirilir → *doğruluk* korunur. Ama 10 satırlı bir tenant için seçilen generic plan, 10M satırlı tenant için felaket olabilir. **Bu konuda ölçülmüş hiçbir çalışma bulunamadı — kendi iş yükünüzde test edin.**
+Ölçülmemiş bir bilinmeyen vardır ve doğrulanamamıştır: satır seviyesi güvenlik ile genel plan önbelleklemesinin etkileşimi. `current_setting()` kararlıdır ve yürütme başına yeniden değerlendirilir, dolayısıyla doğruluk korunmaktadır. Ancak on satırlı bir kiracı için seçilen genel plan, on milyon satırlı bir kiracı için felaket olabilir. Bu konuda ölçülmüş hiçbir çalışma bulunamamıştır ve kendi iş yükünüzde test edilmelidir.
 
-### 2.7 Citus, tenant başına havuz, PG 17/18
+### 2.7 Citus, kiracı başına havuz ile PostgreSQL 17 ve 18
 
-**Citus 12 schema-based sharding** (Tem 2023): `SET citus.enable_schema_based_sharding TO on;`. **Sınırlar:** FK ve join'ler tek şema içinde kalmalı (reference tablolar hariç); **paralel cross-tenant sorgu YOK**; **>10.000 şemada per-process katalog cache belleğinden bozuluyor.** Tek native gürültülü-komşu aracı: `citus_stat_tenants` (Citus 11.3).
+**Citus 12'nin şema tabanlı parçalaması**, Temmuz 2023, `SET citus.enable_schema_based_sharding TO on;` ile açılmaktadır. Sınırları şunlardır: yabancı anahtarlar ile birleştirmeler tek bir şema içinde kalmalıdır, referans tabloları hariç; paralel çapraz kiracı sorgusu yoktur; on binden fazla şemada süreç başına katalog önbelleği belleğinden bozulmaktadır. Tek yerel gürültülü komşu aracı `citus_stat_tenants`'tır ve Citus 11.3 ile gelmiştir.
 
-**Ölçekte gerçekten ne yapılıyor:**
-- **Notion**: 32 instance × 15 mantıksal shard = **480 mantıksal shard**, workspace ID'ye göre; sonra 96 instance × 5 shard, **hâlâ 480**.
-- **Figma**: 2020'den beri ~100× büyüme; yatay shard'lı "colo"lar (`UserId`, `FileId`, `OrgID`); ilk yatay shard'lı tablo Eyl 2023, 9 aylık proje.
+**Ölçekte gerçekte ne yapılmaktadır.** Notion 32 örnek ile örnek başına 15 mantıksal parça, yani 480 mantıksal parça kullanmakta ve bunu çalışma alanı kimliğine göre yapmaktadır; sonra 96 örnek ile beş parçaya geçmiş ancak toplam hâlâ 480 kalmıştır. Figma 2020'den beri yaklaşık yüz kat büyümüştür; kullanıcı kimliği, dosya kimliği ile organizasyon kimliğine göre yatay parçalanmış yerleşimler kullanmaktadır ve ilk yatay parçalanmış tablosu Eylül 2023'te dokuz aylık bir projenin sonunda gelmiştir. İkisi de satır bazlı ile kiracı anahtarlı parçalamayı seçmiştir, kiracı başına şemayı değil.
 
-**İkisi de satır bazlı/tenant-anahtarlı sharding seçti, schema-per-tenant değil.**
+**Kiracı başına havuz aritmetiği.** PgBouncer havuzları kullanıcı ile veritabanı çiftine göre anahtarlanmaktadır ve `default_pool_size` havuz başınadır, küresel değildir. 200 kiracı veritabanı ile onluk havuz 2.000 potansiyel sunucu bağlantısı demektir. Kontrolleri `max_db_connections` ile `max_user_connections`'tır.
 
-**Tenant başına havuz aritmetiği:** PgBouncer havuzları **(user, database)** çiftine göre anahtarlanır; `default_pool_size` havuz başınadır, global değil. 200 tenant DB × 10 = **2.000 potansiyel sunucu bağlantısı**. Kontroller: `max_db_connections`, `max_user_connections`.
+AWS matrisi birebir şöyledir: silo modeli için kayda değer efor gerekir, yani kiracı başına bir bağlantı havuzu, ve daha az verimlidir. Köprü ya da şema modeli için daha az efor gerekir ancak bağlantı yeniden kullanımı `SET ROLE` veya `SET SCHEMA` ile yalnızca oturum havuz modunda mümkündür. Havuz modeli, yani `tenant_id` ile, en az efor gerektirir ve en verimlidir, çünkü tüm kiracılar için tek bir bağlantı havuzu vardır.
 
-AWS matrisi, verbatim:
-- Silo: *"Significant effort. (One connection pool per tenant.)"* / *"Less efficient."*
-- Bridge/şema: *"Less effort"* ama *"Connection reuse through `SET ROLE` or `SET SCHEMA` **in session pool mode only**."*
-- Pool (`tenant_id`): *"**Least effort**"* / *"**Most efficient. (One connection pool for all tenants.)**"*
+> **Az takdir edilen can alıcı nokta:** kiracı başına şemanın herkese tek havuz avantajı, işlem modunda havuzlamaya ihtiyaç duyduğunuz anda buharlaşmaktadır, çünkü `search_path` bir oturum durumudur.
 
-> **Az takdir edilen can alıcı nokta:** schema-per-tenant'ın "herkese tek havuz" avantajı, transaction-mode pooling'e ihtiyaç duyduğunuz anda **buharlaşır**, çünkü `search_path` oturum durumudur.
+**PostgreSQL 17**, 26 Eylül 2024: vacuum'un yeni bellek yapısı 20 kat daha az bellek kullanmaktadır ve bu, 2.2'deki çok tablolu autovacuum çöküşüyle doğrudan ilgilidir.
 
-**PG 17 (26 Eyl 2024):** vacuum'un yeni bellek yapısı **20× daha az bellek** — §2.3'teki çok-tablolu autovacuum çöküşüyle doğrudan ilgili.
+**PostgreSQL 18**, 25 Eylül 2025: birçok ilişkiye erişen sorguların kilitleme performansı iyileştirilmiştir, Vondra'nın `c4d5cb71d` commit'i; bu, çok bölümlü ile çok indeksli kullanan herkes için en alakalı değişikliktir. Birçok bölüme erişen sorguların planlanma verimliliği iyileştirilmiştir. `pg_upgrade --swap` seçeneği eklenmiştir ve özellikle çok ilişkili kümelerde bağlama, klonlama ile kopyalama seçeneklerinden daha iyi performans gösterebilmektedir. `pg_dump --no-policies` seçeneği satır seviyesi güvenlik politikalarını migration'da yönetmek için eklenmiştir.
 
-**PG 18 (25 Eyl 2025):**
-- *"Improve the locking performance of queries that access many relations"* (Vondra, `c4d5cb71d`) — **çok partition/çok indeks kullanan herkes için en alakalı değişiklik**
-- *"Improve the efficiency of planning queries accessing many partitions"*
-- `pg_upgrade --swap` — *"can outperform --link, --clone, --copy… especially on clusters with **many relations**"*
-- `pg_dump --no-policies` — RLS politikalarını migration'da yönetmek için
-
-**PG 18 sürüm notlarında relcache/catcache backend-başı belleğini veya çok-relation'lı autovacuum zamanlamasını ele alan HİÇBİR madde yok. §2.3 ve §2.4 sınırları 2026'da hâlâ canlı.**
+PostgreSQL 18 sürüm notlarında ilişki ile katalog önbelleğinin arka uç başına belleğini veya çok ilişkili autovacuum zamanlamasını ele alan hiçbir madde yoktur. 2.2 ile 2.4'teki sınırlar 2026'da hâlâ canlıdır.
 
 ---
 
-## BÖLÜM III — İZOLASYONUN VERİDEN ÖTESİ
+## Bölüm III — İzolasyonun veriden ötesi
 
-### 3.1 Tenant başına imzalama anahtarı — müzakere edilemez
+### 3.1 Kiracı başına imzalama anahtarı, müzakere edilemez
 
-#### Saldırı zinciri (kendi türetmem, birincil kaynaklarla temellendirilmiş)
+**Saldırı zinciri**, kendi türetimimizdir ve birincil kaynaklarla temellendirilmiştir.
 
-**Adım 1** — RFC 6749 §2.2, verbatim:
-> "The client identifier is **unique to the authorization server**."
+Birinci adım RFC 6749 §2.2'dir: "The client identifier is unique to the authorization server." Çok kiracılı bir IdP'de her kiracı ayrı bir yetkilendirme sunucusudur. Yani kiracı A ile kiracı B'de aynı `webapp` istemci kimliği olabilir ve bu spesifikasyona tamamen uygundur. Keycloak bunu şema düzeyinde yapmaktadır: `UNIQUE(REALM_ID, CLIENT_ID)`.
 
-Çok kiracılı IdP'de her tenant ayrı bir AS'tir. Yani tenant A ve tenant B'de **aynı `webapp` client_id'si olabilir ve bu spec'e tamamen uygundur.** Keycloak bunu şema düzeyinde yapıyor: `UNIQUE(REALM_ID, CLIENT_ID)`.
+İkinci adım şudur: imzalama anahtarı paylaşımlıysa, kiracı A'nın verdiği bir token kiracı B'nin JWKS'iyle de doğrulanır.
 
-**Adım 2** — imzalama anahtarı paylaşımlıysa, tenant A'nın verdiği token tenant B'nin JWKS'iyle de doğrulanır.
+Üçüncü adımda `aud` kontrolü de geçer, çünkü iki kiracıda da audience `webapp`'tır.
 
-**Adım 3** — `aud` kontrolü de **geçer**, çünkü iki tenant'ta da `aud = "webapp"`.
+Dördüncü adımda geriye tek bir savunma kalır: `iss` kontrolü. OIDC Core §3.1.3.7 birebir şöyledir: "The Issuer Identifier for the OpenID Provider… MUST exactly match the value of the `iss` (issuer) Claim."
 
-**Adım 4** — Geriye tek savunma kalır: `iss` kontrolü. OIDC Core §3.1.3.7, verbatim:
-> "The Issuer Identifier for the OpenID Provider… **MUST exactly match** the value of the `iss` (issuer) Claim."
+Beşinci adım şudur: ilgili taraflar bunu yapmamaktadır.
 
-**Adım 5** — Ve RP'ler bunu yapmaz.
+**Bu teorik değildir ve iki kez olmuştur.**
 
-#### Bu teorik değil. İki kez oldu.
+Storm-0558, Wiz Research, 21 Temmuz 2023:
 
-**Storm-0558** ([Wiz Research, 21 Tem 2023](https://www.wiz.io/blog/storm-0558-compromised-microsoft-key-enables-authentication-of-countless-micr)):
+> "The compromised MSA key was trusted to sign any OpenID v2.0 access token for personal accounts and mixed-audience (multi-tenant or personal account) AAD applications."
+>
+> "Any token signed by the MSA tenant for an Azure AD account could be deemed valid, as long as it impersonates a personal account" — çünkü birçok uygulamada issuer doğrulaması yoktu.
+>
+> Microsoft'un issuer doğrulama uzantısı hakkında: "This extension is specific to Microsoft and the responsibility of its implementation rests with the application owner. Therefore, there is a concern that many applications lack this procedure."
 
-> "The compromised MSA key was trusted to sign **any** OpenID v2.0 access token for personal accounts and **mixed-audience (multi-tenant or personal account) AAD applications**."
-> "**Any token signed by the MSA tenant for an Azure AD account could be deemed valid**, as long as it impersonates a personal account" — çünkü birçok uygulamada issuer doğrulaması yoktu.
-> Microsoft'un issuer doğrulama uzantısı hakkında: "This extension is specific to Microsoft and **the responsibility of its implementation rests with the application owner. Therefore, there is a concern that many applications lack this procedure.**"
+Microsoft zorunlu doğrulamayı resmî Azure SDK'sına ancak 12 Temmuz 2023'te eklemiştir. CISA'nın siber güvenlik inceleme kurulu PDF'i 403 döndürmüştür ve doğrulanamamıştır.
 
-Microsoft zorunlu doğrulamayı resmî Azure SDK'sına ancak **12 Tem 2023**'te ekledi. (CISA CSRB PDF'i 403 döndü `[DOĞRULANAMADI]`.)
+CVE-2026-23552, 23 Şubat 2026, CVSS 9,1, Apache Camel'ın Keycloak bileşeni; NVD'den birebir:
 
-**CVE-2026-23552** (23 Şub 2026, **CVSS 9.1**), Apache Camel Keycloak bileşeni, NVD'den verbatim:
+> "The Camel-Keycloak KeycloakSecurityPolicy does not validate the `iss` (issuer) claim of JWT tokens against the configured realm. A token issued by one Keycloak realm is silently accepted by a policy configured for a completely different realm, breaking tenant isolation."
 
-> "The Camel-Keycloak KeycloakSecurityPolicy **does not validate the `iss` (issuer) claim** of JWT tokens against the configured realm. **A token issued by one Keycloak realm is silently accepted by a policy configured for a completely different realm, breaking tenant isolation.**"
+> Yedi ay önce ve CVSS 9,1 olarak tam olarak budur. Keycloak realm başına ayrı anahtar kullandığı için tam bir istismar imza doğrulamasının da gevşek olmasını gerektirir; ancak sessizce kabul edilir ifadesi, izolasyonun tüketici disiplinine ne kadar bağımlı olduğunu kanıtlamaktadır.
 
-> **Yedi ay önce, CVSS 9.1 olarak, tam olarak bu.** Keycloak realm başına ayrı anahtar kullandığı için tam sömürü imza doğrulamasının da gevşek olmasını gerektirir — ama "sessizce kabul edilir" ifadesi, izolasyonun tüketici disiplinine ne kadar bağımlı olduğunu kanıtlıyor.
-
-#### Kim ne yapıyor
+**Kim ne yapmaktadır.**
 
 | IdP | Anahtar kapsamı | Kanıt |
 |---|---|---|
-| **Keycloak** | **Realm başına** | *"When a realm is created, a key pair and a self-signed certificate is automatically generated."* Realm başına 2×RSA-2048 + HMAC + AES |
-| Auth0 | Tenant başına | — |
-| Entra | **Paylaşımlı MSA/kurumsal ayrımı yetersizdi** | Storm-0558 |
+| Keycloak | Realm başına | "When a realm is created, a key pair and a self-signed certificate is automatically generated." Realm başına iki RSA-2048 ile HMAC ve AES anahtarı üretilmektedir |
+| Auth0 | Kiracı başına | — |
+| Entra | Paylaşımlı Microsoft hesabı ile kurumsal ayrımı yetersizdi | Storm-0558 |
 
-#### Rotasyon — Keycloak'ın modeli doğru
+**Rotasyonda Keycloak'ın modeli doğrudur.**
 
-> "Keycloak has a **single active key pair** at a time, but can have **several passive keys** as well. The active key pair is used to create new signatures, while the passive key pair can be used to verify previous signatures."
-> Tavsiye: *"Consider creating new keys every three to six months and deleting old keys one to two months after you create the new keys. **If a user was inactive in the period between the new keys being added and the old keys being removed, that user will have to re-authenticate.**"*
+> "Keycloak has a single active key pair at a time, but can have several passive keys as well. The active key pair is used to create new signatures, while the passive key pair can be used to verify previous signatures."
+>
+> Tavsiyesi şöyledir: "Consider creating new keys every three to six months and deleting old keys one to two months after you create the new keys. If a user was inactive in the period between the new keys being added and the old keys being removed, that user will have to re-authenticate."
 
-**Argus kuralları:**
-1. Tenant başına **1 aktif + N pasif** anahtar; JWKS her ikisini de yayınlar
-2. `kid` **global benzersiz** ve tenant'ı sızdırmayan opak değer (tenant slug'ı `kid`'e KOYMAYIN — enumeration)
-3. Rotasyon **tenant başına bağımsız** zamanlanabilir
-4. **ES256 varsayılan**; RSA yalnız eski RP uyumu için ve **talep üzerine (lazy) üretilsin** — her tenant için peşinen değil
-5. `client_id` **global benzersiz** (Keycloak'ın aksine) → iki bağımsız savunma katmanı
+**Argus kuralları.**
 
-### 3.2 Issuer URL stratejisi — RFC seviyesinde karşılaştırma
+1. Kiracı başına bir aktif ile N pasif anahtar tutulur; JWKS her ikisini de yayımlar.
+2. `kid` küresel benzersiz ve kiracıyı sızdırmayan opak bir değerdir; kiracı kısa adı `kid` içine konmaz, çünkü bu bir sayım yüzeyidir.
+3. Rotasyon kiracı başına bağımsız zamanlanabilir.
+4. Varsayılan ES256'dır; RSA yalnızca eski ilgili taraf uyumu için ve talep üzerine, yani tembel, üretilir, her kiracı için peşinen değil.
+5. `client_id` küresel benzersizdir, Keycloak'ın aksine; bu iki bağımsız savunma katmanı demektir.
 
-#### Kritik spec çelişkisi (kendim doğruladım, verbatim)
+### 3.2 Issuer URL stratejisi, RFC seviyesinde karşılaştırma
 
-**RFC 8414 §3.1** (Haz 2018) — **ARAYA EKLE**:
-> "If the issuer identifier value contains a path component, any terminating `/` MUST be removed before **inserting** `/.well-known/` and the well-known URI suffix **between the host component and the path component**."
-> Örnek: issuer `https://example.com/issuer1` → `GET /.well-known/oauth-authorization-server/issuer1`
-> "Using path components enables supporting multiple issuers per host. **This is required in some multi-tenant hosting configurations.**"
+**Kritik bir spesifikasyon çelişkisi vardır** ve doğrudan doğrulanmıştır.
 
-**OIDC Discovery 1.0 §4** — **SONA EKLE**:
-> "OpenID Providers supporting Discovery MUST make a JSON document available at the path formed by **concatenating** the string `/.well-known/openid-configuration` **to the Issuer**."
-> Örnek: `GET /issuer1/.well-known/openid-configuration`
+RFC 8414 §3.1, Haziran 2018, araya ekleme yapmaktadır:
 
-> **İki spec aynı issuer için FARKLI URL üretir.** Path-based issuer kullanacaksanız **her ikisini de servis etmek zorundasınız**. Bu, path-based'in en sık gözden kaçan maliyetidir.
+> "If the issuer identifier value contains a path component, any terminating `/` MUST be removed before inserting `/.well-known/` and the well-known URI suffix between the host component and the path component."
+>
+> Örneği şudur: issuer `https://example.com/issuer1` ise istek `GET /.well-known/oauth-authorization-server/issuer1` olur.
+>
+> "Using path components enables supporting multiple issuers per host. This is required in some multi-tenant hosting configurations."
 
-#### Sertifika aritmetiği (Let's Encrypt, sayfa tarihi 5 Ağu 2026)
+OIDC Discovery 1.0 §4 ise sona ekleme yapmaktadır:
 
-Verbatim limitler:
-- "Up to **50 certificates** can be issued **per registered domain** every 7 days."
-- "Up to **300 new orders** can be created by a single account every 3 hours."
-- "A single certificate can include up to **100 identifiers**."
+> "OpenID Providers supporting Discovery MUST make a JSON document available at the path formed by concatenating the string `/.well-known/openid-configuration` to the Issuer."
+>
+> Örneği şudur: `GET /issuer1/.well-known/openid-configuration`.
 
-**Sonuçlar:**
-- `acme.argus.io` + tenant başına ayrı sertifika → **50. tenant'ta duvara çarparsınız.** Ölümcül.
-- **Tek wildcard `*.argus.io` (DNS-01) → sınırsız tenant.** Doğru cevap. (Uyarı: wildcard yalnız tek seviye kapsar.)
-- `login.acme.com` custom domain → her tenant kendi kayıtlı domain'i, kendi 50/hafta bütçesi. Ölçeklenir, ama hesap başına 300 sipariş/3 saat ≈ **2.400 yeni custom domain/gün** tavanı.
-- **SAN paketleme (100 identifier/sertifika) çok kiracılıkta ÖNERİLMEZ**: tek bir domain doğrulaması düşerse tüm sertifika yenilemesi düşer.
+> **İki spesifikasyon aynı issuer için farklı URL üretmektedir.** Path tabanlı issuer kullanılacaksa her ikisini de servis etmek zorunludur. Bu, path tabanlı yaklaşımın en sık gözden kaçan maliyetidir.
 
-#### Karşılaştırma
+**Sertifika aritmetiği**, Let's Encrypt, sayfa tarihi 5 Ağustos 2026. Birebir limitler şunlardır: kayıtlı alan adı başına yedi günde 50 sertifika verilebilir; tek bir hesap üç saatte 300 yeni sipariş oluşturabilir; tek bir sertifika 100 tanımlayıcıya kadar içerebilir.
 
-| Boyut | Path (`/t/acme`) | **Subdomain (`acme.argus.io`)** | Custom (`login.acme.com`) |
+Sonuçları şöyledir. `acme.argus.io` biçiminde kiracı başına ayrı sertifika alınırsa 50. kiracıda duvara çarpılır; bu ölümcüldür. Tek bir joker sertifika, yani DNS-01 ile `*.argus.io`, sınırsız kiracı demektir ve doğru cevap budur; uyarısı jokerin yalnızca tek seviyeyi kapsamasıdır. `login.acme.com` biçiminde özel alan adında her kiracının kendi kayıtlı alan adı ile kendi haftalık 50 sertifika bütçesi vardır; bu ölçeklenir ancak hesap başına üç saatte 300 sipariş, yani günde yaklaşık 2.400 yeni özel alan adı, bir tavandır. Sertifika başına 100 tanımlayıcıyla paketleme çok kiracılıkta önerilmez, çünkü tek bir alan adı doğrulaması düşerse tüm sertifika yenilemesi düşer.
+
+**Karşılaştırma.**
+
+| Boyut | Path, yani `/t/acme` | Alt alan adı, yani `acme.argus.io` | Özel, yani `login.acme.com` |
 |---|---|---|---|
-| Sertifika | Tek sertifika | **Tek wildcard** | Tenant başına ACME |
-| DNS işi | Yok | Tek wildcard kaydı | Tenant başına CNAME + doğrulama |
-| **Discovery** | **İKİ farklı yol servis edilmeli** | Kök `/.well-known/…` — çelişki yok | Kök — çelişki yok |
-| RP kütüphane uyumu | Path'li issuer'da kırılganlık | **Sorunsuz** | Sorunsuz |
-| **Tarayıcı origin izolasyonu** | **YOK — aynı origin** | **VAR — çerez/storage/XSS ayrı** | VAR |
-| Onboarding gecikmesi | Anında | Anında | Dakikalar (ACME) |
-| Kurumsal beklenti | Düşük | Orta | Yüksek |
+| Sertifika | Tek sertifika | Tek joker sertifika | Kiracı başına ACME |
+| DNS işi | Yoktur | Tek joker kaydı | Kiracı başına CNAME ile doğrulama |
+| Keşif | İki farklı yol servis edilmelidir | Kök `/.well-known/…` kullanılır ve çelişki yoktur | Kök kullanılır ve çelişki yoktur |
+| İlgili taraf kütüphane uyumu | Path içeren issuer'da kırılganlık vardır | Sorunsuzdur | Sorunsuzdur |
+| Tarayıcı köken izolasyonu | Yoktur, aynı kökendir | Vardır; çerez, depolama ile XSS ayrılır | Vardır |
+| Katılım gecikmesi | Anındadır | Anındadır | Dakikalardır, ACME nedeniyle |
+| Kurumsal beklenti | Düşüktür | Ortadır | Yüksektir |
 
-**Origin izolasyonu argümanı belirleyicidir ve az konuşulur.** CVE-2023-6717 (CVSS 6.0) tam da bunu gösteriyor:
+Köken izolasyonu argümanı belirleyicidir ve az konuşulmaktadır. CVE-2023-6717, CVSS 6,0, tam da bunu göstermektedir:
 
-> "This issue may allow **a malicious admin in one realm** or a client with registration access **to target users in different realms or applications**, executing arbitrary JavaScript in their contexts… compromising the confidentiality, integrity, and availability of **the complete KC instance**."
+> "This issue may allow a malicious admin in one realm or a client with registration access to target users in different realms or applications, executing arbitrary JavaScript in their contexts… compromising the confidentiality, integrity, and availability of the complete KC instance."
 
-Aynı origin'de servis edilen çok kiracılı UI'ın bedeli budur. **Subdomain, bunu tarayıcının kendi güvenlik modeliyle kapatır.**
+Aynı kökende servis edilen çok kiracılı bir arayüzün bedeli budur. Alt alan adı bunu tarayıcının kendi güvenlik modeliyle kapatmaktadır.
 
-#### RFC 9207 — gün-1 zorunlu
+**RFC 9207 birinci günden zorunludur.** RFC 9207, Mart 2022, birebir şöyle der:
 
-RFC 9207 (Mar 2022), verbatim:
-> "In authorization responses to the client, including error responses, an authorization server supporting this specification **MUST indicate its identity by including the `iss` parameter** in the response."
+> "In authorization responses to the client, including error responses, an authorization server supporting this specification MUST indicate its identity by including the `iss` parameter in the response."
 
-Mix-up saldırılarına karşı. **Çok kiracılı IdP'de her tenant ayrı bir AS'tir → `iss` parametresi başlangıçtan itibaren.**
+Bu, mix-up saldırılarına karşıdır. Çok kiracılı bir IdP'de her kiracı ayrı bir yetkilendirme sunucusudur, dolayısıyla `iss` parametresi başlangıçtan itibaren verilmelidir.
 
-### 3.3 Rate limit, kota, gürültülü komşu
+### 3.3 Hız limiti, kota ile gürültülü komşu
 
-Gerçek ürünlerin tenant başına yayımladıkları:
+Gerçek ürünlerin kiracı başına yayımladıkları şunlardır.
 
 | Ürün | Limit |
 |---|---|
-| **Okta** | `/oauth2/v1/authorize` **1200 req/dk/org**; `/api/v1/users/*` **1000 req/dk/org**; `/api/v1/authn` 4/sn/kullanıcı adı. *"The most general scope for a bucket is the entire org."* |
-| **Entra External ID** | **20 req/sn/IP/tenant**, **200 req/sn/tenant**. Kayıt 6 tüketir, giriş 4 → `Tokens/sn = 200 / tüketim` |
-| **Auth0** | Authentication API "shared, environment-wide global limit at the tenant level"; Enterprise örneği **100 RPS**. Bir IP'den aynı hesaba 20 deneme/dk → sonra 10/dk. Organizations API'si için **sayısal limit yayımlanmamış** `[DOĞRULANAMADI]` |
-| **WorkOS** | 6.000 req/60s/API key; SSO authorize 1.000/60s/connection; Directory Sync **4 req/sn/directory** |
-| **Frontegg** | `GET /resources/tenants/v1` **30/dk** (Launch); **SSO config yazma 5-10/dk her planda** |
+| Okta | `/oauth2/v1/authorize` için organizasyon başına dakikada 1200 istek; `/api/v1/users/*` için organizasyon başına dakikada 1000 istek; `/api/v1/authn` için kullanıcı adı başına saniyede dört istek. Doküman şöyle der: bir kova için en genel kapsam tüm organizasyondur |
+| Entra External ID | Kiracı ile IP başına saniyede 20 istek, kiracı başına saniyede 200 istek. Kayıt altı, giriş dört jeton tüketmektedir, dolayısıyla saniyedeki jeton sayısı 200 bölü tüketimdir |
+| Auth0 | Kimlik doğrulama API'si kiracı seviyesinde paylaşımlı ve ortam genelinde küresel bir limite sahiptir; kurumsal örneği saniyede 100 istektir. Bir IP'den aynı hesaba dakikada 20 deneme, sonrasında dakikada on denemeye düşmektedir. Organizations API'si için sayısal bir limit yayımlanmamıştır ve doğrulanamamıştır |
+| WorkOS | API anahtarı başına 60 saniyede 6.000 istek; çoklu oturum açma yetkilendirmesi için bağlantı başına 60 saniyede 1.000 istek; dizin senkronizasyonu için dizin başına saniyede dört istek |
+| Frontegg | `GET /resources/tenants/v1` için Launch planında dakikada 30 istek; çoklu oturum açma yapılandırması yazma işlemi her planda dakikada beş ile on istek |
 
-**Postgres tarafında tek native tenant atıf aracı:** `citus_stat_tenants` (Citus 11.3, May 2023) — tenant başına CPU kullanımı ve sorgu sayısı, kayan zaman kovalarında, `citus.stat_tenants_limit` ile top-N.
+Postgres tarafında kiracı atfı için tek yerel araç `citus_stat_tenants`'tır; Citus 11.3, Mayıs 2023. Kiracı başına işlemci kullanımı ile sorgu sayısını kayan zaman kovalarında vermekte ve `citus.stat_tenants_limit` ile en yüksek N kiracıyı göstermektedir.
 
-### 3.4 Tenant başına özelleştirme — kod çalıştırmanın bedeli
+### 3.4 Kiracı başına özelleştirme, kod çalıştırmanın bedeli
 
-Bu sorunun güvenlik cevabı iki CVE'de yazılı:
+Bu sorunun güvenlik cevabı iki CVE'de yazılıdır.
 
-**CVE-2022-36051** (31 Ağu 2022, CVSS 8.7) — **Zitadel**, verbatim:
-> "**Actions**… is a feature, where users with role `ORG_OWNER` are able to create Javascript Code, which is invoked by the system at certain points during the login… **Due to a missing authorization check, Actions were able to grant authorizations for projects that belong to other organizations inside the same Instance.**"
+CVE-2022-36051, 31 Ağustos 2022, CVSS 8,7, Zitadel; birebir:
 
-**CVE-2019-10170** (8 May 2020, CVSS 6.6) — Keycloak:
-> "the **realm management interface permits a script to be set via the policy**. This flaw allows an attacker with authenticated user and realm management permissions to configure a malicious script to trigger and [execute]"
+> "Actions… is a feature, where users with role `ORG_OWNER` are able to create Javascript Code, which is invoked by the system at certain points during the login… Due to a missing authorization check, Actions were able to grant authorizations for projects that belong to other organizations inside the same Instance."
 
-> **Kural: tenant'ın yazdığı kod ASLA global yazma yetkisi olan bir bağlamda çalışmamalıdır.** Argus'ta tenant özelleştirmesi (claim mapping, akış kararları) tercihen **veri** olmalı (bildirimsel kural motoru), kod değil. Kod gerekiyorsa: WASM sandbox, tenant-scoped capability, ve yazma API'lerine erişim yok.
+CVE-2019-10170, 8 Mayıs 2020, CVSS 6,6, Keycloak:
 
-**Ve bir bonus tuzak — CVE-2026-19608** (18 Ağu 2026, CVSS 5.3), Keycloak:
-> "group-based policies using tokens that only contain **group names rather than full paths**. If two groups in different parts of the organization **share the same name**, a user in the unauthorized group can be mistake[nly authorized]"
+> "the realm management interface permits a script to be set via the policy. This flaw allows an attacker with authenticated user and realm management permissions to configure a malicious script to trigger and [execute]"
 
-> **İSİM TABANLI YETKİLENDİRME ÇOK KİRACILIKTA ÇÖKER.** Her zaman tam yol veya opak ID.
+> **Kural şudur: kiracının yazdığı kod asla küresel yazma yetkisi olan bir bağlamda çalışmamalıdır.** Argus'ta kiracı özelleştirmesi, yani claim eşlemesi ile akış kararları, tercihen veri olmalıdır, yani bildirimsel bir kural motoru olmalıdır, kod değil. Kod gerekiyorsa WASM sanal alanı, kiracı kapsamlı yetenekler ile yazma API'lerine erişimin olmaması şarttır.
 
-### 3.5 Tenant başına denetim logu ve saklama
+Bir bonus tuzak CVE-2026-19608'dir, 18 Ağustos 2026, CVSS 5,3, Keycloak:
 
-**Entra ID resmî tablosu** (ms.date 2026-01-06, güncelleme 2026-03-25):
+> "group-based policies using tokens that only contain group names rather than full paths. If two groups in different parts of the organization share the same name, a user in the unauthorized group can be mistake[nly authorized]"
 
-| Rapor | Free | P1 | P2 |
+> **İsim tabanlı yetkilendirme çok kiracılıkta çökmektedir.** Her zaman tam yol veya opak kimlik kullanılır.
+
+### 3.5 Kiracı başına denetim günlüğü ile saklama
+
+Entra ID'nin resmî tablosu, tarih 6 Ocak 2026, güncelleme 25 Mart 2026:
+
+| Rapor | Ücretsiz | P1 | P2 |
 |---|---|---|---|
-| Audit logs | 7 gün | **30 gün** | **30 gün** |
-| Sign-ins | 7 gün | **30 gün** | **30 gün** |
-| Risky sign-ins | 7 gün | 30 gün | 90 gün |
+| Denetim günlükleri | 7 gün | 30 gün | 30 gün |
+| Oturum açmalar | 7 gün | 30 gün | 30 gün |
+| Riskli oturum açmalar | 7 gün | 30 gün | 90 gün |
 
-> "You can retain the audit and sign-in activity data for longer than the default retention period **by routing it to an Azure storage account**."
-> "Log retention changes **aren't retroactive**."
+> "You can retain the audit and sign-in activity data for longer than the default retention period by routing it to an Azure storage account."
+>
+> "Log retention changes aren't retroactive."
 
-**Auth0**: plana göre değişir. **Okta**: System Log. **authentik tenancy**: `event_retention` varsayılan 365 gün, tenant başına ayarlanabilir.
+Auth0'da bu plana göre değişmektedir. Okta'da System Log kullanılmaktadır. authentik'in kiracılık modülünde `event_retention` varsayılanı 365 gündür ve kiracı başına ayarlanabilir.
 
-> **Argus için ders:** Dünyanın en büyük IdP'si bile denetim logunu IdP içinde **yalnızca 30 gün** tutuyor. Uzun saklama = dışarı akıtma. Argus:
-> - IdP içinde kısa sıcak pencere (varsayılan 30-90 gün), **tenant başına ayarlanabilir**
-> - **Tenant başına export hedefi** (S3/GCS/webhook/SIEM) gün-1'den
-> - Log tablosu `(tenant_id, zaman)` ile **partition'lanmalı** → tenant silme = `DETACH` + `DROP`
+> **Argus için ders.** Dünyanın en büyük IdP'si bile denetim günlüğünü IdP içinde yalnızca 30 gün tutmaktadır. Uzun saklama dışarı akıtma demektir. Argus'ta IdP içinde kısa bir sıcak pencere, varsayılanı 30 ile 90 gün, tutulur ve kiracı başına ayarlanabilir olur; kiracı başına bir dışa aktarım hedefi, yani S3, GCS, web kancası veya güvenlik bilgi ve olay yönetimi sistemi, birinci günden bulunur; günlük tablosu kiracı kimliği ile zamana göre bölümlenir, böylece kiracı silme bir ayırma ile düşürme işlemine dönüşür.
 
 ---
 
-## BÖLÜM IV — HİYERARŞİ VE KULLANICI KİMLİĞİ
+## Bölüm IV — Hiyerarşi ve kullanıcı kimliği
 
-### 4.1 Düz mü ağaç mı — piyasa oy verdi: DÜZ
+### 4.1 Düz mü ağaç mı: piyasa düz demiştir
 
-| Ürün | İç içe? | Kanıt |
+| Ürün | İç içe midir | Kanıt |
 |---|---|---|
-| Zitadel | **Hayır** | "orgs are **flat by design**"; "pls keep your hierarchy flat" |
-| Auth0 | **Hayır** | Personel, 13 Tem 2022: "**Auth0 does not currently support sub-organizations**" |
-| Okta | **Hayır** | "Orgs are hard boundaries" |
-| Entra AU | **Hayır** | "**Administrative units can't be nested**" |
-| WorkOS | **Hayır** | `parent_organization_id` alanı yok |
-| Keycloak | Org düz; **26.6.0'dan beri org İÇİNDE hiyerarşik gruplar** | [keycloak.org/2026/04/org-groups](https://www.keycloak.org/2026/04/org-groups) |
-| **Frontegg** | **Evet** | Belgeli derinlik sınırı yok `[DOĞRULANAMADI]` |
-| AWS Organizations | Evet | **Kök altında 5 seviye sert sınır** |
+| Zitadel | Hayır | Organizasyonlar tasarım gereği düzdür ve hiyerarşiyi düz tutun denmektedir |
+| Auth0 | Hayır | Personel, 13 Temmuz 2022: Auth0 şu anda alt organizasyonları desteklememektedir |
+| Okta | Hayır | Organizasyonlar sert sınırlardır |
+| Entra yönetim birimleri | Hayır | Yönetim birimleri iç içe olamaz |
+| WorkOS | Hayır | `parent_organization_id` alanı yoktur |
+| Keycloak | Organizasyon düzdür; 26.6.0'dan beri organizasyon içinde hiyerarşik gruplar vardır | keycloak.org'un Nisan 2026 tarihli organizasyon grupları yazısı |
+| Frontegg | Evet | Belgeli bir derinlik sınırı yoktur ve doğrulanamamıştır |
+| AWS Organizations | Evet | Kök altında beş seviye sert sınır vardır |
 
-**Hiyerarşiyi yapanların ödediği bedel — iki yönden aynı ders:**
+**Hiyerarşiyi yapanların ödediği bedel iki yönden aynı derstir.** Frontegg'te miras JWT'ye ulaşmamaktadır, dolayısıyla her yetki kararı bir API çağrısıdır. AWS Organizations'ta organizasyon birimi başına en fazla on servis kontrol politikası ile beş seviye vardır; bir hesabın etkin politikası, kimsenin ona iliştirmediği yaklaşık 50 belgenin kesişimidir. Birebir şöyle der: miras yoluyla bir organizasyon birimini ya da hesabı etkileyen politikalar bu limitlere sayılmamaktadır. `OU_DEPTH_LIMIT_EXCEEDED` hata kodu bir sebeple vardır. SpiceDB'de varsayılan sınır 50 sıçramadır; amaca özel bir ilişki tabanlı erişim kontrolü motoru bile derinliği sınırlamaktadır. Zanzibar, USENIX ATC 2019, trilyonlarca erişim kontrol listesi ile saniyede milyonlarca istekte 95. yüzdelikte on milisaniyenin altında kalmaktadır; ancak bu, Google'ın ölçeğinde amaca özel inşa edilmiş bir sistemdir.
 
-- **Frontegg**: miras JWT'ye ulaşmıyor → her yetki kararı API çağrısı
-- **AWS Organizations**: OU başına max 10 SCP × 5 seviye = bir hesabın *etkin* politikası, kimsenin ona iliştirmediği ~50 belgenin kesişimi. Ve verbatim: *"Policies that affect an OU or account **by inheritance do not count against these limits**."* Hata kodları `OU_DEPTH_LIMIT_EXCEEDED` bir sebeple var.
-- **SpiceDB**: *"By default, this limit is **50 hops**."* Amaca özel ReBAC motoru bile derinliği sınırlıyor.
-- **Zanzibar** (USENIX ATC '19): trilyonlarca ACL, milyonlarca istek/sn, **p95 <10 ms** — ama bu Google'ın ölçeğinde amaca özel inşa edilmiş bir sistem.
+> **Kopyalanacak kalıp şudur: düz kiracılar ile kiracı içinde hiyerarşik gruplar.** Hiyerarşi yetkilendirme katmanında kalır ve kimlik doğrulama ile kiracı çözümlemesinin sıcak yolundan çıkar. Keycloak 26.6.0 tam olarak buraya varmıştır. Geçişli miras gerekiyorsa bu bir ilişki tabanlı erişim kontrolü problemidir, yani OpenFGA ya da SpiceDB konusudur, bir kiracı modeli problemi değildir.
 
-> **Kopyalanacak kalıp: DÜZ tenant'lar + tenant İÇİNDE hiyerarşik gruplar.** Hiyerarşi yetkilendirme katmanında kalır, kimlik doğrulama/tenant-çözümleme sıcak yolundan çıkar. Keycloak 26.6.0 tam olarak buraya vardı. Geçişli miras gerekirse bu bir ReBAC problemidir (OpenFGA/SpiceDB), tenant modeli problemi değil.
+Postgres tarafında ağaç sorgu maliyeti bağlayıcı bir kısıt değildir, çünkü kiracı ağaçları küçük ile sığdır. Bağlayıcı kısıtlar taşıma ile yeniden ebeveynlemedeki yazma amplifikasyonu, ltree'de uygulamanın sorumlu olduğu yol bütünlüğü ile mirasın semantik belirsizliğidir; hiçbir indeks bunu düzeltmez.
 
-Postgres tarafında ağaç sorgu maliyeti **bağlayıcı kısıt değildir** — tenant ağaçları küçük ve sığdır. Bağlayıcı kısıtlar: (a) taşıma/yeniden-ebeveynlemede yazma amplifikasyonu, (b) ltree'de uygulama-sorumlu yol bütünlüğü, (c) mirasın semantik belirsizliği — hiçbir indeks bunu düzeltmez.
+### 4.2 Kullanıcı kimliği: iki okul ile ayırt edici soru
 
-### 4.2 Kullanıcı kimliği — iki okul ve ayırt edici soru
+Ayırt edici soru şudur: IdP her kiracı için kimlik bilgisini sahiplenmekte midir.
 
-**Ayırt edici soru: IdP her tenant için kimlik bilgisini (credential) sahiplenıyor mu?**
-
-| Ürün | Benzersizlik kapsamı | Aynı e-posta iki tenant'ta |
+| Ürün | Benzersizlik kapsamı | Aynı e-posta iki kiracıda |
 |---|---|---|
-| **Okul A — global kullanıcı + üyelik** | | |
-| WorkOS | **Environment** | Tek kullanıcı, N üyelik. **OTOMATİK BİRLEŞTİRME.** |
-| Auth0 | **Connection** | Connection paylaşımlıysa tek kullanıcı |
-| Keycloak (realm içi) | Realm | Tek realm kullanıcısı + N org üyeliği; **tam bir "managed" üyelik** |
-| Logto | Logto tenant'ı | Tek kullanıcı, N org |
-| Frontegg | Environment | Her zaman tek; **bölme yolu yok** `[DOĞRULANAMADI]` |
-| **Okul B — tenant-yerel gölge nesne** | | |
-| Zitadel | **Org** (dize kurgusuyla) | İki ayrı kullanıcı. **Taşınamaz.** |
-| Okta | **Org** | İki ayrı kullanıcı |
-| Entra | **Tenant** | İki ayrı nesne; `oid`/`sub` tasarımca farklı |
-| **Stytch** | **Organization** | **İki ayrı Member** |
-| SuperTokens | `appId→tenantId→email` | Varsayılan iki; opt-in paylaşım |
+| Birinci okul: küresel kullanıcı ile üyelik | | |
+| WorkOS | Ortam | Tek kullanıcı ile N üyelik; otomatik birleştirme yapılmaktadır |
+| Auth0 | Bağlantı | Bağlantı paylaşımlıysa tek kullanıcı olur |
+| Keycloak, realm içinde | Realm | Tek realm kullanıcısı ile N organizasyon üyeliği; tam bir yönetilen üyelik vardır |
+| Logto | Logto kiracısı | Tek kullanıcı ile N organizasyon |
+| Frontegg | Ortam | Her zaman tektir; bölme yolu yoktur ve doğrulanamamıştır |
+| İkinci okul: kiracıya yerel gölge nesne | | |
+| Zitadel | Organizasyon, dize kurgusuyla | İki ayrı kullanıcı olur ve taşınamazlar |
+| Okta | Organizasyon | İki ayrı kullanıcı olur |
+| Entra | Kiracı | İki ayrı nesne olur; `oid` ile `sub` tasarım gereği farklıdır |
+| Stytch | Organizasyon | İki ayrı üye olur |
+| SuperTokens | Uygulama kimliği, kiracı kimliği ile e-posta | Varsayılan olarak iki olur; paylaşım isteğe bağlı açılır |
 
-**Entra B2B, Okul B'nin referans uygulaması ve en çok düşünülmüş hâli:**
+**Entra B2B ikinci okulun referans uygulaması ile en çok düşünülmüş hâlidir.** Nesne davetle ve kullanım öncesinde yaratılır: bu hesabın kendisiyle ilişkili hiçbir kimlik bilgisi yoktur, çünkü kimlik doğrulama misafir kullanıcının kimlik sağlayıcısı tarafından yapılmaktadır. Çakışmayı yapısal olarak imkânsız kılan bir kullanıcı asıl adı kurgusu vardır: `john@contoso.com` değeri `john_contoso.com#EXT#@fabrikam.onmicrosoft.com` hâline gelmektedir. `UserType` üye ile misafir değerlerini alır ve bu, barındıran kiracıyla ilişkiyi anlatır, nasıl giriş yapıldığından bağımsızdır: kullanıcı tipinin kullanıcının nasıl oturum açtığıyla hiçbir ilgisi yoktur. `identities` özelliği ana kiracıya bir işaretçidir ve `ExternalAzureAD`, `google.com`, `mail` veya bir SAML issuer URI'si olabilir. Keskin bir operasyonel kenar vardır: bir misafir kullanıcı sonradan e-posta adresini değiştirirse yeni e-posta otomatik olarak senkronize olmamaktadır.
 
-- Nesne davetle yaratılır, kullanım öncesi: *"This account **doesn't have any credentials** associated with it because authentication is performed by the guest user's identity provider."*
-- Çakışmayı yapısal olarak imkânsız kılan UPN kurgusu: `john@contoso.com` → **`john_contoso.com#EXT#@fabrikam.onmicrosoft.com`**
-- `UserType` ∈ {Member, Guest} = *host ile ilişki*, nasıl giriş yaptığından bağımsız: *"The UserType has **no relation to how the user signs in**."*
-- `identities` özelliği ana kiracıya işaretçi: `ExternalAzureAD`, `google.com`, `mail`, veya SAML issuer URI'si
-- Keskin operasyonel kenar: *"If a guest user… later changes their email address, the new email **doesn't automatically sync**."*
+Keycloak'ın en temiz formülasyonu 30747 numaralı issue'dadır: üyeler yalnızca bir yönetilen üyeliğe sahip olabilir. Yani çok üyelik vardır ancak tam olarak bir tanesi kullanıcının yaşam döngüsünü sahiplenir. Bu, saf çoktan çoğa ilişkinin bıraktığı bu kullanıcıyı kim silebilir ile parolasını kim sıfırlayabilir belirsizliğini çözmektedir.
 
-**Ve Keycloak'ın en temiz formülasyonu** ([#30747](https://github.com/keycloak/keycloak/issues/30747)):
-> "members can have only **one managed membership**"
+### 4.3 E-posta ile kimlik: üç bağımsız ihlal
 
-Yani: **çok üyelik, ama tam bir tanesi kullanıcının yaşam döngüsünü sahiplenir.** Bu, saf many-to-many'nin bıraktığı "bu kullanıcıyı kim silebilir / parolasını kim sıfırlayabilir" belirsizliğini çözer.
+**Birincisi nOAuth'tur**, Descope tarafından 20 Haziran 2023'te açıklanmıştır. Saldırgan kendi Entra kiracısında yöneticidir, hesabının e-posta alanını kurbanınkiyle değiştirir, ki doğrulama yoktur, ve Microsoft ile giriş yap der. E-postayla eşleştirip birleştiren bir uygulamada bu tam bir hesap devralmasıdır ve kurbanın bir Microsoft hesabı olmasına bile gerek yoktur. Entra'nın `email` claim'i hem değiştirilebilirdir hem doğrulanmamıştır. Azaltımları `xms_edov` claim'i ile `RemoveUnverifiedEmailClaim` ayarıdır.
 
-### 4.3 E-posta ile kimlik — üç bağımsız ihlal
+İki yıl sonra hâlâ canlıdır; Semperis, 26 Haziran 2025: test edilen 104 Entra uygulama galerisi uygulamasının dokuzu, yani %9'u, savunmasızdır.
 
-**1. nOAuth** (Descope, açıklama 20 Haz 2023): saldırgan **kendi** Entra kiracısında admin, hesabının e-posta alanını kurbanınkiyle değiştirir (doğrulama yok), "Log in with Microsoft" der. E-postayla eşleştirip birleştiren uygulama → **tam hesap devralma. Kurbanın Microsoft hesabı olmasına bile gerek yok.** Entra'nın `email` claim'i hem değiştirilebilir hem doğrulanmamış. Azaltımlar: `xms_edov`, `RemoveUnverifiedEmailClaim`.
+**İkincisi Entra alan adı devralmasıdır.** Bir kullanıcı bir bulut servisine kaydolunca e-posta alan adına göre yönetilmeyen bir Entra dizinine eklenmektedir; buna viral veya gölge kiracı denir. Sonrasında DNS TXT kaydıyla sahiplik kanıtlanarak harici yönetici devralması yapılabilmektedir: Microsoft Entra ID alan adını yönetilmeyen organizasyondan kaldırmakta ve mevcut organizasyonunuza taşımakta, kullanıcıları, abonelikleri ile lisansları da taşımaktadır. `forceTakeover` değeri doğru yapılır ve yönetilmeyen organizasyon on gün sonra silinir.
 
-**İki yıl sonra hâlâ canlı** (Semperis, 26 Haz 2025): test edilen 104 Entra App Gallery uygulamasının **9'u (%9) savunmasız.**
+**Üçüncüsü Truffle Security'nin 13 Ocak 2025 tarihli bulgusudur** ve en önemlisidir, çünkü alan adı doğrulamasının kendisini yenmektedir: başarısız bir girişimin süresi dolmuş alan adı satın alınır, kendi çalışma alanınızda `user@faileddomain.com` yeniden yaratılır ve `hd` ile `email` claim'lerine göre eşleştiren bulut yazılımlarına girilir. Uygulama, orijinal şirket sahipleriyle yeni alan adı alıcısını ayırt edememektedir. 100.000'den fazla uygun alan adı tespit edilmiştir.
 
-**2. Entra domain takeover.** Kullanıcı bir bulut servisine kaydolunca *"they're added to an unmanaged Microsoft Entra directory **based on their email domain**"* — "viral"/"gölge" tenant. Sonra: DNS TXT ile ownership kanıtı → **external admin takeover**: *"Microsoft Entra ID **removes the domain name from the unmanaged organization and moves it to your existing organization**"*, kullanıcıları/abonelikleri/lisansları taşıyarak. `forceTakeover = true`; yönetilmeyen org **10 gün sonra silinir**.
+> **DNS sahipliği bir gerçek değil bir kiralamadır.** Doğrulanmış bir alan adına dayanan her kiracı yönlendirme kuralı, o alan adının süre bitim riskini miras almaktadır.
 
-**3. Truffle Security, 13 Oca 2025** — en önemlisi, çünkü **domain doğrulamasının kendisini yeniyor**: başarısız bir startup'ın süresi dolmuş domain'ini satın al, kendi Workspace'inde `user@faileddomain.com`'u yeniden yarat, `hd` + `email` ile eşleştiren SaaS'lara gir. Uygulama *"cannot distinguish between the original company owners and the new domain purchaser."* **>100.000 uygun domain** tespit edildi.
+Ürünlerin savunmaları şunlardır. Clerk: doğrulanmış bir alan adı tek kullanımlık bir alan adı veya yaygın bir e-posta sağlayıcısı olamaz; örneğin gmail.com için doğrulanmış alan adı yaratılamaz. Stytch: gmail.com gibi yaygın alan adlarına izin verilmemektedir; ayrıca oltalama karşıtı bir koruma vardır: e-posta alan adına göre anlık kullanıcı yaratımı için organizasyonda aynı e-posta alan adına sahip doğrulanmış e-postalı en az bir üye zaten bulunmalıdır, yani bir alan adının ilk kullanıcısı kendini mevcut bir organizasyona sokamaz. WorkOS: ortam başına yalnızca bir organizasyon belirli bir alan adını içerebilir.
 
-> **DNS sahipliği bir gerçek değil, bir kiralamadır.** Doğrulanmış domain'e dayanan her tenant yönlendirme kuralı, o domain'in süre bitim riskini miras alır.
+### 4.4 Politika çakışmasına yalnızca Entra tam cevap vermektedir
 
-**Ürünlerin savunmaları:**
-- **Clerk**: *"A Verified Domain cannot be a disposable domain or common email provider. For example, you cannot create a Verified Domain for @gmail.com"*
-- **Stytch**: *"Common domains such as `gmail.com` are not allowed"*; ve anti-phishing koruması: e-posta-domain JIT için *"there must already be at least one Member in the Organization **with a verified email address with the same email domain**"* — bir domain'in ilk kullanıcısı mevcut bir org'a kendini sokamaz
-- **WorkOS**: *"Only one organization can include a specific domain… per environment"*
+Üç tutarlı strateji vardır.
 
-### 4.4 Politika çakışması — sadece Entra tam cevap veriyor
+Birincisi tasarımla yok etmektir; Zitadel, Okta ile Entra B2B bunu yapar: bir kullanıcı bir kiracıya aittir ve çakışma yoktur.
 
-Üç tutarlı strateji var:
+İkincisi oturumu kiracıya kapsamaktır; Stytch, WorkOS, Auth0'ın organizasyon girişi ile Keycloak'ın organizasyon bağlamlı token'ı bunu yapar: bağlayıcı politika hedef organizasyonunkidir ve o organizasyona giriş yapılırken değerlendirilir. Organizasyon değiştirmek yeni bir kimlik doğrulamadır. Birinci okul için doğru model budur.
 
-1. **Tasarımla yok et** (Zitadel, Okta, Entra B2B): bir kullanıcı bir tenant'a ait → çakışma yok.
-2. **Oturumu tenant'a kapsa** (Stytch, WorkOS, Auth0 org login, Keycloak org-context token): bağlayıcı politika **hedef** org'unkidir, o org'a giriş yaparken değerlendirilir. Org değiştirmek yeni bir kimlik doğrulamadır. **Okul A için doğru model budur.**
-3. **Güven ve federe et** (Entra CA + cross-tenant trust): kaynak tenant'ın politikası her zaman geçerli; ana tenant'ın sağladığı faktörler **yalnızca inbound trust yapılandırılmışsa** kanıt olarak kabul edilir. Varsayılan: güven yok.
+Üçüncüsü güvenip federe etmektir; Entra'nın koşullu erişimi ile çapraz kiracı güveni bunu yapar: kaynak kiracının politikası her zaman geçerlidir ve ana kiracının sağladığı faktörler yalnızca gelen güven yapılandırılmışsa kanıt olarak kabul edilir. Varsayılan güven yokluğudur.
 
-**Entra'nın ilkesi, verbatim ve aynen benimsenmeli:**
-> "**MFA is completed at resource tenancy to ensure predictability.**"
+Entra'nın ilkesi birebir şöyledir ve aynen benimsenmelidir:
 
-Entra'nın asimetrik metot tablosu gerçek bir tuzak: **ana** tenant'ta kabul edilenler FIDO2, Windows Hello, sertifika; **kaynak** tenant'ta kabul edilenler yalnızca SMS, sesli arama, Authenticator push, OATH software. → **MFA güvenini kapatırsanız, phishing-resistant-only bir politika harici kullanıcı tarafından hiç sağlanamaz.**
+> "MFA is completed at resource tenancy to ensure predictability."
 
-> **Kaçınılacak dördüncü, söylenmemiş seçenek: tek global oturum + politikaların birleşimi.** Kullanıcının tek oturumu varsa ve tenant A passkey istiyorsa, tenant B'nin zayıf politikasıyla kurulan bir oturum tenant A erişimi vermemelidir. Pratikte: org-kapsamlı access token yalnızca o org'un politikası mevcut oturumda sağlandığında verilebilir → org değişiminde step-up, `amr`/`acr`'de gerçekten sağlananın kaydı.
+Entra'nın asimetrik metot tablosu gerçek bir tuzaktır: ana kiracıda kabul edilenler FIDO2, Windows Hello ile sertifikadır; kaynak kiracıda kabul edilenler yalnızca SMS, sesli arama, Authenticator bildirimi ile yazılım tabanlı OATH'tır. Yani çok adımlı doğrulama güveni kapatılırsa, yalnızca oltalamaya dirençli bir politika harici bir kullanıcı tarafından hiç sağlanamaz.
+
+> **Kaçınılacak dördüncü, söylenmemiş seçenek: tek küresel oturum ile politikaların birleşimi.** Kullanıcının tek bir oturumu varsa ve kiracı A passkey istiyorsa, kiracı B'nin zayıf politikasıyla kurulan bir oturum kiracı A erişimi vermemelidir. Pratikte organizasyon kapsamlı bir access token yalnızca o organizasyonun politikası mevcut oturumda sağlandığında verilebilir; bu, organizasyon değişiminde bir yükseltme ile `amr` ve `acr` alanlarında gerçekten sağlananın kaydı demektir.
+
+### 4.5 Kiracının kendisinin yetkilendirme sunucusuna dönüşmesi
+
+Buraya kadarki bölüm kiracıyı Argus'un müşterisi olarak ele almaktadır. Adı konmamış bir senaryo daha vardır ile Argus'un veri modeli bunu zaten mümkün kılmaktadır: kiracının kendi uygulaması, kendi kullanıcıları için bir yetkilendirme sunucusu gibi davranmaktadır.
+
+Stytch'in bağlı uygulamalar özelliği bunu ürünleştirmiştir; dokümanına göre müşterinin uygulaması bir kimlik sağlayıcı gibi davranarak yapay zekâ ajanlarıyla etkileşebilmekte, eklenti etkinleştirebilmekte ile kimlik doğrulama durumunu aktarabilmektedir. Erişim 13 Eylül 2026.
+
+Senaryo §14 ile §15'in kesişimindedir ile gerçek talebi ajan ekosistemi yaratmaktadır: kiracının uygulaması bir model bağlam protokolü sunucusu barındırdığında, o sunucuya erişen ajanın belirtecini kim vermektedir. İki cevap vardır. Argus verir ile kiracının uygulaması yalnızca kaynak sunucudur; bu, §14'ün varsayılan modelidir. Ya da kiracının uygulaması kendi belirtecini verir ile Argus yalnızca kullanıcı kimlik doğrulamasını sağlar.
+
+İkinci model adı konmadan bırakılırsa üç şey tasarlanmamış kalmaktadır.
+
+Birincisi veren alanının ayrımıdır. Kiracının verdiği belirteçler Argus'un verdiği belirteçlerden ayırt edilebilmelidir; aksi hâlde bir kaynak sunucu, kiracının verdiği bir belirteci Argus'un verdiği sanabilmektedir. Kiracı başına veren adresi zaten 4.2'nin gereğidir, ancak burada gereken daha fazlasıdır: belirteç tipi ya da izleyici kitle üzerinden, verenin Argus mu kiracı mı olduğu açık olmalıdır.
+
+İkincisi anahtar ayrımıdır. Kiracının kendi imzalama anahtarı olacaksa, o anahtar §1 kararı 25 gereği veritabanı dışında tutulmalıdır ile bu, kiracı başına bir anahtar arka ucu demektir. Kiracı Argus'un anahtarıyla imzalıyorsa, Argus kiracının verdiği her belirtecin içeriğinden sorumlu hâle gelmektedir; bu, §1 §5.1'deki kiracının belirteç içeriğine müdahale sınırıyla doğrudan çelişmektedir.
+
+Üçüncüsü iptalin kapsamıdır. Kiracının verdiği bir belirteç, Argus'un oturum çağı sayacıyla iptal edilebilmeli midir? Edilebilmeliyse kiracının yetkilendirme sunucusu Argus'un iptal yayınına abone olmak zorundadır; edilemiyorsa kullanıcının Argus'taki oturumunu sonlandırması kiracı uygulamasındaki erişimi sonlandırmamaktadır ile bu, kullanıcıya söylenmesi gereken bir sınırdır.
+
+Öneri şudur: ikinci model birinci günde desteklenmemeli ancak yasaklanmamalıdır. Veri modeli veren alanını kiracı başına ayrı tutmalı ile anahtar arka ucu kiracı başına adreslenebilir olmalıdır; bu iki şey sonradan eklenemez. Gerçek destek ise §1 §9.1'deki iptal sözleşmesi kapatıldıktan sonra değerlendirilmelidir, çünkü üçüncü soru o sözleşmenin bir uzantısıdır.
 
 ---
 
-## BÖLÜM V — GÜVENLİK: CROSS-TENANT SIZINTI
+## Bölüm V — Güvenlik: çapraz kiracı sızıntısı
 
-### 5.1 Doğrulanmış cross-tenant sınır ihlalleri
+### 5.1 Doğrulanmış çapraz kiracı sınır ihlalleri
 
-NVD API'sinden doğrudan çektim (`keywordSearch=keycloak`, 296 sonuç tarandı, sınır aşımı belirtilenler):
+NVD API'sinden doğrudan çekilmiştir; `keywordSearch=keycloak` ile 296 sonuç taranmış ve sınır aşımı belirtilenler alınmıştır.
 
-| CVE | Tarih | CVSS | Ne oldu |
+| CVE | Tarih | CVSS | Ne olmuştur |
 |---|---|---|---|
-| **CVE-2026-23552** | 2026-02-23 | **9.1** | Camel-Keycloak `iss` doğrulamıyor → **bir realm'in token'ı başka realm'in politikasınca sessizce kabul ediliyor** |
-| **CVE-2022-36051** | 2022-08-31 | **8.7** | **Zitadel Actions** (tenant JS kodu) **başka organizasyonların projelerine yetki verebiliyordu** |
-| **CVE-2019-14832** | 2019-10-15 | **7.5** | Keycloak REST API *"would permit user access from a realm the user was not configured"* — **unutulmuş `AND realm_id = ?`** |
-| **CVE-2026-41166** | 2026-04-22 | 7.0 | OpenRemote: *"uses the `{realm}` path segment… but **does not check that the caller may administer that realm**"* → master admin'e yükselme |
-| **CVE-2026-18215** | 2026-07-31 | 6.8 | Keycloak: Microsoft org kısıtı **token exchange'de yok sayılıyor** → başka org'un token'ıyla realm'e erişim |
-| **CVE-2023-6717** | 2024-04-25 | 6.0 | *"a malicious admin in one realm… to target users in **different realms**"* — aynı origin XSS |
-| **CVE-2020-1697** | 2020-02-10 | 6.1 | *"trick users in other realms"* — admin console stored XSS |
+| CVE-2026-23552 | 23 Şubat 2026 | 9,1 | Camel ile Keycloak `iss` doğrulamamaktadır; bir realm'in token'ı başka bir realm'in politikasınca sessizce kabul edilmektedir |
+| CVE-2022-36051 | 31 Ağustos 2022 | 8,7 | Zitadel Actions, yani kiracının JavaScript kodu, başka organizasyonların projelerine yetki verebilmekteydi |
+| CVE-2019-14832 | 15 Ekim 2019 | 7,5 | Keycloak REST API'si, kullanıcının yapılandırılmadığı bir realm'den kullanıcı erişimine izin vermekteydi; unutulmuş bir `AND realm_id = ?` koşuludur |
+| CVE-2026-41166 | 22 Nisan 2026 | 7,0 | OpenRemote `{realm}` yol segmentini kullanmakta ancak çağıranın o realm'i yönetebileceğini kontrol etmemektedir; master yöneticiye yükselme mümkündür |
+| CVE-2026-18215 | 31 Temmuz 2026 | 6,8 | Keycloak'ta Microsoft organizasyon kısıtı token takasında yok sayılmaktadır; başka bir organizasyonun token'ıyla realm'e erişilmektedir |
+| CVE-2023-6717 | 25 Nisan 2024 | 6,0 | Bir realm'deki kötü niyetli bir yönetici farklı realm'lerdeki kullanıcıları hedefleyebilmektedir; aynı köken XSS'idir |
+| CVE-2020-1697 | 10 Şubat 2020 | 6,1 | Diğer realm'lerdeki kullanıcıları kandırma; yönetim konsolunda saklanan XSS |
 
-**Bunlardan üçü Argus'un mimarisini doğrudan belirliyor:**
+Bunlardan üçü Argus'un mimarisini doğrudan belirlemektedir. CVE-2019-14832 yabancı anahtarsız bir ayırıcı kolonun kaçınılmaz sonucudur ve satır seviyesi güvenliği bir savunma derinliği olarak zorunlu kılmaktadır. CVE-2026-41166 çok kiracılı bir API'nin kanonik hatasıdır: kiracıyı yol parametresinden almak ancak yetkiyi kontrol etmemek. Tip sisteminde çözülmesi gereken tam olarak budur. CVE-2022-36051 kiracı kodunun küresel yazma bağlamında çalışmaması gerektiğini göstermektedir.
 
-- **CVE-2019-14832** → FK'sız discriminator kolonunun kaçınılmaz sonucu. **RLS savunma derinliği olarak zorunlu.**
-- **CVE-2026-41166** → çok kiracılı API'nin kanonik hatası: tenant'ı yol parametresinden al, yetkiyi kontrol etme. **Tip sisteminde çözülmesi gereken tam olarak bu.**
-- **CVE-2022-36051** → tenant kodu global yazma bağlamında çalışmamalı.
+Ayrıca bulut izolasyonu araştırması bağlamı vardır: Wiz ile Orca serisi, yani ChaosDB, Azure PostgreSQL Flexible Server'da çapraz kiracıya izin veren ExtraReplica ile BingBang; Okta destek sistemi ihlalleri, Ekim 2023 ile Ocak 2022; ve Storm-0558. Bu vakaların ayrıntılı teknik dökümü için ayrılan araştırma akışı bu raporun yazımı sırasında tamamlanmamıştır; yukarıdakiler kendi birincil kaynak doğrulamalarımızdır. Asana MCP olayı ile Wiz serisinin tam teknik ayrıntısı bu raporda doğrulanmamıştır ve talep edilirse ayrıca çıkarılabilir.
 
-**Ayrıca — bulut izolasyon araştırması bağlamı:** Wiz/Orca serisi (ChaosDB, ExtraReplica — Azure PostgreSQL Flexible Server cross-tenant, BingBang), Okta destek sistemi ihlalleri (Eki 2023, Oca 2022), Storm-0558. Bu vakaların ayrıntılı teknik dökümü için ayrılan araştırma akışı bu raporun yazımı sırasında tamamlanmadı; yukarıdakiler **kendi birincil-kaynak doğrulamalarımdır.** Asana MCP olayı ve Wiz serisinin tam teknik ayrıntısı bu raporda **`[DOĞRULANAMADI]`** — talep ederseniz ayrıca çıkarabilirim.
+### 5.2 Savunma derinliği olarak satır seviyesi güvenlik ne kadar etkilidir
 
-### 5.2 RLS savunma derinliği olarak — ne kadar etkili?
+Etkilidir, ancak yalnızca beş kuralın hepsi uygulanırsa. Logto'nun deneyimi bunun bedelini göstermektedir ve kanıt depodadır.
 
-**Etkili, ama yalnızca beş kuralın hepsi uygulanırsa.** Logto'nun deneyimi bunun bedelini gösteriyor — ve kanıt depoda:
+`packages/schemas/tables/_after_each.sql` dosyası her tabloya uygulanmaktadır:
 
-`packages/schemas/tables/_after_each.sql`, **her tabloya** uygulanıyor:
 ```sql
 create trigger set_tenant_id before insert on ${name} for each row execute procedure set_tenant_id();
 alter table ${name} enable row level security;
 create policy ${name}_tenant_id on ${name} as restrictive
   using (tenant_id = (select id from tenants where db_user = current_user));
 ```
-`_before_all.sql`: `create role logto_tenant_${database} password '${password}' noinherit;`
-`_after_all.sql`: `tenants` tablosu kendini koruyor — `revoke all… grant select (id, db_user, is_suspended, tag)`.
 
-**Ödedikleri bedel, birincil kaynaklardan:**
+`_before_all.sql` dosyası `create role logto_tenant_${database} password '${password}' noinherit;` satırını içermektedir. `_after_all.sql` dosyasında `tenants` tablosu kendini korumaktadır; tüm yetkiler geri alınmakta ve yalnızca kimlik, veritabanı kullanıcısı, askıya alınma durumu ile etiket kolonlarında seçme yetkisi verilmektedir.
 
-- **[PR #7596](https://github.com/logto-io/logto/pull/7596)** (29 Tem 2025): tek kolonlu FK'lar *"assign users from other tenants to an organization"*'a izin veriyordu; RLS sonra okumayı engelleyip **500 hatası** üretiyordu. Düzeltme: `(tenant_id, user_id)` composite FK'lar.
-  > **RLS + tenant_id, şemadaki HER FK'yı composite yapmaya zorlar.**
-- **[Issue #7685](https://github.com/logto-io/logto/issues/7685)** (14 Ağu 2025), verbatim: **"Row-level security has to be enforced on EVERY business table when starting Logto"** — ~60+ tablo eksik tespit edildi.
-  > **RLS değişmezi ya-hep-ya-hiçtir ve bootstrap sırasını hassas hale getirir.**
+Ödedikleri bedel birincil kaynaklardan şöyledir.
 
-### 5.3 Cross-tenant sızıntıyı sistematik test etmek
+7596 numaralı PR, 29 Temmuz 2025: tek kolonlu yabancı anahtarlar başka kiracılardan kullanıcıların bir organizasyona atanmasına izin vermekteydi; satır seviyesi güvenlik sonra okumayı engelleyip 500 hatası üretmekteydi. Düzeltme kiracı kimliği ile kullanıcı kimliğinden oluşan bileşik yabancı anahtarlardır. Yani satır seviyesi güvenlik ile kiracı kimliği, şemadaki her yabancı anahtarı bileşik yapmaya zorlamaktadır.
 
-Bu alanda yayımlanmış olgun bir metodoloji **bulunamadı** `[DOĞRULANAMADI]`. Aşağıdakiler kanıtlanmış hata sınıflarından türetilmiş, Argus'a özgü önerilerdir:
+7685 numaralı issue, 14 Ağustos 2025, birebir şöyledir: Logto başlatılırken satır seviyesi güvenliğin her iş tablosunda uygulanması gerekmektedir. Yaklaşık 60'tan fazla tablonun eksik olduğu tespit edilmiştir. Yani satır seviyesi güvenlik değişmezi ya hep ya hiçtir ve önyükleme sırasını hassaslaştırmaktadır.
 
-**1. Şema değişmezi CI kontrolü** (Logto'nun #7685'te öğrendiği ders):
+### 5.3 Çapraz kiracı sızıntısını sistematik test etmek
+
+Bu alanda yayımlanmış olgun bir metodoloji bulunamamıştır ve doğrulanamamıştır. Aşağıdakiler kanıtlanmış hata sınıflarından türetilmiş ve Argus'a özgü önerilerdir.
+
+**Birincisi şema değişmezi sürekli entegrasyon kontrolüdür**; Logto'nun 7685 numaralı issue'da öğrendiği derstir.
+
 ```sql
 -- CI'da FAIL: RLS'siz iş tablosu
 SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
@@ -953,48 +873,46 @@ WHERE n.nspname='argus' AND c.relkind='r'
 -- CI'da FAIL: BYPASSRLS taşıyan uygulama rolü
 ```
 
-**2. İkiz-tenant diferansiyel testi.** Tüm entegrasyon test paketini iki tenant için **aynı verilerle** çalıştır, sonra assert et: A'nın herhangi bir sorgusunun döndürdüğü satır kümesi ∩ B'nin verisi = ∅. Bu, CVE-2019-14832 sınıfını (unutulmuş yüklem) yakalar.
+**İkincisi ikiz kiracı diferansiyel testidir.** Tüm entegrasyon test paketi iki kiracı için aynı verilerle çalıştırılır, sonra şu iddia edilir: A'nın herhangi bir sorgusunun döndürdüğü satır kümesinin B'nin verisiyle kesişimi boştur. Bu, CVE-2019-14832 sınıfını, yani unutulmuş yüklemi, yakalar.
 
-**3. Property-based (proptest) değişmez.** Rastgele tenant/kullanıcı/client grafiği üret; değişmez: *hiçbir API çağrısı, çağıranın tenant'ı dışındaki bir `tenant_id`'ye ait satır döndürmez.* Özellikle **yol parametresi tenant'ı ≠ token tenant'ı** kombinasyonlarını üret — CVE-2026-41166 sınıfı.
+**Üçüncüsü özellik tabanlı bir değişmezdir**, proptest ile yazılır. Rastgele bir kiracı, kullanıcı ile istemci grafiği üretilir; değişmez şudur: hiçbir API çağrısı, çağıranın kiracısı dışındaki bir kiracı kimliğine ait satır döndürmez. Özellikle yol parametresindeki kiracının token'daki kiracıdan farklı olduğu kombinasyonlar üretilir; bu CVE-2026-41166 sınıfıdır.
 
-**4. Token confusion fuzzer'ı.** Tenant A'nın token'ını tenant B'nin her endpoint'ine gönder. Beklenen: 401/403, **hiçbir zaman 200**. Storm-0558 / CVE-2026-23552 sınıfı.
+**Dördüncüsü bir token karışıklığı bulandırıcısıdır.** Kiracı A'nın token'ı kiracı B'nin her endpoint'ine gönderilir. Beklenen 401 veya 403'tür, asla 200 değildir. Bu, Storm-0558 ile CVE-2026-23552 sınıfıdır.
 
-**5. Gizli kanal testi.** Tenant A'da var olan bir e-postayla tenant B'de kayıt dene → **unique violation ASLA sızmamalı.** PG dokümanının "covert channel" uyarısının doğrudan testi.
+**Beşincisi gizli kanal testidir.** Kiracı A'da var olan bir e-postayla kiracı B'de kayıt denenir; benzersizlik ihlali asla sızmamalıdır. Bu, PostgreSQL dokümanının gizli kanal uyarısının doğrudan testidir.
 
-**6. Negatif GUC testi.** `argus.tenant_id` set edilmemişken her sorgunun **sıfır satır** döndürdüğünü assert et (fail-closed), tüm satırları değil.
+**Altıncısı olumsuz yapılandırma değişkeni testidir.** `argus.tenant_id` ayarlanmamışken her sorgunun sıfır satır döndürdüğü iddia edilir, yani kapalı başarısızlık sağlanır, tüm satırların dönmesi değil.
 
 ---
 
-## BÖLÜM VI — RUST'A ÖZGÜ
+## Bölüm VI — Rust'a özgü konular
 
-### 6.1 Ambient context TEHLİKELİDİR — doğrulanmış
+### 6.1 Ortam bağlamı tehlikelidir, doğrulanmıştır
 
-`tokio::task_local!` cazip görünüyor. İki nedenle reddedin:
+`tokio::task_local!` cazip görünmektedir. İki nedenle reddedilmelidir.
 
-**1. `spawn`'a miras kalmaz.** Task-local veri `tokio::spawn` çağrılarına propagate **edilmez** (thread-local davranışıyla aynı) — [tokio#2396](https://github.com/tokio-rs/tokio/issues/2396), [discussion #4317](https://github.com/tokio-rs/tokio/discussions/4317). Geçici çözüm crate'i var (`tokio-inherit-task-local`) ama *"This does not inherit values created by `tokio::task_local`."*
+Birincisi `spawn` çağrısına miras kalmamasıdır. Göreve yerel veri `tokio::spawn` çağrılarına yayılmamaktadır; bu, iş parçacığına yerel verinin davranışıyla aynıdır. Kaynakları tokio deposundaki 2396 numaralı issue ile 4317 numaralı tartışmadır. Bir geçici çözüm crate'i vardır, yani `tokio-inherit-task-local`, ancak kendisi şöyle der: bu, `tokio::task_local` ile yaratılan değerleri miras almamaktadır. Sonuç şudur: arka plan bir işe spawn ettiğiniz an kiracı bağlamı sessizce kaybolmaktadır.
 
-> **Sonuç: arka plan işine spawn ettiğiniz an tenant bağlamı SESSİZCE kaybolur.**
+İkincisi erişimin panic etmesidir. `LocalKey::with()` ile `get()` dokümanı şöyle der: göreve yerel değişkenin ayarlanmış bir değeri yoksa bu fonksiyon panic etmektedir. Bir IdP'de bu bir hizmet reddidir.
 
-**2. Erişim panic eder.** `LocalKey::with()` ve `get()`: *"This function panics if the task local doesn't have a value set."* Bir IdP'de bu bir DoS'tur.
+### 6.2 Kiracıyı tip sisteminde kodlamak mümkündür ve kimse yapmamıştır
 
-### 6.2 Tenant'ı tip sisteminde kodlamak — mümkün, ve kimse yapmamış
-
-**Mekanizma olgun ve yaygın:**
+Mekanizma olgun ile yaygındır.
 
 | Crate | Sürüm | İndirme | Son güncelleme |
 |---|---|---|---|
-| `generativity` | 1.2.1 | **3.991.685** | 2026-04-26 |
-| `qcell` | 0.5.5 | 469.916 | 2025-09-17 |
-| `ghost-cell` | 0.2.6 | 119.002 | 2024-01-28 |
-| `indexing` (bluss) | 0.4.1 | 64.816 | **2019 — ölü** |
+| `generativity` | 1.2.1 | 3.991.685 | 26 Nisan 2026 |
+| `qcell` | 0.5.5 | 469.916 | 17 Eylül 2025 |
+| `ghost-cell` | 0.2.6 | 119.002 | 28 Ocak 2024 |
+| `indexing`, bluss | 0.4.1 | 64.816 | 2019, ölüdür |
 
-Teknik temel: **GhostCell** (Yanovski et al., ICFP 2021, PACMPL, [doi:10.1145/3473597](https://dl.acm.org/doi/10.1145/3473597)) — *"branded types (as exemplified by Haskell's ST monad), which combine phantom types and rank-2 polymorphism."* Sağlamlığı RustBelt ile Coq'ta **formel kanıtlanmış**.
+Teknik temeli GhostCell'dir; Yanovski ve arkadaşları, ICFP 2021, PACMPL, doi 10.1145/3473597. Makale şöyle der: markalı tipler, ki Haskell'in ST monadıyla örneklenmiştir, hayalet tipler ile ikinci mertebe çok biçimliliği birleştirmektedir. Sağlamlığı RustBelt ile Coq'ta formel olarak kanıtlanmıştır.
 
-`generativity` dokümanı: `Guard` ve `Id` lifetime parametresinde **invariant**; *"it is never valid to substitute or otherwise coerce `Id<'a>` into `Id<'b>`, for any concrete `'a` and `'b`, including `'static`."*
+`generativity` dokümanına göre `Guard` ile `Id` yaşam süresi parametresinde değişmezdir: herhangi bir somut yaşam süresi için, `'static` dahil, `Id<'a>` değerini `Id<'b>` yerine koymak ya da zorlamak asla geçerli değildir.
 
-**Çok kiracılığa uygulanmış yayımlanmış bir örnek BULUNAMADI.** Aradım; yok. Bu geçerli bir bulgudur: **Argus bunu yapan ilk sistem olur.**
+Çok kiracılığa uygulanmış yayımlanmış bir örnek bulunamamıştır. Aranmıştır ve yoktur. Bu geçerli bir bulgudur: Argus bunu yapan ilk sistem olur.
 
-### 6.3 Önerilen Rust kalıbı — üç katman
+### 6.3 Önerilen Rust kalıbı, üç katman
 
 ```rust
 // ── KATMAN 1: Opak, sızdırmaz tenant kimliği ───────────────────────────
@@ -1047,7 +965,7 @@ impl<'brand, 'c> TenantTx<'brand, 'c> {
 }
 ```
 
-Kullanım:
+Kullanımı şöyledir:
 
 ```rust
 generativity::make_guard!(guard);              // taze, benzersiz 'brand
@@ -1061,15 +979,15 @@ let mut tx_b = TenantTx::begin(&pool, tenant_b, guard2).await?;
 // ^^^ DERLEME HATASI: lifetime mismatch. 'brand'lar birleşmez.
 ```
 
-**Ne kazanır, ne kazanmaz — dürüstçe:**
+Ne kazandırdığı ile ne kazandırmadığı dürüstçe şöyledir.
 
-| Kazanır | Kazanmaz |
+| Kazandırır | Kazandırmaz |
 |---|---|
-| A tenant'ından okunan bir varlığı B tenant'ının yazma yoluna sokmak = derleme hatası | Yanlış tenant'ı `begin()`'e vermeyi engellemez (bu Katman 4'ün işi) |
-| Kapsamsız (tenant'sız) sorgu yazmak = tip yok, imkânsız | Ham SQL'de `AND tenant_id = ?` unutmayı engellemez → **RLS bunun içindir** |
-| GUC'un transaction içinde set edildiğini yapısal garanti eder | — |
+| Kiracı A'dan okunan bir varlığı kiracı B'nin yazma yoluna sokmak bir derleme hatasıdır | Yanlış kiracıyı `begin()` fonksiyonuna vermeyi engellemez; bu dördüncü katmanın işidir |
+| Kapsamsız, yani kiracısız bir sorgu yazmak imkânsızdır, çünkü böyle bir tip yoktur | Ham SQL'de `AND tenant_id = ?` koşulunu unutmayı engellemez; satır seviyesi güvenlik bunun içindir |
+| Yapılandırma değişkeninin işlem içinde ayarlandığını yapısal olarak garanti eder | — |
 
-#### Katman 4 — istek sınırında tenant çözümlemesi (Axum)
+**Dördüncü katman: istek sınırında kiracı çözümlemesi, Axum ile.**
 
 ```rust
 // Middleware: Host header -> TenantId; ASLA istek gövdesinden veya
@@ -1095,9 +1013,7 @@ impl<S> FromRequestParts<S> for AuthenticatedTenant {
 }
 ```
 
-#### Havuz seviyesi fail-safe
-
-`sqlx::PoolOptions` hook'ları ([docs.rs](https://docs.rs/sqlx/latest/sqlx/pool/struct.PoolOptions.html)) — `after_release` `Ok(false)`/`Err` dönerse bağlantı **kapatılır**:
+**Havuz seviyesinde güvenli başarısızlık.** `sqlx::PoolOptions` kancalarında `after_release` fonksiyonu `Ok(false)` veya bir hata dönerse bağlantı kapatılmaktadır.
 
 ```rust
 PgPoolOptions::new()
@@ -1111,7 +1027,7 @@ PgPoolOptions::new()
 
 ---
 
-## BÖLÜM VII — ARGUS İÇİN ÖNERİ
+## Bölüm VII — Argus için öneri
 
 ### 7.1 Somut şema
 
@@ -1238,67 +1154,78 @@ DO $$ DECLARE t text; BEGIN
 END $$;
 ```
 
-**Politika yazım kuralı (Supabase ölçümü, §2.6): fonksiyonu her zaman `(SELECT …)` ile sarın** — InitPlan kurar, satır başına değil sorgu başına bir kez değerlendirir. Fark 178.000 ms → 12 ms.
+Politika yazım kuralı 2.6'daki Supabase ölçümünden gelmektedir: fonksiyon her zaman `(SELECT …)` ile sarılır, çünkü bu bir başlangıç planı kurmakta ve satır başına değil sorgu başına bir kez değerlendirmektedir. Fark 178.000 milisaniyeden 12 milisaniyeye inmektedir.
 
-### 7.2 GÜN-1'DE KURULMALI — sonradan imkânsız
+### 7.2 Birinci günde kurulması gerekenler, sonradan imkânsızdır
 
-| # | Madde | Sonradan neden imkânsız | Kanıt |
+| # | Madde | Sonradan neden imkânsızdır | Kanıt |
 |---|---|---|---|
-| 1 | **`tenant_id` her tabloda VE her birincil anahtarda** | Tüm PK'ları düşürüp yeniden kurmak = dünya-durduran migration | SuperTokens: 33 tablo, tüm PK'lar CASCADE, offline migration |
-| 2 | **Her FK composite (`tenant_id` dahil)** | Tek kolonlu FK'lar çapraz-tenant referansa izin verir; RLS sonra okumayı bozar | Logto PR #7596 |
-| 3 | **RLS + FORCE + non-owner rol, tüm tablolarda** | Sonradan eklemek "ya hep ya hiç"; eksik tablo = sessiz sızıntı | Logto #7685: "EVERY business table" |
-| 4 | **Tenant başına imzalama anahtarı** | Paylaşımlıdan tenant başınaya geçiş = tüm RP'lerin JWKS cache'ini invalidasyonu + koordineli kesinti | Storm-0558; CVE-2026-23552 |
-| 5 | **`client_id` global benzersiz** | Sonradan globalleştirmek = müşteri client_id'lerini yeniden adlandırmak = her RP config'i kırılır | RFC 6749 §2.2 |
-| 6 | **Kullanıcı benzersizliği tenant-yerel** | Global→tenant-yerel geçiş veri migration'ı + güvenlik incelemesi; tersi imkânsız | Zitadel: "not possible to move users between organizations" |
-| 7 | **Değişmez tenant slug'ı** | Slug issuer URL'inde → değişirse her RP'nin discovery'si kırılır | Keycloak: "alias cannot be changed afterwards" |
-| 8 | **Issuer stratejisi + RFC 9207 `iss`** | Issuer değişimi = tüm RP yeniden yapılandırması | RFC 8414/OIDC Discovery çelişkisi |
-| 9 | **`placement_id` silo kaçış kolonu** | Yoksa düzenlemeye tabi bir tenant'ı ayrı kümeye taşımak mimari yeniden yazımdır | AWS: silo/pool/bridge |
-| 10 | **Denetim logu tenant+zaman partition'lı** | Milyarlarca satırlı tabloyu sonradan partition'lamak pratikte imkânsız | GDPR Art.17 |
-| 11 | **İsim tabanlı değil, opak-ID/tam-yol tabanlı yetkilendirme** | Token'da isim taşıyan her şey yeniden yazılır | CVE-2026-19608 |
-| 12 | **Token exchange'de tenant kısıtı** | Ayrıcalıklı yol; sonradan eklenirse mevcut entegrasyonlar kırılır | CVE-2026-18215 |
-| 13 | **Rate limit / kota boyutu şemada** | Sonradan tenant boyutu eklemek tüm sayaç durumunu geçersiz kılar | Okta/Entra org başına limitler |
-| 14 | **Tip sisteminde tenant (branded scope)** | Sonradan retrofit = her sorgu yolunu elden geçirmek | CVE-2019-14832 |
+| 1 | `tenant_id` her tabloda ile her birincil anahtarda bulunur | Tüm birincil anahtarları düşürüp yeniden kurmak dünyayı durduran bir migration demektir | SuperTokens: 33 tablo, tüm birincil anahtarlar basamaklı, çevrimdışı migration |
+| 2 | Her yabancı anahtar bileşiktir ve `tenant_id` içerir | Tek kolonlu yabancı anahtarlar çapraz kiracı referansa izin vermekte ve satır seviyesi güvenlik sonra okumayı bozmaktadır | Logto'nun 7596 numaralı PR'ı |
+| 3 | Satır seviyesi güvenlik, zorlama ile sahip olmayan rol tüm tablolarda uygulanır | Sonradan eklemek ya hep ya hiçtir ve eksik bir tablo sessiz bir sızıntıdır | Logto'nun 7685 numaralı issue'su: her iş tablosunda |
+| 4 | Kiracı başına imzalama anahtarı kullanılır | Paylaşımlıdan kiracı başınaya geçiş tüm ilgili tarafların JWKS önbelleğinin geçersizleştirilmesi ile koordineli bir kesinti demektir | Storm-0558 ile CVE-2026-23552 |
+| 5 | `client_id` küresel benzersizdir | Sonradan küreselleştirmek müşteri istemci kimliklerini yeniden adlandırmak, yani her ilgili taraf yapılandırmasını kırmak demektir | RFC 6749 §2.2 |
+| 6 | Kullanıcı benzersizliği kiracıya yereldir | Küreselden kiracıya yerele geçiş bir veri göçü ile güvenlik incelemesi gerektirir; tersi imkânsızdır | Zitadel: kullanıcıları organizasyonlar arasında taşımak mümkün değildir |
+| 7 | Kiracı kısa adı değişmezdir | Kısa ad issuer URL'indedir ve değişirse her ilgili tarafın keşfi kırılır | Keycloak: takma ad sonradan değiştirilemez |
+| 8 | Issuer stratejisi ile RFC 9207 `iss` parametresi belirlenir | Issuer değişimi tüm ilgili tarafların yeniden yapılandırılması demektir | RFC 8414 ile OIDC Discovery çelişkisi |
+| 9 | `placement_id` silo kaçış kolonu konur | Yoksa düzenlemeye tabi bir kiracıyı ayrı bir kümeye taşımak bir mimari yeniden yazımdır | AWS'nin silo, havuz ile köprü modelleri |
+| 10 | Denetim günlüğü kiracı ile zamana göre bölümlenir | Milyarlarca satırlı bir tabloyu sonradan bölümlemek pratikte imkânsızdır | Kişisel veri mevzuatının silme hakkı |
+| 11 | Yetkilendirme isim tabanlı değil opak kimlik ile tam yol tabanlıdır | Token'da isim taşıyan her şey yeniden yazılır | CVE-2026-19608 |
+| 12 | Token takasında kiracı kısıtı uygulanır | Ayrıcalıklı bir yoldur ve sonradan eklenirse mevcut entegrasyonlar kırılır | CVE-2026-18215 |
+| 13 | Hız limiti ile kota boyutu şemada bulunur | Sonradan kiracı boyutu eklemek tüm sayaç durumunu geçersiz kılar | Okta ile Entra'nın organizasyon başına limitleri |
+| 14 | Kiracı tip sisteminde markalı kapsam olarak bulunur | Sonradan eklemek her sorgu yolunu elden geçirmek demektir | CVE-2019-14832 |
 
-### 7.3 Sonradan eklenebilir (gün-1'de gerek yok)
+### 7.3 Sonradan eklenebilecekler, birinci günde gerek yoktur
 
-Custom domain / ACME otomasyonu · Tenant başına tema · Org içi grup hiyerarşisi · SCIM · Tenant başına politika motoru · Citus'a geçiş (`tenant_id` zaten shard key) · Cell/hücre mimarisi (`placement_id` yolu açık bırakıyor)
+Özel alan adı ile ACME otomasyonu; kiracı başına tema; organizasyon içi grup hiyerarşisi; SCIM; kiracı başına politika motoru; Citus'a geçiş, ki `tenant_id` zaten parça anahtarıdır; hücre mimarisi, ki `placement_id` yolu açık bırakmaktadır.
 
-### 7.4 Reddedilen alternatifler ve gerekçeleri
+### 7.4 Reddedilen alternatifler ile gerekçeleri
 
 | Alternatif | Neden hayır |
 |---|---|
-| **Schema-per-tenant** | 1.200 tenant'ta 383 ms katalog taraması, 2 saat migration; `search_path` pooling'i kırılganlaştırır; sqlx dinamik şema migration'ı vermez |
-| **Database-per-tenant** | ~50 tenant tavanı; havuz çarpımı; küme-geneli XID/OID baskısı |
-| **Realm-benzeri ağır tenant** | Keycloak 200-500 tavanı, master realm O(N), sabit global cache — kanıtlanmış çıkmaz |
-| **Global kullanıcı + e-posta birleştirme** | nOAuth, Entra takeover, Truffle defunct-domain — üç bağımsız ihlal |
-| **Paylaşımlı imzalama anahtarı** | Storm-0558; CVE-2026-23552 (CVSS 9.1) |
-| **İç içe tenant (ağaç)** | Zitadel/Auth0/Okta/Entra/WorkOS reddetti; Frontegg yaptı, miras JWT'ye sığmıyor |
-| **`task_local` ile ambient tenant** | `spawn`'a miras kalmaz + erişimde panic |
-| **RSA varsayılan** | 130× keygen maliyeti tenant-başına-anahtarı ekonomik olarak imkânsız kılar |
+| Kiracı başına şema | 1.200 kiracıda 383 milisaniyelik katalog taraması ile iki saatlik migration vardır; `search_path` havuzlamayı kırılganlaştırmaktadır; sqlx dinamik şema migration'ı vermemektedir |
+| Kiracı başına veritabanı | Yaklaşık 50 kiracı tavanı, havuz çarpımı ile küme genelinde işlem ile nesne kimliği baskısı vardır |
+| Realm benzeri ağır kiracı | Keycloak'ın 200 ile 500 tavanı, master realm O(N) bağlaması ile sabit küresel önbellek kanıtlanmış bir çıkmazdır |
+| Küresel kullanıcı ile e-posta birleştirme | nOAuth, Entra alan adı devralması ile Truffle'ın terk edilmiş alan adı bulgusu üç bağımsız ihlaldir |
+| Paylaşımlı imzalama anahtarı | Storm-0558 ile CVSS 9,1 puanlı CVE-2026-23552 |
+| İç içe kiracı, yani ağaç | Zitadel, Auth0, Okta, Entra ile WorkOS reddetmiştir; Frontegg yapmıştır ve miras JWT'ye sığmamaktadır |
+| `task_local` ile ortam kiracısı | `spawn` çağrısına miras kalmamakta ve erişimde panic etmektedir |
+| Varsayılan RSA | 130 kat anahtar üretim maliyeti kiracı başına anahtarı ekonomik olarak imkânsız kılmaktadır |
 
 ---
 
-## BÖLÜM VIII — DOĞRULANAMAYANLAR
+## Bölüm VIII — Doğrulanamayanlar
 
-Bunları **asla gerçek olarak sunmayın**:
+Bunlar asla gerçek olarak sunulmamalıdır.
 
-- **Wiz bulut izolasyon serisinin (ExtraReplica, ChaosDB, BingBang) teknik ayrıntısı ve Asana MCP olayı** — bu konulara ayrılan araştırma akışı rapor yazımı sırasında tamamlanmadı
-- **Tenant başına anahtar/JWKS ve rate-limit konularının ayrıntılı vendor karşılaştırması** — aynı sebeple kısmi; yukarıdakiler kendi birincil doğrulamalarım
-- CISA CSRB Storm-0558 raporu (PDF 403 döndü)
-- CYBERTEC *"Too many tables are bad for you"* — site 403; `CacheMemoryContext` rakamları doğrulanmadı
-- CVE-2025-8713 — arama özetlerinde göründü, postgresql.org güvenlik listesinde doğrulanamadı
-- Keycloak Jira KEYCLOAK-4593 ve diğerleri — tracker artık herkese açık değil; yalnızca tanımlayıcı olarak anıldı
-- Realm başına heap-byte rakamı — yetkili kaynak yok
-- Auth0 Organizations API rate limit sayıları; Auth0 org metadata limitleri
-- Frontegg maksimum hiyerarşi derinliği; entitlement mirası
-- Okta hücre başına org sayısı; org başına maksimum kullanıcı/uygulama
-- RLS + generic plan caching'in tenant'lar arası yanlış plan seçimi — ölçülmüş hiçbir çalışma yok
-- N-tenant × M-havuz dağıtımının ölçülmüş kamuya açık hesabı — literatürün en zayıf noktası; prototip gerektirir
-- "2.000 şema × 50 tablo'da katalog taramaları DDL'i yavaşlatır" — yalnızca AI üretimi blog içeriğine dayanıyor, **kullanmayın**
-- AWS SaaS whitepaper'ının silo/pool/bridge tanımları — birinci sayfa doğrulandı, alt sayfa fetch'i başarısız
+Wiz'in bulut izolasyon serisinin, yani ExtraReplica, ChaosDB ile BingBang'in teknik ayrıntısı ile Asana MCP olayı: bu konulara ayrılan araştırma akışı rapor yazımı sırasında tamamlanmamıştır.
 
----
+Kiracı başına anahtar ile JWKS ve hız limiti konularının ayrıntılı satıcı karşılaştırması: aynı sebeple kısmidir; yukarıdakiler kendi birincil doğrulamalarımızdır.
+
+CISA siber güvenlik inceleme kurulunun Storm-0558 raporu: PDF 403 döndürmüştür.
+
+CYBERTEC'in çok fazla tablo size zarar verir yazısı: site 403 döndürmüştür ve `CacheMemoryContext` rakamları doğrulanmamıştır.
+
+CVE-2025-8713: arama özetlerinde görünmüş ancak postgresql.org güvenlik listesinde doğrulanamamıştır.
+
+Keycloak'ın KEYCLOAK-4593 ile diğer Jira kayıtları: izleyici artık herkese açık değildir ve yalnızca tanımlayıcı olarak anılmıştır.
+
+Realm başına yığın bayt rakamı: yetkili bir kaynak yoktur.
+
+Auth0'ın Organizations API hız limiti sayıları ile organizasyon metadata limitleri.
+
+Frontegg'in azami hiyerarşi derinliği ile hak mirası.
+
+Okta'nın hücre başına organizasyon sayısı ile organizasyon başına azami kullanıcı ve uygulama sayısı.
+
+Satır seviyesi güvenlik ile genel plan önbelleklemesinin kiracılar arasında yanlış plan seçimine yol açması: ölçülmüş hiçbir çalışma yoktur.
+
+N kiracı ile M havuz dağıtımının ölçülmüş ve kamuya açık bir hesabı: literatürün en zayıf noktasıdır ve bir prototip gerektirir.
+
+İki bin şema ile şema başına 50 tabloda katalog taramalarının DDL'i yavaşlattığı iddiası: yalnızca AI üretimi blog içeriğine dayanmaktadır ve kullanılmamalıdır.
+
+AWS'nin bulut yazılımı beyaz kâğıdındaki silo, havuz ile köprü tanımları: birinci sayfa doğrulanmış ancak alt sayfa çekimi başarısız olmuştur.
 
 ### Bir cümlelik kapanış
 
-Argus'un çok kiracılığı **satır bazlı, RLS destekli, tenant'ı hem birincil anahtarda hem Rust tip sisteminde taşıyan, tenant başına imzalama anahtarı olan, subdomain issuer kullanan, düz tenant listeli** olmalı — ve bu kararların on dördü gün-1'de verilmeli, çünkü piyasadaki her IdP bunlardan en az birini erteledi ve Keycloak on yıl, Zitadel bir depolama katmanı yeniden yazımı, SuperTokens dünya-durduran bir migration, Kanidm ise özelliği tamamen reddetmekle ödedi.
+Argus'un çok kiracılığı satır bazlı olmalı, satır seviyesi güvenlikle desteklenmeli, kiracıyı hem birincil anahtarda hem Rust tip sisteminde taşımalı, kiracı başına imzalama anahtarı kullanmalı, alt alan adı issuer'ı benimsemeli ile düz bir kiracı listesi tutmalıdır. Bu kararların on dördü birinci günde verilmelidir, çünkü piyasadaki her IdP bunlardan en az birini ertelemiştir ve Keycloak on yılla, Zitadel bir depolama katmanı yeniden yazımıyla, SuperTokens dünyayı durduran bir migration'la ve Kanidm özelliği tamamen reddetmekle ödemiştir.
