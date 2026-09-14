@@ -2,9 +2,11 @@
 
 **Sürüm 1.0 · 8 Eylül 2026**
 
-Argus, sıfırdan yazılan genel amaçlı bir Identity Provider'dır: Keycloak'ın kapsamına sahip,
-MCP ve ajan kimliğini birinci sınıf vatandaş yapan, sender-constrained token'ı varsayılan
-kabul eden, çok kiracılığı gün-1'de doğru modelleyen bir sistem. Dil: Rust.
+Argus, sıfırdan yazılan genel amaçlı bir Identity Provider'dır: protokol yüzeyinin
+tamamını tek üründe veren kapsama sahip, MCP ve ajan kimliğini birinci sınıf vatandaş
+yapan, sender-constrained token'ı varsayılan kabul eden, çok kiracılığı gün-1'de doğru
+modelleyen bir sistem. Dil: Rust. Kapsam sınıfının referansları ve karşılaştırma
+kümesi §1'dedir; tek bir ürün ölçüt alınmaz.
 
 Bu dosya, projenin tüm araştırma ve karar çıktısının tek ve eksiksiz hâlidir — yirmi yedi
 ayrı araştırma dokümanı ile alan referansının birleşimi. Yaklaşık altı yüz birincil kaynağa
@@ -307,9 +309,9 @@ Rakam, tarih veya URL uydurulmamıştır. Araştırma sırasında çürütülen 
 
 **Bu bölüm [`docs/01-architecture-decisions.md`](docs/01-architecture-decisions.md) dosyasına taşındı.**
 
-27 gün-1 kararı, sonradan verilen kararlar (K28, K29), teknoloji yığını,
-crate topolojisi, protokol kapsamı, güvenlik mimarisi, faz planı ve
-§10 açık kararlar orada.
+29 gün-1 kararı ve statüleri, karar kayıtları, teknoloji yığını,
+crate topolojisi, protokol kapsamı, güvenlik mimarisi ve
+bölüm 9'daki açık kararlar orada.
 
 Bu dosyanın başka yerlerinde geçen **`§1 §10.2` gibi referanslar** o dosyanın
 ilgili bölümünü gösterir; numaralandırma korundu.
