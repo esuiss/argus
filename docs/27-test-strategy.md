@@ -1,52 +1,41 @@
-# 27. Test stratejisi
+# §27 — Test stratejisi
 
-> `ARGUS.md` §27'den taşındı. Numaralandırma korundu; bu dosyanın
-> içindeki `§27 §X` referansları aynı anlamda.
+Bu bölüm `ARGUS.md` dosyasının 27. kısmından taşınmıştır. Numaralandırma korunmuştur; dosya içindeki `§27 §X` referansları aynı anlamdadır.
 
-
-Tarih: 8 Eylül 2026. Tüm iddialar kaynaklandırılmıştır; doğrulayamadıklarım "⚠️ DOĞRULANMADI" ile işaretlidir.
+Tarih 8 Eylül 2026'dır. Tüm iddialar kaynaklandırılmıştır; doğrulanamayanlar açıkça işaretlenmiştir.
 
 ---
 
-## 1. Uyum (Conformance) Test Süitleri
+## 1. Uyum test süitleri
 
-### 1.1 OpenID Foundation Conformance Suite
+### 1.1 OpenID Foundation uyum süiti
 
-**Self-hosted çalıştırılabilir — evet, Docker ile.** Suite açık kaynak, `gitlab.com/openid/conformance-suite` üzerinde. OIDF'nin resmî sayfası: "The conformance suite supports local Docker installation for developers wanting to run tests independently" ve tüm testler "can be run locally or via OpenID Foundation servers — whichever the implementer prefers" ([openid.net/certification/about-conformance-suite](https://openid.net/certification/about-conformance-suite/)).
+Kendi barındırdığınız ortamda çalıştırılabilmektedir, Docker ile. Süit açık kaynaktır. Vakfın resmî sayfası, süitin bağımsız test çalıştırmak isteyen geliştiriciler için yerel Docker kurulumunu desteklediğini ile tüm testlerin yerel olarak ya da vakfın sunucuları üzerinden çalıştırılabileceğini söylemektedir.
 
-`docker-compose.yml` içeriği (birincil kaynak, [master raw](https://gitlab.com/openid/conformance-suite/-/raw/master/docker-compose.yml)):
-- `mongodb` — `mongo:6.0.13`, port yok (internal), `./mongo/data:/data/db`
-- `nginx` — `./nginx` context'ten build, **8443:8443** (HTTPS)
-- `server` — `./server-dev` context, Java `fapi-test-suite.jar`, nginx arkasında
+Bileşim dosyasının içeriği birincil kaynaktan şöyledir: bir MongoDB 6.0.13 servisi, dışarı portsuz ile yerel bir veri bağlaması; bir nginx servisi, 8443 portunda HTTPS ile; ile bir Java uygulama sunucusu, nginx arkasında. Yani MongoDB artı Java uygulaması artı nginx TLS sonlandırması. Kayda değer bir ayrıntı vardır: jar adı hâlâ eski finansal API test süiti adını taşımaktadır; süitin kökeni bağışlanan bir açık bankacılık çerçevesidir.
 
-Yani: MongoDB + Java app + nginx TLS terminasyonu. Kayda değer: jar adı hâlâ `fapi-test-suite.jar` — suite'in kökeni OpenBanking Ltd'nin bağışladığı FAPI framework'ü ([README](https://gitlab.com/openid/conformance-suite/-/raw/master/README.md); katkı verenler arasında OpenBanking Ltd, ONC for Health IT, Authlete).
+Kapsanan şartnameler OpenID Connect, birinci ile ikinci sürüm finansal API profilleri, geri kanal kimlik doğrulama profili ile kimlik güvencesidir. Buna federasyon ile doğrulanabilir kimlik bilgisi profilleri de eklenmiştir.
 
-**Kapsanan spesifikasyonlar** (README'den): OpenID Connect, FAPI1-Advanced, FAPI2, FAPI-CIBA, OpenID for Identity Assurance (eKYC). Buna federation ve OpenID4VP/VCI de eklenmiş durumda (aşağıda).
+Sağlayıcı profilleri yedi adettir ile doğrulanmıştır.
 
-**OP profilleri — 7 adet, doğrulandı** ([openid.net/certification/connect_op_testing](https://openid.net/certification/connect_op_testing/)):
-
-| Profil | Ne test eder |
+| Profil | Ne test etmektedir |
 |---|---|
-| Basic OP | `response_type=code` temel akış |
-| Implicit OP | implicit response type'lar |
-| Hybrid OP | hibrit akışlar |
-| Config OP | `.well-known/openid-configuration` discovery |
-| Dynamic OP | Dynamic Client Registration |
-| Form Post OP | `response_mode=form_post` |
-| 3rd Party-Init Login OP | third-party initiated login |
+| Temel sağlayıcı | Yetkilendirme kodu temel akışıdır |
+| Örtük sağlayıcı | Örtük yanıt tipleridir |
+| Hibrit sağlayıcı | Hibrit akışlardır |
+| Yapılandırma sağlayıcısı | İyi bilinen yapılandırma keşfidir |
+| Dinamik sağlayıcı | Dinamik istemci kaydıdır |
+| Form gönderimli sağlayıcı | Form gönderimi yanıt modudur |
+| Üçüncü taraf başlatmalı giriş sağlayıcısı | Üçüncü tarafça başlatılan giriştir |
 
-Aynı sayfadan doğrulanan operasyonel detaylar:
-- Test için `certification.openid.net`'e Google veya GitLab ile giriş
-- DCR desteklenmiyorsa **3 client** elle kaydedilmeli: 2 adet `client_secret_basic`, 1 adet `client_secret_post` (ilkiyle çakışabilir)
-- Redirect URI: `https://www.certification.openid.net/test/a/<ALIAS>/callback`
-- Sertifikasyon kriteri: tüm testler PASSED / REVIEW / WARNING / SKIPPED olmalı; **FAILED veya INTERRUPTED olmamalı**
+Aynı sayfadan doğrulanan operasyonel detaylar şunlardır: test için sertifikasyon sitesine bir sosyal hesapla girilmektedir. Dinamik istemci kaydı desteklenmiyorsa üç istemci elle kaydedilmelidir: iki tanesi temel kimlik doğrulamalı, biri gönderi kimlik doğrulamalı, ki ilkiyle çakışabilmektedir. Yönlendirme adresi sertifikasyon sitesinin takma ad bazlı geri çağırma yoludur. Sertifikasyon kriteri tüm testlerin geçti, incelenecek, uyarı ya da atlandı olmasıdır; başarısız ya da kesildi olmamalıdır.
 
-**Logout profilleri — 4 adet** ([logout_op_testing](https://openid.net/certification/logout_op_testing/)): RP-Initiated Logout OP, Session Management OP, Front-Channel Logout OP, Back-Channel Logout OP. Sertifikasyon için RP-Initiated **+ diğer üçünden en az biri** gerekli. Test id konvansiyonu: `OP-RpInitLogout-*`, `OP-Session-*`, `OP-FrontChannel-*`, `OP-BackChannel-*`. ⚠️ Not: bu sayfa kendini "historical page relating to the now-decommissioned old test suite" olarak tanımlıyor — yeni suite'te plan adları farklı olabilir.
+Çıkış profilleri dört adettir: bağlı tarafça başlatılan çıkış, oturum yönetimi, ön kanal çıkışı ile arka kanal çıkışı. Sertifikasyon için bağlı tarafça başlatılan çıkış artı diğer üçünden en az biri gerekmektedir. Test tanımlayıcıları bir adlandırma kuralı izlemektedir. Bir not gerekmektedir: bu sayfa kendini artık hizmet dışı bırakılmış eski test süitiyle ilgili tarihsel bir sayfa olarak tanımlamaktadır; yeni süitte plan adları farklı olabilir.
 
-**Test planı adları (birincil doğrulama — Ory Hydra'nın CI kodu).** Hydra'nın [`test/conformance/run_test.go`](https://raw.githubusercontent.com/ory/hydra/master/test/conformance/run_test.go) dosyası gerçek plan adlarını içeriyor:
+Test planı adları birincil olarak Ory Hydra'nın sürekli tümleştirme kodundan doğrulanmıştır. İlgili test dosyası gerçek plan adlarını içermektedir.
 
 ```
-oidcc-basic-certification-test-plan          (⚠️ dosyada "oidcc-test-plan" olarak da geçiyor)
+oidcc-basic-certification-test-plan
 oidcc-implicit-certification-test-plan
 oidcc-hybrid-certification-test-plan
 oidcc-config-certification-test-plan
@@ -57,617 +46,570 @@ oidcc-formpost-hybrid-certification-test-plan
 oidcc-test-plan
 ```
 
-Aynı dosya suite'in **REST API'sini** de açığa çıkarıyor — Argus için kritik:
-- `POST /api/plan` → plan adı + variant, plan id döner
-- Plan içinde N adet **module** var (örn. `oidcc-server-rotate-keys`)
-- `POST /api/runner` → module id + plan id + variant ile test instance
-- `GET /api/info` → exponential backoff ile poll; status `FINISHED`, result `PASSED`/`WARNING`/`FAILED`
-- Hydra başarısız/interrupted testleri **max 5 kez** retry ediyor (flakiness gerçek bir problem)
+Aynı dosya süitin REST API'sini de açığa çıkarmaktadır ile bu Argus için kritiktir: bir plan uç noktasına plan adı ile varyant gönderilip plan tanımlayıcısı alınmakta; plan içinde birden çok modül bulunmakta; bir koşucu uç noktasına modül, plan ile varyant gönderilip test örneği oluşturulmakta; ile bir bilgi uç noktası üstel geri çekilmeyle yoklanmaktadır, durum bitti ile sonuç geçti, uyarı veya başarısız olabilmektedir. Hydra başarısız ya da kesilmiş testleri en fazla beş kez yeniden denemektedir; kararsızlık gerçek bir problemdir.
 
-Hydra'nın kurulumu: `test/conformance/` altında `docker-compose.yml`, `Dockerfile`, `config.json`, `start.sh`, `test.sh`, `publish.sh`, `purge.sh`, `run_test.go`, ayrıca `httpd/` ve `ssl/` dizinleri. `test.sh` sadece `go test -tags conformity -test.timeout 60m -failfast .` çalıştırıyor — **60 dakikalık timeout**, tam OIDC plan setinin CI süresi hakkında iyi bir sinyal.
+Hydra'nın kurulumu bir uyum dizini altında bileşim dosyası, imaj tanımı, yapılandırma, başlatma, test, yayımlama ile temizleme betikleri, test kodu ile yardımcı dizinlerden oluşmaktadır. Test betiği yalnızca 60 dakikalık bir zaman aşımıyla Go testlerini çalıştırmaktadır; tam plan setinin sürekli tümleştirme süresi hakkında iyi bir sinyaldir.
 
-**Resmî CI aracı: `scripts/run-test-plan.py`** ([raw kaynak](https://gitlab.com/openid/conformance-suite/blob/master/scripts/run-test-plan.py)). OIDF "highly recommended that authorization server developers integrate this into their development pipeline" diyor. Doğrulanan arayüz:
+Resmî sürekli tümleştirme aracı bir plan çalıştırma betiğidir. Vakıf, yetkilendirme sunucusu geliştiricilerinin bunu geliştirme hatlarına entegre etmesinin şiddetle önerildiğini söylemektedir. Doğrulanan arayüzü şöyledir: argümanları test planı adı ile yapılandırma dosyası çiftleridir, birden fazla verilebilmektedir; ayrıca dışa aktarma dizini, paralellik kapatma, beklenen başarısızlıklar dosyası, beklenen atlamalar dosyası, yeniden çalıştırma, listeleme ile ayrıntı seçenekleri bulunmaktadır. Ortam değişkenleri sunucu adresi, ki zorunludur, belirteç, karşılıklı TLS adresi, yerel adres, dış adres, azami ardışık başarısızlık ile yeniden başlatma denemesidir. Çıkış kodu bir olmaktadır: modül tamamlanmadıysa, beklenmeyen bir başarısızlık ya da uyarı varsa, beklenen bir başarısızlık listede olup gerçekleşmediyse, ki bayat temel çizgi tespitidir, ya da sunucu sağlıksızsa. Çıkış kodu sıfır olmaktadır: hepsi tamamlandıysa ile beklenen başarısızlıklarla eşleştiyse.
 
-- Argümanlar: `<test-plan-name> <config-file>` çiftleri (birden fazla), `--export-dir`, `--no-parallel`, `--expected-failures-file`, `--expected-skips-file`, `--rerun 2:6`, `--list`, `--verbose`
-- Env: `CONFORMANCE_SERVER` (zorunlu), `CONFORMANCE_TOKEN`, `CONFORMANCE_SERVER_MTLS`, `CONFORMANCE_SERVER_LOCAL`, `EXTERNAL_URL`, `CONFORMANCE_MAX_CONSECUTIVE_FAILURES` (default 3), `CONFORMANCE_RESTART_RETRIES` (default 2)
-- Exit 1: modül tamamlanmadı, beklenmeyen failure/warning, **beklenen failure listede olup gerçekleşmedi** (stale baseline tespiti), sunucu sağlıksız
-- Exit 0: hepsi tamam ve expected-failures ile eşleşti
+Bu, tam olarak Argus'un istediği modeldir: temel çizgili, sürekli tümleştirme dostu ile çıkış kodlu.
 
-Bu **tam olarak Argus'un istediği model**: baseline'lı, CI-dostu, exit-code'lu.
+Test sayıları doğrulanamamıştır; hiçbir birincil kaynakta bir planın kaç test içerdiğine dair bir sayı bulunamamıştır. Sayı, plan oluşturulduğunda varyantlara göre dinamik olarak belirlenmektedir. Kesin sayı ancak plan oluşturma çağrısından dönen modül listesinden öğrenilmektedir.
 
-**Test sayıları:** ⚠️ DOĞRULANMADI — hiçbir birincil kaynakta "Basic OP planı N test içerir" gibi bir sayı bulamadım. Sayı, plan oluşturulduğunda dinamik olarak variant'lara göre belirleniyor (Hydra kodu "plan contains multiple modules, iterate over them" mantığıyla çalışıyor). Kesin sayı ancak `POST /api/plan` sonrası dönen module listesinden öğrenilir.
+Ücret tarafında testleri çalıştırmak ücretsizdir; sertifikasyon ücretlidir.
 
-**Ücret:** Testleri çalıştırmak ücretsiz; sertifikasyon ücretli ([openid.net/certification/fees](https://openid.net/certification/fees/)):
-
-| Kategori | Üye | Üye değil |
+| Kategori | Üye | Üye olmayan |
 |---|---|---|
-| OpenID Connect, OpenID4VCI/VP | $700 / deployment | $3,500 / deployment |
-| FAPI 1 / FAPI 2 / FAPI-CIBA | $1,000 / deployment | $5,000 / deployment |
+| OpenID Connect ile doğrulanabilir kimlik bilgisi profilleri | Dağıtım başına 700 dolar | Dağıtım başına 3.500 dolar |
+| Finansal API profilleri ile geri kanal profili | Dağıtım başına 1.000 dolar | Dağıtım başına 5.000 dolar |
 
-Açık kaynak projeler için fee waiver politikası var. **Argus sertifika hedeflemiyor → maliyet sıfır.**
+Açık kaynak projeler için bir ücret muafiyeti politikası bulunmaktadır. Argus sertifika hedeflemediği için maliyet sıfırdır.
 
-### 1.2 FAPI 2.0
+### 1.2 Finansal API ikinci sürümü
 
-- **FAPI 2.0 Security Profile Final onaylandı: Şubat 2025.** Final conformance testleri **9 Temmuz 2025**'te duyuruldu — authorization server *ve* OAuth client için ([openid.net/fapi2-0-final-conformance-tests-available](https://openid.net/fapi2-0-final-conformance-tests-available/)). FAPI 2.0 Message Signing "Proposed Final", yayını Ağustos 2025 bekleniyordu.
-- Desteklenen spesifikasyonlar ([certification-fapi_op_testing](https://openid.net/certification/certification-fapi_op_testing/)): FAPI 1.0 Part 2 Advanced Final, **FAPI 2.0 Security Profile Final**, FAPI 2.0 Security Profile ID2, FAPI 2.0 Message Signing ID1.
-- Client auth varyantları: `oauth-mtls` ve `private_key_jwt`. Ekosistem varyantları: OpenBanking UK, Australian CDR, Brazil, KSA/SAMA.
-- Önemli: "for certification purposes it is now only necessary to run one test with each option" — kombinatoryal patlama sınırlanmış.
-- DPoP (RFC 9449) desteği FAPI 2.0 conformance testlerine eklendi (OIDF duyurusu). ⚠️ Tam plan adı (`fapi2-security-profile-final-test-plan` gibi) hiçbir sayfada açıkça yazılı değil — DOĞRULANMADI.
+Güvenlik profilinin nihai sürümü Şubat 2025'te onaylanmıştır. Nihai uyum testleri 9 Temmuz 2025'te duyurulmuştur; hem yetkilendirme sunucusu hem istemci içindir. Mesaj imzalama profili önerilen nihai aşamadadır ile yayını Ağustos 2025'te beklenmekteydi.
 
-### 1.3 FAPI-CIBA
+Desteklenen şartnameler birinci sürümün gelişmiş nihai profili, ikinci sürümün nihai güvenlik profili, ikinci sürümün gerçekleyici taslağı ile mesaj imzalama taslağıdır.
 
-[fapi_ciba_op_testing](https://openid.net/certification/fapi_ciba_op_testing/): plan adı "FAPI-CIBA: test plan". Variant örneği `poll-mtls`. **Poll modu zorunlu**, ping opsiyonel. OpenBanking UK için `openbankinguk-` prefix'li varyantlar. Uyarı: adında "client" geçen planlar OP testi için kullanılmaz.
+İstemci kimlik doğrulama varyantları karşılıklı TLS ile özel anahtar JWT'sidir. Ekosistem varyantları çeşitli ülkelerin açık bankacılık profilleridir.
+
+Önemli bir nokta vardır: sertifikasyon amacıyla artık her seçenekle yalnızca bir test çalıştırmak yeterlidir; kombinatoryal patlama sınırlanmıştır.
+
+DPoP desteği uyum testlerine eklenmiştir. Tam plan adı hiçbir sayfada açıkça yazılı değildir ile doğrulanamamıştır.
+
+### 1.3 Geri kanal kimlik doğrulama profili
+
+Plan adı geri kanal test planıdır. Bir varyant örneği yoklama ile karşılıklı TLS birleşimidir. Yoklama modu zorunludur, anlık bildirim isteğe bağlıdır. Bazı ekosistemler için önekli varyantlar bulunmaktadır. Bir uyarı vardır: adında istemci geçen planlar sağlayıcı testi için kullanılmamalıdır.
 
 ### 1.4 OpenID Federation
 
-[federation_testing](https://openid.net/certification/federation_testing/) — **3 test planı**:
-1. Deployed Federation Entity Test (leaf/intermediate/trust anchor, metadata + federation endpoint yanıt yapısı)
-2. Entity Joined to Test Federation — OP Test (suite RP + trust anchor rolü oynar, OP suite'i `authority_hints`'e eklemeli)
-3. Entity Joined to Test Federation — RP Test (suite OP + trust anchor rolü)
+Üç test planı bulunmaktadır: dağıtılmış federasyon varlığı testi, ki yaprak, ara ile güven çıpası rollerini ve metadata yanıt yapısını kapsamaktadır; test federasyonuna katılmış varlık sağlayıcı testi, ki süit bağlı taraf ve güven çıpası rolü oynamaktadır ve sağlayıcı süiti yetki ipuçlarına eklemelidir; ile test federasyonuna katılmış varlık bağlı taraf testi, ki süit sağlayıcı ve güven çıpası rolü oynamaktadır.
 
-Olgunluk uyarısı doğrudan sayfadan: **"the set of tests currently available in production are in an early stage."** Argus için düşük öncelik.
+Olgunluk uyarısı doğrudan sayfadadır: üretimde şu anda mevcut test seti erken aşamadadır. Argus için düşük önceliklidir.
 
-### 1.5 OpenID4VP / OpenID4VCI (bonus — Argus roadmap'i için)
+### 1.5 Doğrulanabilir kimlik bilgisi profilleri, Argus yol haritası için bonus
 
-Self-certification **26 Şubat 2026**'da açıldı: OpenID4VP 1.0, OpenID4VCI 1.0, HAIP 1.0 kapsamda; 38 yargı bölgesi bu spesifikasyonları seçmiş durumda ([openid.net](https://openid.net/openid-for-verifiable-credential-self-certification-to-launch-feb-2026/)).
+Kendi kendine sertifikasyon 26 Şubat 2026'da açılmıştır; ilgili sunum, verme ile yüksek güvence profilleri kapsamdadır ile 38 yargı bölgesi bu şartnameleri seçmiş durumdadır.
 
-### 1.6 MCP Conformance Suite
+### 1.6 Model bağlam protokolü uyum süiti
 
-`github.com/modelcontextprotocol/conformance` — birincil README doğrulandı:
+Depo birincil olarak doğrulanmıştır.
 
-- **Ne test eder:** client tarafı (initialize handshake, tool invocation, OAuth akışları, metadata) ve server tarafı (initialize, capabilities, tools list/call, resources, prompts)
-- **Nasıl çalışır:**
-  ```
-  npx @modelcontextprotocol/conformance server --url http://localhost:3000/mcp
-  npx @modelcontextprotocol/conformance client --command "<cmd>" --scenario initialize
-  ```
-- **Spec versiyonları:** tarihli sürümler (2025-11-25'e kadar) ve draft (2026-07-28); iki lifecycle: stateful (initialize handshake) ve stateless (per-request metadata)
-- **Expected-failures baseline:** YAML dosyasında bilinen hatalar baseline'lanabilir → CI yeşil kalırken regresyon yakalanır. **Per-check baselining** (`scenario:check-id`) var — tüm senaryoyu değil tek check'i muaf tutabilirsiniz. Stale baseline'lar da raporlanır.
-- **Çıktı:** conformance check'ler (pass/fail) + **wire-schema validation** (JSON Schema'ya karşı, hem implementasyonun hem harness'ın gönderdiği mesajlar için sentetik check üretir)
-- **CI:** repo bir GitHub Action (`action.yml`) içeriyor; `tier-check` subcommand'ı SEP-1730 tiering'e göre SDK değerlendiriyor
+Ne test ettiği şudur: istemci tarafında başlatma el sıkışması, araç çağrısı, OAuth akışları ile metadata; sunucu tarafında başlatma, yetenekler, araç listeleme ile çağırma, kaynaklar ile istemler.
 
-**Senaryo sayısı (repo ağacından sayıldı):** `src/scenarios/` altında 3 kategori:
-- `authorization-server/` — **2 ana senaryo**: `authorization-code-grant`, `authorization-server-metadata` (+ bir `auth/` alt dizini) ⚠️ alt dizin içeriği sayılmadı
-- `server/` — **~17 senaryo**: caching, dns-rebinding, elicitation-defaults, elicitation-enums, http-standard-headers, input-required-result, json-schema-2020-12, lifecycle, negative-mrtr, negative, prompts, resources, session-lifecycle, sse-multiple-streams, sse-polling, stateless, tools (+ `tasks/` alt dizini, `utils`)
-- `client/` — sayılmadı ⚠️
+Nasıl çalıştığı şudur.
 
-Argus için en değerli kısım **`authorization-server` senaryoları**: Argus bir MCP server'ın koruduğu kaynak için authorization server rolü oynayacaksa, `authorization-server-metadata` (RFC 8414 / RFC 9728 protected resource metadata) ve `authorization-code-grant` doğrudan Argus'u test eder. Ayrıca `dns-rebinding` ve `http-standard-headers` senaryoları güvenlik açısından ilgili.
+```
+npx @modelcontextprotocol/conformance server --url http://localhost:3000/mcp
+npx @modelcontextprotocol/conformance client --command "<cmd>" --scenario initialize
+```
 
-Tek scenario (`server-stateless`) içinde "over twenty" check olduğu README'de belirtiliyor — yani senaryo sayısı ≠ check sayısı; toplam check sayısı birkaç yüz mertebesinde. ⚠️ Kesin toplam DOĞRULANMADI.
+Şartname sürümleri tarihli sürümler ile bir taslaktır; iki yaşam döngüsü vardır, yani başlatma el sıkışmalı durumlu ile istek başına metadatalı durumsuz.
+
+Beklenen başarısızlıklar temel çizgisi bir YAML dosyasında tutulabilmekte; böylece sürekli tümleştirme yeşil kalırken gerilemeler yakalanmaktadır. Kontrol başına temel çizgileme vardır; tüm senaryoyu değil tek bir kontrolü muaf tutabilmektesiniz. Bayat temel çizgiler de raporlanmaktadır.
+
+Çıktısı uyum kontrolleri ile tel şeması doğrulamasıdır; hem gerçeklemenin hem test koşum aracının gönderdiği mesajlar için JSON şemasına karşı sentetik kontroller üretilmektedir.
+
+Sürekli tümleştirme tarafında depo bir GitHub eylemi içermektedir; bir katman kontrolü alt komutu geliştirme kitlerini bir katmanlama önerisine göre değerlendirmektedir.
+
+Senaryo sayısı depo ağacından sayılmıştır: yetkilendirme sunucusu kategorisinde iki ana senaryo vardır, yani yetkilendirme kodu yetkisi ile yetkilendirme sunucusu metadata'sı, artı bir alt dizin; sunucu kategorisinde yaklaşık 17 senaryo bulunmaktadır, yani önbellekleme, alan adı yeniden bağlama, istem varsayılanları ile sıralamaları, standart başlıklar, girdi gerekli sonucu, JSON şeması, yaşam döngüsü, olumsuz senaryolar, istemler, kaynaklar, oturum yaşam döngüsü, çoklu akışlar, yoklama, durumsuzluk ile araçlar; istemci kategorisi sayılmamıştır.
+
+Argus için en değerli kısım yetkilendirme sunucusu senaryolarıdır: Argus bir model bağlam protokolü sunucusunun koruduğu kaynak için yetkilendirme sunucusu rolü oynayacaksa, metadata ile yetkilendirme kodu senaryoları doğrudan Argus'u test etmektedir. Ayrıca alan adı yeniden bağlama ile standart başlık senaryoları güvenlik açısından ilgilidir.
+
+Tek bir senaryo içinde yirmiden fazla kontrol bulunduğu belirtilmektedir; yani senaryo sayısı kontrol sayısına eşit değildir ile toplam kontrol sayısı birkaç yüz mertebesindedir. Kesin toplam doğrulanamamıştır.
 
 ### 1.7 SCIM
 
-**Resmî bir OASIS/IETF conformance süiti YOK.** RFC 7643/7644 için IETF conformance programı yok; ekosistem satıcı araçlarıyla yürüyor. Bulunan araçlar:
+Resmî bir uyum süiti yoktur. İlgili RFC'ler için bir uyum programı bulunmamakta ile ekosistem satıcı araçlarıyla yürümektedir. Bulunan araçlar şunlardır.
 
-| Araç | Ne yapar | Erişim | Not |
+| Araç | Ne yapmaktadır | Erişim | Not |
 |---|---|---|---|
-| **Microsoft Entra SCIM Validator** ([scimvalidator.microsoft.com](https://learn.microsoft.com/en-us/entra/identity/app-provisioning/scim-validator-tutorial)) | Entra provisioning service ile uyumu doğrular. 3 mod: default attributes / **discover schema** (`/Schemas` üzerinden, önerilen) / upload Entra schema. Attribute değerleri için expression desteği (`{% generateRandomString 6 %}@contoso.com`) | Web, ücretsiz | Entra app store'a yayınlanacak connector'lar için **daha katı** kurallar uygular. Bilinen sorun: PATCH testlerinin farklı payload formatı yüzünden fail etmesi (Microsoft Q&A'da rapor edilmiş) |
-| **Okta Runscope SCIM test suite** ([test guide](https://developer.okta.com/docs/guides/scim-provisioning-integration-test/main/)) | **13 ardışık işlem**: user create, assign, attribute update, deactivate, reactivate, remove | Runscope'a JSON import; değişkenler: `oktaAppId`, `oktaOrgUrl`, `oktaToken`, `SCIMUrl`, `SCIMAuth` | OIN yayını için ayrıca **manuel OIN test plan** gerekli. Kritik davranış: "Okta doesn't delete user profiles in your app, but instead marks the user record with `active=false`" |
-| **scim2-tester** (python-scim, [GitHub](https://github.com/python-scim/scim2-tester)) | Discovery (`/ServiceProviderConfig`, `/ResourceTypes`, `/Schemas`), CRUD, **PATCH add/remove/replace** (simple/complex/extension attribute), RFC7643+7644 | pip, kütüphane; CLI için `scim2-cli` | **CI için tasarlanmış**, tag-based filtering. 210 commit. Argus için en pratik programatik seçenek |
-| **WSO2 scim2-compliance-test-suite** ([GitHub](https://github.com/wso2-incubator/scim2-compliance-test-suite)) | Users, Groups, Me, EnterpriseUser, ServiceProviderConfig/ResourceType/Schemas, **Bulk** | `scimproxycompliance.war` deploy | Apache-2.0, 43 commit, "ongoing project" — düşük aktivite ⚠️ |
-| **SCIM Sandbox** ([scimsandbox.net](https://scimsandbox.net/)) | SCIM Server Manager + SCIM Compliance + SCIM Playground; herhangi bir SCIM 2.0 base URL'e pass/fail raporu | ⚠️ Site 403 döndü, doğrudan doğrulanamadı | Açık kaynak olduğu iddia ediliyor — DOĞRULANMADI |
+| Microsoft doğrulayıcısı | Sağlama servisiyle uyumu doğrulamaktadır. Üç modu vardır: varsayılan nitelikler, şema keşfi, ki önerilmektedir, ile şema yükleme. Nitelik değerleri için ifade desteği bulunmaktadır | Web üzerinden ücretsizdir | Uygulama mağazasına yayımlanacak bağlayıcılar için daha katı kurallar uygulamaktadır. Bilinen bir sorun yama testlerinin farklı yük formatı yüzünden başarısız olmasıdır |
+| Okta test süiti | On üç ardışık işlem içermektedir: kullanıcı oluşturma, atama, nitelik güncelleme, devre dışı bırakma, yeniden etkinleştirme ile kaldırma | Bir test platformuna JSON içe aktarımıyla | Mağaza yayını için ayrıca elle bir test planı gerekmektedir. Kritik davranış şudur: Okta uygulamanızdaki kullanıcı profillerini silmemekte, kaydı etkin değil olarak işaretlemektedir |
+| scim2-tester | Keşif, oluştur oku güncelle sil ile yamanın tüm varyantlarını, iki RFC'yi kapsamaktadır | pip ile kurulan bir kütüphanedir; komut satırı için ayrı bir araç vardır | Sürekli tümleştirme için tasarlanmıştır ile etiket bazlı süzme sunmaktadır. Argus için en pratik programatik seçenektir |
+| WSO2 uyum süiti | Kullanıcılar, gruplar, ben, kurumsal kullanıcı, servis sağlayıcı yapılandırması, kaynak tipi, şemalar ile toplu işlemleri kapsamaktadır | Bir web arşivi dağıtımıyla | Apache 2.0 lisanslıdır ile düşük aktiviteye sahiptir |
+| SCIM kum havuzu | Sunucu yöneticisi, uyum ile oyun alanı bileşenleri sunmaktadır; herhangi bir SCIM temel adresine geçti ya da kaldı raporu vermektedir | Site 403 döndürmüş ile doğrudan doğrulanamamıştır | Açık kaynak olduğu iddia edilmektedir; doğrulanmamıştır |
 
-**Test sayıları:** hiçbiri için resmî sayı yok (Okta'nın 13 operasyonu hariç). ⚠️
+Test sayıları için hiçbirinde resmî bir sayı yoktur; Okta'nın on üç operasyonu hariç.
 
 ### 1.8 SAML
 
-**Resmî conformance:** OASIS'in [saml-conformance-2.0-os](https://docs.oasis-open.org/security/saml/v2.0/saml-conformance-2.0-os.pdf) belgesi *conformance requirements*'ı tanımlar ama **çalıştırılabilir bir test süiti değildir**. Liberty Alliance interop testleri tarihsel: GSA E-Authentication programı 2007'de Liberty Alliance SAML 2.0 interop testini zorunlu kılmıştı; Liberty'nin sertifikasyon işlevi **Kantara Initiative**'e geçti ([Kantara SAML IOP snapshot](https://kantarainitiative.org/snapshot-saml-iop/)). Kantara'nın bugünkü çıktısı **normatif profil**: [SAML V2.0 Implementation Profile for Federation Interoperability](https://docs.kantarainitiative.org/fi/rec-saml2-implementation-profile-for-fedinterop.html) ve [saml2int Deployment Profile v2.0](https://kantarainitiative.github.io/SAMLprofiles/saml2int.html). Bunlar bir çek-listesi; otomatik koşan bir suite değil. ⚠️ Kantara'nın halen aktif bir SAML sertifikasyon programı işletip işletmediği DOĞRULANMADI.
+Resmî uyum tarafında ilgili OASIS belgesi uyum gereksinimlerini tanımlamaktadır ancak çalıştırılabilir bir test süiti değildir. Birlikte çalışabilirlik testleri tarihseldir; bir kamu programı 2007'de bunu zorunlu kılmıştı ile sertifikasyon işlevi sonradan Kantara girişimine geçmiştir. Kantara'nın bugünkü çıktısı normatif bir profildir: federasyon birlikte çalışabilirliği için gerçekleme profili ile dağıtım profili. Bunlar bir kontrol listesidir, otomatik koşan bir süit değildir. Kantara'nın hâlen aktif bir SAML sertifikasyon programı işletip işletmediği doğrulanamamıştır.
 
-**Pratikte çalıştırılabilir tek büyük SAML süiti: İtalyan SPID.**
+Pratikte çalıştırılabilir tek büyük SAML süiti İtalyan kamu kimlik sistemine aittir.
 
-Burada bir **düzeltme** yapmam gerekiyor. `italia/spid-saml-check` ([README](https://github.com/italia/spid-saml-check/blob/master/README.md), [README.it](https://github.com/italia/spid-saml-check/blob/master/README.it.md)):
-- **"più di 300 controlli individuali, divisi in 7 famiglie"** — 300+ kontrol, 7 aile: 4 aile SP metadata formal validasyonu, 3 aile SP SAML request validasyonu, 1 aile (**111 kontrol**) IdP yanıtlarına karşı SP davranışının interaktif validasyonu
-- **Bu süit Service Provider'ları test eder, Identity Provider'ları değil.** Araç bir test IdP'si gibi davranarak SP'yi sınar.
-- Çalıştırma: `docker run -t -i -p 8443:8443 italia/spid-saml-check` → `https://localhost:8443`, giriş `validator/validator`
-- Bileşenler: `spid-sp-test` (CLI), `spid-validator` (web UI), `spid-demo` (test IdP)
+Burada bir düzeltme yapılmalıdır. İlgili deponun açıklamasına göre süitte yedi aileye bölünmüş 300'den fazla bireysel kontrol bulunmaktadır: dört aile servis sağlayıcı metadata'sının biçimsel doğrulaması, üç aile servis sağlayıcı istek doğrulaması ile bir aile, 111 kontrolle, kimlik sağlayıcı yanıtlarına karşı servis sağlayıcı davranışının etkileşimli doğrulamasıdır.
 
-⚠️ **"263 test" rakamı doğrulanamadı** — birincil kaynakta geçen sayılar "300+" ve "111". 263 muhtemelen belirli bir profil/varyant için filtrelenmiş bir alt küme veya eski bir sürümün rakamı. Bu iddiayı düzeltmenizi öneririm.
+Bu süit servis sağlayıcıları test etmektedir, kimlik sağlayıcıları değil. Araç bir test kimlik sağlayıcısı gibi davranarak servis sağlayıcıyı sınamaktadır.
 
-**IdP tarafı için:** ayrı bir repo var — [`AgID/spid-saml-check-idp`](https://github.com/AgID/spid-saml-check-idp), "SPID SAML Conformance Test Tool for IdP", Apache-2.0. **Ancak olgunluk çok düşük: 4 star, 1 fork, 51 commit.** Docker yok; Node.js v22 + libxml2-utils gerektiriyor, elle sertifika üretimi, `node server/spid-saml-check-idp`. README test aileleri veya sayı belirtmiyor. ⚠️ IdP tarafında ne test ettiği DOĞRULANMADI — Argus için ancak keşif amaçlı denenebilir, güvenilir bir doğruluk ölçütü değil.
+Çalıştırma tek bir konteyner komutuyla yapılmakta ile bir web arayüzünden erişilmektedir. Bileşenleri bir komut satırı aracı, bir doğrulayıcı arayüzü ile bir demo kimlik sağlayıcısıdır.
 
-`italia/spid-sp-test` (EUPL-1.2): CLI, **13 profil** (saml2-sp, spid-sp-public, spid-sp-private, CIE/eIDAS varyantları). "Send a huge number of fake SAML Response" modu var — yani SP'nin kötü niyetli IdP yanıtlarına dayanıklılığını test ediyor. Argus **IdP olduğu için** bu araç doğrudan Argus'u test etmez; ama Argus'un SP entegrasyonlarını (SAML federation/broker rolü) test etmek için kullanılabilir.
+263 test rakamı doğrulanamamıştır; birincil kaynakta geçen sayılar 300'den fazla ile 111'dir. 263 muhtemelen belirli bir profil için süzülmüş bir alt küme ya da eski bir sürümün rakamıdır. Bu iddianın düzeltilmesi önerilmektedir.
+
+Kimlik sağlayıcı tarafı için ayrı bir depo vardır: aynı kurumun kimlik sağlayıcı uyum test aracı, Apache 2.0 lisanslıdır. Ancak olgunluğu çok düşüktür: dört yıldız, bir çatal ile 51 işleme. Docker yoktur; belirli bir Node.js sürümü ile yardımcı araçlar gerektirmekte, elle sertifika üretimi istemektedir. Açıklaması test ailelerini ya da bir sayı belirtmemektedir. Kimlik sağlayıcı tarafında ne test ettiği doğrulanamamıştır; Argus için ancak keşif amaçlı denenebilir, güvenilir bir doğruluk ölçütü değildir.
+
+İlgili komut satırı aracı 13 profil sunmaktadır. Çok sayıda sahte yanıt gönderen bir modu vardır; yani servis sağlayıcının kötü niyetli kimlik sağlayıcı yanıtlarına dayanıklılığını test etmektedir. Argus kimlik sağlayıcı olduğu için bu araç doğrudan Argus'u test etmemektedir; ancak Argus'un servis sağlayıcı tümleşmelerini, yani federasyon ya da aracı rolünü test etmek için kullanılabilir.
 
 ### 1.9 LDAP
 
-Resmî bir RFC 4511 conformance süiti **yok**. Mevcut olanlar:
-- **OpenLDAP kendi test süiti:** kaynak ağacında `make test`; backend başına testler (`test000-rootdse` gibi numaralı testler). Bu OpenLDAP'ın *kendi* regresyon süiti — üçüncü taraf sunucuya kolayca yöneltilemez ⚠️ (harici sunucuya karşı çalıştırılabilirliği DOĞRULANMADI).
-- `slaptest(8)` — sadece slapd konfigürasyonunu doğrular, protokol conformance ile ilgisi yok.
-- Pratik yaklaşım: `ldapsearch`/`ldapmodify`/`ldapwhoami` ile davranışsal doğrulama + gerçek istemcilerle interop (SSSD, nslcd, Apache Directory Studio, JNDI, `ldap3` Python, .NET `System.DirectoryServices`).
-- Yük testi: **`ldclt`** (389-ds-base ile gelir; async ops, çok thread, search/add/delete/bind) ve **SLAMD** (Neil Wilson/Sun kökenli, LDAP'a özel benchmark tezgâhı). Docker test hedefi: `rroemhild/docker-test-openldap`.
+Resmî bir uyum süiti yoktur. Mevcut olanlar şunlardır.
 
-### 1.10 WebAuthn / FIDO
+OpenLDAP'ın kendi test süiti kaynak ağacında bulunmakta ile arka uç başına numaralı testler içermektedir. Bu, projenin kendi gerileme süitidir; üçüncü taraf bir sunucuya kolayca yöneltilememektedir ile harici sunucuya karşı çalıştırılabilirliği doğrulanamamıştır. Yapılandırma test aracı yalnızca sunucu yapılandırmasını doğrulamakta ile protokol uyumuyla ilgisi yoktur. Pratik yaklaşım standart dizin komut satırı araçlarıyla davranışsal doğrulama ile gerçek istemcilerle birlikte çalışabilirliktir. Yük testi için iki araç vardır: biri bir dizin sunucusu paketiyle gelmekte ile eşzamansız işlemler, çok iş parçacığı, arama, ekleme, silme ve bağlanma desteklemektedir; diğeri dizine özel bir kıyaslama tezgâhıdır. Bir test için hazır bir Docker imajı bulunmaktadır.
 
-**RP (server) tarafı test edilebiliyor — evet.** FIDO Conformance Tools masaüstü uygulaması "Server Tests" çalıştırıyor.
+### 1.10 WebAuthn ile FIDO
 
-- **Erişim:** FIDO Alliance'a **Test Tool Access Request formu** doldurup indirme talebi gönderilir; spesifikasyon dropdown'ından FIDO2 seçilir. Onay sonrası e-postayla kimlik bilgileri + indirme linki gelir ([SimpleWebAuthn FIDO Conformance rehberi](https://simplewebauthn.dev/docs/advanced/fido-conformance)). **Üyelik gerekliliği açıkça belirtilmiyor** ⚠️ — sadece formal talep + onay süreci var. Sertifikasyon ücretleri ayrı ve ödeme yapılana kadar işlenmiyor ([FIDO certification submission](https://fidoalliance.org/certification/functional-certification/certification-submission/)); ücret tutarları sayfada yayımlanmamış ⚠️.
-- **Sunucunun sunması gereken 4 REST endpoint'i** ([FIDO Conformance Test API](https://github.com/fido-alliance/conformance-test-tools-resources/blob/main/docs/FIDO2/Server/Conformance-Test-API.md)): `POST /attestation/options`, `POST /attestation/result`, `POST /assertion/options`, `POST /assertion/result`. Bu, conformance testi *için* tanımlanmış non-normatif bir API — yani Argus'un üretim API'sinden farklı; **test-only adapter yazmak gerekir.**
-- **Test sayısı:** SimpleWebAuthn dokümanındaki örnek çıktı **160 test pass** gösteriyor. ⚠️ Bu resmî bir "160 test" beyanı değil, bir örnek koşu çıktısı — FIDO'nun kendi dokümanında sayı belirtilmiyor.
-- Sertifikasyon yolu: conformance self-validation **+ interoperability testing event** → submission. Argus sertifika hedeflemediği için sadece self-validation kısmı ilgili.
-- **Ücretsiz alternatif — CI için asıl pratik yol:** Chrome DevTools Protocol **Virtual Authenticator** ([CDP WebAuthn domain](https://chromedevtools.github.io/devtools-protocol/tot/WebAuthn/), [Chrome docs](https://developer.chrome.com/docs/devtools/webauthn/)). CTAP2/USB + resident key emülasyonu, WebAuthn UI kapatılabilir. Playwright/Puppeteer üzerinden sürülür. **Sınır: yalnızca Chromium** — Safari/WebKit ve Firefox desteklemiyor. ⚠️ Rust'ta bir `softauthn` benzeri authenticator kütüphanesi araştırmamda doğrulanamadı.
+Bağlı taraf, yani sunucu tarafı test edilebilmektedir. FIDO uyum araçları masaüstü uygulaması sunucu testleri çalıştırmaktadır.
+
+Erişim için FIDO Alliance'a bir test aracı erişim talebi formu doldurulup indirme talebi gönderilmektedir; şartname listesinden ilgili sürüm seçilmektedir. Onay sonrası e-postayla kimlik bilgileri ile indirme bağlantısı gelmektedir. Üyelik gerekliliği açıkça belirtilmemektedir; yalnızca resmî bir talep ile onay süreci vardır. Sertifikasyon ücretleri ayrıdır ile ödeme yapılana kadar işlem yapılmamaktadır; ücret tutarları sayfada yayımlanmamıştır.
+
+Sunucunun sunması gereken dört REST uç noktası kanıtlama seçenekleri ile sonucu, ve doğrulama seçenekleri ile sonucudur. Bu, uyum testi için tanımlanmış normatif olmayan bir API'dir; yani Argus'un üretim API'sinden farklıdır ile yalnızca teste özel bir adaptör yazmak gerekmektedir.
+
+Test sayısı için bir kütüphane dokümanındaki örnek çıktı 160 geçen test göstermektedir. Bu resmî bir beyan değil bir örnek koşu çıktısıdır; FIDO'nun kendi dokümanında sayı belirtilmemektedir.
+
+Sertifikasyon yolu kendi kendine doğrulama artı bir birlikte çalışabilirlik etkinliği ile başvurudur. Argus sertifika hedeflemediği için yalnızca kendi kendine doğrulama kısmı ilgilidir.
+
+Ücretsiz alternatif ile sürekli tümleştirme için asıl pratik yol Chrome geliştirici araçları protokolündeki sanal kimlik doğrulayıcıdır. CTAP2, USB ile kalıcı anahtar emülasyonu sunmakta ile WebAuthn arayüzü kapatılabilmektedir. Tarayıcı otomasyon araçlarıyla sürülmektedir. Sınırı yalnızca Chromium olmasıdır; Safari ile Firefox desteklememektedir. Rust'ta bir yazılım kimlik doğrulayıcı kütüphanesi araştırmada doğrulanamamıştır.
 
 ### 1.11 OAuth genel
 
-- **OAuch** ([DistriNet/OAuch](https://github.com/DistriNet/OAuch), [oauch.io](https://oauch.io/)) — açık kaynak OAuth 2.0 authorization server güvenlik/threat-model uyum analizörü. **195 test case, 13 kategori** ([oauch.io/Tests](https://oauch.io/Tests)): Document Support (10), Feature Support (19), Token Endpoint (30), Device Authorization Endpoint (5), Access & Refresh Tokens (9), Identity Tokens (15), JWTs (11), PKCE (8), Revocation (8), Concurrency (5), Authorization Endpoint (26), API Endpoint (8). OIDC provider'ları da destekliyor. Akademik temel: RAID 2022 makalesi "OAuch: Exploring Security Compliance in the OAuth 2.0 Ecosystem" — 100 kamuya açık IdP taranmış; ortalama IdP güvenlik şartlarının **%34'ünü** (zorunluların %20'sini) uygulamıyor, **97 IdP'de en az bir tehdit tamamen azaltılmamış**, IdP başına ortalama 4 azaltılmamış tehdit. **Argus için OIDF suite'inden sonraki en yüksek değerli araç budur** — çünkü OIDF suite'i "spec'e uyuyor mu"yu, OAuch "BCP/threat model'i karşılıyor mu"yu ölçer.
-- **OSBT** (OIDC Scenario-Based Tester, [GitHub](https://github.com/oidc-scenario-based-tester/osbt), CODE BLUE 2023) — Python'da esnek OAuth/OIDC senaryoları; mitmproxy eklentisiyle HTTP trace manipülasyonu; **kötü niyetli OP** simülasyonu ("Attacker OP"); GitHub Actions entegrasyonu. Argus **IdP** olduğu için "attacker OP" kısmı doğrudan uygulanmaz — ama Argus'un upstream IdP broker'ı (social login / federation) için **birebir** uygun.
-- **oauth.tools** (Curity) — ücretsiz online debugger; JWT decode/create, token alma, revocation, external API çağrılarına token ekleme; paylaşılabilir/import-export edilebilir workspace. Gereklilik: **OAuth servisleri internetten erişilebilir olmalı** — yani lokal Argus için tünel gerekir. Manuel keşif aracı, CI aracı değil.
-- **Authlete** — OIDF conformance suite'e test ortamı ve PAR/FAPI/DPoP kod katkısı yapmış; suite wiki'sinde "Authlete Automated Example Configuration" sayfası var (otomasyon için referans config örneği).
-- ⚠️ `mod_auth_openidc` test setleri — özel bir conformance test seti olarak DOĞRULANMADI; bilinen kullanımı bir RP implementasyonu olması.
+OAuch açık kaynak bir OAuth 2.0 yetkilendirme sunucusu güvenlik ile tehdit modeli uyum analizörüdür. On üç kategoride 195 test durumu bulunmaktadır: doküman desteği on, özellik desteği 19, token uç noktası 30, cihaz yetkilendirme uç noktası beş, erişim ile yenileme token'ları dokuz, kimlik token'ları 15, JWT'ler 11, PKCE sekiz, iptal sekiz, eşzamanlılık beş, yetkilendirme uç noktası 26 ile API uç noktası sekiz. OIDC sağlayıcılarını da desteklemektedir. Akademik temeli RAID 2022'deki bir makaledir; yüz kamuya açık sağlayıcı taranmıştır. Ortalama bir sağlayıcı güvenlik şartlarının %34'ünü, zorunluların %20'sini uygulamamaktadır; 97 sağlayıcıda en az bir tehdit tamamen azaltılmamıştır ile sağlayıcı başına ortalama dört azaltılmamış tehdit bulunmaktadır. Argus için vakıf süitinden sonraki en yüksek değerli araç budur, çünkü vakıf süiti şartnameye uyumu, bu araç ise en iyi uygulama ile tehdit modelini karşılamayı ölçmektedir.
+
+Senaryo tabanlı bir başka test aracı Python'da esnek OAuth ile OIDC senaryoları sunmakta, bir vekil eklentisiyle HTTP izi manipülasyonu yapmakta, kötü niyetli bir sağlayıcı simüle etmekte ile sürekli tümleştirmeyle entegre olmaktadır. Argus kimlik sağlayıcı olduğu için kötü niyetli sağlayıcı kısmı doğrudan uygulanmamaktadır; ancak Argus'un yukarı akış kimlik sağlayıcı aracısı, yani sosyal giriş ile federasyon için birebir uygundur.
+
+Bir satıcının çevrim içi hata ayıklayıcısı ücretsizdir; JWT çözme ile oluşturma, token alma, iptal ile harici API çağrılarına token ekleme sunmakta ile paylaşılabilir çalışma alanları desteklemektedir. Gerekliliği OAuth servislerinin internetten erişilebilir olmasıdır; yani yerel bir kurulum için tünel gerekmektedir. Manuel bir keşif aracıdır, bir sürekli tümleştirme aracı değildir.
+
+Bir başka satıcı vakıf süitine test ortamı ile kod katkısı yapmıştır; süitin belgelerinde bir otomatik örnek yapılandırma sayfası bulunmaktadır.
+
+Bir Apache modülünün test setleri özel bir uyum test seti olarak doğrulanamamıştır; bilinen kullanımı bir bağlı taraf gerçeklemesi olmasıdır.
 
 ---
 
-## 2. Interop Testi — Gerçek Karşı Taraflarla
+## 2. Birlikte çalışabilirlik testi, gerçek karşı taraflarla
 
-### 2.1 Ücretsiz/sandbox erişimi olan SP'ler
+### 2.1 Ücretsiz ya da kum havuzu erişimi olan servis sağlayıcılar
 
 | Karşı taraf | Erişim | Doğrulama durumu |
 |---|---|---|
-| **Okta** | Integrator Free Plan org ücretsiz oluşturulabilir; **SCIM provisioning free tier'da etkinleştirilebilir** (Provisioning tab → SCIM → Configure API integration). Private SCIM integration instance'ı sadece oluşturulduğu org'da kullanılabilir. | Doğrulandı ([Okta devforum](https://devforum.okta.com/t/scim-provisioning-support-in-free-tier/35338), [Okta docs](https://developer.okta.com/docs/guides/scim-provisioning-integration-connect/main/)) |
-| **Microsoft Entra ID** | Ücretsiz tenant + custom SCIM endpoint desteği; SCIM Validator ayrıca ücretsiz web aracı | Doğrulandı; ⚠️ hangi Entra SKU'sunun outbound app provisioning'i içerdiği (P1 gerekiyor mu) DOĞRULANMADI — bu **önemli bir maliyet riski** |
-| **Salesforce** | Developer Edition org'lar ücretsiz; SAML SP olarak konfigüre edilebilir. **Uyarı: Summer '26 sürümü tek-konfigürasyonlu SAML SSO framework'ünü kaldırıyor**, tüm müşteriler multi-configuration SAML'a geçmeli (sandbox preview 8 Mayıs 2026, production 15 Mayıs / 5 Haziran / 12-13 Haziran 2026) | Doğrulandı ([Salesforce Ben](https://www.salesforceben.com/salesforce-summer-26-release-everything-you-need-to-know-before-go-live/), [Salesforce Help](https://help.salesforce.com/s/articleView?id=release-notes.rn_security_verify_saml_integrations.htm)) — Argus SAML çıktısının bu yeni framework'le test edilmesi gerek |
-| **ServiceNow** | Personal Developer Instance (PDI) ücretsiz | ⚠️ DOĞRULANMADI — arama sonuçlarında PDI'nin SAML SSO'yu desteklediğine dair birincil kaynak bulamadım |
-| **Workday, Slack, Zoom, Atlassian, AWS IAM Identity Center, Google Workspace** | — | ⚠️ DOĞRULANMADI — hiçbiri için ücretsiz developer/sandbox tier'ın SAML/SCIM içerdiğini birincil kaynaktan doğrulayamadım. Google Workspace özelinde: WorkOS'a göre **"Google does not support SCIM publicly"** — sadece veri çekilebilir, push edilemez ([WorkOS, 15 Kasım 2024](https://workos.com/blog/scim-challenges)) |
+| Okta | Tümleştirici ücretsiz planında kurum hesabı ücretsiz oluşturulabilmektedir; SCIM sağlaması ücretsiz katmanda etkinleştirilebilmektedir, sağlama sekmesi altından API tümleşmesi yapılandırılarak. Özel SCIM tümleşme örneği yalnızca oluşturulduğu kurumda kullanılabilmektedir | Doğrulanmıştır, geliştirici forumu ile geliştirici belgeleri kaynaklıdır |
+| Microsoft Entra kimliği | Ücretsiz kiracı ile özel SCIM uç noktası desteklenmektedir; doğrulayıcı ayrıca ücretsiz bir web aracıdır | Doğrulanmıştır. Hangi ürün seviyesinin giden uygulama sağlamasını içerdiği, yani birinci kademe premium gerekip gerekmediği doğrulanamamıştır; bu önemli bir maliyet riskidir |
+| Salesforce | Geliştirici sürümü kurumları ücretsizdir ile SAML servis sağlayıcısı olarak yapılandırılabilmektedir. Bir uyarı vardır: 2026 yaz sürümü tek yapılandırmalı SAML çoklu oturum çerçevesini kaldırmaktadır, tüm müşteriler çok yapılandırmalı SAML'a geçmelidir; kum havuzu önizlemesi 8 Mayıs 2026, üretim 15 Mayıs ile 5 ve 12-13 Haziran 2026 tarihlerindedir | Doğrulanmıştır. Argus'un SAML çıktısının bu yeni çerçeveyle test edilmesi gerekmektedir |
+| ServiceNow | Kişisel geliştirici örneği ücretsizdir | Doğrulanamamıştır; arama sonuçlarında bu örneğin SAML çoklu oturumu desteklediğine dair birincil kaynak bulunamamıştır |
+| Workday, Slack, Zoom, Atlassian, AWS kimlik merkezi ile Google Workspace | — | Doğrulanamamıştır; hiçbiri için ücretsiz geliştirici ya da kum havuzu katmanının SAML veya SCIM içerdiği birincil kaynaktan doğrulanamamıştır. Google Workspace özelinde bir satıcı analizine göre Google SCIM'i kamuya açık biçimde desteklememektedir; yalnızca veri çekilebilmekte, itilememektedir |
 
-**Pratik sonuç:** Ücretsiz ve güvenilir şekilde erişilebilen gerçek karşı taraflar **Okta + Entra + Salesforce DE** üçlüsü. Diğerleri için ya ücretli tier ya da partner programı gerekiyor. Kalan SP'ler için **davranış emülasyonu** (aşağıya bakın) tek gerçekçi yol.
+Pratik sonuç şudur: ücretsiz ile güvenilir biçimde erişilebilen gerçek karşı taraflar Okta, Entra ile Salesforce geliştirici sürümü üçlüsüdür. Diğerleri için ya ücretli katman ya da iş ortağı programı gerekmektedir. Kalan servis sağlayıcılar için davranış emülasyonu tek gerçekçi yoldur.
 
-### 2.2 SCIM istemcilerinin çelişkili davranışları — doğrulanmış liste
+### 2.2 SCIM istemcilerinin çelişkili davranışları, doğrulanmış liste
 
-[WorkOS "SCIM challenges", 15 Kasım 2024](https://workos.com/blog/scim-challenges) birincil olarak en zengin kaynak. Doğrulanan farklar:
+Bir satıcının 15 Kasım 2024 tarihli SCIM zorlukları yazısı birincil olarak en zengin kaynaktır. Doğrulanan farklar şunlardır.
 
-| Konu | Okta | Entra ID |
+| Konu | Okta | Entra kimliği |
 |---|---|---|
-| **Deprovisioning** | `PUT`/`PATCH` ile `active=false` — DELETE kullanmaz | **`DELETE` endpoint'ini kullanır** (ayrıca `PATCH /Users/{id}` + `active:false`) |
-| **Group membership** | PATCH ve PUT ikisini de destekler; OIN template'lerinde default PATCH | **Sadece PATCH add/remove gönderir; 200 OK aldıktan sonra üyeleri bir daha doğrulamaz** — kendini source of truth kabul eder, full reconciliation yapmaz |
-| **Senkron sıklığı** | Gerçek zamanlı | Default **40 dakika** (veya on-demand) |
-| **Suspended user** | Kullanıcı suspend edildiyse grup üyelik değişikliklerini bildirmez | Hâlâ provisioned bir grupta olan kullanıcıyı suspend etmez |
-| **Custom attribute** | `urn:ietf:params:scim:schemas:core:2.0:User` prefix'li custom attribute'ları **top-level** olarak işler | Schema extension prefix'i ve **nested** yapı bekler |
-| **Filtreleme** | `meta.lastModified` ile filtrelemeyi desteklemez | Cloud-managed vs synchronized kullanıcılar için e-posta alımı farklı |
-| **Group push** | Destekler; push için assignment'tan ayrı gruplar gerekir | — |
+| Sağlama kaldırma | Güncelleme ya da yama ile etkin bayrağını kapatmaktadır; silme kullanmamaktadır | Silme uç noktasını kullanmaktadır, ayrıca kullanıcı yamasıyla etkin bayrağını kapatmaktadır |
+| Grup üyeliği | Yama ile güncellemenin ikisini de desteklemektedir; tümleşme ağı şablonlarında öntanımlı yamadır | Yalnızca yama ekle ve çıkar göndermektedir; 200 yanıtı aldıktan sonra üyeleri bir daha doğrulamamaktadır, kendini doğruluk kaynağı kabul etmekte ile tam mutabakat yapmamaktadır |
+| Eşzamanlama sıklığı | Gerçek zamanlıdır | Öntanımlı 40 dakikadır, ya da talep üzerinedir |
+| Askıya alınmış kullanıcı | Kullanıcı askıya alındıysa grup üyelik değişikliklerini bildirmemektedir | Hâlâ sağlanmış bir grupta olan kullanıcıyı askıya almamaktadır |
+| Özel nitelik | Çekirdek kullanıcı şeması ön ekli özel nitelikleri üst düzey olarak işlemektedir | Şema uzantısı ön eki ile iç içe yapı beklemektedir |
+| Süzme | Son değişiklik alanıyla süzmeyi desteklememektedir | Bulut yönetimli ile eşzamanlanmış kullanıcılar için e-posta alımı farklıdır |
+| Grup itme | Desteklemektedir; itme için atamadan ayrı gruplar gerekmektedir | — |
 
-Diğerleri: **OneLogin** kullanıcıyı suspend etmek yerine siler, sadece grup üyeliğiyle provision eder. **JumpCloud** grup silindiğinde başka aktif grupta olmayan tüm üyeleri disable eder. Genel: `externalId` tutarlı biçimde benzersiz kimlik olarak kabul edilmiyor; bulk operations opsiyonel ve desteği tutarsız; e-posta çoğu yerde zorunlu değil → geçersiz event üretiyor.
+Diğerleri şöyledir: bir satıcı kullanıcıyı askıya almak yerine silmekte ile yalnızca grup üyeliğiyle sağlamaktadır. Bir başkası grup silindiğinde başka etkin grupta olmayan tüm üyeleri devre dışı bırakmaktadır. Genel olarak dış tanımlayıcı tutarlı biçimde benzersiz kimlik kabul edilmemekte; toplu işlemler isteğe bağlı ile desteği tutarsızdır; e-posta çoğu yerde zorunlu olmadığından geçersiz olay üretilmektedir.
 
-**Ek doğrulanmış tehlike (Argus tasarımı için):** Entra 2000 üyeli bir grup güncellemesi gönderdiğinde, sunucu her PATCH'te tüm `members` dizisini replace ediyorsa ve request timeout olursa **kısmi state** (2000 yerine 1200 üye) kalır ve Entra bunu hiç doğrulamaz. Yani Argus'un SCIM group PATCH'i **atomik ve idempotent** olmalı, `replace` semantiği asla kısmi uygulanmamalı.
+Argus tasarımı için ek bir doğrulanmış tehlike vardır. Entra 2000 üyeli bir grup güncellemesi gönderdiğinde, sunucu her yamada tüm üye dizisini değiştiriyorsa ile istek zaman aşımına uğrarsa kısmi durum kalmaktadır, yani 2000 yerine 1200 üye, ile Entra bunu hiç doğrulamamaktadır. Yani Argus'un SCIM grup yaması atomik ile eş güçlü olmalı, değiştirme anlambilimi asla kısmi uygulanmamalıdır.
 
-Microsoft Q&A'da rapor edilmiş iki gerçek dünya sorunu: (a) SCIM Validator PATCH testlerinin farklı payload formatı yüzünden fail etmesi, (b) başarılı üye eklemesinden sonra **tekrarlayan PATCH /Groups çağrıları**.
+Bir satıcının soru cevap platformunda raporlanmış iki gerçek dünya sorunu vardır: doğrulayıcının yama testlerinin farklı yük formatı yüzünden başarısız olması, ile başarılı üye eklemesinden sonra tekrarlayan grup yaması çağrıları.
 
-### 2.3 Sandbox kurulumu — pratik reçete
+### 2.3 Kum havuzu kurulumu, pratik reçete
 
-1. **Okta Integrator Free Plan** org aç → private SCIM integration ekle → Argus'un SCIM base URL'i + bearer token → **Runscope 13-adımlı CRUD suite**'ini koştur.
-2. **Entra ücretsiz tenant** → Enterprise application → non-gallery app → Provisioning → SCIM. Ayrıca `scimvalidator.microsoft.com`'u "Discover schema" modunda Argus'a yönelt.
-3. Argus lokal olduğu için her ikisi de **public erişilebilir URL** ister → ngrok/cloudflared tüneli veya ephemeral preview environment gerekir. Bu, bu katmanın **CI'da her PR'da koşamayacağı** anlamına gelir (aşağıdaki tabloda nightly).
-4. Yakalanan gerçek trafiği **kaydet** (HAR/JSON) ve bir **"IdP client emulator"** test fixture'ına dönüştür — böylece Okta/Entra davranışları hermetik olarak, tünelsiz, her PR'da replay edilebilir. Bu, ücretsiz tier'ı olmayan SP'ler (Workday, ServiceNow, Slack) için de tek ölçeklenebilir yaklaşım.
+Birinci adım Okta tümleştirici ücretsiz planında kurum açmak, özel SCIM tümleşmesi eklemek, Argus'un SCIM temel adresi ile taşıyıcı belirtecini vermek ile on üç adımlı oluştur oku güncelle sil süitini koşturmaktır.
 
-### 2.4 Test matrisi ne kadar büyür
+İkinci adım Entra ücretsiz kiracısında kurumsal uygulama olarak galeri dışı bir uygulama açıp sağlama sekmesinden SCIM tanımlamaktır. Ayrıca doğrulayıcıyı şema keşfi modunda Argus'a yöneltmektir.
 
-Naif çarpım:
-- Protokoller (N): OIDC, OAuth 2.1, SAML 2.0, SCIM 2.0, LDAP, WebAuthn, MCP = **7**
-- Karşı taraflar (M): protokol başına gerçekçi olarak 3–8 (SCIM: Okta/Entra/OneLogin/JumpCloud/Google = 5; SAML: Salesforce/ServiceNow/AWS/Slack/Atlassian/Zoom/Workday = 7; OIDC RP: 5+)
-- Senaryolar (K): happy path, hata yolları, çok kiracılık izolasyonu, token/session lifecycle, anahtar rotasyonu, deprovisioning ≈ 10–20
+Üçüncü adım şudur: Argus yerel olduğu için her ikisi de kamuya erişilebilir bir adres istemektedir, yani bir tünel ya da geçici önizleme ortamı gerekmektedir. Bu, bu katmanın sürekli tümleştirmede her birleştirme isteğinde koşamayacağı anlamına gelmektedir; aşağıdaki tabloda gecelik olarak konumlanmıştır.
 
-7 × 6 × 15 ≈ **~630 interop kombinasyonu**. Bu, tam kombinatoryal koşumun **imkânsız** olduğu anlamına gelir.
+Dördüncü adım yakalanan gerçek trafiği kaydetmek ile bir kimlik sağlayıcı istemci emülatörü test düzeneğine dönüştürmektir. Böylece Okta ile Entra davranışları hermetik olarak, tünelsiz, her birleştirme isteğinde yeniden oynatılabilmektedir. Bu, ücretsiz katmanı olmayan servis sağlayıcılar için de tek ölçeklenebilir yaklaşımdır.
 
-Matrisi kırmanın yolu — üç eksende ayrıştırma:
-1. **Protokol doğruluğu** (karşı taraftan bağımsız): conformance süitleri. N × K, M yok. ~7 × 15 = 105.
-2. **Karşı taraf tuhaflıkları** (protokolden bağımsız değil ama senaryodan büyük ölçüde bağımsız): her karşı taraf için **davranış profili** olarak kodlanır (deprovisioning yöntemi, PATCH semantiği, filtre desteği, sync sıklığı). M × (küçük profil kontratı) ≈ 5–8 profil × ~10 assertion = 60–80.
-3. **Gerçek uçtan uca smoke**: sadece kritik çiftler için, nightly/haftalık. ~10 kombinasyon.
+### 2.4 Test matrisi ne kadar büyümektedir
 
-Toplam ~200 anlamlı test, 630 yerine. **Pairwise/combinatorial test tasarımı** burada doğal yaklaşım.
+Naif çarpım şudur. Protokoller yedidir: OIDC, OAuth 2.1, SAML, SCIM, LDAP, WebAuthn ile model bağlam protokolü. Karşı taraflar protokol başına gerçekçi olarak üç ile sekiz arasındadır; SCIM için beş, SAML için yedi, OIDC bağlı taraf için beşten fazla. Senaryolar mutlu yol, hata yolları, çok kiracılık izolasyonu, belirteç ile oturum yaşam döngüsü, anahtar rotasyonu ile sağlama kaldırma dâhil on ile yirmi arasındadır.
+
+Yedi çarpı altı çarpı on beş yaklaşık 630 birlikte çalışabilirlik kombinasyonu etmektedir. Bu, tam kombinatoryal koşumun imkânsız olduğu anlamına gelmektedir.
+
+Matrisi kırmanın yolu üç eksende ayrıştırmadır. Birincisi protokol doğruluğudur, karşı taraftan bağımsızdır ile uyum süitleriyle ölçülmektedir; protokol çarpı senaryo, karşı taraf yoktur, yaklaşık 105 eder. İkincisi karşı taraf tuhaflıklarıdır; protokolden bağımsız değildir ancak senaryodan büyük ölçüde bağımsızdır ile her karşı taraf için davranış profili olarak kodlanmaktadır, yani sağlama kaldırma yöntemi, yama anlambilimi, süzme desteği ile eşzamanlama sıklığı. Beş ile sekiz profil çarpı yaklaşık on doğrulama, 60 ile 80 eder. Üçüncüsü gerçek uçtan uca duman testidir; yalnızca kritik çiftler için, gecelik ya da haftalık, yaklaşık on kombinasyon.
+
+Toplam 630 yerine yaklaşık 200 anlamlı test etmektedir. İkili ya da kombinatoryal test tasarımı burada doğal yaklaşımdır.
 
 ---
 
-## 3. Yük Testi — IdP'ye Özgü
+## 3. Yük testi, kimlik sağlayıcıya özgü
 
-### 3.1 keycloak-benchmark — birincil sayılar
+### 3.1 Keycloak kıyaslama projesi, birincil sayılar
 
-Proje: [keycloak/keycloak-benchmark](https://github.com/keycloak/keycloak-benchmark). **Gatling tabanlı** (doğrulandı). Üç modül:
-- **benchmark** — Gatling load testleri
-- **provisioning** — minikube (Grafana observability ile) + docker-compose
-- **dataset** — "a Keycloak add-on that can create entities in a Keycloak data store to prepare it for a load test" ← **Argus için doğrudan kopyalanabilir fikir**
+Proje Keycloak deposunun kıyaslama bileşenidir ile Gatling tabanlı olduğu doğrulanmıştır. Üç modülü vardır: Gatling yük testlerini içeren kıyaslama modülü; gözlemlenebilirlikli minikube ile Docker bileşimi sunan hazırlama modülü; ile bir veri kümesi modülü, ki tanımı bir yük testine hazırlamak üzere Keycloak veri deposunda varlık oluşturabilen bir eklentidir. Bu sonuncusu Argus için doğrudan kopyalanabilir bir fikirdir.
 
-Senaryolar (repo ağacından, [scenario/](https://github.com/keycloak/keycloak-benchmark/tree/main/benchmark/src/main/scala/keycloak/scenario)): paketler `_private`, `admin`, `authentication`, `basic`; ortak sınıflar `CommonSimulation.scala`, `KeycloakScenarioBuilder.scala`. `authentication/` altında: **`AuthorizationCode.scala`, `ClientSecret.scala`, `LoginUserPassword.scala`**. `basic/` altında `Get.scala`. Ayrıca dokümantasyonda `ListSessions`, `CreateRealms` geçiyor.
+Senaryolar depo ağacından okunmuştur: özel, yönetim, kimlik doğrulama ile temel paketleri; ortak simülasyon ile senaryo oluşturucu sınıfları. Kimlik doğrulama paketi altında yetkilendirme kodu, istemci sırrı ile kullanıcı adı parola girişi bulunmaktadır. Temel paket altında bir alma senaryosu vardır. Belgelerde ayrıca oturum listeleme ile bölge oluşturma geçmektedir.
 
-Konfigürasyon ([benchmark guide](https://www.keycloak.org/keycloak-benchmark/benchmark-guide/latest/configuration)) — **açık ve kapalı model ikisi de var**:
-- `--users-per-sec` (default 1) → **open workload model**
-- `--concurrent-users` → closed workload model
-- `--ramp-up` (default 5s), `--measurement` (default 30s), `--user-think-time` (default 0)
-- `--realms`, `--users-per-realm`, `--clients-per-realm` ← **çok kiracılık ölçekleme parametreleri, Argus için birebir**
-- `--sla-error-percentage` (default 0), `--log-http-on-failure`
+Yapılandırma açısından hem açık hem kapalı model bulunmaktadır. Saniyedeki kullanıcı seçeneği, öntanımlı bir, açık iş yükü modelini vermektedir; eşzamanlı kullanıcı seçeneği kapalı modeli vermektedir. Ayrıca rampa süresi, öntanımlı beş saniye, ölçüm süresi, öntanımlı otuz saniye, ile düşünme süresi, öntanımlı sıfır bulunmaktadır. Bölge sayısı, bölge başına kullanıcı ile bölge başına istemci seçenekleri çok kiracılık ölçekleme parametreleridir ile Argus için birebir uygundur. Son olarak hizmet seviyesi hata yüzdesi, öntanımlı sıfır, ile başarısızlıkta HTTP günlükleme seçenekleri vardır.
 
-### 3.2 Yayımlanmış Keycloak 26.4 sonuçları — en değerli veri
+### 3.2 Yayımlanmış Keycloak 26.4 sonuçları, en değerli veri
 
-[keycloak.org/2025/10/keycloak-benchmark](https://www.keycloak.org/2025/10/keycloak-benchmark) (Ekim 2025):
+Ekim 2025 tarihli resmî kıyaslama yazısından alınmıştır.
 
-| Logins/sn | Token refresh/sn | Pod CPU | Pod RAM | DB instance |
+| Saniyedeki giriş | Saniyedeki belirteç yenileme | Kapsül işlemcisi | Kapsül belleği | Veritabanı örneği |
 |---|---|---|---|---|
-| 500 | 2,500 | 24 | 4 GB | db.r8g.2xlarge |
-| 1,000 | 5,000 | 40 | 8 GB | db.r8g.4xlarge |
-| 2,000 | 10,000 | 74 | 8 GB | db.r8g.16xlarge |
+| 500 | 2.500 | 24 | 4 GB | db.r8g.2xlarge |
+| 1.000 | 5.000 | 40 | 8 GB | db.r8g.4xlarge |
+| 2.000 | 10.000 | 74 | 8 GB | db.r8g.16xlarge |
 
-**Sizing formülleri (birincil):**
-- **1 vCPU ≈ 15 login/sn**
-- **1 vCPU ≈ 120 refresh token request/sn**
-- Trafik sıçramaları için **%150 headroom** önerisi
+Birincil boyutlandırma formülleri şunlardır: bir sanal işlemci çekirdeği yaklaşık 15 giriş ya da yaklaşık 120 yenileme belirteci isteği taşımaktadır; trafik sıçramaları için yüzde 150 pay önerilmektedir.
 
-**Darboğaz cevabı net: login, refresh'ten ~8× pahalı.** Kapasite planlaması login/sn üzerinden yapılır.
+Darboğaz cevabı nettir: giriş, yenilemeden yaklaşık sekiz kat pahalıdır. Kapasite planlaması saniyedeki giriş üzerinden yapılmaktadır.
 
-Diğer doğrulanmış bulgular:
-- **Ağ gecikmesine aşırı hassasiyet:** multi-zone deployment'ta **10 ms** gecikme p99 yanıt süresini **47 ms → 84 ms** yaptı. Argus çok-bölgeli olacaksa bu tek başına tasarım kısıtı.
-- **DB CPU:** Aurora %77'de tepe yaptı; Keycloak cache 10K→200K entry çıkarılınca DB yükü **%63**'e düştü.
-- **Login/refresh oranı 1:5** — bu, benchmark'ın seçtiği profil; yayımlanmış *üretim* oranı değil.
+Diğer doğrulanmış bulgular şunlardır. Ağ gecikmesine aşırı hassasiyet vardır: çok bölgeli dağıtımda 10 milisaniyelik gecikme 99. yüzdelik yanıt süresini 47 milisaniyeden 84 milisaniyeye çıkarmıştır. Argus çok bölgeli olacaksa bu tek başına bir tasarım kısıtıdır. Veritabanı işlemci kullanımı yüzde 77'de tepe yapmıştır; Keycloak önbelleği 10 binden 200 bin girdiye çıkarılınca veritabanı yükü yüzde 63'e düşmüştür. Giriş ile yenileme oranı birde beştir; bu kıyaslamanın seçtiği profildir, yayımlanmış bir üretim oranı değildir.
 
-**Yük profili — yayımlanmış üretim verisi:** ⚠️ **DOĞRULANMADI.** Auth0/Okta'nın gerçek login:refresh:introspection oranlarını yayımladığına dair birincil kaynak bulamadım. Bulunabilenler sadece rate limit'ler (Okta Identity Engine: kullanıcı başına 5 saniyede 20 istek; Google: OAuth client ID başına hesap başına 100 refresh token). Keycloak'ın 1:5 login:refresh oranı elimizdeki **tek gerekçelendirilebilir başlangıç noktası**. Introspection oranı için hiçbir yayımlanmış veri yok — ancak mimari olarak: JWT access token kullanılırsa introspection ≈ 0; opaque token kullanılırsa introspection **her API çağrısı** demektir, yani login'den **2-3 kat büyüklük** fazla olabilir. Argus opaque token destekleyecekse introspection'ın en yüksek hacimli endpoint olacağını varsaymak güvenli.
+Yük profili konusunda yayımlanmış üretim verisi doğrulanamamıştır. Büyük satıcıların gerçek giriş, yenileme ile iç gözlem oranlarını yayımladığına dair birincil kaynak bulunamamıştır. Bulunabilenler yalnızca hız sınırlarıdır: bir satıcının kimlik motorunda kullanıcı başına beş saniyede yirmi istek; bir başkasında istemci kimliği başına hesap başına yüz yenileme belirteci. Keycloak'ın birde beş oranı elimizdeki tek gerekçelendirilebilir başlangıç noktasıdır. İç gözlem oranı için hiçbir yayımlanmış veri yoktur; ancak mimari olarak JWT erişim belirteci kullanılırsa iç gözlem sıfıra yakındır, opak belirteç kullanılırsa iç gözlem her API çağrısı demektir, yani girişten iki üç büyüklük mertebesi fazla olabilmektedir. Argus opak belirteç destekleyecekse iç gözlemin en yüksek hacimli uç nokta olacağını varsaymak güvenlidir.
 
-Gatling raporlamasında Keycloak p99'u alıyor ([standard report guide](https://www.keycloak.org/keycloak-benchmark/benchmark-guide/latest/report/standard-report)).
+Gatling raporlamasında Keycloak 99. yüzdeliği almaktadır.
 
-⚠️ Keycloak ekibi Gatling'den memnun değil: [issue #1087 "Evaluate potential Gatling successors"](https://github.com/keycloak/keycloak-benchmark/issues/1087) açık.
+Bir çekince vardır: Keycloak ekibi Gatling'den memnun değildir ile olası ardıllarının değerlendirilmesine dair açık bir konu bulunmaktadır.
 
-### 3.3 Coordinated omission — hangi araç doğru ölçer
+### 3.3 Eşgüdümlü atlama, hangi araç doğru ölçmektedir
 
-**Problem:** load generator, SUT yavaşladığında istek gönderimini istemeden yavaşlatır → tail latency spike'ları ölçümden düşer. Klasik generator'lar latency'yi "gönderim → yanıt" arası ölçer; bu model yüksek gecikme artefaktlarının çoğunu göz ardı eder.
+Problem şudur: yük üreteci, test edilen sistem yavaşladığında istek gönderimini istemeden yavaşlatmakta ile kuyruk gecikmesi sıçramaları ölçümden düşmektedir. Klasik üreteçler gecikmeyi gönderimden yanıta kadar ölçmektedir; bu model yüksek gecikme yapay eserlerinin çoğunu göz ardı etmektedir.
 
-**Doğru ölçen araçlar:**
+Doğru ölçen araçlar şunlardır.
 
-| Araç | CO durumu | Detay |
+| Araç | Eşgüdümlü atlama durumu | Detay |
 |---|---|---|
-| **wrk2** | ✅ Doğru | Gil Tene'nin wrk fork'u. `-R` sabit hız bayrağı + **HdrHistogram**. Latency'yi *gerçekte gönderildiği an*dan değil, **konfigüre edilen throughput'a göre gönderilmesi gereken an**dan ölçer ([giltene/wrk2](https://github.com/giltene/wrk2)) |
-| **k6** | ✅ Şartlı | **`constant-arrival-rate` executor** ile doğru; **default executor'lar (`shared-iterations`, `constant-vus`) CO'ya açık.** Doğrulanmış opsiyonlar: `rate` (zorunlu), `timeUnit` (default `1s`), `duration` (zorunlu), `preAllocatedVUs` (zorunlu), `maxVUs`. Iteration'lar "start independently of system response", 10/sn'de ~100 ms aralıkla. **Kritik uyarı (dokümandan):** "Using too low of a `preAllocatedVUs` setting will reduce the test duration at the desired rate" — VU havuzu yetersizse hedef hız tutturulamaz ve **CO sessizce geri gelir** ([k6 docs](https://grafana.com/docs/k6/latest/using-k6/scenarios/executors/constant-arrival-rate/)) |
-| **Gatling** | ✅ Şartlı | `--users-per-sec` (open model) mevcut. ⚠️ Gatling'in CO'yu spesifik olarak nasıl ele aldığına dair birincil kaynak bulamadım — DOĞRULANMADI |
-| **Locust** | ⚠️ | Open/closed model ayrımını dokümante ediyor; her user bir greenlet → tek-node throughput'u k6'dan düşük |
-| **Vegeta, autocannon** | ✅ | wrk2'nin open-loop yaklaşımını benimsemişler |
-| **oha** | ❌/⚠️ | Rust, TUI'li hey/wrk alternatifi. **CO açısından doğruluğu doğrulanmadı** — smoke test için uygun, kapasite ölçümü için değil |
+| wrk2 | Doğrudur | Gil Tene'nin wrk çatalıdır. Sabit hız bayrağı ile bir yüksek dinamik aralık histogramı sunmaktadır. Gecikmeyi gerçekte gönderildiği andan değil, yapılandırılan verime göre gönderilmesi gereken andan ölçmektedir |
+| k6 | Şartlı doğrudur | Sabit varış hızı yürütücüsüyle doğrudur; öntanımlı yürütücüler eşgüdümlü atlamaya açıktır. Doğrulanmış seçenekleri zorunlu hız, öntanımlı bir saniyelik zaman birimi, zorunlu süre, zorunlu ön ayrılmış sanal kullanıcı ile azami sanal kullanıcıdır. Yinelemeler sistem yanıtından bağımsız başlamaktadır, saniyede onda yaklaşık 100 milisaniye aralıkla. Belgedeki kritik uyarı şudur: çok düşük bir ön ayrılmış sanal kullanıcı ayarı testin istenen hızdaki süresini kısaltmaktadır. Yani havuz yetersizse hedef hız tutturulamamakta ile eşgüdümlü atlama sessizce geri dönmektedir |
+| Gatling | Şartlı doğrudur | Saniyedeki kullanıcı seçeneğiyle açık model mevcuttur. Eşgüdümlü atlamayı özel olarak nasıl ele aldığına dair birincil kaynak bulunamamış ile doğrulanamamıştır |
+| Locust | Kısmen | Açık ile kapalı model ayrımını belgelemektedir; her kullanıcı bir yeşil iş parçacığı olduğundan tek düğüm verimi k6'dan düşüktür |
+| Vegeta ile autocannon | Doğrudur | wrk2'nin açık döngü yaklaşımını benimsemişlerdir |
+| oha | Belirsizdir | Rust ile yazılmış, metin arayüzlü bir alternatiftir. Eşgüdümlü atlama açısından doğruluğu doğrulanamamıştır; duman testi için uygundur, kapasite ölçümü için değildir |
 
-**Argus için sonuç:** kapasite sayıları **k6 `constant-arrival-rate`** veya **wrk2** ile üretilmeli; `preAllocatedVUs`/`maxVUs` mutlaka bilinçli ayarlanmalı ve k6'nın "dropped_iterations" metriği fail koşulu yapılmalı.
+Argus için sonuç şudur: kapasite sayıları k6'nın sabit varış hızı yürütücüsüyle ya da wrk2 ile üretilmelidir; ön ayrılmış ile azami sanal kullanıcı mutlaka bilinçli ayarlanmalı ile düşen yineleme metriği başarısızlık koşulu yapılmalıdır.
 
-### 3.4 Argon2 yük testini nasıl bozar — ve istemci tarafında ne gerekir
+### 3.4 Argon2 yük testini nasıl bozmaktadır ile istemci tarafında ne gerekmektedir
 
-Doğrulanmış gerçekler:
-- Keycloak'ta Argon2'ye geçiş **JVM'de Major GC artışı ve yüksek CPU** yarattı, "applications behave abnormally during medium to high load" ([keycloak issue #29033](https://github.com/keycloak/keycloak/issues/29033))
-- Argon2/scrypt **memory-hard** → GPU/ASIC direnci yüksek ama **bu bellek maliyeti eşzamanlılığı (concurrency) düşürür** ([MojoAuth](https://mojoauth.com/blog/password-hashing-performance-cpu-bottlenecks-high-traffic))
-- **Aritmetik:** 200 eşzamanlı login × 64 MiB = **12.8 GiB RAM** talebi. `memoryCost` **ortalamaya değil, tepe eşzamanlılığa** göre boyutlandırılmalı
-- Öneri: **lanes (parallelism) = 1** tutun ki bir hash bir core'a eşlensin, birkaç core'a değil; worker pool'u hem CPU hem RAM bütçesine göre sınırlayın
-- Hedef: verification **300 ms altında** kalırken sunucunun sürdürebileceği bellek maliyetini maksimize edin; **üretime denk donanımda** benchmark edin
+Doğrulanmış gerçekler şunlardır. Keycloak'ta Argon2'ye geçiş sanal makinede büyük çöp toplama artışı ile yüksek işlemci kullanımı yaratmıştır; ilgili konuda uygulamaların orta ile yüksek yük altında anormal davrandığı belirtilmektedir. Argon2 ile scrypt bellek sıkı algoritmalardır, yani grafik işlemci ile özel donanım direnci yüksektir; ancak bu bellek maliyeti eşzamanlılığı düşürmektedir. Aritmetik açıktır: 200 eşzamanlı giriş çarpı 64 mebibayt, 12,8 gibibayt bellek talebi etmektedir. Bellek maliyeti ortalamaya değil tepe eşzamanlılığa göre boyutlandırılmalıdır. Öneri paralelliği bir tutmaktır, ki bir özet bir çekirdeğe eşlensin, birkaç çekirdeğe değil; ile işçi havuzu hem işlemci hem bellek bütçesine göre sınırlanmalıdır. Hedef, doğrulama 300 milisaniyenin altında kalırken sunucunun sürdürebileceği bellek maliyetini azamiye çıkarmaktır; kıyaslama üretime denk donanımda yapılmalıdır.
 
-**İstemci tarafında CPU-bound endpoint'i test etmek için gerekenler:**
+İstemci tarafında işlemci bağımlı bir uç noktayı test etmek için gerekenler şunlardır.
 
-1. **Kapalı model (concurrent-users) kullanmayın** — SUT yavaşladıkça istemci de yavaşlar, gerçek doygunluk noktası hiç görünmez. **Open model / constant arrival rate zorunlu.**
-2. **Load generator ayrı makinede olmalı.** Argon2 memory-hard olduğu için aynı makinedeki generator, SUT'un cache'ini ve bellek bant genişliğini çalar → ölçüm kirlenir. Bu, HTTP-bound endpoint'lerde önemsiz, Argon2'de belirleyici.
-3. **Kuyruk derinliğini ve reddedilen istekleri ayrı ölç.** Argon2 doyduğunda sistem latency artışı yerine **kuyrukta biriktirme** yapar; sadece p99 latency'ye bakan bir test doygunluğu geç fark eder. `dropped_iterations` (k6) / admission control reddi metrik olmalı.
-4. **Ayrı bir "hash-only" mikro-benchmark** tutun (Rust `criterion`), böylece Argon2 parametre değişikliğinin etkisi HTTP gürültüsünden bağımsız görünür.
-5. **Login yükünü refresh/introspection yükünden ayrı senaryolarda çalıştırın**, sonra karışık profilde. Keycloak'ın 15 vs 120 req/vCPU farkı, karışık profilde login'in kaynak açlığına yol açacağını gösteriyor — **bulkhead/ayrı thread pool** tasarımının test edilmesi gereken bir davranış olduğu anlamına gelir.
-6. **Boyut için formül:** hedef login/sn × Argon2 verification süresi = gerekli eşzamanlı hash sayısı; × memoryCost = gerekli RAM. 500 login/sn × 300 ms = 150 eşzamanlı hash × 64 MiB ≈ **9.6 GiB** sadece hashing için.
+Birincisi, kapalı model kullanılmamalıdır. Test edilen sistem yavaşladıkça istemci de yavaşlamakta ile gerçek doygunluk noktası hiç görünmemektedir. Açık model, yani sabit varış hızı zorunludur.
+
+İkincisi, yük üreteci ayrı makinede olmalıdır. Argon2 bellek sıkı olduğu için aynı makinedeki üreteç, test edilen sistemin önbelleğini ile bellek bant genişliğini çalmakta ile ölçüm kirlenmektedir. Bu, HTTP bağımlı uç noktalarda önemsizdir, Argon2'de belirleyicidir.
+
+Üçüncüsü, kuyruk derinliği ile reddedilen istekler ayrı ölçülmelidir. Argon2 doyduğunda sistem gecikme artışı yerine kuyrukta biriktirme yapmaktadır; yalnızca 99. yüzdeliğe bakan bir test doygunluğu geç fark etmektedir. Düşen yineleme ya da kabul denetimi reddi bir metrik olmalıdır.
+
+Dördüncüsü, ayrı bir yalnızca özetleme mikro kıyaslaması tutulmalıdır, Rust'ta bir kıyaslama çerçevesiyle, böylece Argon2 parametre değişikliğinin etkisi HTTP gürültüsünden bağımsız görünmektedir.
+
+Beşincisi, giriş yükü yenileme ile iç gözlem yükünden ayrı senaryolarda çalıştırılmalı, sonra karışık profilde koşulmalıdır. Keycloak'ın çekirdek başına 15'e karşı 120 istek farkı, karışık profilde girişin kaynak açlığına yol açacağını göstermektedir; yani bölme duvarı ya da ayrı iş parçacığı havuzu tasarımının test edilmesi gereken bir davranış olduğu anlamına gelmektedir.
+
+Altıncısı, boyutlandırma formülü şudur: hedef saniyedeki giriş çarpı Argon2 doğrulama süresi, gerekli eşzamanlı özet sayısını vermekte; bu da bellek maliyetiyle çarpılınca gerekli belleği vermektedir. Saniyede 500 giriş çarpı 300 milisaniye, 150 eşzamanlı özet eder; çarpı 64 mebibayt, yalnızca özetleme için yaklaşık 9,6 gibibayt eder.
 
 ---
 
-## 4. Kaos ve Dayanıklılık Testi
+## 4. Kaos ile dayanıklılık testi
 
-### 4.1 Deterministic Simulation Testing (DST) — genel
+### 4.1 Deterministik simülasyon testi, genel
 
-**FoundationDB modeli** ([apple.github.io/foundationdb/testing.html](https://apple.github.io/foundationdb/testing.html), [Pierre Zemb analizi](https://pierrezemb.fr/posts/diving-into-foundationdb-simulation/)):
-- Tüm bir cluster'ı **tek thread'li tek process** içinde deterministik simüle eder
-- Anahtar fikir: **aynı kod hem production hem simülasyonda çalışır**, sadece interface implementasyonları takas edilir. Nondeterminizmin tüm kaynakları soyutlanır: network, disk, zaman, PRNG
-- `deterministicRandom()` — seeded PRNG tüm rastgeleliği değiştirir
-- Flow (actor-based concurrency dili) ile sıkı entegre
-- Ölçek: her gece on binlerce simülasyon; toplamda ~**1 trilyon CPU-saat** eşdeğeri
-- FDB ekibi diske gerçek veri yazmadan **18 ay** simülasyon framework'ü inşa etti
+FoundationDB modeli şöyledir. Tüm bir küme tek iş parçacıklı tek süreç içinde deterministik simüle edilmektedir. Anahtar fikir, aynı kodun hem üretimde hem simülasyonda çalışması, yalnızca arayüz gerçeklemelerinin takas edilmesidir. Determinizmsizliğin tüm kaynakları soyutlanmaktadır: ağ, disk, zaman ile sözde rastgele sayı üreteci. Tohumlu üreteç tüm rastgeleliği değiştirmektedir. Aktör tabanlı eşzamanlılık diliyle sıkı tümleşiktir. Ölçek her gece on binlerce simülasyondur; toplamda yaklaşık bir trilyon işlemci saati eşdeğeridir. Ekip diske gerçek veri yazmadan on sekiz ay simülasyon çerçevesi inşa etmiştir.
 
-**TigerBeetle VOPR** ([docs/internals/vopr.md](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/internals/vopr.md)):
-- Viewstamped Replication protokolünü, network simülatörü + in-memory storage fault simülatörüyle tek process'te fuzz'lar
-- **Zamanı istediği kadar hızlandırır** — "one minute of VOPR time ≈ days of real-world testing"
-- **State checker**: tüm replica'lara hook, her state transition anında doğrulanır, **kriptografik hash chaining** ile nedensellik kanıtlanır
-- Determinizm **seed + git commit** ile → bug'lar birebir reproduce edilir
-- İlham kaynakları: WarGames filmi, Dropbox Nucleus, FoundationDB
-- Devam eden çalışma: ["Protocol-Aware Deterministic Simulation Testing" (20 Ağustos 2026)](https://tigerbeetle.com/blog/2026-08-20-protocol-aware-dst/) ve ["A Tale Of Four Fuzzers" (28 Kasım 2025)](https://tigerbeetle.com/blog/2025-11-28-tale-of-four-fuzzers/)
+TigerBeetle'ın simülatörü şunu yapmaktadır: görüntü damgalı çoğaltma protokolünü, ağ simülatörü ile bellek içi depolama arıza simülatörüyle tek süreçte bulanıklaştırmaktadır. Zamanı istediği kadar hızlandırmaktadır; belgelerine göre simülatör zamanının bir dakikası gerçek dünya testinin günlerine denktir. Bir durum denetleyicisi tüm kopyalara kanca takmakta, her durum geçişi anında doğrulanmakta ile kriptografik özet zincirlemesiyle nedensellik kanıtlanmaktadır. Determinizm tohum ile depo işlemesiyle sağlanmakta, yani hatalar birebir yeniden üretilmektedir. İlham kaynakları bir film, bir dosya eşzamanlama motoru ile FoundationDB'dir. Devam eden çalışma protokol farkındalıklı deterministik simülasyon testi ile dört bulanıklaştırıcıya dair iki yazıda anlatılmaktadır.
 
-**Antithesis** ([antithesis.com/docs](https://antithesis.com/docs/resources/deterministic_simulation_testing/)):
-- **Deterministik hypervisor** içinde normal, non-deterministik yazılımı çalıştırır → **sistemi yeniden tasarlamadan** DST. Container image yüklenir, üretim replikası deterministik hypervisor'da boot edilir.
-- Ele aldıkları nondeterminizm: clock, thread interleaving, sistem randomness'ı
-- Tradeoff'lar (dokümandan): "Setting up a deterministic simulation environment is a complex, resource-intensive undertaking", "Not every system can be designed in a way that enables DST", harici bağımlılıklar mock'lanmalı
-- **Fiyat:** CPU-hour bazlı; enterprise müşteriler tipik olarak **yıllık $20K–$100K+** ([Sacra](https://sacra.com/c/antithesis/)). Aralık 2025'te Jane Street liderliğinde **$105M Series A** ([PRNewswire](https://www.prnewswire.com/news-releases/jane-street-leads-antithesiss-105m-series-a-to-make-deterministic-simulation-testing-the-new-standard-302631076.html))
-- **Argus için:** fiyat prohibitif; ancak "sistemi yeniden tasarlamadan" özelliği, library-level DST'ye göre entegrasyon maliyetini sıfırlıyor. **Erken aşamada hayır, ürün olgunlaştığında yeniden değerlendir.**
+Antithesis farklı bir yol tutmaktadır: deterministik bir hiper yönetici içinde normal, determinizmsiz yazılımı çalıştırmakta, yani sistemi yeniden tasarlamadan deterministik simülasyon testi sunmaktadır. Konteyner imajı yüklenmekte ile üretim replikası deterministik hiper yöneticide önyüklenmektedir. Ele aldıkları determinizmsizlik kaynakları saat, iş parçacığı serpiştirmesi ile sistem rastgeleliğidir. Belgelerinde açıkça yazılı ödünleşimler şunlardır: deterministik bir simülasyon ortamı kurmak karmaşık ile kaynak yoğun bir iştir, her sistem deterministik simülasyon testini mümkün kılacak biçimde tasarlanamamaktadır, ile harici bağımlılıklar taklit edilmelidir. Fiyat işlemci saati bazlıdır; kurumsal müşteriler tipik olarak yıllık 20 bin ile 100 bin dolar üzeri ödemektedir. Aralık 2025'te 105 milyon dolarlık bir A serisi turu duyurulmuştur. Argus için fiyat engelleyicidir; ancak sistemi yeniden tasarlamama özelliği, kütüphane düzeyindeki deterministik simülasyona göre tümleştirme maliyetini sıfırlamaktadır. Erken aşamada hayır, ürün olgunlaştığında yeniden değerlendirilmelidir.
 
 ### 4.2 Rust'ta uygulanabilirlik
 
-| Araç | Ne yapar | Olgunluk | Argus'a uygunluk |
+| Araç | Ne yapmaktadır | Olgunluk | Argus'a uygunluk |
 |---|---|---|---|
-| **turmoil** ([tokio-rs/turmoil](https://github.com/tokio-rs/turmoil)) | Tek thread'de birden fazla eşzamanlı host; network ve filesystem'e latency, drop, partition, crash, **torn write** enjekte eder; manuel kontrol veya seeded RNG. Crate ailesi: `turmoil`, `turmoil-net` (`tokio::net` yerine), `turmoil-fs` (`std::fs`/`tokio::fs` yerine), `turmoil-io-uring` | **1.3k star**, aktif geliştirme, MIT. Tokio ekibi 2023'te duyurdu ve "**the crate is still experimental**" dedi ([tokio.rs duyurusu](https://tokio.rs/blog/2023-01-03-announcing-turmoil)). ⚠️ TLS desteği, tokio versiyon kısıtları ve desteklenmeyen özellikler README'de açıkça yazılı **değil** — DOĞRULANMADI | **Orta.** Argus'un Postgres'e gerçek TCP ile bağlanması turmoil altında `turmoil-net`e taşınmayı gerektirir; `tokio-postgres` doğrudan çalışmayabilir. En pratik kullanım: **Argus node'ları arası** (epoch/cache invalidation propagation) simülasyonu — DB'yi mock'layarak |
-| **madsim** ([madsim-rs/madsim](https://github.com/madsim-rs/madsim)) | tokio-benzeri ama deterministik runtime. `madsim-tokio` ile bağımlılık takası, `RUSTFLAGS="--cfg madsim" cargo test`. **Simülatör paketleri: tokio, tonic (gRPC), etcd-client, rdkafka, aws-sdk-s3.** Ayrıca yamalı `quanta`, `getrandom`, `tokio-retry`, **`tokio-postgres`**, `tokio-stream` | 1.2k star, 343 commit, Apache-2.0. **RisingWave (dağıtık stream-processing SQL DB) production'da kullanıyor** — bu en güçlü olgunluk sinyali | **Yüksek.** `tokio-postgres` yaması olması Argus için belirleyici — Postgres istemcisi simülasyon altında çalışabilir. ⚠️ API kapsama yüzdesi ve performans overhead'i dokümante değil |
-| **mad-turmoil** | madsim'in libc symbol override yaklaşımıyla turmoil-tabanlı DST'yi birleştirir; CI'da "meta test" aynı seed'i yeniden koşup TRACE seviye logları byte-byte karşılaştırıyor | Yeni, düşük olgunluk ⚠️ | Deneysel |
-| **Shuttle** ([awslabs/shuttle](https://github.com/awslabs/shuttle)) | **Randomized concurrency testing.** Thread scheduling'i kontrol eder, heuristik'li rastgele scheduling. `tokio` ve `rand` wrapper'ları + `std::sync`/`std::collections` primitifleri. **Async destekli** | 1.1k star, 319 commit, crates.io'da yayımlı | **Yüksek — dar kapsamda.** Açık tradeoff (repo'dan): "**not sound** (a passing Shuttle test does not prove the code is correct), but it scales to much larger test cases than **Loom**". Argus'ta hedef: session store, cache invalidation, connection pool, rate limiter gibi paylaşımlı-durum bileşenleri |
-| **stateright** ([stateright/stateright](https://github.com/stateright/stateright)) | **Model checker** — rastgele alt küme değil, spesifikasyon içindeki **tüm gözlemlenebilir davranışları** test eder. Actor modeli + gömülü model checker + keşif UI + hafif actor runtime. **Linearizability tester** içerir ("more exhaustive coverage than similar solutions such as Jepsen"). `always` (safety/invariant) ve `sometimes` (erişilebilirlik) property'leri. Örnekler: Single Decree Paxos, two-phase commit | Kitap var ([stateright.rs](https://www.stateright.rs/getting-started.html)); ⚠️ 2025-2026 aktivitesi doğrulanmadı | **Orta.** Argus'un tam sistemini modellemek pahalı; **protokol state machine'lerini** (OAuth authorization code lifecycle, DPoP nonce, CIBA poll, session/logout propagation) modellemek için ideal |
+| turmoil | Tek iş parçacığında birden fazla eşzamanlı ana makine sunmaktadır; ağ ile dosya sistemine gecikme, düşme, bölünme, çökme ile yırtık yazma enjekte etmektedir; elle kontrol ya da tohumlu üreteçle. Paket ailesi çekirdek paket, ağ paketi, dosya sistemi paketi ile bir giriş çıkış halkası paketinden oluşmaktadır | 1300 yıldız, aktif geliştirme ile MIT lisansı. Tokio ekibi 2023'te duyurmuş ile paketin hâlâ deneysel olduğunu söylemiştir. TLS desteği, tokio sürüm kısıtları ile desteklenmeyen özellikler benioku dosyasında açıkça yazılı değildir ile doğrulanamamıştır | Ortadır. Argus'un Postgres'e gerçek TCP ile bağlanması, turmoil altında ağ paketine taşınmayı gerektirmektedir; Postgres istemcisi doğrudan çalışmayabilir. En pratik kullanım Argus düğümleri arası yayılımın, yani çağ ile önbellek geçersizleştirme yayılımının simülasyonudur, veritabanı taklit edilerek |
+| madsim | tokio benzeri ancak deterministik bir koşum ortamıdır. Bağımlılık takasıyla kullanılmakta ile bir derleyici bayrağıyla etkinleştirilmektedir. Simülatör paketleri tokio, gRPC, etcd istemcisi, Kafka istemcisi ile bir nesne depolama geliştirme kitidir. Ayrıca zaman ölçme, rastgelelik, yeniden deneme, Postgres istemcisi ile akış paketlerinin yamalı sürümleri bulunmaktadır | 1200 yıldız, 343 işleme ile Apache lisansı. Dağıtık bir akış işleme veritabanı üretimde kullanmaktadır; bu en güçlü olgunluk sinyalidir | Yüksektir. Postgres istemcisi yaması olması Argus için belirleyicidir, çünkü veritabanı istemcisi simülasyon altında çalışabilmektedir. API kapsama yüzdesi ile başarım ek yükü belgelenmemiştir |
+| mad-turmoil | madsim'in sistem kütüphanesi sembol geçersiz kılma yaklaşımıyla turmoil tabanlı simülasyonu birleştirmektedir; sürekli tümleştirmede bir üst test aynı tohumu yeniden koşup izleme seviyesi günlükleri bayt bayt karşılaştırmaktadır | Yeni ile düşük olgunluktadır | Deneyseldir |
+| Shuttle | Rastgeleleştirilmiş eşzamanlılık testidir. İş parçacığı çizelgelemesini kontrol etmekte ile sezgisel rastgele çizelgeleme uygulamaktadır. tokio ile rastgelelik sarmalayıcıları artı standart kütüphanenin eşzamanlama ile koleksiyon ilkelerini sunmaktadır. Eşzamansız desteklidir | 1100 yıldız, 319 işleme ile crates.io'da yayımlıdır | Dar kapsamda yüksektir. Depodaki açık ödünleşim şudur: sağlam değildir, yani geçen bir test kodun doğru olduğunu kanıtlamamaktadır, ancak Loom'dan çok daha büyük test durumlarına ölçeklenmektedir. Argus'ta hedef oturum deposu, önbellek geçersizleştirme, bağlantı havuzu ile hız sınırlayıcı gibi paylaşımlı durum bileşenleridir |
+| stateright | Bir model denetleyicisidir; rastgele alt küme değil, şartname içindeki tüm gözlemlenebilir davranışları test etmektedir. Aktör modeli, gömülü model denetleyicisi, keşif arayüzü ile hafif bir aktör koşum ortamı sunmaktadır. Bir doğrusallaştırılabilirlik testçisi içermekte ile benzer çözümlerden daha kapsamlı kapsama iddia etmektedir. Her zaman ile bazen özellikleri tanımlanabilmektedir. Örnekleri tek kararlı Paxos ile iki aşamalı işlemedir | Bir kitabı bulunmaktadır; 2025 ile 2026 etkinliği doğrulanamamıştır | Ortadır. Argus'un tam sistemini modellemek pahalıdır; protokol durum makinelerini, yani yetkilendirme kodu yaşam döngüsü, DPoP tek seferlik değeri, geri kanal yoklaması ile oturum ve çıkış yayılımını modellemek için idealdir |
 
-### 4.3 Jepsen — bir IdP'ye uygulanabilir mi?
+### 4.3 Jepsen bir kimlik sağlayıcıya uygulanabilir mi
 
-**Kısmen — ama doğrudan değil.** Jepsen linearizability/isolation ihlallerini arar; bunun için sistemin **okuma/yazma geçmişi** üretmesi gerekir. Bir IdP'nin çoğu endpoint'i bu kalıba oturmaz; ancak şunlar oturur:
-- Session store (create/read/revoke) — linearizability sorusu anlamlı
-- Refresh token rotation — **çift kullanım tespiti** (reuse detection) tam olarak bir concurrency/isolation problemi
-- Consent/grant kayıtları
-- Multi-tenant konfigürasyon (epoch) propagasyonu
+Kısmen, ancak doğrudan değil. Jepsen doğrusallaştırılabilirlik ile yalıtım ihlallerini aramaktadır; bunun için sistemin bir okuma yazma geçmişi üretmesi gerekmektedir. Bir kimlik sağlayıcının çoğu uç noktası bu kalıba oturmamaktadır; ancak şunlar oturmaktadır: oturum deposu, yani oluşturma, okuma ile iptal, ki doğrusallaştırılabilirlik sorusu anlamlıdır; yenileme belirteci rotasyonu, ki çift kullanım tespiti tam olarak bir eşzamanlılık ile yalıtım problemidir; onay ile yetki kayıtları; ile çok kiracılı yapılandırma çağının yayılımı.
 
-**Jepsen'in PostgreSQL analizleri var — ve doğrudan Argus'u ilgilendiriyor:**
+Jepsen'in PostgreSQL analizleri bulunmakta ile doğrudan Argus'u ilgilendirmektedir.
 
-[Jepsen: Amazon RDS for PostgreSQL 17.4, 29 Nisan 2025](https://jepsen.io/analyses/amazon-rds-for-postgresql-17.4):
-- Test edilen: RDS multi-AZ cluster'lar (13.15–17.4), primary **ve read-only** endpoint'lere karşı
-- Workload: benzersiz integer listeleri üzerinde read/append transaction'ları; Elle checker
-- **Bulgular: Snapshot Isolation ihlalleri — G-nonadjacent cycle'lar ve Long Fork.** ~150 write/sn + 1600 read/sn gibi mütevazı eşzamanlılıkta **"every few minutes"** gerçekleşiyor. **Fault injection yok** — yani normal çalışmada
-- Sonuç: RDS muhtemelen standart SI yerine **Parallel Snapshot Isolation** sağlıyor; "**this behavior should not occur in standard PostgreSQL**"
+29 Nisan 2025 tarihli yönetilen PostgreSQL 17.4 analizinde test edilen, çok bölgeli yönetilen kümelerdir, 13.15'ten 17.4'e, hem birincil hem salt okunur uç noktalara karşı. İş yükü benzersiz tam sayı listeleri üzerinde okuma ile ekleme işlemleridir, bir döngü denetleyicisiyle. Bulgular anlık görüntü yalıtımı ihlalleridir: bitişik olmayan döngüler ile uzun çatal. Saniyede yaklaşık 150 yazma ile 1600 okuma gibi mütevazı eşzamanlılıkta bu birkaç dakikada bir gerçekleşmektedir. Arıza enjeksiyonu yoktur, yani normal çalışmada olmaktadır. Sonuç, yönetilen hizmetin standart anlık görüntü yalıtımı yerine muhtemelen paralel anlık görüntü yalıtımı sağladığıdır; rapor bu davranışın standart PostgreSQL'de gerçekleşmemesi gerektiğini söylemektedir.
 
-**Argus için doğrudan çıkarım:** Read replica'lardan okuma yapan bir IdP, RDS/Aurora üzerinde **tek-node Postgres'ten zayıf** izolasyon garantileri alır. Epoch/revocation propagasyonu "read-your-writes" varsayımına dayanıyorsa bu **güvenlik açığıdır** (revoke edilmiş bir token'ın replica'da hâlâ geçerli görünmesi). Bu, Argus'un test etmesi gereken **birinci sınıf bir senaryo**.
+Argus için doğrudan çıkarım şudur: okuma kopyalarından okuma yapan bir kimlik sağlayıcı, yönetilen hizmetler üzerinde tek düğümlü Postgres'ten zayıf yalıtım garantileri almaktadır. Çağ ile iptal yayılımı kendi yazdığını okuma varsayımına dayanıyorsa bu bir güvenlik açığıdır, yani iptal edilmiş bir belirtecin kopyada hâlâ geçerli görünmesi. Bu, Argus'un test etmesi gereken birinci sınıf bir senaryodur.
 
-[Jepsen 18: "Serializable Mom" (20 Haziran 2025)](https://jepsen.io/blog) — Bufstream 0.1.0, Amazon RDS for PostgreSQL 17.4, TigerBeetle 0.16.1 kapsıyor.
+20 Haziran 2025 tarihli 18 numaralı Jepsen yazısı bir akış ürününü, yönetilen PostgreSQL 17.4'ü ile TigerBeetle 0.16.1'i kapsamaktadır.
 
-**Patroni:** resmî bir Jepsen analizi **yok**; ancak bağımsız bir çalışma var — [Bin Wang, 2 Aralık 2024](https://www.binwang.me/2024-12-02-PostgreSQL-High-Availability-Solutions-Part-1.html): Patroni üzerinde Jepsen testi **read committed isolation ihlali** olan bilinen bir sorunu reproduce etti ve 3 node'dan 1'i kaybedildiğinde cluster'ın **toparlanamadığını** gözlemledi. ⚠️ Bu birincil Jepsen raporu değil, bağımsız blog — ihtiyatla kullanılmalı.
+Patroni için resmî bir Jepsen analizi yoktur; ancak bağımsız bir çalışma bulunmaktadır. 2 Aralık 2024 tarihli bir blog yazısı, Patroni üzerinde Jepsen testinin okuma işlenmiş yalıtım ihlali olan bilinen bir sorunu yeniden ürettiğini ile üç düğümden biri kaybedildiğinde kümenin toparlanamadığını gözlemlemektedir. Bu birincil bir Jepsen raporu değil bağımsız bir blogdur ile ihtiyatla kullanılmalıdır.
 
-### 4.4 Postgres failover / split-brain — somut kaos senaryoları
+### 4.4 Postgres devralma ile bölünmüş beyin, somut kaos senaryoları
 
-**CloudNativePG split-brain reprodüksiyonu — en değerli somut veri.** [Coroot, 29 Temmuz 2026](https://coroot.com/blog/reproducing-split-brain-on-cloudnativepg/):
-- Kurulum: 5-node k3s (v1.34.5+k3s1), CloudNativePG **1.30.0**, PostgreSQL **18.4**, **Chaos Mesh 2.7.2** NetworkChaos; 3 client sürekli yazıyor
-- Deney: primary pod'u replica'lardan, operator'dan ve API server'dan izole et
-- **Ne oldu:** isolation check doğru çalıştı ve ~34. saniyede pod termination tetikledi — **ama primary 177 saniye daha yazmaya devam etti**, çünkü default `smartShutdownTimeout: 180`. Promote edilen replica bu sırada yazmaya başladı → **~99 saniyelik çift-primary penceresi**, her ikisi de commit ACK'liyor
-- **Hasar:** partition iyileştikten ve `pg_rewind` bir survivor seçtikten sonra: **562 write farklı client'lara ID reassign edildi**, **291 write tamamen kayboldu**; ACK'lenmiş 1,472 write'ın sadece **619'u bozulmadan kaldı**. **Cluster mükemmel sağlıklı raporladı, constraint ihlali yok.**
-- **Mitigasyon:** `smartShutdownTimeout: 0` **+** `failoverDelay: 30` birlikte → overlap tamamen ortadan kalktı, default'a kıyasla data corruption **%80** azaldı
+Bir bulut yerel Postgres operatöründe bölünmüş beyin yeniden üretimi elimizdeki en değerli somut veridir; 29 Temmuz 2026 tarihlidir. Kurulum beş düğümlü bir hafif Kubernetes dağıtımı, operatörün 1.30.0 sürümü, PostgreSQL 18.4 ile bir kaos aracının 2.7.2 sürümünün ağ kaosu bileşenidir; üç istemci sürekli yazmaktadır. Deney birincil kapsülü kopyalardan, operatörden ile API sunucusundan izole etmektir.
 
-**Argus için çıkarım:** "DB HA çözümüm var" ≠ "veri kaybım yok". ACK'lenmiş yazımların **%58'i** default konfigürasyonda kayboldu veya bozuldu. Bir IdP için bu, "revoke edilmiş token geri geldi" veya "kullanıcı yanlış tenant'a atandı" demektir. **Argus'un HA konfigürasyonu bu iki parametre için explicit test'e sahip olmalı.**
+Ne olduğu şudur: izolasyon kontrolü doğru çalışmış ile yaklaşık 34. saniyede kapsül sonlandırması tetiklemiştir, ancak birincil 177 saniye daha yazmaya devam etmiştir, çünkü nazik kapanış zaman aşımı öntanımlı 180 saniyedir. Terfi eden kopya bu sırada yazmaya başlamıştır; yani yaklaşık 99 saniyelik bir çift birincil penceresi oluşmuş ile her ikisi de işlemeleri onaylamıştır.
 
-**Diğer CloudNativePG kaos verileri** ([Coroot, 16 Ocak 2025](https://coroot.com/blog/chaos-testing-a-postgres-cluster-managed-by-cloudnativepg/)):
-- Üç deney: (1) `stress-ng` ile 300 sn CPU contention (noisy neighbor), (2) 10M satırlık tabloya `ALTER TABLE ... NOT NULL` ile lock contention, (3) `kubectl delete pod` ile primary failure
-- **Ölçülen failover: primary pod silindikten sonra sorgu işlemenin geri gelmesi ~3 dakika**
-- Gözlem: eBPF (Coroot) + `pg_stat_statements`/`pg_stat_activity`
+Hasar şudur: bölünme iyileştikten ile geri sarma aracı bir hayatta kalanı seçtikten sonra 562 yazma farklı istemcilere yeniden atanmış, 291 yazma tamamen kaybolmuştur; onaylanmış 1.472 yazmanın yalnızca 619'u bozulmadan kalmıştır. Küme kendini mükemmel sağlıklı raporlamış ile hiçbir kısıt ihlali oluşmamıştır.
 
-**CloudNativePG'nin 2025 iyileştirmeleri** ([Gabriele Bartolini, Aralık 2025](https://www.gabrielebartolini.it/articles/2025/12/cloudnativepg-in-2025-cncf-sandbox-postgresql-18-and-a-new-era-for-extensions/)): primary'de network isolation tespiti için deneysel liveness probe (self-demotion), **primary isolation check / self-fencing**, ve failover'ın ancak node çoğunluğu hemfikirse gerçekleşmesini sağlayan **quorum tabanlı mekanizma**. Ayrıca proje **CNCF Sandbox**'a kabul edildi. Bir LFX mentorship projesi CloudNativePG için **kaos testi framework'ü** teslim etti — CI/CD'ye entegre, failover süresi ve data consistency metrikleri topluyor ([cloudnative-pg.io blog](https://cloudnative-pg.io/blog/lfx-chaos-testing-yash-agarwal/)).
+Azaltma şudur: nazik kapanış zaman aşımını sıfır yapmak ile devralma gecikmesini otuz saniyeye ayarlamak birlikte örtüşmeyi tamamen ortadan kaldırmış ile öntanımlıya kıyasla veri bozulmasını yüzde 80 azaltmıştır.
 
-### 4.5 Argus'ta ne test edilmeli — somut liste
+Argus için çıkarım şudur: veritabanı yüksek erişilebilirlik çözümüne sahip olmak veri kaybı olmaması anlamına gelmemektedir. Onaylanmış yazmaların yüzde 58'i öntanımlı yapılandırmada kaybolmuş ya da bozulmuştur. Bir kimlik sağlayıcı için bu, iptal edilmiş belirtecin geri gelmesi ya da kullanıcının yanlış kiracıya atanması demektir. Argus'un yüksek erişilebilirlik yapılandırması bu iki parametre için açık teste sahip olmalıdır.
 
-| Senaryo | Beklenen davranış | Nasıl test edilir |
+Aynı operatör için 16 Ocak 2025 tarihli diğer kaos verileri şunlardır. Üç deney yapılmıştır: bir yük aracıyla 300 saniyelik işlemci çekişmesi, yani gürültülü komşu; on milyon satırlık bir tabloya boş olamaz kısıtı eklenerek kilit çekişmesi; ile birincil kapsülün silinmesiyle birincil arızası. Ölçülen devralma süresi, birincil kapsül silindikten sonra sorgu işlemenin geri gelmesi için yaklaşık üç dakikadır. Gözlem çekirdek içi izleme ile Postgres istatistik görünümleriyle yapılmıştır.
+
+Operatörün 2025 iyileştirmeleri Aralık 2025 tarihli bir yazıda anlatılmaktadır: birincilde ağ izolasyonu tespiti için deneysel bir canlılık yoklaması, yani kendini indirgeme; birincil izolasyon kontrolü, yani kendini çitleme; ile devralmanın ancak düğüm çoğunluğu hemfikirse gerçekleşmesini sağlayan çoğunluk tabanlı bir mekanizma. Ayrıca proje bir vakıf kuluçkasına kabul edilmiştir. Bir mentorluk projesi bu operatör için bir kaos testi çerçevesi teslim etmiştir; sürekli tümleştirmeye entegredir ile devralma süresi ve veri tutarlılığı metrikleri toplamaktadır.
+
+### 4.5 Argus'ta ne test edilmelidir, somut liste
+
+| Senaryo | Beklenen davranış | Nasıl test edilmektedir |
 |---|---|---|
-| **DB tamamen kayıp** | Yeni token yok; **mevcut JWT'ler doğrulanmaya devam eder** (stateless doğrulama); introspection 503 (asla "active:false" değil — fail-closed vs fail-open kararı açıkça verilmiş olmalı) | testcontainers'ta Postgres'i durdur |
-| **Replica lag** | Revocation/logout **asla** stale replica'dan okunmaz; epoch okumaları primary'den veya monotonic read garantili | `pg_sleep` ile yapay lag; Jepsen RDS bulgusu ışığında **read replica'dan yetkilendirme kararı verilmemeli** |
-| **Epoch propagation gecikmesi** | Tenant config değişikliği (örn. bir client'ın devre dışı bırakılması) sınırlı ve **ölçülen** bir süre içinde tüm node'lara ulaşır; süre aşımında fail-closed | turmoil/madsim ile node'lar arası partition; "revoke → N ms içinde tüm node'lar reddediyor" invariant'ı |
-| **JWKS rotasyonu sırasında kesinti** | Eski kid ile imzalanmış token'lar overlap penceresi boyunca doğrulanır; yeni kid RP'ler tarafından fetch edilebilir; **rotation sırasında hiçbir istek 401 almaz** | Rotation'ı yük altında tetikle; k6 senaryosunda 401 sayısı = 0 threshold'u. OIDF suite'inde `oidcc-server-rotate-keys` modülü tam olarak bunu test ediyor |
-| **Split-brain** | ACK'lenmiş hiçbir grant/token kaybolmaz | Chaos Mesh NetworkChaos + `smartShutdownTimeout`/`failoverDelay` matrisi; Coroot metodolojisi |
-| **Refresh token reuse yarışı** | Aynı refresh token'ın iki eşzamanlı kullanımı → biri başarılı, diğeri **tüm aileyi iptal eder** | Shuttle (in-process) + gerçek eşzamanlı HTTP (interleaving) |
-| **Connection pool tükenmesi** | Argon2 kuyruğu DB pool'unu aç bırakmamalı (bulkhead) | Karışık yük profili + pool metrikleri |
+| Veritabanı tamamen kayıp | Yeni belirteç yoktur; mevcut JWT'ler doğrulanmaya devam etmektedir, durumsuz doğrulama sayesinde; iç gözlem 503 dönmektedir, asla etkin değil yanıtı değil. Kapalı mı açık mı arıza verileceği kararı açıkça verilmiş olmalıdır | Test konteynerlerinde Postgres durdurulmaktadır |
+| Kopya gecikmesi | İptal ile çıkış asla bayat kopyadan okunmamaktadır; çağ okumaları birincilden ya da tekdüze okuma garantili yapılmaktadır | Yapay gecikme eklenmektedir; Jepsen bulgusu ışığında okuma kopyasından yetkilendirme kararı verilmemelidir |
+| Çağ yayılımı gecikmesi | Kiracı yapılandırma değişikliği, örneğin bir istemcinin devre dışı bırakılması, sınırlı ile ölçülen bir süre içinde tüm düğümlere ulaşmaktadır; süre aşımında kapalı arıza verilmektedir | turmoil ya da madsim ile düğümler arası bölünme; iptalden sonra belirli bir süre içinde tüm düğümlerin reddetmesi değişmezi |
+| JWKS rotasyonu sırasında kesinti | Eski anahtar kimliğiyle imzalanmış belirteçler örtüşme penceresi boyunca doğrulanmakta; yeni anahtar kimliği bağlı taraflarca çekilebilmekte; rotasyon sırasında hiçbir istek 401 almamaktadır | Rotasyon yük altında tetiklenmektedir; k6 senaryosunda 401 sayısı sıfır eşiği konmaktadır. Vakıf süitinde anahtar rotasyonu modülü tam olarak bunu test etmektedir |
+| Bölünmüş beyin | Onaylanmış hiçbir yetki ya da belirteç kaybolmamaktadır | Kaos aracıyla ağ kaosu, artı nazik kapanış zaman aşımı ile devralma gecikmesi matrisi; yukarıdaki metodoloji izlenmektedir |
+| Yenileme belirteci yeniden kullanım yarışı | Aynı yenileme belirtecinin iki eşzamanlı kullanımında biri başarılı olmakta, diğeri tüm aileyi iptal etmektedir | Shuttle ile süreç içi, artı gerçek eşzamanlı HTTP serpiştirmesi |
+| Bağlantı havuzu tükenmesi | Argon2 kuyruğu veritabanı havuzunu aç bırakmamalıdır, bölme duvarı gereklidir | Karışık yük profili ile havuz metrikleri |
 
 ---
 
-## 5. Güvenlik Testi
+## 5. Güvenlik testi
 
-### 5.1 Protokol-özgü saldırı test setleri
+### 5.1 Protokole özgü saldırı test setleri
 
-**SAML:**
-- **SAML Raider** ([CompassSecurity/SAMLRaider](https://github.com/CompassSecurity/SAMLRaider), [BApp Store](https://portswigger.net/bappstore/c61cfa893bb14db4b01775554f7b802e)) — Burp eklentisi; SAML mesaj manipülasyonu + X.509 sertifika yönetimi. Repeater'a bir panel ekleyip **XSW saldırılarını tek tıkla** uygular. **8 yaygın XML Signature Wrapping varyantı (XSW1–XSW8)** — XSW1 örneğin Response mesajına, mevcut imzadan sonra imzasız bir klon ekler
-- **d0ge/XSW** ([GitHub](https://github.com/d0ge/XSW)) — SAML endpoint'lerini XSW için otomatik prob'lar, çoklu crafted XML payload üretir
-- **PortSwigger "The Fragile Lock"** ([10 Aralık 2025, güncelleme 21 Ocak 2026](https://portswigger.net/research/the-fragile-lock), Zakhar Fedotkin) — **üç yeni saldırı sınıfı**, Argus için doğrudan test vektörü:
-  1. **Attribute Pollution** — parser'lar arası (libxml2 vs REXML) tutarsız namespace işleme; attribute sırasına ve parser'a göre farklı attribute'lar resolve oluyor
-  2. **Namespace Confusion** — rezerve XML namespace bildirimlerini manipüle ederek signature element'lerini bazı parser'lara görünür, bazılarına görünmez yapmak → validation logic'i ikiye bölmek
-  3. **Void Canonicalization** — **yeni bir saldırı sınıfı**: canonicalization çözülemeyen relative URI'lerle karşılaşınca güvenli şekilde fail etmek yerine **boş string** döndürüyor → boş içeriğin geçerli hash'i üretiliyor
-  - Etkilenen: Ruby-SAML (<1.18.0, yamalı 1.12.4 dahil), PHP-SAML, xmlseclibs (v3.1.4'te düzeltildi), libxml2 tabanlı implementasyonlar. **Etkilenmeyen: XMLSec Library, Shibboleth xmlsectool**
-  - Yayımlanan: GitHub samples'ta "Golden SAML Response" XML payload'ları + otomatik Burp eklentisi; SAML Raider'a entegre edilmesi planlanmış
-  - Implementer önerileri: **kısıtlayıcı XML şeması, minimum extension point**; **yalnızca imzalanmış element'lerin downstream işlenmesi**; kütüphaneleri güncel tutmak; erişim kontrolünde e-posta domain suffix'ine güvenmemek
+SAML tarafında üç kaynak vardır.
 
-  **Argus için:** Rust'ta sıfırdan SAML yazarken bu üç sınıf **regression test corpus'unun çekirdeği** olmalı. Özellikle "Void Canonicalization" — Argus'un canonicalization'ı çözülemeyen URI'de **hard fail** etmeli.
+Birincisi bir güvenlik firmasının Burp eklentisidir; SAML mesaj manipülasyonu ile X.509 sertifika yönetimi sunmaktadır. Tekrarlayıcıya bir panel ekleyip imza sarmalama saldırılarını tek tıkla uygulamaktadır. Sekiz yaygın XML imza sarmalama varyantı bulunmaktadır; örneğin birincisi yanıt mesajına, mevcut imzadan sonra imzasız bir klon eklemektedir.
 
-**JWT:**
-- **jwt_tool** ([ticarpi/jwt_tool](https://github.com/ticarpi/jwt_tool)) — Python, **12+ attack mode**: alg confusion (RS256→HS256, RSA public key'i HMAC secret olarak), `none` bypass, `kid` injection (path traversal / SQLi), claim tampering, weak secret brute-force
-- Bağlam: **2025'te yalnız başına 6 kritik CVE** yaygın kullanılan JWT kütüphanelerini etkiledi, birkaçı tek forged token ile tam hesap devralmaya izin veriyordu ([IntelligenceX](https://blog.intelligencex.org/jwt-vulnerabilities-testing-guide-2025-algorithm-confusion))
-- JKU/X5U injection ve `kid` SQLi ayrı vektörler ([jsmon.sh](https://blogs.jsmon.sh/jwt-algorithm-confusion-to-account-takeover-rs256-hs256-jku-injection-kid-sqli/))
+İkincisi bağımsız bir otomatik sondalama aracıdır; SAML uç noktalarını imza sarmalama için yoklamakta ile çok sayıda üretilmiş XML yükü oluşturmaktadır.
 
-**OAuth/OIDC:**
-- **OAuch** — 195 test, yukarıda detaylandırıldı. Argus için **en yüksek ROI'li güvenlik aracı**: threat model'e karşı otomatik uyum
-- **OSBT** — attacker-OP senaryoları (Argus'un federation/broker rolü için)
+Üçüncüsü 10 Aralık 2025 tarihli, 21 Ocak 2026'da güncellenen bir araştırma yazısıdır ile üç yeni saldırı sınıfı tanımlamaktadır; Argus için doğrudan test vektörüdür.
 
-### 5.2 Burp / OWASP ZAP ile OIDC otomasyonu
+Birincisi nitelik kirlenmesidir: ayrıştırıcılar arası tutarsız ad alanı işleme yüzünden, nitelik sırasına ile ayrıştırıcıya göre farklı nitelikler çözülmektedir.
 
-**Kısmen otomatikleştirilebilir — ama sürtünmeli.**
-- ZAP **Automation Framework** YAML dosyalarıyla scan konfigüre ediyor; spider, active scan, API definition import job'ları var
-- **OAuth için script-based authentication öneriliyor** — token'ı alan ve isteklere ekleyen custom script yazılır. Azure AD/OIDC SSO ile kullanım hâlâ community'de tartışılan, tam çözülmemiş bir konu ([zaproxy-users grubu](https://groups.google.com/g/zaproxy-users/c/2-Z7vNMUr2U))
-- Gerçekçi değerlendirme: **ZAP/Burp bir IdP'nin *protokol* mantığını test etmez** — web katmanı (XSS, header'lar, CSRF, injection) için iyidir. Protokol seviyesi için OIDF suite + OAuch + OSBT gerekir.
-- **Argus için tavsiye:** ZAP'ı **admin console ve consent/login UI** için kullanın (klasik web açıkları), protokol endpoint'leri için değil.
+İkincisi ad alanı karışıklığıdır: rezerve XML ad alanı bildirimlerini manipüle ederek imza öğelerini bazı ayrıştırıcılara görünür, bazılarına görünmez yapmak ile doğrulama mantığını ikiye bölmek mümkündür.
 
-### 5.3 IdP-özgü fuzz hedefleri
+Üçüncüsü boş kanonikleştirmedir ile yeni bir saldırı sınıfıdır: kanonikleştirme, çözülemeyen göreli adreslerle karşılaşınca güvenli biçimde başarısız olmak yerine boş dizge döndürmekte, yani boş içeriğin geçerli özeti üretilmektedir.
 
-(Genel fuzzing yöntemleri 11-runtime-hardening.md'de araştırıldı — burada yalnızca **IdP-özgü hedefler**:)
+Etkilenenler belirli sürümlerin altındaki Ruby, PHP ile ilgili XML güvenlik kütüphaneleri ile libxml2 tabanlı gerçeklemelerdir. Etkilenmeyenler bir XML güvenlik kütüphanesi ile bir federasyon projesinin imza aracıdır.
 
-| Hedef | Neden | Corpus kaynağı |
+Yayımlananlar örnek depoda altın SAML yanıtı XML yükleri ile otomatik bir Burp eklentisidir; bunun SAML eklentisine entegre edilmesi planlanmıştır.
+
+Gerçekleyicilere öneriler şunlardır: kısıtlayıcı XML şeması ile asgari uzantı noktası kullanmak; yalnızca imzalanmış öğelerin aşağı akışta işlenmesini sağlamak; kütüphaneleri güncel tutmak; ile erişim kontrolünde e-posta alan adı sonekine güvenmemek.
+
+Argus için çıkarım şudur: Rust'ta sıfırdan SAML yazarken bu üç sınıf gerileme test derleminin çekirdeği olmalıdır. Özellikle boş kanonikleştirme kritiktir; Argus'un kanonikleştirmesi çözülemeyen adreste sert başarısız olmalıdır.
+
+JWT tarafında bir Python aracı on ikiden fazla saldırı modu sunmaktadır: algoritma karışıklığı, yani asimetrik imzayı simetrik özete çevirip açık anahtarı sır olarak kullanmak; algoritma yok atlatması; anahtar kimliği enjeksiyonu, yani dizin gezinme ya da SQL enjeksiyonu; talep kurcalama; ile zayıf sır kaba kuvveti. Bağlam şudur: yalnızca 2025'te altı kritik zafiyet yaygın kullanılan JWT kütüphanelerini etkilemiş, birkaçı tek bir sahte belirteçle tam hesap devralmaya izin vermiştir. Anahtar seti adresi enjeksiyonu ile anahtar kimliği üzerinden SQL enjeksiyonu ayrı vektörlerdir.
+
+OAuth ile OIDC tarafında iki araç öne çıkmaktadır. Yukarıda ayrıntılandırılan 195 testlik analizör, Argus için en yüksek getirili güvenlik aracıdır; tehdit modeline karşı otomatik uyum ölçmektedir. Senaryo tabanlı diğer araç saldırgan sağlayıcı senaryoları sunmakta ile Argus'un federasyon ya da aracı rolü için uygundur.
+
+### 5.2 Web güvenlik tarayıcılarıyla OIDC otomasyonu
+
+Kısmen otomatikleştirilebilmektedir, ancak sürtünmelidir.
+
+Bir açık kaynak tarayıcının otomasyon çerçevesi YAML dosyalarıyla tarama yapılandırmaktadır; örümcek, etkin tarama ile API tanımı içe aktarma işleri bulunmaktadır. OAuth için betik tabanlı kimlik doğrulama önerilmektedir; belirteci alan ile isteklere ekleyen özel bir betik yazılmaktadır. Kurumsal dizin ile çoklu oturum birlikte kullanım hâlâ toplulukta tartışılan, tam çözülmemiş bir konudur.
+
+Gerçekçi değerlendirme şudur: bu tarayıcılar bir kimlik sağlayıcının protokol mantığını test etmemektedir; web katmanı için, yani siteler arası betik, başlıklar, istek sahteciliği ile enjeksiyon için iyidirler. Protokol seviyesi için vakıf süiti artı tehdit modeli analizörü artı senaryo aracı gerekmektedir.
+
+Argus için tavsiye şudur: bu tarayıcılar yönetim konsolu ile onay ve giriş arayüzü için kullanılmalıdır, yani klasik web açıkları için; protokol uç noktaları için değil.
+
+### 5.3 Kimlik sağlayıcıya özgü bulanıklaştırma hedefleri
+
+Genel bulanıklaştırma yöntemleri §11'de araştırılmıştır; burada yalnızca kimlik sağlayıcıya özgü hedefler ele alınmaktadır.
+
+| Hedef | Neden | Derlem kaynağı |
 |---|---|---|
-| **XML parser + canonicalization (C14N)** | En yüksek riskli yüzey. PortSwigger'ın 3 saldırı sınıfı doğrudan burada | "The Fragile Lock" Golden SAML samples; XSW1–XSW8 varyantları; SPID test response'ları |
-| **XML DSig verification** | İmzalanmış vs işlenen element ayrışması | SAML Raider çıktıları |
-| **SAML metadata parser** | Güvenilmeyen federation metadata'sı | Kantara/eduGAIN metadata örnekleri |
-| **JOSE: JWS/JWE header + compact/JSON serialization** | alg confusion, kid injection, crit header, zip bombası (JWE `zip:DEF`) | jwt_tool üretimleri |
-| **JWKS parser** | Uzaktan çekilen güvenilmeyen JWK set'leri; dev boyut, garip curve, duplicate kid | — |
-| **LDAP BER/ASN.1 decoder** | Ham bayt protokolü, klasik memory-safety yüzeyi (Rust'ta panic/DoS'a dönüşür) | RFC 4511 mesaj yapıları; `ldclt` trafiği |
-| **LDAP search filter parser** | RFC 4515 filter string'leri; iç içe geçme derinliği → stack overflow | — |
-| **SCIM filter parser** | RFC 7644 filter grameri — `and`/`or`/`not`, complex attribute path'leri | scim2-tester payload'ları |
-| **SCIM PATCH path parser** | `members[value eq "x"].display` gibi ifadeler | — |
-| **CBOR / COSE (WebAuthn attestation)** | attestationObject, authenticatorData; CBOR derinlik/boyut saldırıları | FIDO conformance tool trafiği |
-| **CTAP2 attestation formatı** | packed, tpm, android-key, apple, fido-u2f varyantları | — |
-| **URI/redirect_uri matcher** | Açık redirect; normalizasyon farkları | OAuch redirect testleri |
-| **Deflate/inflate (SAML HTTP-Redirect binding)** | Zip bomb / decompression DoS | — |
-| **MCP JSON-RPC mesaj parser** | MCP conformance'ın wire-schema validation'ı bunu kısmen kapsıyor | conformance harness trafiği |
+| XML ayrıştırıcı ile kanonikleştirme | En yüksek riskli yüzeydir. Yukarıdaki üç saldırı sınıfı doğrudan buradadır | Araştırma yazısının altın SAML örnekleri; sekiz imza sarmalama varyantı; kamu kimlik sistemi test yanıtları |
+| XML imza doğrulaması | İmzalanmış ile işlenen öğenin ayrışmasıdır | Burp eklentisi çıktıları |
+| SAML metadata ayrıştırıcı | Güvenilmeyen federasyon metadata'sıdır | Federasyon metadata örnekleri |
+| JOSE, yani imza ile şifreleme başlığı ve serileştirmeleri | Algoritma karışıklığı, anahtar kimliği enjeksiyonu, kritik başlık ile sıkıştırma bombasıdır | JWT aracının üretimleri |
+| Anahtar seti ayrıştırıcı | Uzaktan çekilen güvenilmeyen anahtar setleridir; dev boyut, garip eğri ile yinelenen anahtar kimliği | — |
+| LDAP kodlama çözücüsü | Ham bayt protokolüdür, klasik bellek güvenliği yüzeyidir; Rust'ta panik ya da hizmet reddine dönüşmektedir | İlgili RFC mesaj yapıları ile yük aracı trafiği |
+| LDAP arama süzgeci ayrıştırıcısı | Süzgeç dizgeleridir; iç içe geçme derinliği yığın taşmasına yol açmaktadır | — |
+| SCIM süzgeç ayrıştırıcısı | Süzgeç grameridir; mantıksal işleçler ile bileşik nitelik yolları | Test kütüphanesinin yükleri |
+| SCIM yama yolu ayrıştırıcısı | Üye eşitliği ile nitelik erişimi gibi ifadelerdir | — |
+| CBOR ile COSE, yani WebAuthn kanıtlaması | Kanıtlama nesnesi ile kimlik doğrulayıcı verisidir; derinlik ile boyut saldırıları | FIDO uyum aracı trafiği |
+| CTAP2 kanıtlama formatı | Paketli, güvenlik yongası, platform ile eski varyantlardır | — |
+| Adres ile yönlendirme eşleştiricisi | Açık yönlendirme ile normalleştirme farklarıdır | Analizörün yönlendirme testleri |
+| Sıkıştırma ile açma, yani SAML yeniden yönlendirme bağlaması | Sıkıştırma bombası ile açma kaynaklı hizmet reddidir | — |
+| Model bağlam protokolü mesaj ayrıştırıcısı | Uyum süitinin tel şeması doğrulaması bunu kısmen kapsamaktadır | Uyum koşum aracı trafiği |
 
-**Öncelik sırası:** XML C14N/DSig > JOSE > LDAP BER > SCIM filter > CBOR/COSE.
+Öncelik sırası şudur: XML kanonikleştirme ile imza, sonra JOSE, sonra LDAP kodlaması, sonra SCIM süzgeci, sonra CBOR ile COSE.
 
-### 5.4 Differential testing (Keycloak vs Argus)
+### 5.4 Ayrımsal test, Keycloak'a karşı Argus
 
-**Pratik mi? — Kısmen. Şu koşullarda evet:**
+Pratik midir? Kısmen; şu koşullarda evet.
 
-**Uygun olduğu yerler:**
-- **Saf fonksiyonlar / parser'lar**: aynı JWT'yi, aynı SAML assertion'ı, aynı SCIM filter'ı ikisine verip **kabul/red kararını** karşılaştırmak. Karar bir bit — karşılaştırması kolay, oracle sorunu yok. Bu klasik differential fuzzing ve **çok değerli**: Argus kabul edip Keycloak reddediyorsa muhtemelen Argus'ta güvenlik açığı var.
-- **Discovery dokümanları**: `.well-known/openid-configuration`, `/Schemas`, `/ServiceProviderConfig` — yapısal diff.
-- **Hata kodları**: aynı bozuk istek → `error` + `error_description` alanları. RP'ler bunlara bağımlıdır.
+Uygun olduğu yerler şunlardır. Saf fonksiyonlar ile ayrıştırıcılarda aynı JWT, aynı SAML iddiası ile aynı SCIM süzgeci ikisine verilip kabul ya da ret kararı karşılaştırılabilmektedir. Karar tek bir bittir, karşılaştırması kolaydır ile kâhin sorunu yoktur. Bu klasik ayrımsal bulanıklaştırmadır ile çok değerlidir: Argus kabul edip Keycloak reddediyorsa muhtemelen Argus'ta bir güvenlik açığı vardır. Keşif dokümanlarında, yani yapılandırma, şema ile servis sağlayıcı yapılandırma uç noktalarında yapısal fark alınabilmektedir. Hata kodlarında aynı bozuk istek için hata ile açıklama alanları karşılaştırılabilmektedir; bağlı taraflar bunlara bağımlıdır.
 
-**Uygun olmadığı yerler:**
-- Token içerikleri (nonce, jti, iat, imza) — nondeterministik
-- Session/cookie davranışı, HTML login sayfaları
-- Keycloak'ın spec'ten sapan davranışları — Keycloak **oracle değil**, referans implementasyon değil. Keycloak'a uymak spec'e uymak demek değil.
+Uygun olmadığı yerler şunlardır: belirteç içerikleri, yani tek seferlik değer, belirteç kimliği, verilme zamanı ile imza, çünkü determinizmsizdir; oturum ile çerez davranışı ve HTML giriş sayfaları; ile Keycloak'ın şartnameden sapan davranışları. Keycloak bir kâhin değildir, referans gerçekleme değildir; Keycloak'a uymak şartnameye uymak demek değildir.
 
-**Argus için önerilen konumlandırma:** Differential testing'i **birincil doğruluk ölçütü değil, bug bulucu** olarak kullanın. Birincil ölçüt conformance suite'leri. Fark bulunduğunda **spec metni hakem olur**, Keycloak değil. Pratik uygulama: `insta` snapshot'ları + Keycloak'ın testcontainer'ı ile nightly bir "divergence report" — fail etmeyen, sadece raporlayan bir job.
+Argus için önerilen konumlandırma şudur: ayrımsal test birincil doğruluk ölçütü değil bir hata bulucu olarak kullanılmalıdır. Birincil ölçüt uyum süitleridir. Fark bulunduğunda hakem şartname metnidir, Keycloak değildir. Pratik uygulama anlık görüntü testleri artı Keycloak'ın test konteyneriyle gecelik bir ayrışma raporudur; başarısız etmeyen, yalnızca raporlayan bir iştir.
 
-⚠️ OIDC/SAML implementasyonlarının otomatik differential testing'i üzerine akademik literatür bu araştırmada doğrulanamadı (arama bütçesi doldu).
+OIDC ile SAML gerçeklemelerinin otomatik ayrımsal testi üzerine akademik yazın bu araştırmada doğrulanamamıştır; arama bütçesi dolmuştur.
 
 ---
 
-## 6. Test Altyapısı
+## 6. Test altyapısı
 
-### 6.1 Rust entegrasyon testi
+### 6.1 Rust tümleşme testi
 
-**testcontainers-rs** ([GitHub](https://github.com/testcontainers/testcontainers-rs), [rust.testcontainers.org](https://rust.testcontainers.org/)):
-- İki crate: `testcontainers` (çekirdek) + `testcontainers-modules` (community-maintained hazır image'lar)
-- **Async API** birinci sınıf; `blocking` feature'ı senkron testler için
-- `GenericImage` ile keyfi Docker image
-- Olgunluk: 1.1k star, 195 fork, 839 commit, Apache-2.0/MIT dual. ⚠️ Kesin sürüm ve son release tarihi doğrulanmadı
+Rust'ın test konteynerleri kütüphanesi iki pakettir: bir çekirdek paket ile toplulukça sürdürülen hazır imajlar paketi. Eşzamansız API birinci sınıftır; senkron testler için bir engelleyici özellik bulunmaktadır. Genel imaj tipiyle keyfî bir Docker imajı kullanılabilmektedir. Olgunluk 1100 yıldız, 195 çatal, 839 işleme ile ikili lisanstır. Kesin sürüm ile son yayın tarihi doğrulanamamıştır.
 
-**Mevcut modüller** ([testcontainers-rs-modules-community](https://github.com/testcontainers/testcontainers-rs-modules-community)): anvil, azurite, fakecloud, localstack, mongo, mssql_server, nats, neo4j, **openldap**, **postgres**, rqlite, selenium, surrealdb, **zitadel**.
+Mevcut topluluk modülleri arasında Postgres, OpenLDAP, bir kimlik sağlayıcı, nesne depolama taklitleri, çeşitli veritabanları ile tarayıcı otomasyonu bulunmaktadır.
 
-**Argus için sonuç:**
-- ✅ **Postgres** — hazır
-- ✅ **OpenLDAP** — hazır (Argus'un LDAP client tarafı veya migration senaryoları için)
-- ❌ **Keycloak modülü Rust'ta YOK** (Java/Go'da var) → differential testing için `GenericImage` ile elle sarmalamak gerekir
-- ❌ **SAML SP container'ı yok** → `GenericImage` ile SimpleSAMLphp veya Shibboleth SP image'ı sarmalanmalı; `italia/spid-saml-check` Docker image'ı (`docker run -p 8443:8443 italia/spid-saml-check`) hazır bir SAML test partneri olarak `GenericImage`'a takılabilir
-- OIDF conformance suite'in kendisi de docker-compose ile ayağa kalktığı için CI'da `GenericImage`/compose olarak sürülebilir (Hydra'nın yaptığı gibi)
+Argus için sonuç şudur. Postgres hazırdır. OpenLDAP hazırdır; Argus'un LDAP istemci tarafı ya da göç senaryoları için kullanılabilmektedir. Rust'ta Keycloak modülü yoktur, Java ile Go'da vardır; ayrımsal test için genel imaj tipiyle elle sarmalamak gerekmektedir. SAML servis sağlayıcı konteyneri yoktur; genel imaj tipiyle bir açık kaynak servis sağlayıcı imajı sarmalanmalıdır. Kamu kimlik sisteminin SAML denetim imajı hazır bir SAML test partneri olarak takılabilmektedir. Vakıf uyum süitinin kendisi de Docker bileşimiyle ayağa kalktığı için sürekli tümleştirmede aynı yolla sürülebilmektedir.
 
-### 6.2 Snapshot testi — `insta`
+### 6.2 Anlık görüntü testi
 
-[insta.rs](https://insta.rs/), [mitsuhiko/insta](https://github.com/mitsuhiko/insta):
-- `assert_json_snapshot!` ile `serde::Serialize` çıktısı JSON olarak snapshot'lanır; format seçenekleri JSON/YAML/TOML/CSV
-- **Redaction** — protokol yanıtları için kritik özellik: "permits replacing values with hardcoded other values to make snapshots stable when otherwise random or otherwise changing values are involved". Sözdizimi: `{ selector => replacement }` veya `match .. { selector => replacement }`
-- `cargo-insta` ile inceleme; VS Code eklentisi; terminalde `similar` crate'i ile diff
+Rust'ın anlık görüntü kütüphanesi şunu sunmaktadır: serileştirilebilir çıktı JSON olarak anlık görüntülenmekte; format seçenekleri JSON, YAML, TOML ile CSV'dir. Protokol yanıtları için kritik özellik karartmadır; belgeye göre rastgele ya da değişen değerler söz konusu olduğunda anlık görüntüleri kararlı kılmak üzere değerlerin sabit değerlerle değiştirilmesine izin vermektedir. Sözdizimi seçici ile yerine koyulan değer çiftidir, isteğe bağlı bir eşleşme ifadesiyle. İnceleme için bir komut satırı alt komutu, bir düzenleyici eklentisi ile terminalde fark gösterimi bulunmaktadır.
 
-**Argus'ta nereye:**
-- `.well-known/openid-configuration`, `/jwks.json` (kid redact), OAuth error yanıtları
-- SCIM `/Schemas`, `/ResourceTypes`, `/ServiceProviderConfig`
-- Decode edilmiş JWT **claim set'i** (imza değil; `jti`, `iat`, `exp`, `nonce` redact)
-- SAML metadata (sertifika ve `ID` redact); assertion'ın **canonicalize edilmiş** hâli
-- LDAP root DSE
+Argus'ta nereye uygulanacağı şudur: keşif yapılandırması ile anahtar seti, anahtar kimliği karartılarak, ve OAuth hata yanıtları; SCIM şemaları, kaynak tipleri ile servis sağlayıcı yapılandırması; çözülmüş JWT talep kümesi, imza değil, ve belirteç kimliği, verilme zamanı, son kullanma ile tek seferlik değer karartılarak; SAML metadata'sı, sertifika ile tanımlayıcı karartılarak, ve iddianın kanonikleştirilmiş hâli; ile LDAP kök girdi tanımı.
 
-Bu, "protokol yanıtımı yanlışlıkla değiştirdim" regresyonunu **çok ucuza** yakalar ve conformance suite'in çalışmadığı PR'larda ilk savunma hattıdır.
+Bu, protokol yanıtını yanlışlıkla değiştirme gerilemesini çok ucuza yakalamakta ile uyum süitinin çalışmadığı birleştirme isteklerinde ilk savunma hattı olmaktadır.
 
 ### 6.3 Test verisi üretimi
 
-Keycloak'ın **dataset modülü** doğrudan model alınmalı: "a Keycloak add-on that can create entities in a Keycloak data store to prepare it for a load test". Keycloak benchmark'ın ölçeklendirme parametreleri (`--realms`, `--users-per-realm`, `--clients-per-realm`) gerçekçi bir çok-kiracılı grafiğin hangi eksenlerde büyüdüğünü gösteriyor.
+Keycloak'ın veri kümesi modülü doğrudan model alınmalıdır; tanımı bir yük testine hazırlamak üzere veri deposunda varlık oluşturabilen bir eklentidir. Kıyaslamanın ölçeklendirme parametreleri, yani bölge sayısı, bölge başına kullanıcı ile bölge başına istemci, gerçekçi bir çok kiracılı grafiğin hangi eksenlerde büyüdüğünü göstermektedir.
 
-Argus için gerçekçi kiracı/kullanıcı/rol grafiği eksenleri:
-- Tenant sayısı × tenant başına kullanıcı (Zipf dağılımı — birkaç dev tenant, uzun kuyruk küçük tenant)
-- Kullanıcı başına grup üyeliği (LDAP/SCIM'de **memberOf** patlaması; 389-ds dokümanlarında "large groups and memberOf tuning" ayrı bir başlık — [golinuxcloud](https://www.golinuxcloud.com/389-directory-server-large-group-performance/))
-- Rol/scope grafiği derinliği (nested group resolution maliyeti)
-- Client sayısı, redirect_uri sayısı, aktif session/refresh token sayısı
-- **Sınır vakaları zorunlu**: 2000 üyeli grup (Entra'nın gerçek davranışı), Unicode/homoglyph kullanıcı adları, çok uzun DN'ler
+Argus için gerçekçi kiracı, kullanıcı ile rol grafiğinin eksenleri şunlardır: kiracı sayısı çarpı kiracı başına kullanıcı, Zipf dağılımıyla, yani birkaç dev kiracı ile uzun kuyrukta küçük kiracılar; kullanıcı başına grup üyeliği, ki dizin protokollerinde üyelik niteliği patlaması yaşanmakta ile bir dizin sunucusunun belgelerinde büyük gruplar ile üyelik ayarı ayrı bir başlıktır; rol ile kapsam grafiğinin derinliği, yani iç içe grup çözümleme maliyeti; istemci sayısı, yönlendirme adresi sayısı ile etkin oturum ve yenileme belirteci sayısı. Sınır vakaları zorunludur: 2000 üyeli grup, ki Entra'nın gerçek davranışıdır, Unicode ile benzer görünümlü kullanıcı adları, ile çok uzun ayırt edici adlar.
 
-Üretim: deterministik seed'li generator (aynı seed → aynı veri seti), böylece benchmark sonuçları karşılaştırılabilir olur.
+Üretim deterministik tohumlu bir üreteçle yapılmalıdır; aynı tohum aynı veri kümesini vermeli, böylece kıyaslama sonuçları karşılaştırılabilir olmalıdır.
 
-### 6.4 CI süresi bütçesi
+### 6.4 Sürekli tümleştirme süre bütçesi
 
-**cargo-nextest** ([nexte.st](https://nexte.st/book/partitioning.html)) — Argus'un ölçeğinde zorunlu:
-- **Process-per-test** modeli: her test kendi process'inde → gerçek izolasyon (bir panic/segfault diğerlerini düşürmez) ve daha iyi scheduling
-- Hız: kaynaklara göre `cargo test`'e kıyasla **2–5×** (bazı ölçümlerde "up to 60% faster", "up to 3x")
-- **Partitioning/sharding** — CI matrisi için:
-  ```
-  cargo nextest run --partition count:1/3   # job 1
-  cargo nextest run --partition count:2/3   # job 2
-  cargo nextest run --partition count:3/3   # job 3
-  ```
-  İki mod: `count` (sayı tabanlı) ve `hash` (hash tabanlı)
-- **Flaky test retry:** `--retries 2`
-- **JUnit XML** çıktısı
+Rust'ın hızlı test koşucusu Argus'un ölçeğinde zorunludur. Test başına süreç modeli kullanmaktadır; her test kendi sürecinde koştuğu için gerçek yalıtım sağlanmakta, yani bir panik ya da bölümleme hatası diğerlerini düşürmemekte, ile çizelgeleme iyileşmektedir. Hız kaynaklara göre standart test koşucusuna kıyasla iki ile beş kattır; bazı ölçümlerde yüzde 60'a varan hızlanma ya da üç kat belirtilmektedir.
 
-**Referans süreler:**
-- Ory Hydra'nın tam OIDC conformance koşumu için ayrılan timeout: **60 dakika** (`go test -tags conformity -test.timeout 60m -failfast`)
-- OIDF `run-test-plan.py` **paralel çalışır** (`--no-parallel` ile kapatılabilir) — yani conformance kendi içinde paralelleşebilir
+Bölümleme ile parçalama sürekli tümleştirme matrisi için kullanılmaktadır.
 
-**Argus için realist bütçe:**
+```
+cargo nextest run --partition count:1/3   # job 1
+cargo nextest run --partition count:2/3   # job 2
+cargo nextest run --partition count:3/3   # job 3
+```
+
+İki mod vardır: sayı tabanlı ile özet tabanlı. Kararsız testler için yeniden deneme seçeneği ile JUnit XML çıktısı bulunmaktadır.
+
+Referans süreler şunlardır. Ory Hydra'nın tam OIDC uyum koşumu için ayrılan zaman aşımı 60 dakikadır. Vakıf süitinin plan çalıştırma betiği paralel çalışmaktadır, bir bayrakla kapatılabilmektedir; yani uyum kendi içinde paralelleşebilmektedir.
+
+Argus için gerçekçi bütçe şudur.
 
 | Aşama | Hedef süre | İçerik |
 |---|---|---|
-| Pre-commit / hızlı | < 2 dk | fmt, clippy, unit + `insta` snapshot |
-| PR (blocking) | **< 15 dk** | nextest 4-8 shard: unit + testcontainers entegrasyon + property/proptest + Shuttle (sabit seed, kısa) + kaydedilmiş IdP-emulator replay |
-| Merge/main | ~45 dk | + OIDF conformance (Basic/Config/Dynamic + logout), MCP conformance, scim2-tester, OAuch |
-| Nightly | 2-4 saat | + FAPI 2.0 planları, madsim/turmoil DST (yüksek seed sayısı), fuzzing (kısa), Keycloak differential raporu, gerçek Okta/Entra sandbox koşumu (tünelli) |
-| Haftalık | uzun | Yük testleri (k6 constant-arrival-rate), kaos (Chaos Mesh split-brain matrisi), uzun fuzzing kampanyaları, FIDO conformance tools (manuel/yarı-otomatik) |
+| İşleme öncesi, hızlı | İki dakikanın altı | Biçimlendirme, tüy denetimi, birim testleri ile anlık görüntüler |
+| Birleştirme isteği, engelleyici | On beş dakikanın altı | Dört ile sekiz parçalı koşum: birim, test konteynerli tümleşme, özellik testi, Shuttle, sabit tohumla ve kısa, ile kaydedilmiş kimlik sağlayıcı emülatörü tekrarı |
+| Ana dala birleştirme | Yaklaşık 45 dakika | Ek olarak vakıf uyum planları, yani temel, yapılandırma, dinamik ile çıkış, model bağlam protokolü uyumu, SCIM test kütüphanesi ile tehdit modeli analizörü |
+| Gecelik | İki ile dört saat | Ek olarak finansal API ikinci sürüm planları, deterministik simülasyon testi, yüksek tohum sayısıyla, kısa bulanıklaştırma, Keycloak ayrımsal raporu ile tünelli gerçek kum havuzu koşumu |
+| Haftalık | Uzun | Yük testleri, sabit varış hızıyla, kaos, yani bölünmüş beyin matrisi, uzun bulanıklaştırma kampanyaları ile FIDO uyum araçları, elle ya da yarı otomatik |
 
-Conformance'ı PR'da tutmanın anahtarı: **expected-failures baseline'ı** (hem OIDF `run-test-plan.py` hem MCP conformance bunu destekliyor) — böylece bilinen eksikler CI'yı kırmaz ama **regresyon ve stale baseline** yakalanır.
+Uyumu birleştirme isteğinde tutmanın anahtarı beklenen başarısızlıklar temel çizgisidir; hem vakıf betiği hem model bağlam protokolü süiti bunu desteklemektedir. Böylece bilinen eksikler sürekli tümleştirmeyi kırmamakta, ancak gerileme ile bayat temel çizgi yakalanmaktadır.
 
 ---
 
-## 7. Argus İçin Test Stratejisi — Somut Tablo
+## 7. Argus için test stratejisi, somut tablo
 
 ### 7.1 Ana matris
 
-| # | Katman | Araç | Ne ölçer | Sıklık | CI aşaması | Blocking? |
+| # | Katman | Araç | Ne ölçmektedir | Sıklık | Sürekli tümleştirme aşaması | Engelleyici mi |
 |---|---|---|---|---|---|---|
-| 1 | Unit | `cargo nextest` | Fonksiyon doğruluğu | Her commit | pre-commit + PR | ✅ |
-| 2 | Property | `proptest` | Parser/serializer round-trip, filter grameri invariant'ları | Her PR | PR | ✅ |
-| 3 | Snapshot | **`insta`** (redactions) | Protokol yanıt yapıları: discovery, JWKS, SCIM Schemas, error kodları, SAML metadata | Her PR | PR | ✅ |
-| 4 | Concurrency | **Shuttle** (AWS) | Session store, refresh-token rotation yarışı, cache invalidation, pool | Her PR (kısa) + nightly (uzun) | PR + nightly | ✅ (kısa) |
-| 5 | Entegrasyon | **testcontainers-rs** (postgres, openldap, GenericImage) | Gerçek DB/LDAP ile uçtan uca | Her PR | PR (nextest shard'lı) | ✅ |
-| 6 | IdP-client emulator | Kaydedilmiş Okta/Entra trafiği replay | SCIM istemci tuhaflıkları (PATCH semantiği, `active=false`, DELETE, nested extension) | Her PR | PR | ✅ |
-| 7 | **OIDC conformance** | **OIDF suite** (self-hosted Docker) + `run-test-plan.py` | `oidcc-basic/config/dynamic/implicit/hybrid/formpost-*-certification-test-plan` | Merge | main | ✅ (baseline'lı) |
-| 8 | **Logout conformance** | OIDF suite | RP-Initiated + Back-Channel (+ Front-Channel) | Merge | main | ✅ (baseline'lı) |
-| 9 | **OAuth güvenlik uyumu** | **OAuch** (self-hosted) | 195 test / 13 kategori — threat model + BCP | Merge | main | ✅ (baseline'lı) |
-| 10 | **MCP conformance** | `npx @modelcontextprotocol/conformance` + GitHub Action | `authorization-server` senaryoları (authorization-code-grant, AS metadata) + server senaryoları | Merge | main | ✅ (per-check baseline) |
-| 11 | **SCIM conformance** | **`scim2-tester`** (pytest/CI) | RFC 7643/7644: discovery, CRUD, PATCH add/remove/replace | Merge | main | ✅ |
-| 12 | SCIM vendor uyumu | Entra SCIM Validator (discover-schema modu), Okta Runscope (13 op) | Gerçek istemci uyumu | Haftalık / release öncesi | manuel + nightly | ❌ rapor |
-| 13 | **FAPI 2.0** | OIDF suite, FAPI 2.0 Security Profile Final planı | Yüksek güvenlik profili doğruluğu | Nightly | nightly | ❌ rapor → sonra ✅ |
-| 14 | SAML doğruluğu | `italia/spid-saml-check` (Docker) — Argus'un **SP entegrasyonları** için; `AgID/spid-saml-check-idp` — deneysel IdP tarafı | 300+ kontrol / 7 aile (SP tarafı) | Nightly | nightly | ❌ rapor |
-| 15 | SAML güvenliği | **SAML Raider XSW1–XSW8** + **"The Fragile Lock"** 3 saldırı sınıfı (Golden SAML samples) → **regression corpus** | Attribute Pollution, Namespace Confusion, Void Canonicalization | Her PR (corpus olarak) | PR | ✅ |
-| 16 | JWT güvenliği | **`jwt_tool`** vektörleri → regression corpus | alg confusion, none, kid injection, jku/x5u | Her PR (corpus) | PR | ✅ |
-| 17 | WebAuthn (ucuz) | **CDP Virtual Authenticator** + Playwright | RP akışı uçtan uca (Chromium-only) | Her PR | PR | ✅ |
-| 18 | WebAuthn (resmî) | **FIDO Conformance Tools** (talep formu ile edinilir; 4 test endpoint'i için adapter gerekir) | FIDO2 server conformance (~160 test örnek koşum) | Release öncesi | manuel | ❌ |
-| 19 | LDAP doğruluğu | `ldapsearch`/`ldapmodify` senaryoları + gerçek istemciler (SSSD, JNDI, `ldap3`, Apache DS) | Davranışsal interop | Nightly | nightly | ❌ rapor |
-| 20 | LDAP yükü | **`ldclt`** (389-ds) veya SLAMD | bind/search/modify hızı, büyük grup + memberOf | Haftalık | perf job | ❌ |
-| 21 | Fuzzing | `cargo-fuzz` — hedefler §5.3 önceliğine göre | Bellek/panic/DoS | Nightly (kısa) + haftalık (uzun) | nightly | ❌ (crash → issue) |
-| 22 | **DST — node arası** | **madsim** (`tokio-postgres` yaması var) — birincil; **turmoil** — alternatif | Epoch propagasyonu, JWKS rotasyonu, partition altında revocation | Nightly (yüksek seed) | nightly | ❌ (seed kaydedilir) |
-| 23 | Model checking | **stateright** | OAuth code lifecycle, refresh rotation, CIBA poll, logout propagation state machine'leri — `always`/`sometimes` property'leri | Haftalık | perf/verify job | ❌ |
-| 24 | **Yük** | **k6 `constant-arrival-rate`** (birincil) veya **wrk2**; ayrı makinede | login/sn, refresh/sn, introspection/sn, p99 | Haftalık + release | perf job | ✅ threshold |
-| 25 | Argon2 mikro-benchmark | `criterion` | Hash süresi + bellek, parametre değişimi regresyonu | Her PR | PR | ✅ (regresyon eşiği) |
-| 26 | **Kaos — DB** | **Chaos Mesh** (NetworkChaos) + CloudNativePG; Coroot metodolojisi | Split-brain veri kaybı; failover süresi | Haftalık | chaos job | ❌ → ✅ |
-| 27 | Differential | Keycloak `GenericImage` + `insta` diff | Parser kabul/red farkları, discovery farkları | Nightly | nightly | ❌ **rapor** (asla blocking değil) |
-| 28 | Web güvenliği | **OWASP ZAP** Automation Framework | Admin console + login/consent UI (XSS, header, CSRF) — protokol için DEĞİL | Nightly | nightly | ❌ rapor |
-| 29 | Federation broker | **OSBT** (attacker-OP) | Argus upstream IdP'ye bağlanırken kötü niyetli OP'ye dayanıklılık | Nightly | nightly | ❌ rapor |
+| 1 | Birim | Hızlı test koşucusu | Fonksiyon doğruluğudur | Her işleme | İşleme öncesi ile birleştirme isteği | Evet |
+| 2 | Özellik | Özellik testi kütüphanesi | Ayrıştırıcı ile serileştirici gidiş dönüşü, süzgeç grameri değişmezleridir | Her birleştirme isteği | Birleştirme isteği | Evet |
+| 3 | Anlık görüntü | Karartmalı anlık görüntü kütüphanesi | Protokol yanıt yapılarıdır: keşif, anahtar seti, SCIM şemaları, hata kodları ile SAML metadata'sı | Her birleştirme isteği | Birleştirme isteği | Evet |
+| 4 | Eşzamanlılık | Shuttle | Oturum deposu, yenileme belirteci rotasyon yarışı, önbellek geçersizleştirme ile havuzdur | Her birleştirme isteğinde kısa, gecelik uzun | Birleştirme isteği ile gecelik | Kısa koşumda evet |
+| 5 | Tümleşme | Test konteynerleri, yani Postgres, OpenLDAP ile genel imaj | Gerçek veritabanı ile dizin üzerinden uçtan uca doğruluktur | Her birleştirme isteği | Birleştirme isteği, parçalı | Evet |
+| 6 | Kimlik sağlayıcı istemci emülatörü | Kaydedilmiş gerçek trafiğin tekrarı | SCIM istemci tuhaflıklarıdır: yama anlambilimi, etkinlik bayrağı, silme ile iç içe uzantı | Her birleştirme isteği | Birleştirme isteği | Evet |
+| 7 | OIDC uyumu | Kendi barındırdığınız vakıf süiti ile plan çalıştırma betiği | Temel, yapılandırma, dinamik, örtük, hibrit ile form gönderimli sertifikasyon planlarıdır | Birleştirmede | Ana dal | Evet, temel çizgili |
+| 8 | Çıkış uyumu | Vakıf süiti | Bağlı tarafça başlatılan ile arka kanal, ayrıca ön kanal çıkışıdır | Birleştirmede | Ana dal | Evet, temel çizgili |
+| 9 | OAuth güvenlik uyumu | Kendi barındırdığınız tehdit modeli analizörü | On üç kategoride 195 test, tehdit modeli ile en iyi uygulamalardır | Birleştirmede | Ana dal | Evet, temel çizgili |
+| 10 | Model bağlam protokolü uyumu | Uyum paketi ile GitHub eylemi | Yetkilendirme sunucusu senaryoları, yani yetkilendirme kodu ile metadata, artı sunucu senaryolarıdır | Birleştirmede | Ana dal | Evet, kontrol başına temel çizgiyle |
+| 11 | SCIM uyumu | SCIM test kütüphanesi | İlgili RFC'ler: keşif, oluştur oku güncelle sil ile yama işlemleridir | Birleştirmede | Ana dal | Evet |
+| 12 | SCIM satıcı uyumu | Entra doğrulayıcısı, şema keşfi modunda, ile Okta'nın on üç işlemlik süiti | Gerçek istemci uyumudur | Haftalık ya da yayın öncesi | Elle ile gecelik | Hayır, yalnızca rapor |
+| 13 | Finansal API ikinci sürümü | Vakıf süiti, nihai güvenlik profili planı | Yüksek güvenlik profili doğruluğudur | Gecelik | Gecelik | Önce rapor, sonra engelleyici |
+| 14 | SAML doğruluğu | Kamu kimlik sisteminin servis sağlayıcı denetim imajı, ile deneysel kimlik sağlayıcı aracı | Yedi ailede 300'den fazla kontroldür, servis sağlayıcı tarafında | Gecelik | Gecelik | Hayır, yalnızca rapor |
+| 15 | SAML güvenliği | Sekiz imza sarmalama varyantı ile üç yeni saldırı sınıfının örnekleri, gerileme derlemi olarak | Nitelik kirlenmesi, ad alanı karışıklığı ile boş kanonikleştirmedir | Her birleştirme isteğinde, derlem olarak | Birleştirme isteği | Evet |
+| 16 | JWT güvenliği | JWT saldırı aracının vektörleri, gerileme derlemi olarak | Algoritma karışıklığı, algoritma yok, anahtar kimliği enjeksiyonu ile anahtar seti adresi enjeksiyonudur | Her birleştirme isteğinde, derlem olarak | Birleştirme isteği | Evet |
+| 17 | WebAuthn, ucuz yol | Tarayıcı protokolünün sanal kimlik doğrulayıcısı ile bir tarayıcı otomasyon kütüphanesi | Bağlı taraf akışı uçtan uca, yalnızca Chromium'da | Her birleştirme isteği | Birleştirme isteği | Evet |
+| 18 | WebAuthn, resmî yol | FIDO uyum araçları, talep formuyla edinilmektedir; dört test uç noktası için adaptör gerekmektedir | FIDO2 sunucu uyumudur, örnek koşumda yaklaşık 160 test | Yayın öncesi | Elle | Hayır |
+| 19 | LDAP doğruluğu | Standart dizin komut satırı senaryoları ile gerçek istemciler | Davranışsal birlikte çalışabilirliktir | Gecelik | Gecelik | Hayır, yalnızca rapor |
+| 20 | LDAP yükü | Bir dizin sunucusunun yük aracı ya da bir kıyaslama tezgâhı | Bağlanma, arama ile değiştirme hızı, büyük grup ile üyelik niteliği | Haftalık | Başarım işi | Hayır |
+| 21 | Bulanıklaştırma | Rust'ın bulanıklaştırma aracı, hedefler §5.3 önceliğine göre | Bellek, panik ile hizmet reddidir | Gecelik kısa, haftalık uzun | Gecelik | Hayır; çökme bir konuya dönüşmektedir |
+| 22 | Deterministik simülasyon, düğümler arası | madsim birincildir, Postgres istemci yaması bulunmaktadır; turmoil alternatiftir | Çağ yayılımı, JWKS rotasyonu ile bölünme altında iptaldir | Gecelik, yüksek tohum sayısıyla | Gecelik | Hayır; tohum kaydedilmektedir |
+| 23 | Model denetleme | stateright | Yetkilendirme kodu yaşam döngüsü, yenileme rotasyonu, geri kanal yoklaması ile çıkış yayılımı durum makineleridir; her zaman ile bazen özellikleriyle | Haftalık | Doğrulama işi | Hayır |
+| 24 | Yük | Sabit varış hızlı k6 birincildir, wrk2 alternatiftir; ayrı makinede koşmaktadır | Saniyedeki giriş, yenileme ile iç gözlem, ve 99. yüzdelik gecikmedir | Haftalık ile yayın öncesi | Başarım işi | Evet, eşik olarak |
+| 25 | Argon2 mikro kıyaslaması | Rust'ın kıyaslama kütüphanesi | Özet süresi ile bellek, parametre değişimi gerilemesidir | Her birleştirme isteği | Birleştirme isteği | Evet, gerileme eşiğiyle |
+| 26 | Kaos, veritabanı | Kaos aracının ağ bileşeni ile bulut yerel Postgres operatörü; yukarıdaki metodoloji | Bölünmüş beyin veri kaybı ile devralma süresidir | Haftalık | Kaos işi | Önce hayır, sonra evet |
+| 27 | Ayrımsal | Genel imajla Keycloak ile anlık görüntü farkı | Ayrıştırıcı kabul ret farkları ile keşif farklarıdır | Gecelik | Gecelik | Hayır, yalnızca rapor; asla engelleyici değildir |
+| 28 | Web güvenliği | Açık kaynak tarayıcının otomasyon çerçevesi | Yönetim konsolu ile giriş ve onay arayüzüdür, yani siteler arası betik, başlıklar ile istek sahteciliği; protokol için değildir | Gecelik | Gecelik | Hayır, yalnızca rapor |
+| 29 | Federasyon aracısı | Saldırgan sağlayıcı senaryo aracı | Argus yukarı akış kimlik sağlayıcıya bağlanırken kötü niyetli sağlayıcıya dayanıklılıktır | Gecelik | Gecelik | Hayır, yalnızca rapor |
 
-### 7.2 Uygulama sırası (öncelik)
+### 7.2 Uygulama sırası
 
-**Faz 1 — temel (hemen):** #1–5, #25. `nextest` + partitioning'i baştan kur; `insta` snapshot'larını protokol yanıtları yazılırken beraber yaz (sonradan eklemek 5× daha pahalı).
+Birinci faz temeldir ile hemen yapılmalıdır: matristeki ilk beş satır ile Argon2 mikro kıyaslaması. Hızlı test koşucusu ile bölümleme baştan kurulmalıdır. Anlık görüntüler protokol yanıtları yazılırken beraber yazılmalıdır; sonradan eklemek beş kat daha pahalıdır.
 
-**Faz 2 — doğruluğu ölçmeye başla:** #7, #9, #11, #15, #16. **OIDF suite self-hosted + `run-test-plan.py` + expected-failures baseline** Argus'un tek en yüksek getirili yatırımıdır: Ory Hydra'nın `run_test.go`'su hazır bir referans implementasyon. **OAuch'u hemen yanına koyun** — spec uyumu ile güvenlik uyumu farklı şeyler ve OAuch'un 100-IdP çalışması bu farkın ne kadar büyük olduğunu gösteriyor.
+İkinci faz doğruluğu ölçmeye başlamaktır: OIDC uyumu, OAuth güvenlik uyumu, SCIM uyumu, SAML güvenliği ile JWT güvenliği. Kendi barındırdığınız vakıf süiti, plan çalıştırma betiği ile beklenen başarısızlıklar temel çizgisi Argus'un tek en yüksek getirili yatırımıdır; Ory Hydra'nın sürekli tümleştirme testi hazır bir referans gerçeklemedir. Tehdit modeli analizörü hemen yanına konmalıdır; şartname uyumu ile güvenlik uyumu farklı şeylerdir ile analizörün yüz kimlik sağlayıcılık çalışması bu farkın ne kadar büyük olduğunu göstermektedir.
 
-**Faz 3 — interop:** #6, #10, #12, #17. Gerçek Okta/Entra sandbox koşumunu **bir kez** yapıp trafiği kaydedin, sonra replay ile her PR'da koşun.
+Üçüncü faz birlikte çalışabilirliktir: kimlik sağlayıcı istemci emülatörü, model bağlam protokolü uyumu, SCIM satıcı uyumu ile ucuz WebAuthn yolu. Gerçek kum havuzu koşumu bir kez yapılıp trafik kaydedilmeli, sonra her birleştirme isteğinde tekrar oynatılmalıdır.
 
-**Faz 4 — dayanıklılık:** #22, #24, #26. Postgres izolasyon garantilerini (Jepsen RDS bulgusu) ve split-brain penceresini (Coroot bulgusu) **açıkça** test edin.
+Dördüncü faz dayanıklılıktır: deterministik simülasyon, yük ile kaos. Postgres izolasyon garantileri ile bölünmüş beyin penceresi açıkça test edilmelidir.
 
-**Faz 5 — derinlik:** #13, #14, #18, #21, #23, #27.
+Beşinci faz derinliktir: finansal API ikinci sürümü, SAML doğruluğu, resmî WebAuthn yolu, bulanıklaştırma, model denetleme ile ayrımsal test.
 
 ### 7.3 Üç stratejik karar
 
-1. **Sertifikasyon hedeflenmiyor ama süitler koşulacak** → Argus, tüm conformance süitlerini **ücretsiz self-hosted** çalıştırabilir. Ödenecek tek maliyet mühendislik zamanı. Yine de **certification.openid.net'e API token alıp** OIDF'nin sunucusunu kullanmak, kendi suite'inizi güncel tutma yükünü ortadan kaldırır — ama CI'yı harici servise bağımlı kılar. **Öneri: self-hosted Docker (Hydra modeli), nightly'de OIDF sunucusuna karşı çapraz doğrulama.**
+Birincisi şudur: sertifikasyon hedeflenmemektedir ancak süitler koşulacaktır. Argus tüm uyum süitlerini ücretsiz olarak kendi barındırdığı ortamda çalıştırabilmektedir. Ödenecek tek maliyet mühendislik zamanıdır. Yine de sertifikasyon sitesinden bir API belirteci alıp vakfın sunucusunu kullanmak, kendi süitinizi güncel tutma yükünü ortadan kaldırmaktadır; ancak sürekli tümleştirmeyi harici bir servise bağımlı kılmaktadır. Öneri şudur: kendi barındırdığınız Docker kurulumu, yani Hydra modeli, artı gecelik olarak vakıf sunucusuna karşı çapraz doğrulama.
 
-2. **Keycloak oracle değil.** Differential testing bug bulucudur, doğruluk ölçütü değil. Spec metni tek hakem.
+İkincisi şudur: Keycloak bir kâhin değildir. Ayrımsal test bir hata bulucudur, doğruluk ölçütü değildir. Tek hakem şartname metnidir.
 
-3. **Matris patlamasını tasarımla çözün** (§2.4): protokol doğruluğu (conformance) × karşı taraf profili (kodlanmış davranış kontratı) × az sayıda gerçek E2E smoke. 630 kombinasyon yerine ~200 anlamlı test.
+Üçüncüsü şudur: matris patlaması tasarımla çözülmelidir, §2.4'te anlatıldığı gibi. Protokol doğruluğu, yani uyum, çarpı karşı taraf profili, yani kodlanmış davranış sözleşmesi, çarpı az sayıda gerçek uçtan uca duman testi. 630 kombinasyon yerine yaklaşık 200 anlamlı test.
 
 ---
 
-## 8. ⚠️ DOĞRULANMAYANLAR
+## 8. Doğrulanamayanlar
 
-1. **SPID "263 test"** — birincil kaynaklarda geçen sayılar **"300+ kontrol, 7 aile"** ve **"111 kontrol"** (interaktif SP davranış ailesi). 263 rakamını hiçbir yerde doğrulayamadım. Ayrıca **önemli düzeltme:** `italia/spid-saml-check` **SP'leri** test eder, IdP'leri değil. IdP tarafı için ayrı ve çok olgunlaşmamış (**4 star, 51 commit**) `AgID/spid-saml-check-idp` var; onun test aileleri/sayısı dokümante değil.
-2. **OIDF conformance planlarındaki test sayıları** — hiçbir plan için (Basic OP, FAPI 2.0, CIBA) resmî test sayısı bulunamadı. Sayı variant seçimine göre dinamik; ancak `POST /api/plan` yanıtından öğrenilebilir.
-3. **FAPI 2.0 test planının tam adı** (`fapi2-security-profile-final-test-plan` vb.) — hiçbir OIDF sayfasında açıkça yazılı değil.
-4. **FIDO "160 test"** — bu SimpleWebAuthn dokümanındaki bir **örnek koşum çıktısı**, FIDO Alliance'ın resmî beyanı değil.
-5. **FIDO Conformance Tools için üyelik gerekliliği ve ücretler** — form + onay süreci doğrulandı; üyelik zorunluluğu ve fiyat tutarları hiçbir sayfada yayımlanmamış.
-6. **Kantara'nın aktif SAML sertifikasyon programı** — saml2int/FedInterop profilleri doğrulandı (bunlar **normatif profil**, çalıştırılabilir süit değil); bugün işleyen bir sertifikasyon programı olup olmadığı doğrulanmadı.
-7. **OASIS SAML conformance programının durumu** — `saml-conformance-2.0-os` belgesi mevcut, ancak programın devam edip etmediği doğrulanmadı.
-8. **OpenLDAP `make test`'in harici sunucuya yöneltilebilirliği** — kendi regresyon süiti olduğu doğrulandı; üçüncü taraf LDAP sunucusuna karşı çalıştırılabildiğine dair kanıt yok.
-9. **turmoil'in desteklemediği özellikler** — TLS desteği, tokio versiyon kısıtları, `tokio-postgres` uyumluluğu README'de yazılı değil. "Still experimental" ifadesi 2023 duyurusundan; 2026 itibarıyla güncel olgunluk seviyesi doğrulanmadı.
-10. **madsim'in API kapsama yüzdesi, performans overhead'i ve bilinen sınırları** — dokümante edilmemiş. RisingWave kullanımı doğrulandı ancak kapsam derinliği bilinmiyor.
-11. **Gatling'in coordinated omission davranışı** — open model (`--users-per-sec`) desteği doğrulandı, ancak latency'yi intended-send-time'a göre mi ölçtüğü doğrulanmadı.
-12. **`oha`'nın coordinated omission doğruluğu** — doğrulanmadı; smoke test için uygun, kapasite ölçümü için güvenilmemeli.
-13. **Üretim IdP trafik oranları (login : refresh : introspection)** — Auth0/Okta'dan yayımlanmış veri bulunamadı. Elimizdeki tek referans Keycloak benchmark'ın **1:5** login:refresh profili; bu bir benchmark seçimi, üretim ölçümü değil. Introspection için hiçbir veri yok.
-14. **ServiceNow PDI'nin SAML SSO desteği**, ve **Workday / Slack / Zoom / Atlassian / AWS / Google Workspace** için ücretsiz developer tier'da SAML/SCIM erişimi — hiçbiri birincil kaynaktan doğrulanmadı. (Google Workspace için **negatif** doğrulama var: WorkOS'a göre SCIM push desteklenmiyor.)
-15. **Entra ID'nin hangi SKU'sunun outbound app provisioning içerdiği** (P1 gerekiyor mu) — doğrulanmadı; Argus'un interop bütçesi için maliyet riski.
-16. **SCIM Sandbox (scimsandbox.net)** — site 403 döndürdü; açık kaynak/self-hostable olduğu ve kaç check koştuğu doğrulanmadı.
-17. **MCP conformance toplam check sayısı** — senaryo dizinleri sayıldı (`server/` ~17, `authorization-server/` 2 + `auth/` alt dizini, `client/` sayılmadı) ama toplam check sayısı doğrulanmadı. Tek senaryoda "over twenty" check olduğu README'de belirtiliyor.
-18. **Patroni'nin resmî Jepsen analizi** — **yok**. Bulunan çalışma bağımsız bir blog (Bin Wang, Aralık 2024); ihtiyatla değerlendirin.
-19. **`mod_auth_openidc` test setleri** — bir conformance test seti olarak varlığı doğrulanamadı.
-20. **Rust'ta softauthn benzeri yazılım WebAuthn authenticator kütüphanesi** — doğrulanamadı; CDP Virtual Authenticator tek doğrulanmış ücretsiz yol (Chromium-only).
-21. **OIDC/SAML implementasyonlarının otomatik differential testing'i üzerine akademik literatür** — arama bütçesi (200/200 WebSearch) dolduğu için araştırılamadı.
-22. **Keycloak testsuite'inin toplam test sayısı** — Arquillian tabanlı mimarisi doğrulandı, sayı bulunamadı.
-23. **`stateright`'ın 2025-2026 bakım durumu** — doğrulanmadı.
+Birincisi, kamu kimlik sistemi süitinin 263 test rakamıdır. Birincil kaynaklarda geçen sayılar yedi ailede 300'den fazla kontrol ile etkileşimli servis sağlayıcı davranış ailesinde 111 kontroldür. 263 rakamı hiçbir yerde doğrulanamamıştır. Ayrıca önemli bir düzeltme vardır: ilgili araç servis sağlayıcıları test etmektedir, kimlik sağlayıcıları değil. Kimlik sağlayıcı tarafı için ayrı ile çok olgunlaşmamış bir depo bulunmaktadır, dört yıldız ile 51 işleme; test aileleri ile sayısı belgelenmemiştir.
 
-**Not:** Bu oturumda WebSearch bütçesi (200/200) tükendi; kalan doğrulamalar WebFetch ile doğrudan URL üzerinden yapıldı. Yukarıdaki 21. madde ve madsim/turmoil olgunluk detayları için ek bir oturum gerekir.
+İkincisi, vakıf uyum planlarındaki test sayılarıdır. Hiçbir plan için resmî test sayısı bulunamamıştır. Sayı varyant seçimine göre dinamiktir; ancak plan oluşturma çağrısının yanıtından öğrenilebilmektedir.
+
+Üçüncüsü, finansal API ikinci sürüm test planının tam adıdır; hiçbir vakıf sayfasında açıkça yazılı değildir.
+
+Dördüncüsü, FIDO'nun 160 test rakamıdır; bu bir kütüphane belgesindeki örnek koşum çıktısıdır, birliğin resmî beyanı değildir.
+
+Beşincisi, FIDO uyum araçları için üyelik gerekliliği ile ücretlerdir. Form ile onay süreci doğrulanmıştır; üyelik zorunluluğu ile fiyat tutarları hiçbir sayfada yayımlanmamıştır.
+
+Altıncısı, Kantara'nın aktif SAML sertifikasyon programıdır. Birlikte çalışabilirlik profilleri doğrulanmıştır, ki bunlar normatif profillerdir, çalıştırılabilir süit değildir; bugün işleyen bir sertifikasyon programı olup olmadığı doğrulanamamıştır.
+
+Yedincisi, OASIS SAML uyum programının durumudur. İlgili belge mevcuttur, ancak programın devam edip etmediği doğrulanamamıştır.
+
+Sekizincisi, OpenLDAP test hedefinin harici sunucuya yöneltilebilirliğidir. Kendi gerileme süiti olduğu doğrulanmıştır; üçüncü taraf bir LDAP sunucusuna karşı çalıştırılabildiğine dair kanıt yoktur.
+
+Dokuzuncusu, turmoil'in desteklemediği özelliklerdir. TLS desteği, tokio sürüm kısıtları ile Postgres istemci uyumluluğu benioku dosyasında yazılı değildir. Hâlâ deneysel ifadesi 2023 duyurusundandır; 2026 itibarıyla güncel olgunluk seviyesi doğrulanamamıştır.
+
+Onuncusu, madsim'in API kapsama yüzdesi, başarım ek yükü ile bilinen sınırlarıdır; belgelenmemiştir. Üretim kullanımı doğrulanmıştır ancak kapsam derinliği bilinmemektedir.
+
+On birincisi, Gatling'in eşgüdümlü atlama davranışıdır. Açık model desteği doğrulanmıştır, ancak gecikmeyi amaçlanan gönderim anına göre mi ölçtüğü doğrulanamamıştır.
+
+On ikincisi, oha'nın eşgüdümlü atlama doğruluğudur; doğrulanamamıştır. Duman testi için uygundur, kapasite ölçümü için güvenilmemelidir.
+
+On üçüncüsü, üretim kimlik sağlayıcı trafik oranlarıdır, yani giriş, yenileme ile iç gözlem. Büyük satıcılardan yayımlanmış veri bulunamamıştır. Elimizdeki tek referans Keycloak kıyaslamasının birde beş giriş yenileme profilidir; bu bir kıyaslama seçimidir, üretim ölçümü değildir. İç gözlem için hiçbir veri yoktur.
+
+On dördüncüsü, bir hizmet yönetim platformunun kişisel geliştirici örneğinde SAML çoklu oturum desteği, ile diğer altı büyük servis sağlayıcının ücretsiz geliştirici katmanında SAML ya da SCIM erişimidir; hiçbiri birincil kaynaktan doğrulanamamıştır. Google Workspace için negatif bir doğrulama vardır: bir satıcıya göre SCIM itme desteklenmemektedir.
+
+On beşincisi, Entra kimliğinin hangi ürün seviyesinin giden uygulama sağlamasını içerdiğidir, yani birinci kademe premium gerekip gerekmediği; doğrulanamamıştır ile Argus'un birlikte çalışabilirlik bütçesi için bir maliyet riskidir.
+
+On altıncısı, bir SCIM kum havuzu sitesidir; site 403 döndürmüştür, açık kaynak ya da kendi barındırılabilir olduğu ile kaç kontrol koştuğu doğrulanamamıştır.
+
+On yedincisi, model bağlam protokolü uyumunun toplam kontrol sayısıdır. Senaryo dizinleri sayılmıştır, yani sunucu kategorisinde yaklaşık 17, yetkilendirme sunucusu kategorisinde iki artı bir alt dizin, istemci kategorisi sayılmamıştır; ancak toplam kontrol sayısı doğrulanamamıştır. Tek bir senaryoda yirmiden fazla kontrol olduğu belirtilmektedir.
+
+On sekizincisi, Patroni'nin resmî Jepsen analizidir; yoktur. Bulunan çalışma Aralık 2024 tarihli bağımsız bir blogdur ile ihtiyatla değerlendirilmelidir.
+
+On dokuzuncusu, bir Apache modülünün test setlerinin bir uyum test seti olarak varlığıdır; doğrulanamamıştır.
+
+Yirmincisi, Rust'ta yazılım tabanlı bir WebAuthn kimlik doğrulayıcı kütüphanesidir; doğrulanamamıştır. Tarayıcı protokolünün sanal kimlik doğrulayıcısı tek doğrulanmış ücretsiz yoldur, yalnızca Chromium'da.
+
+Yirmi birincisi, OIDC ile SAML gerçeklemelerinin otomatik ayrımsal testi üzerine akademik yazındır; arama bütçesi dolduğu için araştırılamamıştır.
+
+Yirmi ikincisi, Keycloak test süitinin toplam test sayısıdır. Mimarisi doğrulanmıştır, sayı bulunamamıştır.
+
+Yirmi üçüncüsü, stateright'ın 2025 ile 2026 bakım durumudur; doğrulanamamıştır.
+
+Bir not gerekmektedir: bu oturumda web arama bütçesi tükenmiş ile kalan doğrulamalar doğrudan adres üzerinden yapılmıştır. Yirmi birinci madde ile simülasyon kütüphanelerinin olgunluk detayları için ek bir oturum gerekmektedir.

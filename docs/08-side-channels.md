@@ -1,269 +1,186 @@
-# 8. Yan kanal ve zamanlama saldırıları
+# §8 — Yan kanal ve zamanlama saldırıları
 
-> `ARGUS.md` §8'den taşındı. Numaralandırma korundu; bu dosyanın
-> içindeki `§8 §X` referansları aynı anlamda.
+## 0. Yönetici özeti: gerçek risk sıralaması
 
-
-
----
-
-### 0. Yönetici özeti — gerçek risk sıralaması
-
-| # | Konu | Gerçek risk | Argus'ta yeri |
+| # | Konu | Gerçek risk | Argus'taki yeri |
 |---|---|---|---|
-| 1 | **Kullanıcı sayımı (enumeration)** — zamanlama + mesaj/status/uzunluk farkı | **Yüksek, kesin sömürülebilir** | Login, kayıt, şifre sıfırlama, MFA kaydı, SCIM |
-| 2 | **`rsa` crate'inin Marvin durumu** | **Yüksek** — 2026'da hâlâ yamalı sürüm yok | JWE RSA1_5, RSA imzalama |
-| 3 | **JWE `RSA1_5` desteği** | **Yüksek** — IETF varsayılan olarak kapatılmasını MUST diyor | JOSE katmanı |
-| 4 | **Sabit-zamanlı karşılaştırma eksikliği** (token/HMAC/TOTP/PKCE/client_secret) | **Orta-Yüksek** (HTTP/2 varsa yüksek) | Tüm kimlik doğrulama yolları |
-| 5 | **Argon2 DoS** (dummy hash veya yüksek parametre) | **Orta-Yüksek** | Login endpoint |
-| 6 | **Derleyicinin sabit-zamanı bozması** | **Orta** — 2026'da Rust'ta gerçek CVE var | Kripto yardımcı kodu |
-| 7 | **Spectre/Meltdown sınıfı** | **Düşük** (co-tenant yoksa) / **Yüksek** (plugin/WASM varsa) | Barındırma + eklenti motoru |
+| 1 | Kullanıcı sayımı (enumeration); zamanlama ile mesaj, status ve uzunluk farkı | Yüksek ve kesin sömürülebilir | Login, kayıt, şifre sıfırlama, MFA kaydı, SCIM |
+| 2 | `rsa` crate'inin Marvin durumu | Yüksek; 2026'da hâlâ yamalı sürüm yoktur | JWE RSA1_5, RSA imzalama |
+| 3 | JWE `RSA1_5` desteği | Yüksek; IETF varsayılan olarak kapatılmasını zorunlu kılar | JOSE katmanı |
+| 4 | Sabit zamanlı karşılaştırma eksikliği (token, HMAC, TOTP, PKCE, client_secret) | Orta ile yüksek arası; HTTP/2 varsa yüksek | Tüm kimlik doğrulama yolları |
+| 5 | Argon2 DoS'u; dummy hash veya yüksek parametre | Orta ile yüksek arası | Login endpoint'i |
+| 6 | Derleyicinin sabit zamanı bozması | Orta; 2026'da Rust'ta gerçek CVE mevcuttur | Kripto yardımcı kodu |
+| 7 | Spectre ve Meltdown sınıfı | Co-tenant yoksa düşük; plugin veya WASM varsa yüksek | Barındırma ve eklenti motoru |
 
 ---
 
-## A) RUST'TA SABİT-ZAMANLI KARŞILAŞTIRMA
+## A. Rust'ta sabit zamanlı karşılaştırma
 
-### A.1 `subtle` crate — durum 2026
+### A.1 `subtle` crate'inin 2026 durumu
 
-**Sürüm ve bakım (doğrulanmış):**
-- Son sürüm **2.6.1, 24 Haziran 2024**; toplam 682.501.354 indirme. Kaynak: crates.io API — `https://crates.io/api/v1/crates/subtle` (2026-09-08 çekildi).
-- **Son commit: 19 Haziran 2024.** Kaynak: `https://github.com/dalek-cryptography/subtle/commits/main.atom` (2026-09-08). Yani **26 aydır hiçbir commit yok.** Bu, "en güvenli IdP" hedefi için dikkate alınması gereken bir bakım riski.
-- 2.6.0 yanked, 2.5.0 (2023-02-28), MSRV Rust 1.41.
+**Sürüm ve bakım.** Son sürüm 2.6.1'dir ve 24 Haziran 2024 tarihlidir; toplam 682.501.354 indirme almıştır (crates.io API, 8 Eylül 2026). Son commit 19 Haziran 2024 tarihlidir (github.com/dalek-cryptography/subtle/commits/main.atom, 8 Eylül 2026), yani 26 aydır hiçbir commit yoktur. Bu, en güvenli IdP hedefi için dikkate alınması gereken bir bakım riskidir. 2.6.0 yanked'tır, 2.5.0 28 Şubat 2023 tarihlidir ve MSRV Rust 1.41'dir.
 
-**Sunduğu API:** `Choice` (u8 sarmalayıcı, 0/1), `CtOption<T>`, `ConstantTimeEq`, `ConstantTimeGreater`, `ConstantTimeLess`, `ConditionallySelectable`, `ConditionallyNegatable`.
+**Sunduğu API.** `Choice` (u8 sarmalayıcı, 0 veya 1), `CtOption<T>`, `ConstantTimeEq`, `ConstantTimeGreater`, `ConstantTimeLess`, `ConditionallySelectable`, `ConditionallyNegatable`.
 
-**Dokümante edilmiş çekinceler — README'den birebir** (`https://raw.githubusercontent.com/dalek-cryptography/subtle/main/README.md`):
+**Dokümante edilmiş çekinceler.** README'ye göre crate bir en iyi çaba denemesini temsil eder, çünkü yan kanallar nihayetinde yalnızca yazılımın değil, üzerinde çalıştığı donanım dahil dağıtılmış kriptografik sistemin bir özelliğidir. Trait'ler bitwise işlemlerle implemente edilmiştir ve iki koşul sağlanırsa sabit zamanda çalışırlar: bitwise işlemlerin sabit zamanlı olması ve bu işlemlerin koşullu atama olarak tanınıp branch'e geri optimize edilmemesi. Bir derleyicinin bitwise işlemlerin koşullu atamayı temsil ettiğini anlaması için bitmask üretiminde kullanılan değerin `i8` bayt değeri değil gerçek bir boolean `i1` olduğunu bilmesi gerekir; crate bu daraltmayı engellemek için `Choice`'ın içindeki `u8` değerini volatile read ile gizlemeye çalışır. Ayrıca crate debug build'lerde invariant kontrolü için `debug_assert` içerir; bu kontroller gizliye bağımlı dallanma barındırır ve release modda bulunmaz, dolayısıyla crate release modda kullanılmak üzere tasarlanmıştır.
 
-> "This crate represents a "best-effort" attempt, since side-channels are ultimately a property of a deployed cryptographic system including the hardware it runs on, not just of software."
->
-> "The traits are implemented using bitwise operations, and should execute in constant time **provided that a) the bitwise operations are constant-time and b) the bitwise operations are not recognized as a conditional assignment and optimized back into a branch.**"
->
-> "For a compiler to recognize that bitwise operations represent a conditional assignment, it needs to know that the value used to generate the bitmasks is really a boolean `i1` rather than an `i8` byte value. **In an attempt to prevent this refinement, the crate tries to hide the value of a `Choice`'s inner `u8` by passing it through a volatile read.**"
->
-> "Note: the `subtle` crate contains `debug_assert`s to check invariants during debug builds. **These invariant checks involve secret-dependent branches**, and are not present when compiled in release mode. This crate is intended to be used in release mode."
+docs.rs özeti de aynı yöndedir: böyle bir çaba temelde sınırlıdır ve kullanım kullanıcının kendi riskindedir.
 
-docs.rs özetinde de aynı ifade: *"any such effort is fundamentally limited. **USE AT YOUR OWN RISK**"* (`https://docs.rs/subtle/latest/subtle/`).
+Kritik nokta şudur: `subtle` `black_box` kullanmaz, volatile read kullanır. Bu, LLVM'in `Choice`'ı `i1`'e daraltıp branch'e çevirmesini engelleme umududur, garanti değildir.
 
-**Kritik nokta:** `subtle` **`black_box` kullanmıyor** — volatile read kullanıyor. Bu, LLVM'in `Choice`'ı `i1`'e daraltıp branch'e çevirmesini engellemeye yönelik *bir umut*, garanti değil.
+### A.2 Alternatifler
 
-### A.2 Alternatifler — 2026'da daha iyi seçenekler var
-
-| Crate | Sürüm / tarih | Ne sunuyor |
+| Crate | Sürüm ve tarih | Ne sunuyor |
 |---|---|---|
-| **`constant_time_eq`** | **0.6.0, 2026-08-30**, 307.711.245 indirme, `codeberg.org/cesarb/constant_time_eq` | Sadece eşit uzunluklu byte dizisi karşılaştırma. Aktif bakımda. |
-| **`cmov`** | **0.5.4, 2026-05-28**, RustCrypto | x86/x86_64 `CMOVZ/CMOVNZ`, aarch64 `CSEL` — **inline `asm!` ile**, "guaranteed ... to execute in constant-time and not be rewritten as branches by the compiler". LLVM'in `x86-cmov-conversion` pass'ini bypass eder. |
-| **`ctutils`** | **0.4.2, 2026-04-02**, RustCrypto | `cmov` üstüne kurulu, `subtle`'ın modern muadili: `Choice`, `CtOption`, `CtFind`, `CtLookup`, `const fn` desteği. |
-| **`aarch64-dit`** | 0.1.0, 2024-09-06, RustCrypto | ARM DIT bit'ini RAII guard ile açıp kapatır. |
+| `constant_time_eq` | 0.6.0, 30 Ağustos 2026; 307.711.245 indirme; codeberg.org/cesarb/constant_time_eq | Yalnızca eşit uzunluklu bayt dizisi karşılaştırması yapar. Aktif bakımdadır |
+| `cmov` | 0.5.4, 28 Mayıs 2026; RustCrypto | x86 ve x86_64'te `CMOVZ` ve `CMOVNZ`, aarch64'te `CSEL` komutlarını inline `asm!` ile kullanır; sabit zamanda çalışmayı ve derleyici tarafından branch'e dönüştürülmemeyi garanti eder. LLVM'in `x86-cmov-conversion` pass'ini bypass eder |
+| `ctutils` | 0.4.2, 2 Nisan 2026; RustCrypto | `cmov` üzerine kuruludur ve `subtle`'ın modern muadilidir: `Choice`, `CtOption`, `CtFind`, `CtLookup` ve `const fn` desteği sunar |
+| `aarch64-dit` | 0.1.0, 6 Eylül 2024; RustCrypto | ARM DIT bitini RAII guard ile açıp kapatır |
 
-`ctutils` README'sinden (`https://raw.githubusercontent.com/RustCrypto/utils/master/ctutils/README.md`):
-> "**Guaranteed** constant-time equality testing and conditional selection on `x86(_64)` and `aarch64` using `asm!` implementations in the `cmov` crate ... with a portable "best effort" fallback on other platforms using bitwise arithmetic and `black_box`"
->
-> "This is an **experimental next-generation** constant-time library inspired by `subtle`, but **for now we recommend you continue to stick with `subtle`**."
->
-> "⚠️ **The implementation contained in this crate has never been independently audited! USE AT YOUR OWN RISK!**"
+`ctutils` README'sine göre crate x86, x86_64 ve aarch64'te `cmov` crate'indeki `asm!` implementasyonlarıyla garantili sabit zamanlı eşitlik testi ve koşullu seçim sağlar; diğer platformlarda bitwise aritmetik ve `black_box` ile taşınabilir bir en iyi çaba fallback'i kullanır. Crate kendisini `subtle`'dan esinlenmiş deneysel bir yeni nesil sabit zaman kütüphanesi olarak tanımlar ve şimdilik `subtle` kullanmaya devam edilmesini önerir. Ayrıca bu crate'teki implementasyonun hiç bağımsız denetimden geçmediğini ve kullanımın kullanıcının kendi riskinde olduğunu belirtir.
 
-**Argus için öneri:** x86_64/aarch64 hedefliyorsanız `constant_time_eq` (basit byte karşılaştırma için, aktif bakımda) + kripto seçim mantığı gerekiyorsa `subtle` (olgun) veya `ctutils` (garanti daha güçlü ama denetlenmemiş). `subtle`'ı seçerseniz **bakım durgunluğunu risk kaydına yazın**.
+**Argus için öneri.** x86_64 ve aarch64 hedefleniyorsa basit bayt karşılaştırması için aktif bakımdaki `constant_time_eq` kullanılır; kripto seçim mantığı gerekiyorsa olgun olan `subtle` veya garantisi daha güçlü ancak denetlenmemiş olan `ctutils` tercih edilir. `subtle` seçilirse bakım durgunluğu risk kaydına yazılır.
 
-### A.3 Sabit-zamanlı karşılaştırmanın ZORUNLU olduğu yerler (IdP'ye özgü)
+### A.3 Sabit zamanlı karşılaştırmanın zorunlu olduğu yerler
 
-Sıralama: gerçek uzaktan sömürülebilirlik değerlendirmesiyle.
+Sıralama gerçek uzaktan sömürülebilirlik değerlendirmesine göredir.
 
 | # | Yer | Zorunlu mu | Gerekçe |
 |---|---|---|---|
-| 1 | **Opak session/bearer token DB araması** | **Evet — ama asıl çözüm hash'lemek** | Token'ı düz saklarsanız hem karşılaştırma hem **DB indeks karşılaştırması** sızdırır (B-tree karşılaştırmaları prefix'e göre erken çıkar). Çözüm: DB'ye `SHA-256(token)` yaz, araması bu hash üzerinden olsun, dönen kaydı `constant_time_eq` ile doğrula. |
-| 2 | **HMAC / JWS imza doğrulama (HS256)** | **Evet** | Klasik. Keyczar 2009 zafiyeti tam olarak buydu (cryptocoding referansı, aşağıda). |
-| 3 | **TOTP kodu karşılaştırma** | **Evet** | **Gerçek CVE var:** `totp-rs` — RUSTSEC-2022-0018 / CVE-2022-29185, 2022-05-09, `TOTP::check` sabit zamanlı değildi, 1.1.0'da `constant_time_eq` ile düzeltildi. Bugünkü kaynak (6.0.0) `Token::eq` içinde `constant_time_eq::constant_time_eq_n` kullanıyor — doğruladım. 6 haneli kodda arama uzayı 10⁶ olduğu için byte-byte sızıntı gerçekten kritik. |
-| 4 | **client_secret karşılaştırma** | **Evet** | Rauthy sabit uzunluk zorlayıp `constant_time_eq_64` kullanıyor (kaynak doğrulandı). |
-| 5 | **API anahtarı** | **Evet + hash'le** | Rauthy: `EncValue::encrypt(sha256!(secret))` saklıyor, doğrulamada `constant_time_eq(self.secret, sha256!(secret))`. |
-| 6 | **CSRF / state token** | **Evet** | Rauthy `sessions.rs::validate_csrf` ve `magic_links.rs` içinde `constant_time_eq`. |
-| 7 | **Şifre sıfırlama token'ı / magic link** | **Evet + hash'le + tek kullanımlık** | OWASP Forgot Password Cheat Sheet: token'lar "Randomly generated using a cryptographically safe algorithm, Sufficiently long, Stored securely, Single use and expire". |
-| 8 | **PKCE `code_verifier` → `code_challenge`** | **Evet (pratikte düşük risk)** | **RFC 7636 sabit zaman ZORUNLU KILMIYOR** — §4.6 sadece `BASE64URL-ENCODE(SHA256(...)) == code_challenge` diyor (`https://www.rfc-editor.org/rfc/rfc7636.txt`). §7.1 en az 256 bit entropi öneriyor; entropi yüksek olduğu için byte-byte sızıntı bile pratikte sömürülemez ama maliyeti sıfır olduğundan yine de yapın. Rauthy yapıyor (`login_finish.rs:60`). |
-| 9 | **Device code / user code** | **Evet (düşük risk) + rate limit ZORUNLU** | RFC 8628 §5.1: *"it is recommended that the server rate-limit user code attempts"*; 8 karakter base-20 (≈34.5 bit) için 2⁻³² başarı olasılığı ancak **5 deneme** izniyle sağlanır. §5.2 device code brute force. Asıl savunma rate-limit, sabit zaman değil. |
-| 10 | **WebAuthn challenge karşılaştırma** | **Evet ama düşük** | Challenge ≥16 rastgele byte + tek kullanımlık; asıl güvenlik imza doğrulamada. Yine de eşitlik kontrolünü CT yapın. |
+| 1 | Opak session ve bearer token veritabanı araması | Evet; ancak asıl çözüm hash'lemektir | Token düz saklanırsa hem karşılaştırma hem veritabanı indeks karşılaştırması sızdırır, çünkü B-tree karşılaştırmaları prefix'e göre erken çıkar. Çözüm veritabanına `SHA-256(token)` yazmak, aramayı bu hash üzerinden yapmak ve dönen kaydı `constant_time_eq` ile doğrulamaktır |
+| 2 | HMAC ve JWS imza doğrulama (HS256) | Evet | Klasik durumdur. Keyczar'ın 2009 zafiyeti tam olarak buydu |
+| 3 | TOTP kodu karşılaştırma | Evet | Gerçek CVE mevcuttur: `totp-rs` için RUSTSEC-2022-0018 ve CVE-2022-29185, 9 Mayıs 2022; `TOTP::check` sabit zamanlı değildi ve 1.1.0'da `constant_time_eq` ile düzeltildi. Bugünkü kaynak (6.0.0) `Token::eq` içinde `constant_time_eq::constant_time_eq_n` kullanmaktadır. Altı haneli kodda arama uzayı 10⁶ olduğu için bayt bayt sızıntı gerçekten kritiktir |
+| 4 | `client_secret` karşılaştırma | Evet | Rauthy sabit uzunluk zorlar ve `constant_time_eq_64` kullanır |
+| 5 | API anahtarı | Evet, ayrıca hash'lenir | Rauthy `EncValue::encrypt(sha256!(secret))` saklar ve doğrulamada `constant_time_eq(self.secret, sha256!(secret))` kullanır |
+| 6 | CSRF ve state token'ı | Evet | Rauthy `sessions.rs::validate_csrf` ve `magic_links.rs` içinde `constant_time_eq` kullanır |
+| 7 | Şifre sıfırlama token'ı ve magic link | Evet, ayrıca hash'lenir ve tek kullanımlık yapılır | OWASP Forgot Password Cheat Sheet token'ların kriptografik olarak güvenli bir algoritmayla rastgele üretilmesini, yeterince uzun olmasını, güvenli saklanmasını, tek kullanımlık olmasını ve süresinin dolmasını ister |
+| 8 | PKCE `code_verifier` ile `code_challenge` karşılaştırması | Evet; pratikte düşük risk | RFC 7636 sabit zaman zorunlu kılmaz; §4.6 yalnızca `BASE64URL-ENCODE(SHA256(...)) == code_challenge` der. §7.1 en az 256 bit entropi önerir; entropi yüksek olduğu için bayt bayt sızıntı bile pratikte sömürülemez, ancak maliyeti sıfır olduğundan yine de uygulanır. Rauthy uygulamaktadır (`login_finish.rs:60`) |
+| 9 | Device code ve user code | Evet; düşük risk, ancak rate limit zorunludur | RFC 8628 §5.1 sunucunun user code denemelerini rate limit etmesini önerir; 8 karakterlik base-20 kod için (yaklaşık 34,5 bit) 2⁻³² başarı olasılığı ancak beş deneme izniyle sağlanır. §5.2 device code brute force'unu ele alır. Asıl savunma rate limit'tir, sabit zaman değildir |
+| 10 | WebAuthn challenge karşılaştırma | Evet; risk düşüktür | Challenge en az 16 rastgele bayttır ve tek kullanımlıktır; asıl güvenlik imza doğrulamadadır. Yine de eşitlik kontrolü sabit zamanlı yapılır |
 
-**Rauthy'nin ilginç karşı-argümanı** — `src/service/src/oidc/grant_types/device_code.rs` (kaynak birebir):
-> "The constant time comparison for both the device code and the client secret don't make any sense in terms of security here, but I don't want any other brain-dead AI security report about it. The device code is very short-lived, rate-limited and even deleted after 3 times rate-limit abuse. ... this comparison happens in single digit nanoseconds and is practically impossible to measure in this API. Scheduling an async task that is ready for work takes even longer than that..."
+**Rauthy'nin karşı argümanı.** `src/service/src/oidc/grant_types/device_code.rs` dosyasında device code ve client secret için sabit zamanlı karşılaştırmanın güvenlik açısından anlam taşımadığı, ancak konu hakkında rapor almamak için yapıldığı belirtilir. Gerekçe device code'un çok kısa ömürlü, rate limit'li ve üç kez rate limit ihlalinden sonra silinmiş olması, karşılaştırmanın tek haneli nanosaniyelerde gerçekleşmesi ve bu API'de pratikte ölçülemez olmasıdır.
 
-Bu argüman **kısmen** doğru — ama Timeless Timing Attacks (aşağıda) tam olarak bu "ölçülemez" varsayımını yıkıyor.
+Bu argüman kısmen doğrudur; ancak aşağıdaki Timeless Timing Attacks çalışması tam olarak bu ölçülemezlik varsayımını yıkmaktadır.
 
-### A.4 Uzaktan zamanlama saldırısı gerçekten fizibil mi? — Klasik literatür
+### A.4 Uzaktan zamanlama saldırısının fizibilitesi
 
-**1) Brumley & Boneh, "Remote Timing Attacks are Practical" (2003)**
-`https://crypto.stanford.edu/~dabo/papers/ssl-timing.pdf` (PDF çekilip metin çıkarıldı)
-> "We show that timing attacks apply to general software systems. Specifically, we devise a timing attack against OpenSSL. ... we can extract private keys from an OpenSSL-based web server running on a machine in the local network."
-> Üç ortam: **Network** (kampüs ağı, 3 router arası), **Interprocess** (aynı makinede iki süreç), **Virtual Machines** (VMM izolasyonunu delip diğer VM'den RSA anahtarı çıkarma).
+**Brumley ve Boneh, "Remote Timing Attacks are Practical" (2003).** Çalışma zamanlama saldırılarının genel yazılım sistemlerine uygulandığını gösterir; OpenSSL'e karşı bir zamanlama saldırısı tasarlanmış ve yerel ağdaki bir makinede çalışan OpenSSL tabanlı web sunucusundan özel anahtarlar çıkarılmıştır. Üç ortam denenmiştir: ağ (kampüs ağı, üç router arası), süreçler arası (aynı makinede iki süreç) ve sanal makineler (VMM izolasyonu delinerek diğer VM'den RSA anahtarı çıkarma).
 
-**2) Crosby, Wallach & Riedi, "Opportunities and Limits of Remote Timing Attacks" (ACM TISSEC, 2009)**
-`https://www.cs.rice.edu/~dwallach/pub/crosby-timing2009.pdf` · `https://dl.acm.org/doi/10.1145/1455526.1455530`
-- Jitter filtreleriyle **İnternet üzerinden 15–100 µs**, **LAN üzerinden 100 ns** çözünürlük.
-- Timeless makalesinin alıntısıyla: *"Crosby et al. found that the Box Test performs best, and were able to measure a timing difference of 20µs over the Internet and 100ns over the LAN"*.
+**Crosby, Wallach ve Riedi, "Opportunities and Limits of Remote Timing Attacks" (ACM TISSEC, 2009).** Jitter filtreleriyle internet üzerinden 15-100 µs, LAN üzerinden 100 ns çözünürlük elde edilmiştir. Timeless makalesinin aktarımına göre Crosby ve arkadaşları Box Test'in en iyi performansı verdiğini bulmuş ve internet üzerinden 20 µs, LAN üzerinden 100 ns'lik bir zamanlama farkı ölçebilmiştir.
 
-**3) ⭐ Van Goethem, Pöpper, Joosen, Vanhoef — "Timeless Timing Attacks: Exploiting Concurrency to Leak Secrets over Remote Connections", USENIX Security 2020**
-`https://www.usenix.org/system/files/sec20-van_goethem.pdf` (PDF çekilip metin çıkarıldı) · `https://www.usenix.org/conference/usenixsecurity20/presentation/van-goethem`
+**Van Goethem, Pöpper, Joosen ve Vanhoef, "Timeless Timing Attacks: Exploiting Concurrency to Leak Secrets over Remote Connections", USENIX Security 2020.** Bu makale Argus'un tehdit modelini değiştirmektedir.
 
-**Bu, IdP tehdit modelinizi değiştiren makale.** Birebir alıntılar:
-> "These concurrency-based timing attacks infer a relative timing difference by analyzing **the order in which responses are returned**, and thus do not rely on any absolute timing information. ... can accurately detect timing differences as small as **100ns**, similar to attacks launched on a local system."
->
-> "On web servers hosted over HTTP/2, we find that a timing difference as small as **100ns can be accurately inferred from the response order of approximately 40,000 request-pairs**. The smallest timing difference that we could observe in a traditional timing attack over the Internet was 10µs, **100 times higher**."
->
-> "Our proposed concurrency-based timing attacks are **completely unaffected by network conditions, regardless of the distance** between the adversary and the victim server."
+Bulguları şunlardır. Eşzamanlılık tabanlı zamanlama saldırıları yanıtların döndürülme sırasını analiz ederek göreli bir zamanlama farkı çıkarır ve hiçbir mutlak zamanlama bilgisine dayanmaz; 100 ns kadar küçük farkları, yerel bir sistemde yapılan saldırılara benzer doğrulukla tespit edebilir. HTTP/2 üzerinden sunulan web sunucularında 100 ns kadar küçük bir fark yaklaşık 40.000 istek çiftinin yanıt sırasından doğru biçimde çıkarılabilmektedir; internet üzerinden geleneksel bir zamanlama saldırısında gözlenebilen en küçük fark 10 µs'dir, yani 100 kat daha büyüktür. Yöntem ağ koşullarından tamamen bağımsızdır ve saldırgan ile kurban sunucu arasındaki mesafeden etkilenmez.
 
-Mekanizma: İki HTTP/2 isteği **tek bir TCP paketinde** birleşir → sunucuya aynı anda varır → eşzamanlı işlenir → hangisinin cevabının önce döndüğü ölçülür. Ağ jitter'ı hem yukarı hem aşağı yönde tamamen elenir. Tor onion servisleri ve VPN/SOCKS tünelleri de aynı paket birleştirmeyi sağlıyor. HTTP/3 için: *"we did not evaluate this protocol as it is not yet widely deployed"* — yani **[KISMEN DOĞRULANMAMIŞ]** ama multiplexing olduğu için aynı prensip geçerli.
+Mekanizma şudur: iki HTTP/2 isteği tek bir TCP paketinde birleşir, sunucuya aynı anda varır, eşzamanlı işlenir ve hangi yanıtın önce döndüğü ölçülür. Ağ jitter'ı hem yukarı hem aşağı yönde tamamen elenir. Tor onion servisleri ile VPN ve SOCKS tünelleri de aynı paket birleştirmeyi sağlar. HTTP/3 için makale bu protokolü değerlendirmediğini, çünkü henüz yaygın olarak dağıtılmadığını belirtir; multiplexing bulunduğu için aynı prensibin geçerli olması beklenir ancak bu kısmen doğrulanmamıştır.
 
-**Argus için sonuç:** Argus HTTP/2 (veya HTTP/3) sunuyorsa — ki modern bir IdP sunar — Rauthy'nin "tek haneli nanosaniye ölçülemez" argümanı **artık geçerli değil**. 100 ns'lik fark 40.000 istek çiftiyle ölçülebiliyor. 32 byte'lık bir token'ın byte-byte karşılaştırmasında ilk byte farkı ~1-2 ns, ama 16. byte'a kadar birikirse fark 10-30 ns'ye çıkar; 40k istek/byte × 256 tahmin ile brute force teorik olarak mümkün. **Kesin sonuç: tüm sır karşılaştırmalarında CT kullanın, tartışma yok.**
+**Argus için sonuç.** Argus HTTP/2 veya HTTP/3 sunduğu için — ki modern bir IdP sunar — Rauthy'nin tek haneli nanosaniyelerin ölçülemeyeceği argümanı artık geçerli değildir. 100 ns'lik fark 40.000 istek çiftiyle ölçülebilmektedir. 32 baytlık bir token'ın bayt bayt karşılaştırmasında ilk bayt farkı 1-2 ns'dir, ancak 16. bayta kadar birikirse fark 10-30 ns'ye çıkar; bayt başına 40.000 istek ve 256 tahmin ile brute force teorik olarak mümkündür. Sonuç kesindir: tüm sır karşılaştırmalarında sabit zaman kullanılır.
 
-**Makalenin önerdiği savunmalar (§6.3):**
-> "The most effective counter-measure against timing attacks is to ensure constant time execution. However, this can be very difficult ... A straightforward defense is **adding a random delay on incoming requests**. To mimic network conditions where the standard deviation of the jitter is 1ms, this delay can be sampled uniformly at random from the range [0, √12] ms, resulting in an average delay of ≈1.73ms for every request. However, **only requests that arrive simultaneously at the server need to be padded**."
+**Makalenin önerdiği savunmalar (§6.3).** Zamanlama saldırılarına karşı en etkili karşı önlem sabit zamanlı yürütmedir, ancak bu çok zor olabilir. Doğrudan bir savunma gelen isteklere rastgele gecikme eklemektir. Jitter'ın standart sapmasının 1 ms olduğu ağ koşullarını taklit etmek için bu gecikme [0, √12] ms aralığından tekdüze rastgele örneklenebilir ve istek başına yaklaşık 1,73 ms ortalama gecikme üretir. Ancak yalnızca sunucuya eşzamanlı ulaşan isteklerin doldurulması gerekir.
 
-Yani: eşzamanlı gelen istek çiftlerine rastgele gecikme ekleyerek saldırıyı "sıradan sıralı zamanlama saldırısı" seviyesine indirebilirsiniz — yok edemezsiniz.
+Yani eşzamanlı gelen istek çiftlerine rastgele gecikme eklenerek saldırı sıradan bir sıralı zamanlama saldırısı seviyesine indirilebilir, yok edilemez.
 
-### A.5 Sabit-zamanlı karşılaştırmaya alternatifler
+### A.5 Sabit zamanlı karşılaştırmaya alternatifler
 
-**1) Hash-then-compare (DB'de hash saklama) — EN İYİ ÇÖZÜM**
-Token'ı DB'ye düz yazmayın. `SHA-256(token)` yazın:
-- Karşılaştırma zamanlaması sızıntısı: hash çıktıları saldırganın kontrolünde olmadığı için byte-byte sızıntı işe yaramaz.
-- **DB indeks zamanlaması sızıntısı da ölür** — B-tree/hash-index araması hash üzerinde yapılır.
-- DB dump'ı çalınırsa token'lar kullanılamaz (bu tek başına yeterli gerekçe).
-- Gerçek örnek: Rauthy `api_keys.rs:84,148,444` ve `pam/remote_password.rs:25,61` — `sha256!` ile saklayıp `constant_time_eq` ile doğruluyor.
-- **Not:** Token yüksek entropili (≥128 bit) olduğu için SHA-256 yeterli; Argon2 gerekmez.
+**Hash'leyip karşılaştırma, yani veritabanında hash saklama. En iyi çözümdür.** Token veritabanına düz yazılmaz, `SHA-256(token)` yazılır. Karşılaştırma zamanlaması sızıntısı ortadan kalkar, çünkü hash çıktıları saldırganın kontrolünde değildir ve bayt bayt sızıntı işe yaramaz. Veritabanı indeks zamanlaması sızıntısı da ortadan kalkar, çünkü B-tree veya hash indeks araması hash üzerinde yapılır. Veritabanı dump'ı çalınırsa token'lar kullanılamaz; bu tek başına yeterli bir gerekçedir. Gerçek örnek Rauthy'dedir: `api_keys.rs:84,148,444` ve `pam/remote_password.rs:25,61` dosyalarında `sha256!` ile saklanır ve `constant_time_eq` ile doğrulanır. Token yüksek entropili olduğu için (en az 128 bit) SHA-256 yeterlidir ve Argon2 gerekmez.
 
-**2) Double-HMAC / HMAC-then-compare**
-`compare(HMAC(k, a), HMAC(k, b))` — `k` her süreç başlangıcında üretilen rastgele anahtar. Saldırgan karşılaştırılan değerleri tahmin edemediği için erken-çıkışlı `memcmp` bile güvenli hale gelir.
-- ⚠️ Orijinal NCC Group / iSEC Partners "Double HMAC Verification" (Şubat 2011) blog yazısı **artık erişilemiyor** — hem `nccgroup.com/us/research-blog/...` (404) hem `research.nccgroup.com/2011/02/07/...` hem de Wayback CDX'te snapshot yok (2026-09-08 kontrol edildi). **[KAYNAK ÖLÜ]**
-- Yerine kullanılabilir kanonik kaynak: **Cryptography Coding Standard**, "Compare secret strings in constant time" — `https://github.com/veorq/cryptocoding` — Keyczar zafiyetine (Nate Lawson, 2009) ve OpenBSD `memcmp` erken-çıkış implementasyonuna atıf yapıyor.
+**Double-HMAC, yani HMAC'leyip karşılaştırma.** `compare(HMAC(k, a), HMAC(k, b))` biçiminde çalışır; `k` her süreç başlangıcında üretilen rastgele bir anahtardır. Saldırgan karşılaştırılan değerleri tahmin edemediği için erken çıkışlı `memcmp` bile güvenli hâle gelir.
 
-**3) Uzunluk sızıntısına dikkat**
-`constant_time_eq` **eşit uzunluk gerektirir**; uzunluk farkı zaten sızar. Token'ları sabit uzunluk yapın (Rauthy `SECRET_LEN_CLIENTS = 64` sabitini `debug_assert_eq!` ile zorluyor).
+> **Ölü kaynak.** Orijinal NCC Group ve iSEC Partners "Double HMAC Verification" (Şubat 2011) blog yazısı artık erişilememektedir; hem `nccgroup.com/us/research-blog/...` hem `research.nccgroup.com/2011/02/07/...` 404 vermekte ve Wayback CDX'te snapshot bulunmamaktadır (8 Eylül 2026'da kontrol edilmiştir). Yerine kullanılabilecek kanonik kaynak Cryptography Coding Standard'ın "Compare secret strings in constant time" maddesidir (github.com/veorq/cryptocoding); bu kaynak Keyczar zafiyetine (Nate Lawson, 2009) ve OpenBSD `memcmp`'ın erken çıkışlı implementasyonuna atıf yapar.
+
+**Uzunluk sızıntısı.** `constant_time_eq` eşit uzunluk gerektirir; uzunluk farkı zaten sızar. Token'lar sabit uzunluk yapılır; Rauthy `SECRET_LEN_CLIENTS = 64` sabitini `debug_assert_eq!` ile zorlar.
 
 ---
 
-## B) DERLEYİCİ SABİT-ZAMANI BOZUYOR MU? — EVET, RUST'TA DA
+## B. Derleyici sabit zamanı bozuyor mu
 
-### B.1 ⭐ En güçlü kanıt: Rust standart kütüphanesinin kendi dokümantasyonu
+Cevap evettir ve bu Rust'ta da geçerlidir.
 
-`https://doc.rust-lang.org/std/hint/fn.black_box.html` (Rust **1.98.1**, build `48a229cea 2026-09-01`, 2026-09-08 çekildi) — **birebir**:
+### B.1 Rust standart kütüphanesinin kendi dokümantasyonu
 
-> "Note however, that `black_box` is only (and can only be) provided on a **"best-effort" basis**. The extent to which it can block optimisations may vary depending upon the platform and code-gen backend used. **Programs cannot rely on `black_box` for correctness**, beyond it behaving as the identity function. As such, it must not be relied upon to control critical program behavior.
->
-> **This also means that this function does not offer any guarantees for cryptographic or security purposes.**
->
-> **This limitation is not specific to `black_box`; there is no mechanism in the entire Rust language that can provide the guarantees required for constant-time cryptography. (There is also no such mechanism in LLVM, so the same is true for every other LLVM-based compiler.)**"
+`doc.rust-lang.org/std/hint/fn.black_box.html` (Rust 1.98.1, build `48a229cea`, 1 Eylül 2026; 8 Eylül 2026'da çekilmiştir) şunu belirtir.
 
-Bu, resmi Rust dokümantasyonunun açık kabulü. Argus'un tehdit modeli belgesine birebir alınmalı.
+`black_box` yalnızca en iyi çaba temelinde sağlanır ve yalnızca öyle sağlanabilir. Optimizasyonları ne ölçüde engelleyebileceği platforma ve kullanılan kod üretim arka ucuna göre değişir. Programlar, kimlik fonksiyonu gibi davranması dışında `black_box`'a doğruluk için güvenemez ve kritik program davranışını kontrol etmek için ona dayanılmamalıdır. Bu aynı zamanda fonksiyonun kriptografik veya güvenlik amaçları için hiçbir garanti sunmadığı anlamına gelir. Bu kısıt `black_box`'a özgü değildir; Rust dilinin tamamında sabit zamanlı kriptografinin gerektirdiği garantileri sağlayabilecek bir mekanizma yoktur. LLVM'de de böyle bir mekanizma bulunmadığı için aynı durum LLVM tabanlı her derleyici için geçerlidir.
 
-### B.2 ⭐⭐ Gerçek, güncel Rust CVE'leri — risk teorik değil
+Bu, resmî Rust dokümantasyonunun açık kabulüdür ve Argus'un tehdit modeli belgesine birebir alınmalıdır.
 
-RustSec advisory-db'nin **ana dalını indirip taradım** (`https://codeload.github.com/rustsec/advisory-db/tar.gz/refs/heads/main`, 2026-09-08). Sabit-zamanlılıkla ilgili advisory'ler:
+### B.2 Gerçek ve güncel Rust CVE'leri
 
-**① RUSTSEC-2026-0003 / CVE-2026-23519 — `cmov`, 14 Ocak 2026** ⭐ (en önemli kanıt)
-`https://github.com/RustCrypto/utils/security/advisories/GHSA-2gqc-6j2q-83qp`
-Başlık: *"Non-constant-time code generation on ARM32 targets"*
-> "This implementation uses a combination of bitwise arithmetic and `core::hint::black_box` to attempt to coerce constant-time code generation out of the optimizer, but **the implementation in v0.4.3 and earlier failed to do this on 32-bit ARM targets.**"
->
-> Üretilen assembly:
-> ```asm
-> bne  .LBB0_2      ; Branch if Not Equal  ← BRANCH!
-> mvns r3, r3
-> ```
-> "Branch instructions inserted by the LLVM optimizer on 32-bit targets can be leveraged using various microarchitectural sidechannels like cache timing attacks..."
->
-> Çözüm: v0.4.4 taktiksel `black_box` yamalı, **v0.4.5 `asm!` ile yeniden yazıldı**. CVSS 4.0 AV:N/AC:H, VC:H/SC:H.
+RustSec advisory-db'nin ana dalı indirilip taranmıştır (8 Eylül 2026). Sabit zamanlılıkla ilgili advisory'ler şunlardır.
 
-**Anlam:** RustCrypto ekibinin, tam da bu iş için yazdığı, `black_box`'ı bilinçli kullanan crate'te bile LLVM branch üretti. `black_box`'a güvenmek çalışmıyor; `asm!` çalışıyor.
+**RUSTSEC-2026-0003 ve CVE-2026-23519, `cmov`, 14 Ocak 2026.** En önemli kanıttır. Başlığı ARM32 hedeflerinde sabit zamanlı olmayan kod üretimidir. Advisory'ye göre implementasyon, optimizasyon aşamasından sabit zamanlı kod üretimini zorlamak için bitwise aritmetik ile `core::hint::black_box` kombinasyonunu kullanır, ancak v0.4.3 ve öncesindeki implementasyon bunu 32 bit ARM hedeflerinde başaramamıştır. Üretilen assembly şudur:
 
-**② RUSTSEC-2025-0144 / CVE-2026-22705 — `ml-dsa`, 12 Aralık 2025**
-> "The analysis was performed using **a constant-time analyzer that examines compiled assembly code** for instructions with data-dependent timing behavior. The analyzer flags: **UDIV/SDIV instructions**: Hardware division instructions have early termination optimizations where execution time depends on operand values."
-> `r1.0 /= TwoGamma2::U32;` — gizli anahtardan türeyen veride donanım bölmesi. Düzeltme: **Barrett reduction**. Patched ≥ 0.1.0-rc.3.
+```asm
+bne  .LBB0_2      ; Branch if Not Equal
+mvns r3, r3
+```
 
-**③ RUSTSEC-2026-0212 — `libcrux-secrets`, 26 Mayıs 2026**
-aarch64 inline `asm!`'de `cmp` 32-bit register kullanıyordu, 8-bit selector'ın üst 24 biti tanımsızdı → `Select::select` ve `Swap::swap` yanlış sonuç verebiliyordu. `tst` + maske ile düzeltildi (≥0.0.6).
+Advisory, LLVM optimizasyon aşamasının 32 bit hedeflerde eklediği branch komutlarının cache timing gibi çeşitli mikromimari yan kanallarla sömürülebileceğini belirtir. Çözüm olarak v0.4.4 taktiksel bir `black_box` yaması uygulamış, v0.4.5 ise `asm!` ile yeniden yazılmıştır. CVSS 4.0 vektörü AV:N/AC:H, VC:H/SC:H'dir.
 
-**④ RUSTSEC-2026-0211 — `libcrux-aesgcm`, 14 Temmuz 2026**
-> "AES-GCM decryption used an implementation for checking the provided authentication tag ... that was **intended to be constant-time, but resulted in non-constant-time code generation in certain circumstances.** Note that `libcrux-aesgcm` **does not give guarantees on constant-time code generation** and possible mitigations must be considered on a best-effort basis."
-> `versions.patched = []` (advisory düzeyinde), gerçek düzeltme `libcrux-aes@v0.0.9`.
+Bunun anlamı şudur: RustCrypto ekibinin tam da bu iş için yazdığı ve `black_box`'ı bilinçli kullandığı crate'te bile LLVM branch üretmiştir. `black_box`'a güvenmek çalışmamakta, `asm!` çalışmaktadır.
 
-**⑤ RUSTSEC-2024-0354 / CVE-2024-40640 — `vodozemac`, 17 Temmuz 2024**
-Sabit-zamanlı olmayan **base64 decoder** gizli anahtar materyalini sızdırıyordu. Bu, "sadece karşılaştırma değil, tüm sır işleme yolu" dersidir.
+**RUSTSEC-2025-0144 ve CVE-2026-22705, `ml-dsa`, 12 Aralık 2025.** Analiz, derlenmiş assembly kodunu veri bağımlı zamanlama davranışı olan komutlar için inceleyen bir sabit zaman analizöründe yapılmıştır. Analizör `UDIV` ve `SDIV` komutlarını işaretlemektedir; donanım bölme komutlarının erken sonlanma optimizasyonları vardır ve yürütme süresi operand değerlerine bağlıdır. Sorunlu satır `r1.0 /= TwoGamma2::U32;` biçimindedir ve gizli anahtardan türeyen veride donanım bölmesi yapar. Düzeltme Barrett reduction'dır; yamalı sürüm 0.1.0-rc.3 ve üstüdür.
 
-**⑥ RUSTSEC-2022-0018 / CVE-2022-29185 — `totp-rs` (yukarıda, A.3).**
+**RUSTSEC-2026-0212, `libcrux-secrets`, 26 Mayıs 2026.** aarch64 inline `asm!` içinde `cmp` 32 bit register kullanmaktaydı ve 8 bitlik selector'ın üst 24 biti tanımsızdı; bu nedenle `Select::select` ve `Swap::swap` yanlış sonuç verebiliyordu. `tst` ve maske ile düzeltilmiştir; yamalı sürüm 0.0.6 ve üstüdür.
+
+**RUSTSEC-2026-0211, `libcrux-aesgcm`, 14 Temmuz 2026.** AES-GCM şifre çözme, verilen kimlik doğrulama tag'ini kontrol etmek için sabit zamanlı olması amaçlanan ancak belirli koşullarda sabit zamanlı olmayan kod üreten bir implementasyon kullanmaktaydı. Advisory, `libcrux-aesgcm`'in sabit zamanlı kod üretimi hakkında garanti vermediğini ve olası azaltmaların en iyi çaba temelinde değerlendirilmesi gerektiğini belirtir. Advisory düzeyinde `versions.patched` boştur; gerçek düzeltme `libcrux-aes@v0.0.9`'dadır.
+
+**RUSTSEC-2024-0354 ve CVE-2024-40640, `vodozemac`, 17 Temmuz 2024.** Sabit zamanlı olmayan bir base64 decoder gizli anahtar materyalini sızdırmaktaydı. Bu, yalnızca karşılaştırmanın değil, tüm sır işleme yolunun sabit zamanlı olması gerektiğinin dersidir.
+
+**RUSTSEC-2022-0018 ve CVE-2022-29185, `totp-rs`.** A.3'te ele alınmıştır.
 
 ### B.3 Akademik literatür
 
-**"What you get is what you C: Controlling side effects in mainstream C compilers"** — Laurent Simon (Samsung Research America / Cambridge), David Chisnall, Ross Anderson, **IEEE EuroS&P 2018**. PDF: `https://www.cl.cam.ac.uk/~rja14/Papers/whatyouc.pdf` (indirilip metin çıkarıldı). Abstract birebir:
-> "But when a programmer tries to control side effects of code, such as to make a cryptographic algorithm execute in constant time, the problem remains. **Programmers devise complex tricks to obscure their intentions, but compiler writers find ever smarter ways to optimize code. A compiler upgrade can suddenly and without warning open a timing channel in previously secure code. This arms race is pointless and has to stop.**"
-> Katkı: Clang/LLVM'e **constant-time selection** ve **register/stack erasure** için doğrudan derleyici desteği eklemişler.
+**"What you get is what you C: Controlling side effects in mainstream C compilers".** Laurent Simon (Samsung Research America ve Cambridge), David Chisnall ve Ross Anderson; IEEE EuroS&P 2018. Özet şunu söyler: bir programcı kodun yan etkilerini kontrol etmeye çalıştığında, örneğin bir kriptografik algoritmayı sabit zamanda çalıştırmak istediğinde sorun devam eder. Programcılar niyetlerini gizlemek için karmaşık hileler geliştirir, derleyici yazarları ise kodu optimize etmenin gittikçe daha akıllı yollarını bulur. Bir derleyici yükseltmesi, daha önce güvenli olan kodda aniden ve uyarısız bir zamanlama kanalı açabilir. Bu silahlanma yarışı anlamsızdır ve sona ermelidir. Makalenin katkısı Clang ve LLVM'e sabit zamanlı seçim ile register ve stack silme için doğrudan derleyici desteği eklemektir.
 
-**"Dude, is my code constant time?"** — Oscar Reparaz, Josep Balasch, Ingrid Verbauwhede. IACR ePrint 2016/1123 (Aralık 2016), **DATE 2017**. `https://eprint.iacr.org/2016/1123.pdf` · Kod: `https://github.com/oreparaz/dudect`
-- ~350 satır C; hedef platformda kara-kutu istatistiksel sızıntı tespiti (Welch t-testi). |t| > 5 → sızıntı çok muhtemel.
-- README'den örnek çıktı: `./dudect_cmpmemcmp_-O2` → `max t: +1271.13 ... Definitely not constant time.` (memcmp tabanlı MAC karşılaştırma).
+**"Dude, is my code constant time?"** Oscar Reparaz, Josep Balasch ve Ingrid Verbauwhede; IACR ePrint 2016/1123 (Aralık 2016), DATE 2017. Yaklaşık 350 satır C'dir ve hedef platformda kara kutu istatistiksel sızıntı tespiti yapar (Welch t-testi). |t| değeri 5'i aşarsa sızıntı çok muhtemeldir. README'deki örnek çıktı memcmp tabanlı MAC karşılaştırması için `max t: +1271.13 ... Definitely not constant time.` biçimindedir.
 
-**Cryptography Coding Standard** — `https://github.com/veorq/cryptocoding`, "Prevent compiler interference with security-critical operations": Tor'daki `memset`'in MSVC 2010 tarafından silinmesi; `volatile` fonksiyon pointer hilesi ve Colin Percival'ın *"may not be sufficient"* errata'sı (`https://www.daemonology.net/blog/2014-09-05-erratum.html`).
+**Cryptography Coding Standard** (github.com/veorq/cryptocoding), "Prevent compiler interference with security-critical operations" maddesi Tor'daki `memset` çağrısının MSVC 2010 tarafından silinmesini, `volatile` fonksiyon pointer hilesini ve Colin Percival'ın bu hilenin yeterli olmayabileceğini belirten errata'sını aktarır.
 
-### B.4 Doğrulama araçları — ne kullanılabilir
+### B.4 Doğrulama araçları
 
-| Araç | Tip | URL / Referans | Notlar |
+| Araç | Tip | Kaynak | Notlar |
 |---|---|---|---|
-| **dudect** | Dinamik, istatistiksel, kara kutu | `https://github.com/oreparaz/dudect` | Donanım modeli gerektirmez |
-| **`dudect-bencher`** (Rust) | Dinamik | **0.7.0, 2026-03-23**, 191.096 indirme, `https://github.com/rozbb/dudect-bencher/` | Rust portu. README uyarısı: *"In general, it is not possible to prove that a function always runs in constant time. The purpose of this tool is to find non-constant-timeness when it exists ... it requires the user to think very hard about where the non-constant-timeness might be."* **Argus'un CI'ına eklenebilecek en pratik araç.** |
-| **ctgrind** (Adam Langley, 1 Nisan 2010) | Valgrind/memcheck | `https://www.imperialviolet.org/2010/04/01/ctgrind.html` | Gizli veriyi "uninitialised" olarak işaretle (`ct_poison`), memcheck secret-dependent branch/memory-access'i yakalar. Langley bu araçla OpenSSL'in `BN_mod_exp_mont_consttime`'ının sabit zamanlı **olmadığını** bulmuş. |
-| **TIMECOP** | Valgrind, SUPERCOP üzerinde | `https://post-apocalyptic-crypto.org/timecop/` | 2.700+ kripto implementasyonu tarıyor. **Bilinen sınırı (birebir): "Valgrind cannot spot cases where variable-time code is caused by variable-time CPU instructions."** — yani `ml-dsa`'daki UDIV'i yakalayamaz. |
-| **ct-verif** | Statik/formal (LLVM, SMACK+Boogie) | Almeida, Barbosa, Barthe, Dupressoir, Emmi — USENIX Security 2016, `https://www.usenix.org/conference/usenixsecurity16/technical-sessions/presentation/almeida` | Ürün-program indirgemesi Coq'ta doğrulanmış |
-| **Binsec/Rel** | İkili düzey ilişkisel sembolik yürütme | Daniel, Bardin, Rezk — IEEE S&P 2020, arXiv:1912.08788 (`http://export.arxiv.org/api/query?id_list=1912.08788`, doğrulandı) | Derleyicinin ürettiği ikiliyi analiz eder — kaynak kodu değil |
-| **Microwalk** | Dinamik ikili enstrümantasyon + istatistik | `https://github.com/microwalk-project/Microwalk` | **CI entegrasyonu var** (GitHub Actions şablonları, hazır Docker imajları, GitHub UI'da satır-içi sızıntı raporu). C ve JS örnek repoları mevcut. Rust için hazır şablon **[DOĞRULANMADI]**. |
-| **cachegrind** | Cache profili | Valgrind paketi | Sadece kaba sinyal |
+| dudect | Dinamik, istatistiksel, kara kutu | github.com/oreparaz/dudect | Donanım modeli gerektirmez |
+| `dudect-bencher` (Rust) | Dinamik | 0.7.0, 23 Mart 2026, 191.096 indirme; github.com/rozbb/dudect-bencher/ | Rust portudur. README uyarısı şudur: genel olarak bir fonksiyonun her zaman sabit zamanda çalıştığını kanıtlamak mümkün değildir; aracın amacı sabit zamanlı olmama durumu varsa onu bulmaktır ve kullanıcının sabit zamanlı olmamanın nerede olabileceğini çok dikkatli düşünmesini gerektirir. Argus'un CI'ına eklenebilecek en pratik araçtır |
+| ctgrind (Adam Langley, 1 Nisan 2010) | Valgrind ve memcheck | imperialviolet.org/2010/04/01/ctgrind.html | Gizli veri `ct_poison` ile uninitialised işaretlenir ve memcheck gizliye bağımlı branch ile bellek erişimini yakalar. Langley bu araçla OpenSSL'in `BN_mod_exp_mont_consttime` fonksiyonunun sabit zamanlı olmadığını bulmuştur |
+| TIMECOP | Valgrind, SUPERCOP üzerinde | post-apocalyptic-crypto.org/timecop/ | 2.700'den fazla kripto implementasyonu tarar. Bilinen sınırı şudur: Valgrind, değişken zamanlı kodun değişken zamanlı CPU komutlarından kaynaklandığı durumları tespit edemez. Yani `ml-dsa`'daki UDIV'i yakalayamaz |
+| ct-verif | Statik ve formel; LLVM, SMACK ve Boogie | Almeida, Barbosa, Barthe, Dupressoir, Emmi; USENIX Security 2016 | Ürün-program indirgemesi Coq'ta doğrulanmıştır |
+| Binsec/Rel | İkili düzeyde ilişkisel sembolik yürütme | Daniel, Bardin, Rezk; IEEE S&P 2020, arXiv:1912.08788 | Derleyicinin ürettiği ikiliyi analiz eder, kaynak kodu değil |
+| Microwalk | Dinamik ikili enstrümantasyon ve istatistik | github.com/microwalk-project/Microwalk | CI entegrasyonu vardır: GitHub Actions şablonları, hazır Docker imajları ve GitHub arayüzünde satır içi sızıntı raporu. C ve JavaScript örnek repoları mevcuttur; Rust için hazır şablon doğrulanmamıştır |
+| cachegrind | Cache profili | Valgrind paketi | Yalnızca kaba sinyal verir |
 
 ### B.5 RustCrypto'nun politikası
 
-`crypto-bigint` README (`https://raw.githubusercontent.com/RustCrypto/crypto-bigint/master/README.md`) — birebir:
-> "**All functions contained in the crate are designed to execute in constant time unless explicitly specified otherwise (via a `*_vartime` name suffix).**"
-> "This crate has been **audited by NCC Group** with no significant findings. ... Note that **the implementation has diverged significantly since the last audit.**"
-> "This library is **NOT suitable for use on processors with a variable-time multiplication operation** (e.g. short circuit on multiply-by-zero / multiply-by-one, such as certain 32-bit PowerPC CPUs and some non-ARM microcontrollers)."
+`crypto-bigint` README'si şunu belirtir: crate'te bulunan tüm fonksiyonlar, aksi açıkça belirtilmedikçe (`*_vartime` isim soneki ile) sabit zamanda çalışacak biçimde tasarlanmıştır. Crate NCC Group tarafından denetlenmiş ve önemli bir bulgu çıkmamıştır; ancak implementasyon son denetimden bu yana belirgin biçimde değişmiştir. Kütüphane, değişken zamanlı çarpma işlemi olan işlemcilerde kullanıma uygun değildir; örneğin sıfırla veya birle çarpmada kısa devre yapan bazı 32 bit PowerPC CPU'lar ve ARM olmayan bazı mikrodenetleyiciler.
 
-**`*_vartime` isimlendirme kuralı Argus için doğrudan benimsenmeli.**
+`*_vartime` isimlendirme kuralı Argus için doğrudan benimsenmelidir.
 
-**CI'da ne yapıyorlar?** RustCrypto/utils'in `.github/workflows/` dizinini indirip taradım (2026-09-08): `aarch64-dit.yml`, `cmov.yml`, `ctutils.yml`, `security-audit.yml`... — **dudect/valgrind tabanlı otomatik sabit-zaman testi yok**. `cmov` CVE'si de zaten harici bir raporla ortaya çıktı. Yani **RustCrypto bile CI'da CT doğrulaması yapmıyor** — Argus bunu yaparsa ekosistemin önüne geçmiş olur.
+**CI'da ne yapıyorlar.** RustCrypto/utils'in `.github/workflows/` dizini indirilip taranmıştır (8 Eylül 2026): `aarch64-dit.yml`, `cmov.yml`, `ctutils.yml` ve `security-audit.yml` bulunmaktadır; dudect veya valgrind tabanlı otomatik sabit zaman testi yoktur. `cmov` CVE'si de harici bir raporla ortaya çıkmıştır. Yani RustCrypto bile CI'da sabit zaman doğrulaması yapmamaktadır; Argus bunu yaparsa ekosistemin önüne geçmiş olur.
 
-**fiat-crypto** (`https://github.com/mit-plv/fiat-crypto`): Coq'ta formal olarak doğrulanmış alan aritmetiği üreteci; Rust backend'i var ve `curve25519-dalek`/BoringSSL/Firefox tarafından kullanılıyor. IdP için doğrudan gerekli değil (eğri aritmetiği yazmıyorsunuz), ama "doğru yapılmış" referansı olarak değerli.
+**fiat-crypto** (github.com/mit-plv/fiat-crypto) Coq'ta formel olarak doğrulanmış bir alan aritmetiği üretecidir; Rust backend'i vardır ve `curve25519-dalek`, BoringSSL ile Firefox tarafından kullanılır. Bir IdP için doğrudan gerekli değildir, çünkü eğri aritmetiği yazılmaz; ancak doğru yapılmış bir referans olarak değerlidir.
 
 ### B.6 Donanım: yazılım tek başına yetmiyor
 
-**Intel DOIT / DOITM**
-`https://www.intel.com/content/www/us/en/developer/articles/technical/software-security-guidance/best-practices/data-operand-independent-timing-isa-guidance.html` (belge güncelleme tarihi: **10 Eylül 2025**; not: intel.com curl'e 403 döndü, WebFetch ile alındı)
-- `IA32_UARCH_MISC_CTL` MSR (0x1B01), DOITM bit'i. Açıkken listelenen komutlar "timing independent of the data values in the sources".
-- **Ice Lake ve sonrası** Core, **Gracemont ve sonrası** Atom DOITM'i enumerate ediyor. Daha eski işlemcilerde mod "her zaman açık" varsayılıyor.
-- ⚠️ Intel açıkça uyarıyor: *"the performance impact of this mode may be **significantly higher on future processors**"* ve **global olarak açılmasını önermiyor**; gelecekte uygulama-başına ince taneli kontrol planlıyor.
-- **Rust ekosisteminde DOITM'i açan yaygın bir crate bulamadım** — RustCrypto/utils dizin listesinde `aarch64-dit` var ama x86 muadili yok (2026-09-08 doğrulandı). **[BOŞLUK]**
+**Intel DOIT ve DOITM.** Kaynak intel.com üzerindeki data operand independent timing ISA rehberidir; belge güncelleme tarihi 10 Eylül 2025'tir. `IA32_UARCH_MISC_CTL` MSR'si (0x1B01) DOITM bitini taşır. Bit açıkken listelenen komutların zamanlaması kaynaklardaki veri değerlerinden bağımsızdır. Ice Lake ve sonrası Core ile Gracemont ve sonrası Atom işlemciler DOITM'i enumerate eder; daha eski işlemcilerde modun her zaman açık olduğu varsayılır.
 
-**ARM DIT (FEAT_DIT, PSTATE.DIT)**
-- ARM developer dokümantasyonu curl'e 403, WebFetch'e boş içerik döndü — **doğrudan alıntı alınamadı [KAYNAK ERİŞİLEMEDİ]**.
-- Ancak **Linux kernel kaynağından doğrulandı** (`https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain/arch/arm64/kernel/`):
-  - `entry.S:199` → `alternative_insn nop, SET_PSTATE_DIT(1), ARM64_HAS_DIT` — **kernel, EL0'dan girişte DIT'i açıyor.**
-  - `cpufeature.c:3057-3064` → `.desc = "Data independent timing control (DIT)"`, `ARM64_HAS_DIT`, `ID_AA64PFR0_EL1.DIT`.
-- Rust: `aarch64-dit` 0.1.0 (2024-09-06), `cpufeatures::new!(dit_supported, "dit")` ile runtime tespit + RAII guard.
+> **Intel'in uyarısı.** Bu modun performans etkisi gelecekteki işlemcilerde belirgin biçimde daha yüksek olabilir ve Intel modun global olarak açılmasını önermemektedir; gelecekte uygulama başına ince taneli kontrol planlanmaktadır. Rust ekosisteminde DOITM'i açan yaygın bir crate bulunamamıştır; RustCrypto/utils dizininde `aarch64-dit` vardır ancak x86 muadili yoktur (8 Eylül 2026'da doğrulanmıştır).
 
-**GoFetch (USENIX Security 2024) — sabit-zamanlı kodun donanımda kırılması**
-`https://gofetch.fail/` (2026-09-08 çekildi)
-> "GoFetch is a microarchitectural side-channel attack that can extract secret keys from **constant-time cryptographic implementations** via **data memory-dependent prefetchers (DMPs)**."
-> "the DMP activates (and attempts to dereference) data loaded from memory that "looks like" a pointer. **This explicitly violates a requirement of the constant-time programming paradigm**, which forbids mixing data and memory access patterns."
-> Uçtan uca anahtar çıkarma: **OpenSSL Diffie-Hellman, Go RSA-2048 decryption, CRYSTALS-Kyber, CRYSTALS-Dilithium** — Apple M1'de gösterildi, M2/M3'te de benzer DMP davranışı.
-> DMP kapatma: **"the DIT bit set on m3 CPUs effectively disables the DMP. This is not the case for the m1 and m2."** Intel'in DOIT bit'i Raptor Lake'te DMP'yi kapatıyor.
-> Nisan 2024 güncellemesi: Hector Martin (marcan) M1/M2 için `SYS_APL_HID11_EL1[30]` chicken bit'i buldu; macOS'ta kernel desteği yok.
-> Aralık 2024 devamı: **"Peek-a-Walk: Leaking Secrets via Page Walk Side Channels"** — Intel DMP semantiği tersine mühendislikle çözüldü.
-> Apple'a bildirim: 5 Aralık 2023. Pwnie Award 2024 "Best Cryptographic Attack".
+**ARM DIT (FEAT_DIT, PSTATE.DIT).** ARM developer dokümantasyonu curl'e 403, WebFetch'e boş içerik döndürmüştür; doğrudan alıntı alınamamıştır. Ancak bilgi Linux kernel kaynağından doğrulanmıştır: `entry.S:199` satırında `alternative_insn nop, SET_PSTATE_DIT(1), ARM64_HAS_DIT` bulunur, yani kernel EL0'dan girişte DIT'i açar; `cpufeature.c:3057-3064` satırlarında `.desc = "Data independent timing control (DIT)"`, `ARM64_HAS_DIT` ve `ID_AA64PFR0_EL1.DIT` tanımlıdır. Rust tarafında `aarch64-dit` 0.1.0 (6 Eylül 2024) `cpufeatures::new!(dit_supported, "dit")` ile runtime tespiti ve RAII guard sağlar.
 
-**Argus için anlamı:** M-serisi Mac üzerinde geliştirme/test yapıyorsanız sorun yok (yerel makine). **Üretimde Apple Silicon sunucu kullanmayın** ve zaten yan-kanal kritik kod için x86_64 sunucu varsayın. DMP tehdidi lokal kod yürütme gerektiriyor — çok kiracılı değilseniz doğrudan uygulanabilir değil.
+**GoFetch (USENIX Security 2024).** Sabit zamanlı kodun donanımda kırılmasıdır. Proje sayfasına göre GoFetch, veri bellek bağımlı prefetcher'lar (DMP) üzerinden sabit zamanlı kriptografik implementasyonlardan gizli anahtar çıkarabilen bir mikromimari yan kanal saldırısıdır. DMP, bellekten yüklenen ve pointer'a benzeyen veriyi etkinleştirir ve dereference etmeye çalışır; bu, veri ile bellek erişim örüntülerinin karıştırılmasını yasaklayan sabit zamanlı programlama paradigmasının bir gereksinimini açıkça ihlal eder. Uçtan uca anahtar çıkarma OpenSSL Diffie-Hellman, Go RSA-2048 şifre çözme, CRYSTALS-Kyber ve CRYSTALS-Dilithium için Apple M1'de gösterilmiş, M2 ve M3'te de benzer DMP davranışı görülmüştür. DMP kapatma konusunda M3 CPU'larda DIT bitinin ayarlanması DMP'yi etkili biçimde devre dışı bırakır; M1 ve M2'de bu geçerli değildir. Intel'in DOIT biti Raptor Lake'te DMP'yi kapatır. Nisan 2024 güncellemesinde Hector Martin M1 ve M2 için `SYS_APL_HID11_EL1[30]` chicken bitini bulmuştur; macOS'ta kernel desteği yoktur. Aralık 2024'teki devam çalışması "Peek-a-Walk: Leaking Secrets via Page Walk Side Channels" Intel DMP semantiğini tersine mühendislikle çözmüştür. Apple'a bildirim 5 Aralık 2023'te yapılmıştır; çalışma 2024 Pwnie Award'da en iyi kriptografik saldırı ödülünü almıştır.
+
+**Argus için anlamı.** M serisi Mac üzerinde geliştirme ve test yapmak sorun değildir, çünkü yerel makinedir. Üretimde Apple Silicon sunucu kullanılmaz ve yan kanal kritik kod için x86_64 sunucu varsayılır. DMP tehdidi yerel kod yürütme gerektirir; çok kiracılı olunmadığı sürece doğrudan uygulanabilir değildir.
 
 ---
-
-## C) ZAMANLAMA İLE KULLANICI SAYIMI (USER ENUMERATION)
+## C. Zamanlama ile kullanıcı sayımı
 
 ### C.1 Klasik problem
 
-Kullanıcı yoksa parola hash'i hesaplanmaz → cevap ~1 ms; kullanıcı varsa Argon2 çalışır → ~200-500 ms. Fark **beş kat büyüklük derecesinde** — bu, 100 ns'lik incelikli saldırılara gerek bırakmaz, `curl -w '%{time_total}'` ile görülür.
+Kullanıcı yoksa parola hash'i hesaplanmaz ve cevap yaklaşık 1 ms'de döner; kullanıcı varsa Argon2 çalışır ve cevap 200-500 ms sürer. Fark beş büyüklük derecesindedir; bu, 100 ns inceliğindeki saldırılara gerek bırakmaz ve `curl -w '%{time_total}'` ile görülebilir.
 
-**OWASP Authentication Cheat Sheet** (`https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html`) — birebir sözde kod:
+OWASP Authentication Cheat Sheet'in sözde kodu şöyledir. Zafiyetli hâli hızlı çıkış yapar:
 
-Zafiyetli ("quick exit"):
 ```
 IF USER_EXISTS(username) THEN
     password_hash = HASH(password)
@@ -273,137 +190,108 @@ ELSE
     RETURN Error("Invalid Username or Password!")   ← hızlı dönüş
 ENDIF
 ```
-Güvenli:
+
+Güvenli hâli şudur:
+
 ```
 password_hash = HASH(password)
 IS_VALID = LOOKUP_CREDENTIALS_IN_STORE(username, password_hash)
 IF NOT IS_VALID THEN RETURN Error("Invalid Username or Password!")
 ```
 
-### C.2 "Kullanıcı yoksa dummy Argon2 çalıştır" doğru çözüm mü? — HAYIR, tek başına değil
+### C.2 Kullanıcı yoksa dummy Argon2 çalıştırmak doğru çözüm değildir
 
-#### Sorun 1: DoS — memory-hard fonksiyonu saldırgana ücretsiz veriyorsunuz
-- OWASP Argon2id önerisi m=19456 KiB (19 MiB) veya m=47104 KiB (46 MiB) (aşağıda). 100 eşzamanlı sahte kullanıcı isteği × 19 MiB = **1.9 GB RAM** + 100 çekirdek-saniye. Saldırgan hiç geçerli kullanıcı adı bilmeden IdP'nizi düşürür.
-- Rauthy varsayılanı daha da agresif: `argon2_m_cost = 131072` (**128 MiB**), `t_cost = 4`, `p_cost = 8` (`https://raw.githubusercontent.com/sebadob/rauthy/main/config.toml`). 2 eşzamanlı hash bile 256 MiB.
+Tek başına yeterli olmamasının iki nedeni vardır.
 
-#### Sorun 2: Doğruluk — dummy hash gerçekten zamanı eşitler mi?
-Hayır, üç sebeple:
-1. **Parametre göçü.** Kullanıcı A `m=19456,t=2` ile, kullanıcı B `m=47104,t=1` ile hash'lenmişse, tek bir dummy parametre setiyle ikisini de taklit edemezsiniz. Dummy'nin süresi A ile eşleşiyorsa B sızar, B ile eşleşiyorsa A sızar.
-2. **Algoritma göçü.** Legacy bcrypt (cost 10, ~60 ms) + yeni Argon2id (~300 ms) karışımı varsa, dummy hangisini taklit edecek?
-3. **"Unusable password" durumu.** ⭐ **Gerçek CVE:** **CVE-2024-39329** — Django, `https://www.djangoproject.com/weblog/2024/jul/09/security-releases/` (9 Temmuz 2024):
-   > "The `django.contrib.auth.backends.ModelBackend.authenticate()` method allowed remote attackers to **enumerate users via a timing attack involving login requests for users with unusable passwords**."
-   Düzeltilen sürümler: Django 5.0.7, 4.2.14, 5.1b.
-   Yani Django, 2013'te dummy hash eklemiş olmasına rağmen (aşağıda) **11 yıl sonra aynı sınıfta yeni bir zafiyet çıkardı.**
+**Birinci sorun: DoS.** Memory-hard fonksiyon saldırgana ücretsiz verilmiş olur. OWASP'ın Argon2id önerisi m=19456 KiB (19 MiB) veya m=47104 KiB'dir (46 MiB). Yüz eşzamanlı sahte kullanıcı isteği 19 MiB ile çarpıldığında 1,9 GB RAM ve 100 çekirdek-saniye eder. Saldırgan hiçbir geçerli kullanıcı adı bilmeden IdP'yi düşürebilir. Rauthy varsayılanı daha da agresiftir: `argon2_m_cost = 131072` (128 MiB), `t_cost = 4`, `p_cost = 8`. İki eşzamanlı hash bile 256 MiB tüketir.
 
-**Django'nun orijinal düzeltmesi** — ticket #20760 (`https://code.djangoproject.com/ticket/20760`), Django 1.6 (Temmuz 2013). Aymeric Augustin, 20 Temmuz 2013:
-> "Since Django now ships with strong hashers by default, the login view spends most of its time hashing the password; there's some value in **running the hasher regardless of whether the user exists or not**, in order to make a timing attack (at least) **non-trivial**."
+**İkinci sorun: doğruluk.** Dummy hash zamanı gerçekten eşitlemez ve bunun üç sebebi vardır.
 
-Dikkat: "non-trivial", "impossible" değil. Django ekibi bile bunu tam çözüm saymamış.
+Parametre göçü: kullanıcı A `m=19456,t=2` ile, kullanıcı B `m=47104,t=1` ile hash'lenmişse tek bir dummy parametre setiyle ikisi de taklit edilemez. Dummy'nin süresi A ile eşleşiyorsa B sızar, B ile eşleşiyorsa A sızar.
 
-### C.3 Alternatifler — karşılaştırmalı analiz
+Algoritma göçü: legacy bcrypt (cost 10, yaklaşık 60 ms) ile yeni Argon2id (yaklaşık 300 ms) karışımı varsa dummy hangisini taklit edeceği belirsizdir.
+
+Unusable password durumu: bu gerçek bir CVE'ye yol açmıştır. CVE-2024-39329, Django, 9 Temmuz 2024. `django.contrib.auth.backends.ModelBackend.authenticate()` metodu, kullanılamaz parolaya sahip kullanıcılar için yapılan login isteklerini içeren bir zamanlama saldırısıyla uzaktaki saldırganların kullanıcıları sayabilmesine izin veriyordu. Düzeltilen sürümler Django 5.0.7, 4.2.14 ve 5.1b'dir. Django 2013'te dummy hash eklemiş olmasına rağmen 11 yıl sonra aynı sınıfta yeni bir zafiyet çıkarmıştır.
+
+Django'nun orijinal düzeltmesi ticket #20760 ile Django 1.6'da (Temmuz 2013) gelmiştir. Aymeric Augustin 20 Temmuz 2013'te şunu yazmıştır: Django artık varsayılan olarak güçlü hasher'larla geldiği için login view'ı zamanının çoğunu parolayı hash'lemekle geçirmektedir; kullanıcının var olup olmamasından bağımsız olarak hasher'ı çalıştırmanın, bir zamanlama saldırısını en azından önemsiz olmaktan çıkarma açısından değeri vardır.
+
+İfadenin "önemsiz olmaktan çıkarmak" olduğuna, "imkânsız kılmak" olmadığına dikkat edilmelidir. Django ekibi bile bunu tam çözüm saymamıştır.
+
+### C.3 Alternatifler
 
 | Yaklaşım | Etkinlik | Maliyet | Değerlendirme |
 |---|---|---|---|
-| **Dummy Argon2** | Orta | **Çok yüksek (DoS)** | Tek başına önerilmez |
-| **Sabit gecikme** (ör. her cevap 500 ms) | İyi ama... | Throughput tavanı; ayrıca gerçek işlem 500 ms'yi aşarsa sızıntı geri gelir | Uygulanabilir ama kaba |
-| **Rastgele gecikme** | **Zayıf** | Düşük | Ortalamayla yenilir: N örnekte gürültü √N ile azalır. Timeless makalesi bunu "saldırıyı sıralı seviyeye indirir" diye tanımlıyor — **yok etmez** |
-| **⭐ Adaptif gecikme (koşan ortalamaya doldurma)** | **İyi** | Düşük | Rauthy'nin çözümü — aşağıda |
-| **Rate limiting + IP kara liste** | Yüksek (ortogonal) | Düşük | Zorunlu |
-| **Protokol düzeyinde kabullenme** (enumeration'ı önlemeye çalışma, her yerde tutarlı ol) | Kanidm'in seçimi | Sıfır | Aşağıda |
-| **Hash kuyruğu / semafor** | DoS'a karşı zorunlu | Düşük | Rauthy `max_hash_threads`, Keycloak `cpu-cores` |
+| Dummy Argon2 | Orta | Çok yüksek; DoS üretir | Tek başına önerilmez |
+| Sabit gecikme, örneğin her cevap 500 ms | İyi, ancak sınırlı | Throughput tavanı getirir; ayrıca gerçek işlem 500 ms'yi aşarsa sızıntı geri gelir | Uygulanabilir ancak kabadır |
+| Rastgele gecikme | Zayıf | Düşük | Ortalamayla yenilir; N örnekte gürültü √N ile azalır. Timeless makalesi bunun saldırıyı sıralı seviyeye indirdiğini, yok etmediğini belirtir |
+| Adaptif gecikme, koşan ortalamaya doldurma | İyi | Düşük | Rauthy'nin çözümüdür; aşağıdadır |
+| Rate limiting ve IP kara listesi | Yüksek; ortogonaldir | Düşük | Zorunludur |
+| Protokol düzeyinde kabullenme, yani enumeration'ı önlemeye çalışmayıp her yerde tutarlı olmak | Kanidm'in seçimidir | Sıfır | Aşağıdadır |
+| Hash kuyruğu ve semafor | DoS'a karşı zorunludur | Düşük | Rauthy'de `max_hash_threads`, Keycloak'ta `cpu-cores` |
 
-#### ⭐ Rauthy'nin çözümü — kaynak kodundan doğrulandı
+#### Rauthy'nin çözümü
 
-`src/service/src/login_delay.rs` (`https://github.com/sebadob/rauthy`, main branch, 2026-09-08 indirildi):
-> "Handles the login delay. With every successful login, a new average login time is calculated for how long it took for a successful login. **If a login failed though, the answer will be delayed by the current average for a successful login, to prevent things like username enumeration.**"
+Kaynak kodundan doğrulanmıştır: `src/service/src/login_delay.rs` (main dalı, 8 Eylül 2026'da indirilmiştir). Dosyanın açıklamasına göre modül login gecikmesini yönetir; her başarılı login'de başarılı bir login'in ne kadar sürdüğüne dair yeni bir ortalama hesaplanır ve bir login başarısız olduğunda cevap, kullanıcı sayımı gibi saldırıları önlemek için başarılı login'in güncel ortalaması kadar geciktirilir.
 
-Mekanizma:
-- Başarılı ve **parola gerçekten hash'lendiyse**: `new_time = (success_time + delta) / 2` → koşan ortalama cache'e yazılır (varsayılan başlangıç 2000 ms).
-- Başarısızlıkta: `sleep_time_median = success_time - time_taken` (negatifse 0) → hata cevabı ortalama başarı süresine kadar doldurulur.
-- Üstüne **IP başına başarısız giriş sayacıyla üstel ceza**:
-  `≥3 → +t×2s`, `≥5 → +t×3s`, `7 → 60 s kara liste`, `10 → 600 s`, `15 → 900 s`, `20 → 3600 s`, `≥25 → 86400 s`.
+Mekanizma şudur. Parola gerçekten hash'lenerek başarılı olunduğunda `new_time = (success_time + delta) / 2` hesaplanır ve koşan ortalama cache'e yazılır; varsayılan başlangıç 2000 ms'dir. Başarısızlıkta `sleep_time_median = success_time - time_taken` hesaplanır, negatifse sıfır alınır ve hata cevabı ortalama başarı süresine kadar doldurulur. Üstüne IP başına başarısız giriş sayacıyla üstel ceza uygulanır: üç ve üzeri denemede ek 2 saniye, beş ve üzeri denemede ek 3 saniye, yedi denemede 60 saniye kara liste, on denemede 600 saniye, on beş denemede 900 saniye, yirmi denemede 3600 saniye, yirmi beş ve üzerinde 86.400 saniye.
 
-`src/service/src/oidc/authorize.rs` (kullanıcı bulunamadığında):
-> "The UI does not show the password input form when there is no user yet. **To prevent username enumeration, we should not add a login delay if a user does not even exist** when the UI is in that phase where the user does not provide any password."
+`src/service/src/oidc/authorize.rs` dosyasında kullanıcı bulunamadığında şu not bulunur: arayüz henüz kullanıcı yokken parola giriş formunu göstermez, dolayısıyla kullanıcı sayımını önlemek için arayüzün parola istemediği bu aşamada kullanıcı hiç yoksa login gecikmesi eklenmemelidir.
 
-**Yani Rauthy dummy Argon2 ÇALIŞTIRMIYOR** — DoS'tan kaçınıyor, bunun yerine yanıt süresini ortalamaya dolduruyor. Bu yaklaşım:
-- ✅ DoS yok (hash yok)
-- ✅ Parametre göçü sorunu yok
-- ⚠️ "Ortalama" istatistiksel; farklı parametreli kullanıcılar arası varyans hâlâ sızabilir
-- ⚠️ Gerçek başarılı login ortalamadan uzunsa (ör. yavaş DB) sızıntı geri gelir
+Rauthy dummy Argon2 çalıştırmamaktadır; DoS'tan kaçınmakta ve bunun yerine yanıt süresini ortalamaya doldurmaktadır. Bu yaklaşımda hash çalıştırılmadığı için DoS yoktur ve parametre göçü sorunu bulunmaz. Buna karşılık ortalama istatistikseldir ve farklı parametreli kullanıcılar arasındaki varyans hâlâ sızabilir; ayrıca gerçek başarılı login ortalamadan uzunsa, örneğin veritabanı yavaşsa, sızıntı geri gelir.
 
-Ayrıca `CredStuffDetect` (config.toml): 5 saniyelik pencerede 3 başarısız `sha256(email/password)` → 86400 s kara liste.
+Ayrıca `CredStuffDetect` mekanizması beş saniyelik pencerede üç başarısız `sha256(email/password)` denemesinde 86.400 saniyelik kara liste uygular.
 
-#### Keycloak'ın çözümü — DoS tarafı
-`https://www.keycloak.org/server/all-provider-config` (2026-09-08):
-- Varsayılan hash: **Argon2id** (non-FIPS), `memory = 7168` KB, `iterations = 5`, `parallelism = 1`, `version = 1.3`, `hash-length = 32`
-- `spi-password-hashing--argon2--cpu-cores` — *"Maximum parallel CPU cores to use for hashing"*
-- Admin guide (`https://www.keycloak.org/docs/latest/server_admin/index.html`): *"**To prevent excessive memory and CPU usage, the parallel computation of hashes by Argon2 is by default limited to the number of cores available to the JVM.**"*
+#### Keycloak'ın çözümü
 
-Not: Keycloak'ın `m=7168, t=5, p=1` değeri OWASP'ın listelediği eşdeğer seçeneklerden biriyle **birebir aynı** (aşağıya bakınız) — yani düşük bellek/yüksek iterasyon tercihi bilinçli, DoS yüzeyini küçültüyor.
+Keycloak'ın yaklaşımı DoS tarafına odaklanır. Varsayılan hash Argon2id'dir (FIPS dışı modda) ve parametreleri `memory = 7168` KB, `iterations = 5`, `parallelism = 1`, `version = 1.3`, `hash-length = 32`'dir. `spi-password-hashing--argon2--cpu-cores` ayarı hash'leme için kullanılacak azami paralel CPU çekirdeği sayısını belirler. Admin guide'a göre aşırı bellek ve CPU kullanımını önlemek için Argon2'nin paralel hash hesaplaması varsayılan olarak JVM'in erişebildiği çekirdek sayısıyla sınırlanmıştır.
 
-#### Kanidm'in çözümü — "engellemiyoruz"
-`https://github.com/kanidm/kanidm/discussions/610` — Firstyear, 14 Kasım 2021:
-> "The technical barriers to effectively blocking account enumeration are extremely high ... the cost would be extraordinary for what gain?"
-> "**Account security is not defined through obscurity of its name or existence but from other elements.**"
-> "Major providers like microsoft, gmail/google, github ... do **NOT** try to prevent account/username enumeration."
+Keycloak'ın `m=7168, t=5, p=1` değeri OWASP'ın listelediği eşdeğer seçeneklerden biriyle birebir aynıdır; düşük bellek ve yüksek iterasyon tercihi bilinçlidir ve DoS yüzeyini küçültür.
 
-Tartışılan ve reddedilen seçenek: sahte hesap simülasyonu — *"simulating a fake user account would require simulating rate limits and locking, which would consume server memory"*. Ayrıca akış sorunu tespiti: `user → MFA → password` sırası zorunlu olarak sızdırır; ideali `user + password → MFA`.
+#### Kanidm'in çözümü
 
-### C.4 Bu Keycloak'ta bile hâlâ çıkıyor — güncel CVE
+Kanidm enumeration'ı engellememeyi seçmiştir. Firstyear 14 Kasım 2021'de şunu yazmıştır: hesap sayımını etkili biçimde engellemenin teknik bariyerleri son derece yüksektir ve maliyeti elde edilecek kazanca göre olağanüstüdür. Hesap güvenliği adının veya varlığının gizliliğiyle değil, başka unsurlarla tanımlanır. Microsoft, Gmail, Google ve GitHub gibi büyük sağlayıcılar hesap ve kullanıcı adı sayımını engellemeye çalışmamaktadır.
 
-**CVE-2026-4633 / GHSA-rhgq-f8x5-j2jc** — `https://github.com/advisories/GHSA-rhgq-f8x5-j2jc`
-- Yayın: **23 Mart 2026**. Şiddet: Low, CVSS 3.7 (AV:N/AC:H/PR:N/UI:N/C:L). CWE-209.
-- *"Keycloak's identity-first login flow exposes user information ... A remote attacker can exploit **differential error messages** during the identity-first login flow when **Organizations are enabled**."*
-- Var olan kullanıcı: "Invalid Password"; olmayan kullanıcı: "Invalid username or password".
-- Etkilenen: `< 26.4.12` ve `>= 26.5.0, < 26.6.1`. Düzeltilen: **26.6.1, 26.4.12**.
-- İlgili issue: `https://github.com/keycloak/keycloak/issues/47619`; Red Hat Bugzilla 2450247.
-- Ayrıca açık: `https://github.com/keycloak/keycloak/issues/26625` — *"Manual user enumeration via password reset endpoint"*.
-- Tarihsel: CVE-2020-1717 (giriş yapmış kullanıcı e-posta enumeration'ı).
+Tartışılan ve reddedilen seçenek sahte hesap simülasyonudur; sahte bir kullanıcı hesabını simüle etmek rate limit ve kilitlemeyi de simüle etmeyi gerektirir ve bu sunucu belleği tüketir. Ayrıca bir akış sorunu tespit edilmiştir: kullanıcıdan MFA'ya, oradan parolaya giden sıra zorunlu olarak sızdırır; idealı kullanıcı ve parolanın birlikte alınıp ardından MFA'nın gelmesidir.
 
-**Ders:** Enumeration, olgun bir IdP'de 2026'da hâlâ bulunuyor ve genellikle **zamanlamadan değil, yeni eklenen bir özellikten** (Organizations) sızıyor. Argus'ta her yeni akış için enumeration regresyon testi olmalı.
+### C.4 Enumeration Keycloak'ta bile hâlâ çıkıyor
 
-### C.5 Zamanlama dışı yan kanallar — tam liste
+CVE-2026-4633 ve GHSA-rhgq-f8x5-j2jc, yayın 23 Mart 2026, şiddet düşük, CVSS 3.7 (AV:N/AC:H/PR:N/UI:N/C:L), CWE-209. Keycloak'ın identity-first login akışı kullanıcı bilgisi sızdırmaktadır; uzaktaki bir saldırgan, Organizations etkinken identity-first login akışı sırasındaki differential error message'ları sömürebilmektedir. Var olan kullanıcıda mesaj "Invalid Password", olmayan kullanıcıda "Invalid username or password" biçimindedir. Etkilenen sürümler 26.4.12'nin altı ile 26.5.0 ve üstü, 26.6.1'in altıdır; düzeltilen sürümler 26.6.1 ve 26.4.12'dir. İlgili issue github.com/keycloak/keycloak/issues/47619 ve Red Hat Bugzilla 2450247'dir. Ayrıca github.com/keycloak/keycloak/issues/26625 şifre sıfırlama endpoint'i üzerinden manuel kullanıcı sayımını açık bir konu olarak taşımaktadır. Tarihsel örnek CVE-2020-1717'dir; giriş yapmış kullanıcı e-posta sayımıdır.
 
-WSTG-IDNT-04 (`https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/03-Identity_Management_Testing/04-Testing_for_Account_Enumeration_and_Guessable_User_Account.html`) + IdP'ye özgü eklemelerim:
+Ders şudur: enumeration olgun bir IdP'de 2026'da hâlâ bulunmakta ve genellikle zamanlamadan değil, yeni eklenen bir özellikten sızmaktadır. Argus'ta her yeni akış için enumeration regresyon testi bulunmalıdır.
 
-1. **Hata mesajı metni** — "Login for User foo: invalid password" vs "invalid Account"
-2. **HTTP status kodu** — 401 vs 403 vs 200
-3. **Content-Length / cevap gövde uzunluğu** — aynı metin bile olsa CSRF token uzunluğu, HTML render farkı
-4. **URL hata kodu parametresi** — `err.jsp?User=gooduser&Error=2` vs `Error=0`
-5. **URI probing** — `/account1` → 403 (var), `/account2` → 404 (yok)
-6. **Redirect hedefi** — var olan kullanıcı `/password` sayfasına, olmayan `/error`'a
-7. **Rate-limit davranış farkı** ⚠️ — var olan kullanıcı için hesap kilidi devreye giriyor, olmayan için girmiyorsa **kilit mekanizmanız oracle olur**. (Kanidm'in tespit ettiği sorun.)
-8. **Şifre sıfırlama akışı** — "Invalid username" vs "Your password has been successfully sent"; e-postanın gerçekten gidip gitmediği zamanlaması
-9. **Kayıt akışı** — "email already in use" ⚠️ **En sık kaçırılan.** Rauthy'de bunun için özel bir e-posta şablonu var: `email_registered_already.rs` → *"show this information in the UI directly to prevent a username enumeration"* (yani UI'da göstermiyor, e-posta ile bildiriyor)
-10. **MFA kayıt/challenge akışı** — WebAuthn `allowCredentials` listesi dolu mu boş mu (**passkey'lerde kritik**; `residentKey`/discoverable credential kullanmıyorsanız kullanıcının kayıtlı authenticator'ı olup olmadığı sızar)
-11. **SCIM `/Users?filter=userName eq "x"`** — API tarafında yetkisiz sorgu
-12. **OIDC hata kodları** — `login_required` vs `interaction_required`; `error_description` farkları
-13. **`prompt=none` davranışı** — oturum var mı yok mu
-14. **Sosyal/federe login** — "Bu e-posta Google ile kayıtlı" mesajı
-15. **Kullanıcı adı formatı** — `jbloggs`, `CN000100/CN000101` gibi tahmin edilebilir şemalar (WSTG)
+### C.5 Zamanlama dışı yan kanallar
 
-**Argus önerisi:** Enumeration'ı **protokol seviyesinde** çözün: tüm bu akışlarda **aynı cevap gövdesi, aynı status, aynı süre, aynı yönlendirme**. Login akışını `user+password birlikte → MFA` yapın (Kanidm'in tespiti), identity-first akışı kullanmayın veya identity-first'te **her zaman** parola formunu gösterin.
+Aşağıdaki liste WSTG-IDNT-04 ile IdP'ye özgü eklemelerden oluşur.
 
-### C.6 NIST ve OWASP resmi konumu
+1. Hata mesajı metni: "Login for User foo: invalid password" ile "invalid Account" arasındaki fark.
+2. HTTP status kodu: 401, 403 ve 200 arasındaki fark.
+3. Content-Length ve cevap gövdesi uzunluğu: aynı metin bile olsa CSRF token uzunluğu veya HTML render farkı.
+4. URL hata kodu parametresi: `err.jsp?User=gooduser&Error=2` ile `Error=0` arasındaki fark.
+5. URI probing: `/account1` 403 dönerken `/account2` 404 dönmesi.
+6. Redirect hedefi: var olan kullanıcının `/password` sayfasına, olmayanın `/error`'a yönlendirilmesi.
+7. Rate limit davranış farkı: var olan kullanıcı için hesap kilidi devreye girip olmayan için girmiyorsa kilit mekanizması oracle hâline gelir. Bu Kanidm'in tespit ettiği sorundur.
+8. Şifre sıfırlama akışı: "Invalid username" ile "Your password has been successfully sent" farkı ve e-postanın gerçekten gidip gitmediğinin zamanlaması.
+9. Kayıt akışı: "email already in use" mesajı en sık kaçırılan sızıntıdır. Rauthy'de bunun için özel bir e-posta şablonu vardır (`email_registered_already.rs`); bilgi arayüzde gösterilmez, e-posta ile bildirilir.
+10. MFA kayıt ve challenge akışı: WebAuthn `allowCredentials` listesinin dolu veya boş olması passkey'lerde kritiktir; `residentKey` veya discoverable credential kullanılmıyorsa kullanıcının kayıtlı authenticator'ı olup olmadığı sızar.
+11. SCIM `/Users?filter=userName eq "x"` sorgusu: API tarafında yetkisiz sorgu.
+12. OIDC hata kodları: `login_required` ile `interaction_required` farkı ve `error_description` farkları.
+13. `prompt=none` davranışı: oturumun var olup olmadığını sızdırır.
+14. Sosyal ve federe login: "Bu e-posta Google ile kayıtlı" mesajı.
+15. Kullanıcı adı formatı: `jbloggs` veya `CN000100` ile `CN000101` gibi tahmin edilebilir şemalar.
 
-**NIST SP 800-63B-4** (final, 2025; `https://pages.nist.gov/800-63-4/sp800-63b.html` — sayfa "Revision 4, 26 Ağustos 2025" gösteriyor **[TAM TARİH DOĞRULAMASI ZAYIF]**):
-- **Tam metin taramamda account enumeration / generic error message hakkında normatif (SHALL/SHOULD) bir gereksinim BULUNMADI.** Bu önemli: NIST bunu zorunlu kılmıyor.
-- Bulunan ilgili normatif madde (§3.2.2 civarı): *"the verifier **SHALL** limit consecutive failed authentication attempts using a specific authenticator on a single subscriber account to **no more than 100** by disabling that authenticator"*.
-- ⚠️ Bölüm numarasını kaynak sayfadan çıkardım; **§ numarası kesin değil [KISMEN DOĞRULANDI]**.
+**Argus önerisi.** Enumeration protokol seviyesinde çözülür: tüm bu akışlarda aynı cevap gövdesi, aynı status, aynı süre ve aynı yönlendirme kullanılır. Login akışı kullanıcı ve parolanın birlikte alınıp ardından MFA'nın geldiği biçimde kurulur; identity-first akışı kullanılmaz veya identity-first kullanılıyorsa parola formu her zaman gösterilir.
 
-**OWASP Forgot Password Cheat Sheet** (`https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html`) — birebir:
-> "Return a consistent message for both existent and non-existent accounts."
-> "**Ensure that the time taken for the user response message is uniform.**"
-> "Ensure that responses return in a consistent amount of time to prevent an attacker enumerating which accounts exist. **This could be achieved by using asynchronous calls or by making sure that the same logic is followed, instead of using a quick exit method.**"
-> "Implement protections against excessive automated submissions such as rate-limiting on a per-account basis, requiring a CAPTCHA..."
-> "Do not make a change to the account until a valid token is presented, such as **locking out the account**."
+### C.6 NIST ve OWASP'ın resmî konumu
 
-Son madde önemli: sıfırlama isteği hesabı kilitlerse, bu da bir oracle olur.
+**NIST SP 800-63B-4** (final, 2025; pages.nist.gov/800-63-4/sp800-63b.html sayfası Revision 4, 26 Ağustos 2025 göstermektedir; tam tarih doğrulaması zayıftır). Tam metin taramasında hesap sayımı veya genel hata mesajı hakkında normatif bir gereksinim bulunmamıştır. Bu önemlidir: NIST bunu zorunlu kılmamaktadır. Bulunan ilgili normatif madde, doğrulayıcının tek bir abone hesabında belirli bir authenticator ile yapılan ardışık başarısız kimlik doğrulama denemelerini o authenticator'ı devre dışı bırakarak en fazla 100 ile sınırlaması gerektiğidir. Bölüm numarası kaynak sayfadan çıkarılmıştır ve kesin değildir.
 
-### C.7 Argon2 parametreleri ve DoS matematiği — 2026
+**OWASP Forgot Password Cheat Sheet.** Var olan ve olmayan hesaplar için tutarlı bir mesaj döndürülmelidir. Kullanıcıya dönen mesajın süresi tekdüze olmalıdır. Yanıtların tutarlı bir sürede dönmesi sağlanmalı ve bu, senkron olmayan çağrılar kullanılarak veya hızlı çıkış yöntemi yerine aynı mantığın izlenmesi sağlanarak yapılabilir. Hesap bazında rate limiting veya CAPTCHA gibi aşırı otomatik gönderimlere karşı korumalar uygulanmalıdır. Geçerli bir token sunulmadan hesapta değişiklik yapılmamalıdır; örneğin hesap kilitlenmemelidir.
 
-**OWASP Password Storage Cheat Sheet** (`https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html`, 2026-09-08 çekildi) — Argon2id için eşdeğer güvenlikte seçenekler:
+Son madde önemlidir: sıfırlama isteği hesabı kilitlerse bu da bir oracle olur.
+
+### C.7 Argon2 parametreleri ve DoS matematiği
+
+OWASP Password Storage Cheat Sheet'e göre (8 Eylül 2026'da çekilmiştir) Argon2id için eşdeğer güvenlikteki seçenekler şunlardır:
 
 | m (KiB) | m (MiB) | t | p |
 |---|---|---|---|
@@ -413,17 +301,16 @@ Son madde önemli: sıfırlama isteği hesabı kilitlerse, bu da bir oracle olur
 | 9216 | 9 | 4 | 1 |
 | 7168 | 7 | 5 | 1 |
 
-Diğer: scrypt `N=2^17 (128 MiB), r=8, p=1`; bcrypt cost ≥10 + 72 byte sınırı (yalnızca legacy); PBKDF2-HMAC-SHA256 **600.000** iterasyon (FIPS için). Genel kural: *"Calculating a hash should take less than one second."* bcrypt ile pre-hashing tehlikeli (null byte + password shucking); gerekiyorsa `bcrypt(base64(hmac-sha384(password, pepper)), salt, cost)`.
+Diğer seçenekler scrypt için `N=2^17` (128 MiB), `r=8`, `p=1`; yalnızca legacy için bcrypt cost 10 ve üstü ile 72 baytlık sınır; FIPS gereksinimi için PBKDF2-HMAC-SHA256 ile 600.000 iterasyondur. Genel kural bir hash hesaplamasının bir saniyeden kısa sürmesi gerektiğidir. bcrypt ile ön hash'leme tehlikelidir (null byte ve password shucking); gerekiyorsa `bcrypt(base64(hmac-sha384(password, pepper)), salt, cost)` kalıbı kullanılır.
 
-**RFC 9106 §4** (`https://www.rfc-editor.org/rfc/rfc9106.txt`) — çok daha agresif:
-> "Backend server authentication, which takes 0.5 seconds on a 2 GHz CPU using 4 cores — **Argon2id with 8 lanes and 4 GiB of RAM**."
-> "Frontend server authentication, which takes 0.5 seconds on a 2 GHz CPU using 2 cores — **Argon2id with 4 lanes and 1 GiB of RAM**."
+**RFC 9106 §4** çok daha agresiftir: 2 GHz CPU'da dört çekirdek kullanarak 0,5 saniye süren arka uç sunucu kimlik doğrulaması için 8 lane ve 4 GiB RAM ile Argon2id; 2 GHz CPU'da iki çekirdek kullanarak 0,5 saniye süren ön uç sunucu kimlik doğrulaması için 4 lane ve 1 GiB RAM ile Argon2id önerilir.
 
-⚠️ RFC 9106'nın 4 GiB önerisi bir IdP için **DoS açısından kabul edilemez**. OWASP/Keycloak/Rauthy pratiği (7–128 MiB) gerçek dünyayı yansıtıyor.
+> **Uyarı.** RFC 9106'nın 4 GiB önerisi bir IdP için DoS açısından kabul edilemez. OWASP, Keycloak ve Rauthy pratiği olan 7-128 MiB aralığı gerçek dünyayı yansıtmaktadır.
 
-**`argon2` crate (RustCrypto):** **0.6.0, 27 Ağustos 2026**, 50.939.882 indirme, `https://github.com/RustCrypto/password-hashes`. (Rauthy hâlâ 0.5 kullanıyor — `Cargo.toml:73`.)
+`argon2` crate'i (RustCrypto) 0.6.0 sürümündedir, 27 Ağustos 2026 tarihlidir ve 50.939.882 indirme almıştır. Rauthy hâlâ 0.5 kullanmaktadır (`Cargo.toml:73`).
 
-**DoS matematiği (Argus için):**
+DoS matematiği şudur:
+
 ```
 Eşzamanlı hash sayısı N, bellek m MiB
 Tepe RAM = N × m + baseline
@@ -431,129 +318,99 @@ Rauthy varsayılanı: max_hash_threads=2, m=128 MiB → 256 MiB tepe
 OWASP m=19 MiB, N=32 → 608 MiB, 32 çekirdek-yarım saniye
 ```
 
-**Rauthy dokümantasyonu** (`https://sebadob.github.io/rauthy/config/argon2.html`) — birebir:
-> "`hashing.max_hash_threads` limits the maximum number of parallel password hashes at the exact same time to never exceed system memory... The default value is **2**."
-> "**For smaller deployments, set `hashing.max_hash_threads` [to 1], which will technically allow only one user login at the exact same time. This value makes an external rate limiting for the login obsolete** (while you may add some for the others)."
-> "Keep in mind that if you run the application in a way where memory is limited, for instance inside Kubernetes with resource limits set too low, **it will crash** if either `hashing.argon2_m_cost` is set too high or the memory limit too low."
+Rauthy dokümantasyonuna göre `hashing.max_hash_threads` sistem belleğini aşmamak için tam olarak aynı anda çalışan azami paralel parola hash sayısını sınırlar ve varsayılan değeri 2'dir. Küçük kurulumlar için bu değerin 1 yapılması önerilir; bu teknik olarak aynı anda yalnızca bir kullanıcı girişine izin verir ve login için harici bir rate limiting'i gereksiz kılar, diğer uçlar için rate limiting eklenebilir. Ayrıca uygulama belleğin sınırlı olduğu bir ortamda çalışıyorsa, örneğin kaynak limitleri çok düşük ayarlanmış bir Kubernetes içinde, `hashing.argon2_m_cost` çok yüksek veya bellek limiti çok düşük ayarlanırsa uygulama çöker.
 
-Ayrıca `config.toml`'da `hash_await_warn_time = 500` — *"If a request waited longer than this time... indicator that you have more concurrent logins than allowed and may need config adjustments"*.
+`config.toml` dosyasında `hash_await_warn_time = 500` ayarı bulunur; bir istek bu süreden uzun beklediyse bu, izin verilenden daha fazla eşzamanlı login olduğuna ve yapılandırmanın ayarlanması gerekebileceğine dair bir göstergedir.
 
-**⭐ Argus için hash kuyruğu tasarımı:**
+**Argus için hash kuyruğu tasarımı.**
+
 ```rust
 // Semafor + kuyruk + zaman aşımı
 static HASH_SEM: Semaphore = Semaphore::new(max_hash_threads);
-// 1. permit al (timeout ile) → alınamazsa 503 + Retry-After (kullanıcıdan bağımsız!)
+// 1. permit al (timeout ile) → alınamazsa 503 + Retry-After (kullanıcıdan bağımsız)
 // 2. Argon2 çalıştır
 // 3. permit'i bırak
 // Kritik: kuyruk doluluğu kullanıcı varlığına göre değişmemeli,
-//         yoksa yeni bir oracle yaratırsınız.
+//         yoksa yeni bir oracle yaratılır.
 ```
-⚠️ **Dikkat: kuyruk kendisi bir yan kanaldır.** Sadece var olan kullanıcılar için hash çalıştırırsanız, saldırgan kuyruğu doldurup gecikmeyi gözleyerek hangi kullanıcının var olduğunu anlayabilir. Rauthy'nin adaptif-gecikme yaklaşımı bu tuzağa düşmüyor çünkü gecikme kullanıcı varlığından bağımsız bir global ortalamadan geliyor.
+
+> **Uyarı.** Kuyruğun kendisi bir yan kanaldır. Hash yalnızca var olan kullanıcılar için çalıştırılırsa saldırgan kuyruğu doldurup gecikmeyi gözleyerek hangi kullanıcının var olduğunu anlayabilir. Rauthy'nin adaptif gecikme yaklaşımı bu tuzağa düşmez, çünkü gecikme kullanıcı varlığından bağımsız global bir ortalamadan gelir.
 
 ---
 
-## D) MARVIN SALDIRISI VE RSA
+## D. Marvin saldırısı ve RSA
 
 ### D.1 Marvin nedir
 
-**"Everlasting ROBOT: the Marvin Attack"** — Hubert Kario (Red Hat).
-IACR ePrint 2023/1442 (`https://eprint.iacr.org/2023/1442`, alındı 21 Eylül 2023, onay 24 Eylül 2023), **ESORICS 2023** (`https://link.springer.com/chapter/10.1007/978-3-031-51479-1_13`).
-Proje sayfası: `https://people.redhat.com/~hkario/marvin/` (2026-09-08 çekildi).
+"Everlasting ROBOT: the Marvin Attack", Hubert Kario (Red Hat). IACR ePrint 2023/1442, alınma 21 Eylül 2023, onay 24 Eylül 2023; ESORICS 2023. Proje sayfası people.redhat.com/~hkario/marvin/ (8 Eylül 2026'da çekilmiştir).
 
-Abstract birebir:
-> "In this paper we show that **Bleichenbacher-style attacks on RSA decryption are not only still possible, but also that vulnerable implementations are common.** We have successfully attacked multiple implementations using **only timing of decryption operation** and shown that many others are vulnerable. To perform the attack we used more statistically rigorous techniques like the **sign test, Wilcoxon signed-rank test, and bootstrapping of median of pairwise differences.**"
+Özete göre çalışma, RSA şifre çözmeye yönelik Bleichenbacher tarzı saldırıların hâlâ mümkün olmakla kalmadığını, zafiyetli implementasyonların da yaygın olduğunu göstermektedir. Yalnızca şifre çözme işleminin zamanlaması kullanılarak birden çok implementasyona başarıyla saldırılmış ve daha birçoğunun zafiyetli olduğu gösterilmiştir. Saldırıyı gerçekleştirmek için sign test, Wilcoxon signed-rank test ve pairwise farkların medyanının bootstrap'ı gibi istatistiksel olarak daha titiz teknikler kullanılmıştır.
 
-Proje sayfasından kritik noktalar:
-- Pratiklik: *"executed the attack against M2Crypto and pyca/cryptography in just a couple of hours"* — standart dizüstülerde. TLS sunucularında saatler–günler.
-- *"Previous assumptions that timing differences 'too small to detect' were safe proved wrong. The researchers' paired-difference statistical approach detects differences as small as **a few CPU clock cycles** across production networks."*
-- **OAEP de güvende değil:** *"Even RSA-OAEP implementations remain vulnerable if underlying numerical libraries leak timing information. Protection requires constant-time deblinding and byte-string conversion."*
-- **Özel anahtar çalınmaz:** *"The attack decrypts individual ciphertexts or forges signatures but does not expose the private key itself."* Sertifika yenilemeye gerek yok.
-- Birincil öneri: **"Deprecate and disable PKCS#1 v1.5 encryption entirely."**
+Proje sayfasındaki kritik noktalar şunlardır. Saldırı pratiktir: M2Crypto ve pyca/cryptography'ye karşı standart dizüstülerde birkaç saat içinde yürütülmüştür; TLS sunucularında saatler ile günler arası sürer. Ölçülemeyecek kadar küçük olduğu varsayılan zamanlama farklarının güvenli olduğu varsayımı yanlış çıkmıştır; araştırmacıların eşleştirilmiş fark yaklaşımı üretim ağlarında birkaç CPU saat döngüsü kadar küçük farkları tespit etmektedir. OAEP de güvende değildir: altındaki sayısal kütüphaneler zamanlama bilgisi sızdırıyorsa RSA-OAEP implementasyonları zafiyetli kalır ve koruma sabit zamanlı deblinding ile bayt dizisi dönüşümü gerektirir. Özel anahtar çalınmaz: saldırı tek tek şifreli metinleri çözer veya imza forge eder, ancak özel anahtarın kendisini açığa çıkarmaz, dolayısıyla sertifika yenilemeye gerek yoktur. Birincil öneri PKCS#1 v1.5 şifrelemenin tamamen deprecate edilip devre dışı bırakılmasıdır.
 
-### D.2 Etkilenen kütüphaneler ve CVE listesi (proje sayfasından, 2026-09-08)
+### D.2 Etkilenen kütüphaneler ve CVE listesi
+
+Proje sayfasından, 8 Eylül 2026:
 
 | Uygulama | CVE | Durum |
 |---|---|---|
-| OpenSSL (TLS) | **CVE-2022-4304** | Fixed |
+| OpenSSL (TLS) | CVE-2022-4304 | Düzeltildi |
 | OpenSSL (API) | — | API iyileştirmeleri merge edildi |
-| GnuTLS (TLS) | **CVE-2023-0361, CVE-2023-5981, CVE-2024-0553** | Kısmi / çoklu düzeltme |
-| NSS (TLS) | **CVE-2023-4421, CVE-2023-5388** | **Kısmi düzeltme; hâlâ zafiyetli** |
-| pyca/cryptography | **CVE-2020-25659, CVE-2023-50782** | **Etkisiz azaltma** |
-| M2Crypto | **CVE-2020-25657, CVE-2023-50781** | **Etkisiz azaltma** |
-| python-rsa | **CVE-2020-25658** | Kapsam dışı |
-| Go | **CVE-2023-45287** | Fixed (v1.20+) |
-| Java | **CVE-2024-20952, CVE-2025-21587** | Fixed |
-| BouncyCastle | **CVE-2024-30171** | Fixed |
-| Node.js | **CVE-2023-46809** | Fixed |
+| GnuTLS (TLS) | CVE-2023-0361, CVE-2023-5981, CVE-2024-0553 | Kısmî ve çoklu düzeltme |
+| NSS (TLS) | CVE-2023-4421, CVE-2023-5388 | Kısmî düzeltme; hâlâ zafiyetlidir |
+| pyca/cryptography | CVE-2020-25659, CVE-2023-50782 | Etkisiz azaltma |
+| M2Crypto | CVE-2020-25657, CVE-2023-50781 | Etkisiz azaltma |
+| python-rsa | CVE-2020-25658 | Kapsam dışı |
+| Go | CVE-2023-45287 | Düzeltildi; v1.20 ve üstü |
+| Java | CVE-2024-20952, CVE-2025-21587 | Düzeltildi |
+| BouncyCastle | CVE-2024-30171 | Düzeltildi |
+| Node.js | CVE-2023-46809 | Düzeltildi |
 | .NET | — | Issue açıldı |
-| Apple corecrypto | **CVE-2024-23218** | Fixed |
-| Mbed TLS | **CVE-2024-23170** | Fixed |
-| libgcrypt | **CVE-2024-2236** | Fixed |
-| wolfSSL | **CVE-2023-6935** | Fixed |
-| PyCryptodome | **CVE-2023-52323** | Fixed |
-| jsrsasign | **CVE-2024-21484** | Fixed |
+| Apple corecrypto | CVE-2024-23218 | Düzeltildi |
+| Mbed TLS | CVE-2024-23170 | Düzeltildi |
+| libgcrypt | CVE-2024-2236 | Düzeltildi |
+| wolfSSL | CVE-2023-6935 | Düzeltildi |
+| PyCryptodome | CVE-2023-52323 | Düzeltildi |
+| jsrsasign | CVE-2024-21484 | Düzeltildi |
 | cjose | — | PR merge edildi |
-| Ruby | **CVE-2025-0306** | Fixed |
-| Linux Kernel | **CVE-2023-6240** | Fixed |
-| OpenSC | **CVE-2023-5992, CVE-2024-29995** | Fixed |
-| Intel QuickAssist | **CVE-2024-33617, CVE-2024-28885, CVE-2024-31074** | Fixed |
-| Rust OpenSSL | **CVE-2024-3296** | Fixed |
-| **RustCrypto RSA** | **CVE-2023-49092** | **"Fixed" (proje sayfasına göre) — ÇELİŞKİLİ, aşağıya bakınız** |
+| Ruby | CVE-2025-0306 | Düzeltildi |
+| Linux Kernel | CVE-2023-6240 | Düzeltildi |
+| OpenSC | CVE-2023-5992, CVE-2024-29995 | Düzeltildi |
+| Intel QuickAssist | CVE-2024-33617, CVE-2024-28885, CVE-2024-31074 | Düzeltildi |
+| RustCrypto RSA | CVE-2023-49092 | Proje sayfasına göre düzeltildi; bu bilgi çelişkilidir, aşağıya bakınız |
 | xmlsec | — | PKCS1.5 devre dışı bırakıldı |
 | Erlang/OTP | — | Uyarı eklendi |
 
-**Etkilenmediği doğrulananlar:** BearSSL 0.6, BoringSSL (TLS, Eylül 2023 itibarıyla), **rustls 0.21.9** (RSA ciphersuite desteği yok).
+Etkilenmediği doğrulananlar: BearSSL 0.6, BoringSSL (TLS, Eylül 2023 itibarıyla) ve rustls 0.21.9 (RSA ciphersuite desteği yoktur).
 
-**marvin-toolkit** — `https://github.com/tomato42/marvin-toolkit` (sürüm 0.3.5)
-- Step 0: venv + tlsfuzzer kurulumu. Step 1: 1024/2048/4096-bit RSA anahtar üretimi (PEM/PKCS#8/PKCS#12). Step 2: bilinen yapıda çok sayıda şifreli metin (geçerli, bozuk header, yanlış padding uzunluğu vb.).
-- İstatistik: **Friedman testi.** p < 0.05 → muhtemel yan kanal; **p < 1e-9 → neredeyse kesin.**
-- Örneklem: *"100k to a 1M calls per ciphertext"* yerel test için; hızlı kütüphaneler ~10M, yavaşlar 1G+ gözlem gerektirebiliyor.
-- TLS sunucusu testi: `test-bleichenbacher-timing-pregenerate.py`; API testi: `marvin-ciphertext-generator.py`.
+**marvin-toolkit** (github.com/tomato42/marvin-toolkit, sürüm 0.3.5). Adım 0 venv ve tlsfuzzer kurulumudur. Adım 1 1024, 2048 ve 4096 bit RSA anahtar üretimidir (PEM, PKCS#8, PKCS#12). Adım 2 bilinen yapıda çok sayıda şifreli metin üretimidir: geçerli, bozuk header'lı, yanlış padding uzunluklu ve benzeri. İstatistik Friedman testidir; p değeri 0,05'in altındaysa muhtemel yan kanal, 1e-9'un altındaysa neredeyse kesin yan kanal vardır. Örneklem yerel test için şifreli metin başına 100.000 ile 1 milyon çağrıdır; hızlı kütüphaneler yaklaşık 10 milyon, yavaşlar 1 milyardan fazla gözlem gerektirebilir. TLS sunucusu testi `test-bleichenbacher-timing-pregenerate.py`, API testi `marvin-ciphertext-generator.py` ile yapılır.
 
-**OpenSSL tarafındaki asıl azaltma — "implicit rejection"**
-`https://raw.githubusercontent.com/openssl/openssl/master/CHANGES.md` (satır 3935 civarı, **"Changes between 3.1 and 3.2.0 [23 Nov 2023]"** başlığı altında):
-> "Added and **enabled by default implicit rejection in RSA PKCS#1 v1.5 decryption** as a protection against Bleichenbacher-like attacks. The RSA decryption API will now return a randomly generated **deterministic message** instead of an error in case it detects an error when checking padding... This is a general protection against issues like CVE-2020-25659 and CVE-2020-25657."
-> *Katkı: Hubert Kario*
+**OpenSSL tarafındaki asıl azaltma: implicit rejection.** OpenSSL CHANGES.md dosyasında, 3.1 ile 3.2.0 (23 Kasım 2023) arasındaki değişiklikler başlığı altında şu yer alır: Bleichenbacher benzeri saldırılara karşı koruma olarak RSA PKCS#1 v1.5 şifre çözmede implicit rejection eklenmiş ve varsayılan olarak etkinleştirilmiştir. RSA şifre çözme API'si, padding kontrolünde hata tespit ettiğinde hata döndürmek yerine rastgele üretilmiş deterministik bir mesaj döndürecektir. Bu, CVE-2020-25659 ve CVE-2020-25657 gibi sorunlara karşı genel bir korumadır. Katkı Hubert Kario'ya aittir.
 
-Ayrıca (3.0.9/3.1.1 civarı): *"Reworked the Fix for the Timing Oracle in RSA Decryption (CVE-2022-4304). The previous fix ... caused a severe 2-3x performance regression ... The new fix uses existing constant time code paths."*
+Ayrıca 3.0.9 ve 3.1.1 civarında RSA şifre çözmedeki zamanlama oracle'ı için düzeltme yeniden ele alınmıştır (CVE-2022-4304); önceki düzeltme 2-3 kat ciddi bir performans gerilemesine yol açmıştı ve yeni düzeltme mevcut sabit zamanlı kod yollarını kullanmaktadır.
 
-**Sonuç:** OpenSSL ≥ 3.2.0 kullanıyorsanız PKCS#1 v1.5 decryption'da implicit rejection açık. Bu bir **azaltma**, kök çözüm değil — Kario'nun önerisi hâlâ "PKCS#1 v1.5 şifrelemeyi tamamen kapat".
+Sonuç şudur: OpenSSL 3.2.0 ve üstü kullanılıyorsa PKCS#1 v1.5 şifre çözmede implicit rejection açıktır. Bu bir azaltmadır, kök çözüm değildir; Kario'nun önerisi hâlâ PKCS#1 v1.5 şifrelemenin tamamen kapatılmasıdır.
 
-### D.3 IdP'de RSA-PKCS#1 v1.5 decryption nerede kullanılır?
+### D.3 IdP'de RSA PKCS#1 v1.5 şifre çözmenin kullanıldığı yerler
 
-**⭐ Tek büyük yer: JWE `alg=RSA1_5` anahtar sarmalama.** IdP'de görülebilecek yerler:
-- Request Object encryption (JAR/JARM — `request` parametresi şifreli JWE)
-- ID Token / UserInfo encryption (`id_token_encrypted_response_alg`, `userinfo_encrypted_response_alg`)
-- `private_key_jwt` istemci kimlik doğrulaması (imza — decryption değil, **Marvin kapsamı dışı**)
-- Client'tan gelen şifreli JWT'ler
-- SAML `EncryptedAssertion` / `EncryptedKey` (**bunu unutmayın** — SAML tarafı `http://www.w3.org/2001/04/xmlenc#rsa-1_5` kullanır; xmlsec bunu devre dışı bıraktı)
+Tek büyük yer JWE `alg=RSA1_5` anahtar sarmalamadır. Bir IdP'de görülebilecek noktalar şunlardır: Request Object şifrelemesi (JAR ve JARM; `request` parametresi şifreli JWE olabilir), ID Token ve UserInfo şifrelemesi (`id_token_encrypted_response_alg`, `userinfo_encrypted_response_alg`), `private_key_jwt` istemci kimlik doğrulaması (imzadır, şifre çözme değildir ve Marvin kapsamı dışındadır), istemciden gelen şifreli JWT'ler ve SAML `EncryptedAssertion` ile `EncryptedKey`. Sonuncusu unutulmamalıdır; SAML tarafı `http://www.w3.org/2001/04/xmlenc#rsa-1_5` kullanır ve xmlsec bunu devre dışı bırakmıştır.
 
-**RSASSA-PKCS1-v1_5 imzalama (RS256/384/512) etkilenir mi?**
-- **Doğrulama (verify): HAYIR.** Yalnızca public key işlemi; sır yok.
-- **İmzalama (sign): Marvin'in decryption oracle'ı kapsamında DEĞİL**, ama:
-  - IETF draft'ı bunu açıkça ayırıyor (`draft-ietf-jose-deprecate-none-rsa15-05` §1, birebir): *"Note that **RSA signatures using PKCS#1 version 1.5 padding ("RS256", "RS384", and "RS512") are unchanged by this specification and can still be used.**"*
-  - **AMA:** RustSec RUSTSEC-2023-0071 (`rsa` crate) **her türlü private-key işlemini** kapsıyor ve *"information about the private key is leaked through timing information which is observable over the network"* diyor — yani `rsa` crate'iyle RS256 **imzalamak** da advisory kapsamında. IdP her token için imzalar → çok sayıda ölçüm → risk gerçek.
-  - Marvin FAQ'ında da: aynı anahtarla hem decryption oracle'ı hem imzalama varsa, oracle üzerinden **imza forge edilebilir**.
+**RSASSA-PKCS1-v1_5 imzalama (RS256, RS384, RS512) etkilenir mi.** Doğrulama etkilenmez; yalnızca public key işlemidir ve sır yoktur. İmzalama Marvin'in decryption oracle'ı kapsamında değildir, ancak iki nokta vardır. IETF taslağı bunu açıkça ayırır: `draft-ietf-jose-deprecate-none-rsa15-05` §1'e göre PKCS#1 sürüm 1.5 padding kullanan RSA imzaları (RS256, RS384, RS512) bu spesifikasyonla değişmemiştir ve hâlâ kullanılabilir. Buna karşılık RustSec RUSTSEC-2023-0071 advisory'si `rsa` crate'i için her türlü private key işlemini kapsar ve özel anahtar hakkındaki bilginin ağ üzerinden gözlemlenebilen zamanlama bilgisiyle sızdığını belirtir; yani `rsa` crate'iyle RS256 imzalamak da advisory kapsamındadır. Bir IdP her token için imzalar, dolayısıyla çok sayıda ölçüm birikir ve risk gerçektir. Marvin SSS'inde de aynı anahtarla hem decryption oracle'ı hem imzalama varsa oracle üzerinden imza forge edilebileceği belirtilir.
 
-**JOSE'de RSA1_5'in durumu — 2026**
+**JOSE'de RSA1_5'in 2026 durumu.** `draft-ietf-jose-deprecate-none-rsa15-05` Haziran 2026 tarihlidir, son geçerlilik 25 Aralık 2026'dır; datatracker'da IESG durumu "Publication Requested"tır, son revizyon 23 Haziran 2026, son güncelleme 6 Eylül 2026'dır. Henüz RFC değildir. Yazarı Neil Madden'dır (Hazelcast).
 
-`draft-ietf-jose-deprecate-none-rsa15-05` (`https://www.ietf.org/archive/id/draft-ietf-jose-deprecate-none-rsa15-05.txt`, Haziran 2026, son geçerlilik 25 Aralık 2026; datatracker: **IESG state "Publication Requested"**, son revizyon 23 Haziran 2026, son güncelleme 6 Eylül 2026 — `https://datatracker.ietf.org/doc/draft-ietf-jose-deprecate-none-rsa15/`). **Henüz RFC değil.** Yazar: Neil Madden (Hazelcast).
+§3'e göre `RSA1_5` algoritması PKCS#1 sürüm 1.5 padding kullanan RSA şifrelemesini implemente eder. Bu padding modunun en azından 1998'deki Bleichenbacher saldırısından beri güvenlik sorunları olduğu bilinmektedir. Algoritmanın JWE'de desteklenmesinin nedeni, özellikle legacy donanımdaki yaygın dağıtımıdır. Ancak OAEP veya eliptik eğri şifreleme algoritmaları gibi daha güvenli alternatifler artık yaygın biçimde mevcuttur. NIST bu şifreleme modunun federal kullanımını 2023 sonundan itibaren yasaklamıştır (NIST SP 800-131Ar2) ve bir CFRG taslağı da bu modu yeni protokoller ve dağıtımlar için deprecate etmektedir.
 
-§3 birebir:
-> "The "RSA1_5" algorithm implements RSA encryption using PKCS#1 version 1.5 padding... This padding mode has long been known to have security issues, since at least Bleichenbacher's attack in 1998. It was supported in JWE due to the wide deployment of this algorithm, especially in legacy hardware. However, more secure replacements such as OAEP or elliptic curve encryption algorithms are now widely available. **NIST has disallowed the use of this encryption mode for federal use since the end of 2023** [NIST.SP800-131Ar2] and a CFRG draft also deprecates this encryption mode for new protocols and deployments."
+§4'e göre JOSE kütüphane geliştiricileri bu algoritmaların desteğini deprecate etmelidir; uygulama geliştiricileri bu algoritmaların desteğini varsayılan olarak devre dışı bırakmak zorundadır. Bu algoritmalardan birine özel ihtiyacı olan bir uygulama onu etkinleştirebilir, ancak yalnızca onu gerektiren belirli nesneler veya işlemler için, global düzeyde değil. JOSE üzerine kurulan yeni spesifikasyonlar bu algoritmaların kullanımına izin veremez. IANA'da "Deprecated" olarak işaretlenecektir, "Prohibited" değil.
 
-§4 birebir:
-> "JOSE library developers **SHOULD** deprecate support for these algorithms. Application developers **MUST disable support for these algorithms by default.** ... an application that has a specific need for one of these algorithms MAY enable it, but **only for the specific objects or operations that require it and not at a global level.** **New specifications building on top of JOSE MUST NOT allow the use of either algorithm.**"
-> IANA'da "Deprecated" olarak işaretlenecek (Prohibited değil).
+**RFC 8725 §3.2** uygulamaların algoritmaya özgü tavsiyeleri izlemesini önerir: tüm RSA-PKCS1 v1.5 şifreleme algoritmalarından kaçınılmalı (RFC 8017 §7.2) ve RSAES-OAEP tercih edilmelidir (RFC 8017 §7.1).
 
-**RFC 8725 §3.2** (`https://www.rfc-editor.org/rfc/rfc8725.txt`):
-> "Applications SHOULD follow these algorithm-specific recommendations: **Avoid all RSA-PKCS1 v1.5 encryption algorithms ([RFC8017], Section 7.2), preferring RSAES-OAEP ([RFC8017], Section 7.1).**"
+**alg downgrade riski.** Sunucu JWE header'ındaki `alg` değerini allowlist olmadan kabul ediyorsa saldırgan RSA-OAEP'ten RSA1_5'e düşürüp Bleichenbacher saldırısı açabilir. Argus'ta `alg` değeri her zaman istemci kaydındaki beklenen değere karşı doğrulanır, JWE header'ından alınmaz.
 
-**alg downgrade riski:** Sunucu JWE header'ındaki `alg`'yi allowlist olmadan kabul ediyorsa, saldırgan RSA-OAEP'ten RSA1_5'e düşürüp Bleichenbacher açar. **Argus'ta `alg` değeri her zaman istemci kaydındaki (client metadata) beklenen değere karşı doğrulanmalı, JWE header'ından alınmamalı.**
+### D.4 Rust `rsa` crate'i ve RUSTSEC-2023-0071'in 2026 durumu
 
-### D.4 ⭐ Rust `rsa` crate — RUSTSEC-2023-0071 durumu 2026'da
+RustSec advisory'sinin ana daldan alınan TOML'u şudur:
 
-**RustSec advisory (ana daldan birebir TOML, `https://raw.githubusercontent.com/rustsec/advisory-db/main/crates/rsa/RUSTSEC-2023-0071.md`, 2026-09-08):**
 ```toml
 id = "RUSTSEC-2023-0071"
 package = "rsa"
@@ -562,64 +419,47 @@ url = "https://github.com/RustCrypto/RSA/issues/626"
 cvss = "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N"   # 5.9 Medium
 aliases = ["CVE-2023-49092", "GHSA-c38w-74pg-36hr", "GHSA-4grx-2x9w-596c"]
 [versions]
-patched = []          # ← BOŞ
+patched = []          # boş
 ```
-> "### Patches — Currently, **no patched versions exist**. The maintainers are working toward a fully constant-time implementation."
-> "### Workarounds — Users should **limit the RSA crate to scenarios where timing observations aren't feasible** — such as isolated, uncompromised systems."
 
-**Sürüm durumu (crates.io API, 2026-09-08):**
-- Stabil varsayılan: **0.9.10 (6 Ocak 2026)**
-- En yeni: **0.10.0-rc.18 (27 Nisan 2026)** — hâlâ **release candidate**, 18 RC'den sonra
-- Toplam 215.298.115 indirme, MSRV Rust 1.85
+Advisory, hâlihazırda yamalı bir sürüm bulunmadığını ve bakımcıların tam sabit zamanlı bir implementasyona doğru çalıştığını belirtir. Geçici çözüm olarak kullanıcıların `rsa` crate'ini zamanlama gözlemlerinin fizibil olmadığı senaryolarla sınırlaması önerilir; örneğin izole ve ele geçirilmemiş sistemler.
 
-**Düzeltme çalışmasının durumu:**
-- **Issue #390** "Migrating from `num-bigint(-dig)` to `crypto-bigint`" (açılış 28 Kasım 2023, tarcieri) → **KAPALI**. `BoxedUint` + Montgomery + sabit-zamanlı modexp'e geçiş.
-- **⭐ Issue #626** "**Padding implementation is not constant-time**" (açılış **7 Ocak 2026**) → **AÇIK**. Maintainer notu (birebir):
-  > "the remaining sidechannels in our implementation are probably no longer coming from `crypto-bigint`, but are instead **in this crate's implementation of RSA padding modes**."
-  RustSec advisory'sinin `url` alanı artık **bu issue'ya** işaret ediyor.
-- README (`https://raw.githubusercontent.com/RustCrypto/RSA/master/README.md`, 2026-09-08) hâlâ: *"The implementation is vulnerable to the Marvin Attack ... (RUSTSEC-2023-0071). Mitigation efforts are ongoing in issue #390."*
-- docs.rs 0.9.10 Security Notes: *"The implementation of modular exponentiation is not constant time, but timing variability is masked using **random blinding**"* + Include Security tarafından tek denetim.
+**Sürüm durumu** (crates.io API, 8 Eylül 2026). Stabil varsayılan 0.9.10'dur (6 Ocak 2026). En yeni sürüm 0.10.0-rc.18'dir (27 Nisan 2026) ve 18 release candidate sonrasında hâlâ RC aşamasındadır. Toplam 215.298.115 indirme alınmıştır, MSRV Rust 1.85'tir.
 
-**⚠️ [ÇELİŞKİLİ]** Marvin proje sayfası (`people.redhat.com/~hkario/marvin/`) tablosunda **"RustCrypto RSA | CVE-2023-49092 | Fixed"** yazıyor. Ancak:
-- RustSec advisory-db ana dalı: `patched = []`
-- GitHub Advisory GHSA-c38w-74pg-36hr: "Patched versions: None"
-- Upstream issue #626 açık ve **2026 Ocak'ta açılmış**
-- Crate README'si hâlâ uyarıyor
+**Düzeltme çalışmasının durumu.** Issue #390 ("Migrating from `num-bigint(-dig)` to `crypto-bigint`", açılış 28 Kasım 2023, tarcieri) kapalıdır; `BoxedUint`, Montgomery ve sabit zamanlı modexp'e geçiş yapılmıştır. Issue #626 ("Padding implementation is not constant-time", açılış 7 Ocak 2026) açıktır. Bakımcı notuna göre implementasyondaki kalan yan kanallar muhtemelen artık `crypto-bigint`'ten değil, bu crate'in RSA padding modlarına ait implementasyonundan gelmektedir. RustSec advisory'sinin `url` alanı artık bu issue'ya işaret etmektedir. README hâlâ implementasyonun Marvin saldırısına açık olduğunu ve azaltma çabalarının issue #390'da sürdüğünü belirtmektedir. docs.rs 0.9.10 güvenlik notlarına göre modüler üs alma implementasyonu sabit zamanlı değildir ancak zamanlama değişkenliği rastgele blinding ile maskelenmektedir; crate Include Security tarafından bir kez denetlenmiştir.
 
-**Değerlendirmem:** Kario'nun tablosu muhtemelen modexp düzeltmesini (issue #390 / crypto-bigint) gördüğü için "Fixed" işaretlemiş; padding tarafı hâlâ açık. **Argus için karar: `rsa` crate'ini private-key işlemleri için üretimde kullanmayın.**
+> **Çelişki.** Marvin proje sayfası tablosunda RustCrypto RSA için CVE-2023-49092 "Fixed" olarak işaretlidir. Ancak RustSec advisory-db ana dalında `patched = []`, GitHub Advisory GHSA-c38w-74pg-36hr'de "Patched versions: None" yazmakta, upstream issue #626 açık ve Ocak 2026'da açılmış durumdadır ve crate README'si hâlâ uyarı vermektedir. Değerlendirme şudur: Kario'nun tablosu muhtemelen modexp düzeltmesini (issue #390 ve crypto-bigint) gördüğü için "Fixed" işaretlemiştir; padding tarafı hâlâ açıktır. Argus için karar `rsa` crate'inin private key işlemleri için üretimde kullanılmamasıdır.
 
-**Rust JOSE kütüphaneleri ne yapıyor?**
-- **`jsonwebtoken` 11.0.0 (24 Temmuz 2026)**, 183.855.256 indirme — **sadece JWS**, JWE yok. Kripto backend'i takılabilir: `aws_lc_rs` (aws-lc-rs 1.18.1, 1 Eylül 2026) veya `rust_crypto`. `CryptoProvider` deseni rustls'ten alınmış. **Argus için RS256 imzalamada `aws_lc_rs` backend'ini seçmek `rsa` crate'inden kaçınmanın en temiz yolu** (kaynak: `https://raw.githubusercontent.com/Keats/jsonwebtoken/master/src/crypto/mod.rs`).
-- **`josekit` 0.10.3 (20 Mayıs 2025)**, 3.747.971 indirme — **tam JOSE, JWE dahil**. README algoritma tablosunda **`RSA1_5` (RSAES-PKCS1-v1_5) DESTEKLENİYOR**, RSA-OAEP/-256/-384/-512 ile birlikte. Backend: `openssl = "0.10.68"` (native OpenSSL) — yani Marvin durumu sistemdeki OpenSSL sürümüne bağlı (≥3.2.0 ise implicit rejection açık). ⚠️ **Bakım:** 16 aydır güncelleme yok.
-- **`rustls`**: RSA key exchange desteklemiyor → Marvin'e karşı yapısal olarak bağışık (Kario'nun listesinde "not vulnerable, rustls 0.21.9").
+**Rust JOSE kütüphanelerinin durumu.** `jsonwebtoken` 11.0.0 (24 Temmuz 2026, 183.855.256 indirme) yalnızca JWS sağlar, JWE yoktur. Kripto backend'i takılabilirdir: `aws_lc_rs` (aws-lc-rs 1.18.1, 1 Eylül 2026) veya `rust_crypto`. `CryptoProvider` deseni rustls'ten alınmıştır. Argus için RS256 imzalamada `aws_lc_rs` backend'ini seçmek `rsa` crate'inden kaçınmanın en temiz yoludur. `josekit` 0.10.3 (20 Mayıs 2025, 3.747.971 indirme) JWE dahil tam JOSE sağlar. README algoritma tablosunda `RSA1_5` (RSAES-PKCS1-v1_5) RSA-OAEP, OAEP-256, OAEP-384 ve OAEP-512 ile birlikte desteklenmektedir. Backend'i `openssl = "0.10.68"`, yani native OpenSSL'dir; dolayısıyla Marvin durumu sistemdeki OpenSSL sürümüne bağlıdır ve 3.2.0 ve üstünde implicit rejection açıktır. Bakım açısından 16 aydır güncelleme yoktur. `rustls` RSA key exchange desteklemez ve Marvin'e karşı yapısal olarak bağışıktır; Kario'nun listesinde rustls 0.21.9 zafiyetsiz olarak yer alır.
 
-**Argus için RSA kararları:**
-1. **JWE `RSA1_5`'i hiç implemente etmeyin.** IETF zaten "MUST disable by default" diyor; hiç desteklemeyerek downgrade yüzeyini sıfırlarsınız.
-2. JWE için: **ECDH-ES + A256GCM** (birincil), gerekirse **RSA-OAEP-256** (ikincil, sadece legacy istemciler için, açıkça opt-in).
-3. İmzalama için: **EdDSA (Ed25519)** veya **ES256** birincil; RS256'yı sadece uyumluluk için ve `aws-lc-rs` backend ile.
-4. `rsa` crate'ini bağımlılık ağacından çıkarın (`cargo tree -i rsa` ile kontrol edin) veya sadece public-key doğrulama için sınırlayın.
-5. `alg` allowlist'i istemci metadata'sından gelsin, JWE/JWS header'ından değil.
-6. CI'da `cargo audit` / `cargo deny` ile RUSTSEC-2023-0071'i explicit olarak izleyin.
+**Argus için RSA kararları.**
+
+1. JWE `RSA1_5` hiç implemente edilmez. IETF zaten varsayılan olarak devre dışı bırakılmasını zorunlu kılmaktadır; hiç desteklememek downgrade yüzeyini sıfırlar.
+2. JWE için birincil `ECDH-ES` ve `A256GCM`, gerekirse ikincil olarak ve yalnızca legacy istemciler için açıkça opt-in `RSA-OAEP-256` kullanılır.
+3. İmzalama için birincil `EdDSA` (Ed25519) veya `ES256`, uyumluluk için `RS256` ve yalnızca `aws-lc-rs` backend ile kullanılır.
+4. `rsa` crate'i bağımlılık ağacından çıkarılır (`cargo tree -i rsa` ile kontrol edilir) veya yalnızca public key doğrulamayla sınırlanır.
+5. `alg` allowlist'i istemci metadata'sından gelir, JWE veya JWS header'ından değil.
+6. CI'da `cargo audit` ve `cargo deny` ile RUSTSEC-2023-0071 açıkça izlenir.
 
 ---
 
-## E) SPECTRE / MELTDOWN SINIFI — IdP İÇİN GERÇEKÇİ DEĞERLENDİRME
+## E. Spectre ve Meltdown sınıfı
 
-### E.1 Tehdit modeli — ne zaman önemli?
+### E.1 Tehdit modeli
 
-Geçici yürütme (transient execution) saldırıları **yerel kod yürütme veya aynı fiziksel makinede co-tenant** gerektirir. Bir IdP için üç senaryo:
+Geçici yürütme saldırıları yerel kod yürütme veya aynı fiziksel makinede co-tenant gerektirir. Bir IdP için senaryolar şunlardır.
 
 | Senaryo | Risk | Gerekçe |
 |---|---|---|
-| Kendi donanımınız / dedicated instance, başka kiracı yok | **Çok düşük** | Saldırgan kod çalıştıramıyor |
-| Çok kiracılı bulut (paylaşımlı VM host) | **Orta** | VMScape, cross-VM saldırılar |
-| Paylaşımlı çekirdek üzerinde container'lar (aynı node'da güvenilmeyen iş yükü) | **Orta-Yüksek** | user↔user, user↔kernel |
-| ⭐ **Argus'ta WASM/script/plugin eklenti noktası varsa** | **YÜKSEK** | Süreç-içi güvenilmeyen kod — Spectre'ın klasik senaryosu |
-| Tarayıcı tarafı | **İlgisiz** | Kernel dokümanı: *"the CPU vulnerabilities mitigated by Linux have generally not been shown to be exploitable from browser-based sandboxes."* |
+| Kendi donanımı veya dedicated instance; başka kiracı yok | Çok düşük | Saldırgan kod çalıştıramaz |
+| Çok kiracılı bulut, paylaşımlı VM host | Orta | VMScape ve cross-VM saldırıları |
+| Paylaşımlı çekirdek üzerinde container'lar; aynı node'da güvenilmeyen iş yükü | Orta ile yüksek arası | Kullanıcıdan kullanıcıya ve kullanıcıdan kernel'e saldırılar |
+| Argus'ta WASM, script veya plugin eklenti noktası varsa | Yüksek | Süreç içi güvenilmeyen kod; Spectre'ın klasik senaryosudur |
+| Tarayıcı tarafı | İlgisiz | Kernel dokümantasyonuna göre Linux'un azalttığı CPU zafiyetlerinin genel olarak tarayıcı tabanlı sandbox'lardan sömürülebilir olduğu gösterilmemiştir |
 
-### E.2 Mevcut manzara 2024–2026 — DOĞRULANMIŞ liste
+### E.2 Mevcut manzara, 2024-2026
 
-Linux kernel dokümantasyon ağacındaki **tam hw-vuln listesi** (`https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain/Documentation/admin-guide/hw-vuln/index.rst`, 2026-09-08, docs sürümü **7.3.0-rc2**):
+Linux kernel dokümantasyon ağacındaki tam hw-vuln listesi şudur (docs sürümü 7.3.0-rc2, 8 Eylül 2026):
 
 ```
 attack_vector_controls, spectre, l1tf, mds, tsx_async_abort, multihit,
@@ -628,177 +468,134 @@ processor_mmio_stale_data, cross-thread-rsb, srso, gather_data_sampling,
 reg-file-data-sampling, rsb, old_microcode, indirect-target-selection, vmscape
 ```
 
-**Bu listede `vmscape`'ten daha yeni isimli bir zafiyet dokümanı YOK** — yani 2026-09 itibarıyla kernel'de yeni bir isimlendirilmiş sınıf eklenmemiş.
+Bu listede `vmscape`'ten daha yeni isimli bir zafiyet dokümanı yoktur; Eylül 2026 itibarıyla kernel'e yeni bir isimlendirilmiş sınıf eklenmemiştir.
 
-| Saldırı | CVE | Yıl | Etki | Kaynak (doğrulandı) |
+| Saldırı | CVE | Yıl | Etki | Kaynak |
 |---|---|---|---|---|
-| **Downfall / GDS** | **CVE-2022-40982** | 2023 | Intel Skylake(6.)–Tiger Lake(11.) `gather` komutu vektör register dosyasını sızdırıyor. SGX dahil. Mitigation overhead **%50'ye kadar**. Bildirim 24 Ağu 2022, embargo ~1 yıl. | `https://downfall.page/` |
-| **Zenbleed** | **CVE-2023-20593** | 2023 | AMD **Zen 2** (Ryzen 3000/4000/5000-G, EPYC "Rome"); `vzeroupper` yanlış tahmin kurtarma → register sızıntısı | `https://lock.cmpxchg8b.com/zenbleed.html` (Tavis Ormandy) |
-| **Inception / SRSO** | **CVE-2023-20569** | 2023 | AMD **Zen 1–4** (family 0x17, 0x19); RAP zehirlenmesi, non-architectural CALL | Kernel `srso.rst` |
-| **Reptar** | **CVE-2023-23583** | 2023 | Intel redundant prefix — DoS / privilege escalation. **Bu bir yan kanal DEĞİL.** | ⚠️ **[KISMEN DOĞRULANDI]** — `lock.cmpxchg8b.com/reptar.html` HTTP 200 döndü ama içerik JS ile yükleniyor, metin çıkaramadım. CVE numarası arama sonuçlarından. |
-| **Breaking the Barrier / PB-Inception** | **CVE-2024-10041** (PAM zafiyeti için) | IEEE S&P **2025** | IBPB bariyerini bypass. Intel Core 12–14. nesil, Xeon 5–6. nesil mikrokod hatası + AMD IBPB'nin return tahminlerini temizlememesi. **İlk pratik uçtan uca cross-process Spectre**: SUID `sudo`'dan root parolası; PB-Inception ile page cache'ten root parola hash'i. | `https://comsec.ethz.ch/research/microarch/breaking-the-barrier/` |
-| **⭐ Training Solo** | **CVE-2024-28956** (ITS), **CVE-2025-24495** (Lion Cove BPU) | 2025 | Domain isolation'ı **tasarım gereği** kırar: saldırgan aynı domain içinde self-training yapıyor. eBPF gerekmiyor — **cBPF/SECCOMP yeterli (tüm kullanıcılara varsayılan açık)**. Kernel bellek sızıntısı **17 KB/s**; hipervizör belleği 8.5 KB/s. Etkilenen: eIBRS'li tüm Intel CPU'lar (BHI_NO'lu Lion Cove dahil), ITS için Core 9–11. nesil / Xeon 2–3. nesil. Azaltma: yeni **IBHF** komutu (mikrokod), yeni indirect branch thunk'ları (cache line üst yarısı), IBPB mikrokod güncellemesi. | `https://www.vusec.net/projects/training-solo/` |
-| **⭐ VMScape** | **CVE-2025-40300** | IEEE S&P **2026** | **Tüm AMD Zen CPU'ları (Zen 5 dahil)** — BTB host/guest ayrımı yapmıyor. Kötü niyetli KVM guest'i, **QEMU** gibi userspace hipervizörden anahtar sızdırıyor. Intel eIBRS BTB'yi ayırıyor ama branch history'yi ayırmıyor → vBHI potansiyeli (Intel doğruladı, PoC yok). Zen 5 BTB'de tek-bit privilege tag var ama 4 domain için yetersiz. | `https://comsec.ethz.ch/research/microarch/vmscape-.../` + kernel `vmscape.rst` |
-| **Stack Engine Attacks** | — | MICRO **2025** | x86 stack engine (2000'lerin ortasından beri her x86'da) frontend optimizasyonu → **Intel MPK ile süreç-içi izolasyonu kırıyor**. Recursive descent JSON parser'ın derinliğinden FHIR veri setindeki 120 hastadan 5'ini ayırt edebiliyor. Zen 5'te AGESA varsayılan olarak add/sub desteğini kapatıyor. Intel Alder Lake+ P-core'larda benzeri var. **Azaltma olarak açıkça: "data-invariant control flow and other constant-time programming techniques also provide a good defense"** | `https://comsec.ethz.ch/research/microarch/microarchitectural-attacks-on-the-stack-engine/` |
+| Downfall (GDS) | CVE-2022-40982 | 2023 | Intel Skylake (6. nesil) ile Tiger Lake (11. nesil) arasında `gather` komutu vektör register dosyasını sızdırır, SGX dahil. Azaltma maliyeti %50'ye kadar çıkar. Bildirim 24 Ağustos 2022, embargo yaklaşık bir yıl | downfall.page |
+| Zenbleed | CVE-2023-20593 | 2023 | AMD Zen 2 (Ryzen 3000, 4000, 5000-G ve EPYC Rome); `vzeroupper` yanlış tahmin kurtarması register sızdırır | lock.cmpxchg8b.com/zenbleed.html (Tavis Ormandy) |
+| Inception (SRSO) | CVE-2023-20569 | 2023 | AMD Zen 1 ile Zen 4 arası (family 0x17 ve 0x19); RAP zehirlenmesi ve mimari olmayan CALL | Kernel `srso.rst` |
+| Reptar | CVE-2023-23583 | 2023 | Intel redundant prefix; DoS veya ayrıcalık yükseltme. Bu bir yan kanal değildir | Kısmen doğrulanmıştır; lock.cmpxchg8b.com/reptar.html HTTP 200 döndürmüş ancak içerik JavaScript ile yüklendiği için metin çıkarılamamıştır. CVE numarası ikincil kaynaklardandır |
+| Breaking the Barrier ve PB-Inception | CVE-2024-10041 (PAM zafiyeti için) | IEEE S&P 2025 | IBPB bariyerini bypass eder. Intel Core 12-14. nesil ve Xeon 5-6. nesilde mikrokod hatası, AMD'de IBPB'nin return tahminlerini temizlememesi. İlk pratik uçtan uca cross-process Spectre'dır: SUID `sudo`'dan root parolası, PB-Inception ile page cache'ten root parola hash'i elde edilmiştir | comsec.ethz.ch/research/microarch/breaking-the-barrier/ |
+| Training Solo | CVE-2024-28956 (ITS), CVE-2025-24495 (Lion Cove BPU) | 2025 | Domain izolasyonunu tasarım gereği kırar; saldırgan aynı domain içinde self-training yapar. eBPF gerekmez, cBPF ve SECCOMP yeterlidir ve bunlar tüm kullanıcılara varsayılan açıktır. Kernel bellek sızıntısı 17 KB/sn, hipervizör belleği 8,5 KB/sn'dir. Etkilenenler eIBRS'li tüm Intel CPU'lardır (BHI_NO'lu Lion Cove dahil); ITS için Core 9-11. nesil ve Xeon 2-3. nesil. Azaltma yeni IBHF komutu (mikrokod), yeni indirect branch thunk'ları (cache line üst yarısı) ve IBPB mikrokod güncellemesidir | vusec.net/projects/training-solo/ |
+| VMScape | CVE-2025-40300 | IEEE S&P 2026 | Tüm AMD Zen CPU'ları (Zen 5 dahil); BTB host ile guest ayrımı yapmaz. Kötü niyetli bir KVM guest'i QEMU gibi userspace hipervizörden anahtar sızdırır. Intel eIBRS BTB'yi ayırır ancak branch history'yi ayırmaz, dolayısıyla vBHI potansiyeli vardır; Intel doğrulamıştır, PoC yoktur. Zen 5 BTB'sinde tek bitlik privilege tag bulunur ancak dört domain için yetersizdir | comsec.ethz.ch ve kernel `vmscape.rst` |
+| Stack Engine Attacks | — | MICRO 2025 | x86 stack engine, 2000'lerin ortasından beri her x86'da bulunan bir frontend optimizasyonudur ve Intel MPK ile kurulan süreç içi izolasyonu kırar. Recursive descent JSON parser'ın derinliğinden FHIR veri setindeki 120 hastadan beşini ayırt edebilmektedir. Zen 5'te AGESA varsayılan olarak add ve sub desteğini kapatır; Intel Alder Lake ve sonrası P-core'larda benzeri bulunur. Azaltma olarak veri değişmez kontrol akışı ve diğer sabit zamanlı programlama tekniklerinin iyi bir savunma sağladığı açıkça belirtilir | comsec.ethz.ch |
 
-**2026 gelişmeleri:** VMScape makalesi IEEE S&P 2026'da sunulacak; kernel'de `vmscape` dokümanı ve `vmscape=` boot parametresi mevcut. **Bunun ötesinde 2026'ya özgü yeni bir isimlendirilmiş geçici-yürütme saldırısı doğrulayamadım [DOĞRULANMADI].**
+VMScape makalesi IEEE S&P 2026'da sunulacaktır; kernel'de `vmscape` dokümanı ve `vmscape=` boot parametresi mevcuttur. Bunun ötesinde 2026'ya özgü yeni bir isimlendirilmiş geçici yürütme saldırısı doğrulanamamıştır.
 
 ### E.3 Azaltmalar ve maliyetleri
 
-**⭐ Linux `attack_vector_controls` (yeni, çok pratik)** — `Documentation/admin-guide/hw-vuln/attack_vector_controls.rst`, birebir:
-> "Attack vector controls provide a simple method to configure **only the mitigations for CPU vulnerabilities which are relevant given the intended use of a system.** Administrators are encouraged to consider which attack vectors are relevant and **disable all others in order to recoup system performance.**"
-> "When new relevant CPU vulnerabilities are found, they will be added to these attack vector controls so administrators will likely not need to reconfigure their command line parameters."
+**Linux `attack_vector_controls`.** Yeni ve çok pratiktir. Dokümantasyona göre saldırı vektörü kontrolleri, bir sistemin amaçlanan kullanımı göz önüne alındığında yalnızca ilgili CPU zafiyeti azaltmalarını yapılandırmak için basit bir yöntem sunar. Yöneticilerin hangi saldırı vektörlerinin ilgili olduğunu değerlendirmesi ve sistem performansını geri kazanmak için diğerlerinin tamamını devre dışı bırakması önerilir. Yeni ilgili CPU zafiyetleri bulunduğunda bunlar bu saldırı vektörü kontrollerine eklenecektir, dolayısıyla yöneticilerin komut satırı parametrelerini yeniden yapılandırması gerekmeyecektir.
 
-5 vektör: `user_kernel`, `user_user`, `guest_host`, `guest_guest`, `smt` (cross-thread).
-- *"If no untrusted userspace applications are being run, such as with single-user systems, consider disabling user-to-kernel mitigations."*
-- *"Note that because the Linux kernel contains a mapping of all physical memory, preventing a malicious userspace program from leaking data from another userspace program requires mitigating user-to-kernel attacks as well for complete protection."*
-- Cross-thread: `'auto,nosmt'` → SMT kapatılabilir; `'auto'` → SMT açık kalır ama diğer azaltmalar devrede.
+Beş vektör vardır: `user_kernel`, `user_user`, `guest_host`, `guest_guest` ve `smt` (cross-thread). Dokümantasyon, tek kullanıcılı sistemlerde olduğu gibi güvenilmeyen kullanıcı uygulaması çalıştırılmıyorsa kullanıcıdan kernel'e azaltmaların devre dışı bırakılmasının değerlendirilmesini önerir. Ayrıca Linux kernel'i tüm fiziksel belleğin bir eşlemesini içerdiği için, kötü niyetli bir kullanıcı programının başka bir kullanıcı programından veri sızdırmasını engellemek tam koruma açısından kullanıcıdan kernel'e saldırıların da azaltılmasını gerektirir. Cross-thread için `'auto,nosmt'` SMT'yi kapatabilir; `'auto'` SMT'yi açık tutar ancak diğer azaltmalar devrede kalır.
 
-**Core scheduling** (`core-scheduling.rst`), birebir:
-> "**The only full mitigation of cross-HT attacks is to disable Hyper Threading (HT).** Core scheduling is a scheduler feature that can mitigate **some (not all)** cross-HT attacks. It allows HT to be turned on safely by ensuring that only tasks in a user-designated trusted group can share a core."
-> "In theory, core scheduling aims to perform at least as good as when Hyper Threading is disabled. In practice, this is mostly the case though not always... **Please measure the performance of your workloads always.**"
-API: `prctl(PR_SCHED_CORE, PR_SCHED_CORE_CREATE/SHARE_TO/SHARE_FROM, pid, pid_type, &cookie)`; cookie fork/exec'te miras alınır.
+**Core scheduling.** Dokümantasyona göre cross-HT saldırılarının tek tam azaltması Hyper Threading'i kapatmaktır. Core scheduling, bazı cross-HT saldırılarını azaltabilen bir scheduler özelliğidir ve yalnızca kullanıcı tarafından belirlenmiş güvenilir bir gruptaki görevlerin bir çekirdeği paylaşmasını sağlayarak HT'nin güvenli biçimde açılmasına imkân verir. Teorik olarak core scheduling en az Hyper Threading kapalıyken olduğu kadar iyi performans göstermeyi hedefler; pratikte çoğunlukla böyledir ancak her zaman değildir ve iş yüklerinin performansı mutlaka ölçülmelidir. API `prctl(PR_SCHED_CORE, PR_SCHED_CORE_CREATE/SHARE_TO/SHARE_FROM, pid, pid_type, &cookie)` biçimindedir; cookie fork ve exec'te miras alınır.
 
-**VMScape azaltması** (`vmscape.rst`), birebir:
-> "Kernel tracks when a CPU has run a potentially malicious guest and issues an **IBPB before the first exit to userspace after VM-exit.** If userspace did not run between VM-exit and the next VM-entry, no IBPB is issued."
-> "**When SMT is enabled, hypervisors can be vulnerable to cross-thread attacks. For complete protection against VMSCAPE attacks in SMT environments, STIBP should be enabled.**"
-sysfs: `/sys/devices/system/cpu/vulnerabilities/vmscape`; boot: `vmscape=off|ibpb|force`.
+**VMScape azaltması.** Kernel bir CPU'nun potansiyel olarak kötü niyetli bir guest çalıştırdığı durumu takip eder ve VM-exit'ten sonra kullanıcı alanına ilk çıkıştan önce IBPB verir. VM-exit ile bir sonraki VM-entry arasında kullanıcı alanı çalışmadıysa IBPB verilmez. SMT etkinken hipervizörler cross-thread saldırılara açık olabilir; SMT ortamlarında VMSCAPE saldırılarına karşı tam koruma için STIBP etkinleştirilmelidir. sysfs yolu `/sys/devices/system/cpu/vulnerabilities/vmscape`, boot parametresi `vmscape=off|ibpb|force`'tur.
 
-**Confidential computing:** AMD SEV-SNP / Intel TDX — hipervizörden bellek şifrelemesi + bütünlük. ⚠️ Ama VMScape gibi branch predictor saldırıları **mimari olmayan** durumu hedefliyor; SEV-SNP tek başına Spectre-BTI'ı çözmez. **[BU KONUDA DERİN DOĞRULAMA YAPMADIM]**
+**Confidential computing.** AMD SEV-SNP ve Intel TDX hipervizörden bellek şifrelemesi ve bütünlük sağlar. Ancak VMScape gibi branch predictor saldırıları mimari olmayan durumu hedefler; SEV-SNP tek başına Spectre-BTI'ı çözmez. Bu konuda derin doğrulama yapılmamıştır.
 
-### E.4 ⭐ Argus için pratik öneri: ne önemli, ne tiyatro
+### E.4 Argus için pratik öneri
 
-**GERÇEKTEN ÖNEMLİ:**
-1. **Eklenti/script motoru varsa bu konu birinci öncelik.** Argus'ta WASM plugin, JS script (Keycloak'taki gibi authenticator script'leri), Lua/Rhai policy engine varsa: **süreç-içi izolasyon Spectre'a karşı yeterli değildir.** Stack engine makalesi tam olarak MPK tabanlı süreç-içi izolasyonu kırdığını gösteriyor. **Çözüm: eklentileri ayrı süreçte (hatta ayrı kullanıcı/cgroup'ta) çalıştırın**, ana IdP sürecinde asla güvenilmeyen kod yürütmeyin. Keycloak'ın script'leri "preview" olarak işaretlemesi tesadüf değil.
-2. **Barındırma kararı:** Dedicated instance veya bare-metal. Bulutta genel amaçlı paylaşımlı instance kullanmayın. Bu, **tüm bu saldırı sınıfını tek hamlede** tehdit modelinden çıkarır.
-3. **`mitigations=auto` varsayılanını bozmayın.** Performans için `mitigations=off` yapmak — özellikle imza anahtarları RAM'de duran bir IdP'de — kabul edilemez.
-4. **Mikrokod güncel tut.** Training Solo, Breaking the Barrier, Downfall, VMScape'in azaltmalarının **hepsi** mikrokoda bağlı. Kernel'de `old_microcode` dokümanı ve uyarısı var — bunu izleyin.
-5. **Kernel LTS + güncel.** VMScape FAQ: *"For Linux systems, updating to the latest version, or any maintained LTS release, is sufficient."*
-6. **İmza anahtarlarını süreç dışına çıkarın** — HSM / KMS / ayrı imzalama servisi. Anahtar hiç Argus'un adres uzayında değilse hiçbir Spectre varyantı onu okuyamaz. **En yüksek getirili tek kontrol budur.**
-7. **`zeroize`** kullanın (RustCrypto, `utils` repo'sunda) — sırları kullanım sonrası temizleyin; sızıntı penceresini daraltır.
+**Gerçekten önemli olanlar.**
 
-**TİYATRO (bu bağlamda):**
-- Uygulama kodunda Spectre-v1 `lfence` serpiştirmek — LLVM'in `-mspeculative-load-hardening`'i bile IdP iş mantığı için anlamsız; darboğaz orada değil.
-- Co-tenant yokken SMT kapatmak (~%20-30 throughput kaybı, karşılığında sıfır kazanç).
-- Rust'ta "Spectre-safe" bounds check yazmaya çalışmak — Rust'ın bounds check'i zaten var ve spekülatif bypass'ı uygulama katmanında çözemezsiniz.
-- Tarayıcı tarafı önlemler (COOP/COEP) — kullanıcı arayüzü için iyi hijyen ama Spectre'la ilgili değil.
+1. Eklenti veya script motoru varsa bu konu birinci önceliktir. Argus'ta WASM plugin, Keycloak'takine benzer JavaScript authenticator script'leri veya Lua ile Rhai policy engine varsa süreç içi izolasyon Spectre'a karşı yeterli değildir. Stack engine makalesi tam olarak MPK tabanlı süreç içi izolasyonun kırıldığını göstermektedir. Çözüm eklentileri ayrı süreçte, hatta ayrı kullanıcı veya cgroup'ta çalıştırmak ve ana IdP sürecinde asla güvenilmeyen kod yürütmemektir. Keycloak'ın script'leri preview olarak işaretlemesi tesadüf değildir.
+2. Barındırma kararı dedicated instance veya bare-metal yönünde verilir. Bulutta genel amaçlı paylaşımlı instance kullanılmaz. Bu karar tüm saldırı sınıfını tek hamlede tehdit modelinden çıkarır.
+3. `mitigations=auto` varsayılanı bozulmaz. Performans için `mitigations=off` yapmak, özellikle imza anahtarları RAM'de duran bir IdP'de kabul edilemez.
+4. Mikrokod güncel tutulur. Training Solo, Breaking the Barrier, Downfall ve VMScape azaltmalarının hepsi mikrokoda bağlıdır. Kernel'de `old_microcode` dokümanı ve uyarısı bulunur ve izlenmelidir.
+5. Kernel LTS sürümü kullanılır ve güncel tutulur. VMScape SSS'ine göre Linux sistemlerde en son sürüme veya bakımı sürdürülen herhangi bir LTS sürümüne güncellemek yeterlidir.
+6. İmza anahtarları süreç dışına çıkarılır; HSM, KMS veya ayrı bir imzalama servisi kullanılır. Anahtar Argus'un adres uzayında hiç bulunmuyorsa hiçbir Spectre varyantı onu okuyamaz. En yüksek getirili tek kontrol budur.
+7. `zeroize` kullanılarak sırlar kullanım sonrası temizlenir ve sızıntı penceresi daraltılır.
+
+**Bu bağlamda gereksiz olanlar.**
+
+Uygulama kodunda Spectre-v1 için `lfence` serpiştirmek gereksizdir; LLVM'in `-mspeculative-load-hardening` seçeneği bile IdP iş mantığı için anlamsızdır, çünkü darboğaz orada değildir. Co-tenant yokken SMT kapatmak yaklaşık %20-30 throughput kaybına karşılık sıfır kazanç verir. Rust'ta Spectre'a dayanıklı bounds check yazmaya çalışmak gereksizdir; Rust'ın bounds check'i zaten vardır ve spekülatif bypass uygulama katmanında çözülemez. Tarayıcı tarafı önlemler (COOP ve COEP) kullanıcı arayüzü için iyi hijyendir ancak Spectre ile ilgili değildir.
 
 ---
 
-## F) ARGUS İÇİN SOMUT YAPILACAKLAR LİSTESİ
+## F. Argus için yapılacaklar
 
-### F.1 Sabit-zamanlı karşılaştırma (A)
-- [ ] `constant_time_eq = "0.6"` bağımlılığı ekle (aktif bakımda, 2026-08-30). Kripto seçim mantığı gerekirse `subtle 2.6.1` (bakım durgun) veya `ctutils 0.4.2` (denetlenmemiş) — kararı gerekçeleriyle ADR'ye yaz.
-- [ ] **Newtype tasarımı:** `struct Secret<const N: usize>([u8; N])`, `PartialEq` implementasyonu `constant_time_eq_n` kullansın, `Debug` maskeleyecek, `Drop` ile `zeroize` yapacak. Böylece `==` yazan geliştirici otomatik güvende olur (totp-rs'in `Token` deseni).
-- [ ] **Tüm token'ları DB'ye `SHA-256` hash'i olarak yaz** (session, refresh token, API key, password reset, device code, magic link). Arama hash üzerinden → DB indeks zamanlaması ölür.
-- [ ] Token'ları **sabit uzunluk** yap; uzunluk kontrolünü CT karşılaştırmadan **önce** yap (uzunluk zaten sırdır değil).
-- [ ] Clippy lint / `cargo-deny` / custom lint: sır tiplerinde `==`, `memcmp`, `String::eq` kullanımını yasakla.
-- [ ] `*_vartime` isimlendirme kuralını benimse (RustCrypto politikası).
+### F.1 Sabit zamanlı karşılaştırma
 
-### F.2 Derleyici doğrulaması (B)
-- [ ] CI'a **`dudect-bencher 0.7`** ile bir `ct-bench` binary'si ekle: token karşılaştırma, TOTP kontrolü, PKCE doğrulama, client_secret doğrulama fonksiyonlarını test et. |t| > 5 → build fail.
-- [ ] Nightly job: **ctgrind/valgrind memcheck** ile `ct_poison` yaklaşımını Rust FFI shim'iyle uygula (veya **Microwalk** Docker şablonunu Rust için uyarla).
-- [ ] **Release binary'de assembly denetimi:** kritik CT fonksiyonları için `cargo asm` / `objdump` çıktısında `jne/je/bne/cmov` beklentisini bir snapshot testi olarak sabitle. `cmov` CVE'si tam olarak böyle yakalanabilirdi.
-- [ ] `aarch64-dit` crate'i ile aarch64 hedeflerinde kripto bölgelerinde DIT aç (RAII guard).
-- [ ] x86'da DOITM: **hazır crate yok**; Intel global açmayı önermiyor. **Şu an aksiyon almayın**, sadece risk kaydına yazın.
-- [ ] Bağımlılıkları `cargo audit` ile günlük tara — RUSTSEC-2026-0003 (cmov), RUSTSEC-2026-0211/0212 (libcrux) gösteriyor ki CT advisory'leri sık geliyor.
+1. `constant_time_eq = "0.6"` bağımlılığı eklenir; crate aktif bakımdadır (30 Ağustos 2026). Kripto seçim mantığı gerekirse `subtle 2.6.1` (bakım durgun) veya `ctutils 0.4.2` (denetlenmemiş) seçilir ve karar gerekçeleriyle karar kaydına yazılır.
+2. Newtype tasarımı uygulanır: `struct Secret<const N: usize>([u8; N])` tanımlanır, `PartialEq` implementasyonu `constant_time_eq_n` kullanır, `Debug` maskeler ve `Drop` `zeroize` yapar. Böylece `==` yazan geliştirici otomatik olarak güvende olur; bu totp-rs'in `Token` desenidir.
+3. Tüm token'lar veritabanına SHA-256 hash'i olarak yazılır: session, refresh token, API anahtarı, şifre sıfırlama, device code ve magic link. Arama hash üzerinden yapılır ve veritabanı indeks zamanlaması sızıntısı ortadan kalkar.
+4. Token'lar sabit uzunluk yapılır; uzunluk kontrolü sabit zamanlı karşılaştırmadan önce yapılır, çünkü uzunluk zaten sır değildir.
+5. Clippy lint, `cargo-deny` veya özel bir lint ile sır tiplerinde `==`, `memcmp` ve `String::eq` kullanımı yasaklanır.
+6. `*_vartime` isimlendirme kuralı benimsenir; bu RustCrypto politikasıdır.
 
-### F.3 Enumeration (C)
-- [ ] **Login akışını `user+password birlikte → MFA` yap.** Identity-first akışı kullanma (Kanidm'in tespiti + Keycloak CVE-2026-4633).
-- [ ] **Rauthy modelini uygula:** koşan başarılı-login ortalaması + başarısızlıkta ortalamaya doldurma. Dummy Argon2 **çalıştırma** (DoS).
-- [ ] `max_hash_threads` semaforu + `hash_await_warn_time` metriği. Kuyruk doluluğunun kullanıcı varlığına bağlı olmadığından emin ol.
-- [ ] IP başına başarısız giriş sayacı + üstel kara liste (Rauthy: 7→60s, 10→600s, 15→900s, 20→3600s, 25→24h).
-- [ ] **Enumeration regresyon test suite'i:** her akış (login, register, reset, MFA enroll, SCIM, device flow, OIDC error) için var-olan vs olmayan kullanıcı arasında **status kodu, gövde byte'ı byte'ına, header seti, redirect hedefi, p50/p95 süre** karşılaştırması. Rauthy'de örneği var: `handler_users.rs:156` — *"we should always get back an HTTP 200 for username enumeration prevention"*.
-- [ ] Kayıtta "email already in use" bilgisini UI'da gösterme; e-posta ile bildir (Rauthy `email_registered_already.rs`).
-- [ ] Argon2 parametre göçünde **eski ve yeni parametrelerin süre farkını** ölç; fark ortalama-doldurma penceresinden büyükse migration'ı zorla (kullanıcı login olduğunda rehash).
-- [ ] HTTP/2 kullanıyorsanız: Timeless Timing savunması olarak **eşzamanlı gelen istek çiftlerine** rastgele gecikme (~1.73 ms ortalama) eklemeyi değerlendirin — veya kritik endpoint'lerde HTTP/2 multiplexing'i sınırlayın.
+### F.2 Derleyici doğrulaması
 
-### F.4 RSA / JOSE (D)
-- [ ] **`alg=RSA1_5` desteklemeyin.** Hiç. (draft-ietf-jose-deprecate-none-rsa15: "MUST disable by default")
-- [ ] `alg=none` desteklemeyin (aynı draft).
-- [ ] JWE: `ECDH-ES+A256KW` / `A256GCM` birincil; `RSA-OAEP-256` sadece opt-in legacy.
-- [ ] İmza: `EdDSA`/`ES256` birincil; `RS256` uyumluluk için, **`aws-lc-rs` backend ile** (`jsonwebtoken 11` `CryptoProvider`).
-- [ ] `cargo tree -i rsa` çalıştır — `rsa` crate'i ağaçtaysa neden orada olduğunu belgele. Private-key işlemi yapıyorsa **kaldır**.
-- [ ] `alg` allowlist'i **istemci metadata'sından** gelsin, JWS/JWE header'ından asla. Downgrade testi yaz.
-- [ ] SAML tarafı varsa `xmlenc#rsa-1_5`'i devre dışı bırak (xmlsec'in yaptığı gibi).
-- [ ] RUSTSEC-2023-0071 ve RustCrypto/RSA issue #626'yı izleme listesine al.
+1. CI'a `dudect-bencher 0.7` ile bir `ct-bench` binary'si eklenir; token karşılaştırma, TOTP kontrolü, PKCE doğrulama ve client_secret doğrulama fonksiyonları test edilir. |t| değeri 5'i aşarsa build başarısız olur.
+2. Gecelik bir job ile ctgrind ve valgrind memcheck üzerinden `ct_poison` yaklaşımı bir Rust FFI shim'iyle uygulanır; alternatif olarak Microwalk Docker şablonu Rust için uyarlanır.
+3. Release binary'de assembly denetimi yapılır: kritik sabit zaman fonksiyonları için `cargo asm` veya `objdump` çıktısında `jne`, `je`, `bne` ve `cmov` beklentisi bir snapshot testi olarak sabitlenir. `cmov` CVE'si tam olarak böyle yakalanabilirdi.
+4. `aarch64-dit` crate'i ile aarch64 hedeflerinde kripto bölgelerinde DIT açılır; RAII guard kullanılır.
+5. x86'da DOITM için hazır crate yoktur ve Intel global açmayı önermemektedir. Şimdilik aksiyon alınmaz, yalnızca risk kaydına yazılır.
+6. Bağımlılıklar `cargo audit` ile günlük taranır; RUSTSEC-2026-0003 (cmov) ile RUSTSEC-2026-0211 ve 0212 (libcrux) sabit zaman advisory'lerinin sık geldiğini göstermektedir.
 
-### F.5 Barındırma / donanım (E)
-- [ ] Dedicated instance veya bare-metal. Paylaşımlı genel amaçlı bulut instance'ı kullanma.
-- [ ] `mitigations=auto` (varsayılan). Co-tenant/untrusted VM varsa `mitigations=auto,nosmt`.
-- [ ] Yeni `attack_vector_controls` ile gereksiz vektörleri kapatıp performans geri kazan — ama `user_kernel` ve `user_user`'ı kapatmadan önce "bu makinede güvenilmeyen kod çalışmıyor" iddiasını ispatla.
-- [ ] Mikrokod + kernel LTS güncel; `old_microcode` uyarısını izle.
-- [ ] `/sys/devices/system/cpu/vulnerabilities/*` çıktısını deployment health check'ine ekle.
-- [ ] **İmza anahtarlarını HSM/KMS'e taşı** — en yüksek getirili tek kontrol.
-- [ ] **Eklenti/script motoru varsa ayrı süreçte çalıştır.** Süreç-içi sandbox (WASM/MPK) Spectre'a karşı yeterli değil (MICRO 2025 stack engine).
-- [ ] `zeroize` ile sırları temizle.
+### F.3 Enumeration
 
----
+1. Login akışı kullanıcı ve parolanın birlikte alınıp ardından MFA'nın geldiği biçimde kurulur. Identity-first akışı kullanılmaz; gerekçe Kanidm'in tespiti ve Keycloak CVE-2026-4633'tür.
+2. Rauthy modeli uygulanır: koşan başarılı login ortalaması tutulur ve başarısızlıkta yanıt ortalamaya doldurulur. Dummy Argon2 çalıştırılmaz, çünkü DoS üretir.
+3. `max_hash_threads` semaforu ve `hash_await_warn_time` metriği eklenir. Kuyruk doluluğunun kullanıcı varlığına bağlı olmadığından emin olunur.
+4. IP başına başarısız giriş sayacı ve üstel kara liste uygulanır; Rauthy'nin değerleri yedi denemede 60 saniye, on denemede 600 saniye, on beş denemede 900 saniye, yirmi denemede 3600 saniye ve yirmi beş denemede 24 saattir.
+5. Enumeration regresyon test süiti yazılır: her akış için (login, kayıt, sıfırlama, MFA enroll, SCIM, device flow, OIDC hata) var olan ve olmayan kullanıcı arasında status kodu, gövdenin baytı baytına içeriği, header seti, redirect hedefi ve p50 ile p95 süreleri karşılaştırılır. Rauthy'de örneği vardır: `handler_users.rs:156` satırında kullanıcı sayımını önlemek için her zaman HTTP 200 dönülmesi gerektiği belirtilir.
+6. Kayıtta "email already in use" bilgisi arayüzde gösterilmez, e-posta ile bildirilir; Rauthy'nin `email_registered_already.rs` deseni izlenir.
+7. Argon2 parametre göçünde eski ve yeni parametrelerin süre farkı ölçülür; fark ortalama doldurma penceresinden büyükse migration zorlanır, yani kullanıcı login olduğunda yeniden hash'lenir.
+8. HTTP/2 kullanılıyorsa Timeless Timing savunması olarak eşzamanlı gelen istek çiftlerine ortalama yaklaşık 1,73 ms rastgele gecikme eklemek değerlendirilir; alternatif olarak kritik endpoint'lerde HTTP/2 multiplexing sınırlanır.
 
-## G) DOĞRULANMAMIŞ / ÇELİŞKİLİ MADDELER — AÇIKÇA İŞARETLİ
+### F.4 RSA ve JOSE
 
-1. **[ÇELİŞKİLİ]** `rsa` crate'inin Marvin durumu: Kario'nun tablosu "Fixed", RustSec/GHSA/upstream "patched yok + açık issue #626 (7 Ocak 2026)". Ben upstream'e güveniyorum → **düzeltilmemiş kabul edin.**
-2. **[KAYNAK ÖLÜ]** NCC Group / iSEC Partners "Double HMAC Verification" (Şubat 2011) blog yazısı erişilemiyor; Wayback'te snapshot yok. Teknik doğru, ama kanonik kaynak olarak `github.com/veorq/cryptocoding` kullanın.
-3. **[KAYNAK ERİŞİLEMEDİ]** ARM DIT resmi dokümantasyonu (developer.arm.com / support.arm.com) 403 ve boş içerik döndü. DIT bilgisi **Linux kernel kaynak kodundan** ve GoFetch FAQ'ından doğrulandı — ARM ARM'dan birebir alıntı veremedim.
-4. **[KISMEN DOĞRULANDI]** Reptar / CVE-2023-23583: sayfa JS ile yükleniyor, metin çıkaramadım. CVE numarası ikincil kaynaklardan. Ayrıca bu bir yan kanal değil, DoS/privilege escalation.
-5. **[KISMEN DOĞRULANDI]** NIST SP 800-63B-4'ün yayın tarihi (26 Ağustos 2025 mi, Temmuz 2025 mi) ve rate-limiting maddesinin bölüm numarası (§3.2.2) kesin değil. **Enumeration hakkında normatif gereksinim bulunmadığı** bulgusu ise tam metin taramasıyla doğrulandı.
-6. **[DOĞRULANMADI]** Microwalk için hazır bir Rust CI şablonu olup olmadığı (C ve JS örnekleri var).
-7. **[DOĞRULANMADI]** 2026'ya özgü yeni bir isimlendirilmiş geçici-yürütme saldırısı bulamadım. Linux 7.3-rc2 dokümantasyon ağacında `vmscape`'ten yenisi yok. Bu "yok" demek değil, "benim doğrulayamadığım" demek.
-8. **[DOĞRULANMADI]** SEV-SNP/TDX'in VMScape sınıfı branch-predictor saldırılarına karşı ne ölçüde koruduğu — derin doğrulama yapmadım.
-9. **[DOĞRULANMADI]** HTTP/3/QUIC üzerinde Timeless Timing Attack'ın pratik uygulanabilirliği — makale bunu değerlendirmediğini açıkça söylüyor.
-10. **[DÜZELTME]** docs.rs'in `subtle` sayfası küçük bir modelce "2.6.1 released September 1, 2026" olarak özetlendi — **yanlış**. crates.io API'sine göre 2.6.1 **24 Haziran 2024**. crates.io'yu esas alın.
-11. Rauthy kaynak kodu alıntıları `main` dalından, 2026-09-08 tarihli snapshot'tan. Sürüm etiketi sabitlemedim.
+1. `alg=RSA1_5` hiç desteklenmez; taslak bunu varsayılan olarak devre dışı bırakmayı zorunlu kılar.
+2. `alg=none` desteklenmez; aynı taslak geçerlidir.
+3. JWE'de birincil `ECDH-ES+A256KW` ve `A256GCM` kullanılır; `RSA-OAEP-256` yalnızca opt-in legacy seçenek olarak bulunur.
+4. İmzalamada birincil `EdDSA` veya `ES256` kullanılır; `RS256` uyumluluk için ve `aws-lc-rs` backend ile (`jsonwebtoken 11` `CryptoProvider`) tutulur.
+5. `cargo tree -i rsa` çalıştırılır; `rsa` crate'i ağaçtaysa neden orada olduğu belgelenir. Private key işlemi yapıyorsa kaldırılır.
+6. `alg` allowlist'i istemci metadata'sından gelir, JWS veya JWE header'ından değil. Downgrade testi yazılır.
+7. SAML tarafı varsa `xmlenc#rsa-1_5` devre dışı bırakılır; xmlsec'in yaptığı budur.
+8. RUSTSEC-2023-0071 ve RustCrypto/RSA issue #626 izleme listesine alınır.
+
+### F.5 Barındırma ve donanım
+
+1. Dedicated instance veya bare-metal kullanılır; paylaşımlı genel amaçlı bulut instance'ı kullanılmaz.
+2. `mitigations=auto` varsayılanı korunur. Co-tenant veya güvenilmeyen VM varsa `mitigations=auto,nosmt` kullanılır.
+3. Yeni `attack_vector_controls` ile gereksiz vektörler kapatılıp performans geri kazanılır; ancak `user_kernel` ve `user_user` kapatılmadan önce bu makinede güvenilmeyen kod çalışmadığı iddiası ispatlanır.
+4. Mikrokod ve kernel LTS güncel tutulur; `old_microcode` uyarısı izlenir.
+5. `/sys/devices/system/cpu/vulnerabilities/*` çıktısı dağıtım sağlık kontrolüne eklenir.
+6. İmza anahtarları HSM veya KMS'e taşınır; en yüksek getirili tek kontrol budur.
+7. Eklenti veya script motoru varsa ayrı süreçte çalıştırılır. Süreç içi sandbox (WASM veya MPK) Spectre'a karşı yeterli değildir; MICRO 2025 stack engine çalışması bunu göstermektedir.
+8. `zeroize` ile sırlar temizlenir.
 
 ---
 
-## KAYNAKLAR (erişim: 2026-09-08)
+## G. Doğrulanmamış ve çelişkili maddeler
 
-**Rust / crate'ler**
-- https://doc.rust-lang.org/std/hint/fn.black_box.html (Rust 1.98.1, build 2026-09-01)
-- https://raw.githubusercontent.com/dalek-cryptography/subtle/main/README.md · https://docs.rs/subtle/latest/subtle/ · https://crates.io/api/v1/crates/subtle · https://github.com/dalek-cryptography/subtle/commits/main.atom
-- https://raw.githubusercontent.com/RustCrypto/utils/master/ctutils/README.md · .../cmov/README.md · .../aarch64-dit/README.md
-- https://raw.githubusercontent.com/RustCrypto/crypto-bigint/master/README.md
-- https://raw.githubusercontent.com/RustCrypto/RSA/master/README.md · .../CHANGELOG.md · https://docs.rs/rsa/latest/rsa/index.html
-- https://github.com/RustCrypto/RSA/issues/390 (kapalı) · https://github.com/RustCrypto/RSA/issues/626 (açık, 2026-01-07)
-- https://crates.io/api/v1/crates/{rsa,argon2,constant_time_eq,cmov,ctutils,dudect-bencher,jsonwebtoken,josekit,totp-rs,aws-lc-rs,aarch64-dit}
-- https://github.com/rozbb/dudect-bencher
-- https://raw.githubusercontent.com/constantoine/totp-rs/master/src/{lib.rs,token.rs}
-- https://raw.githubusercontent.com/Keats/jsonwebtoken/master/src/crypto/mod.rs
-- https://raw.githubusercontent.com/hidekatsu-izuno/josekit-rs/master/{README.md,Cargo.toml}
+1. **Çelişkili.** `rsa` crate'inin Marvin durumu: Kario'nun tablosu "Fixed" der, RustSec, GHSA ve upstream yamalı sürüm bulunmadığını ve issue #626'nın (7 Ocak 2026) açık olduğunu gösterir. Upstream esas alınır ve düzeltilmemiş kabul edilir.
+2. **Ölü kaynak.** NCC Group ve iSEC Partners "Double HMAC Verification" (Şubat 2011) blog yazısı erişilemezdir; Wayback'te snapshot yoktur. Teknik doğrudur, ancak kanonik kaynak olarak github.com/veorq/cryptocoding kullanılır.
+3. **Kaynağa erişilemedi.** ARM DIT resmî dokümantasyonu (developer.arm.com ve support.arm.com) 403 ve boş içerik döndürmüştür. DIT bilgisi Linux kernel kaynak kodundan ve GoFetch SSS'inden doğrulanmıştır; ARM ARM'dan birebir alıntı verilememiştir.
+4. **Kısmen doğrulandı.** Reptar ve CVE-2023-23583: sayfa JavaScript ile yüklendiği için metin çıkarılamamıştır. CVE numarası ikincil kaynaklardandır. Ayrıca bu bir yan kanal değil, DoS ve ayrıcalık yükseltmedir.
+5. **Kısmen doğrulandı.** NIST SP 800-63B-4'ün yayın tarihi (26 Ağustos 2025 mi Temmuz 2025 mi) ve rate limiting maddesinin bölüm numarası kesin değildir. Enumeration hakkında normatif gereksinim bulunmadığı bulgusu ise tam metin taramasıyla doğrulanmıştır.
+6. **Doğrulanmadı.** Microwalk için hazır bir Rust CI şablonu olup olmadığı; C ve JavaScript örnekleri mevcuttur.
+7. **Doğrulanmadı.** 2026'ya özgü yeni bir isimlendirilmiş geçici yürütme saldırısı bulunamamıştır. Linux 7.3-rc2 dokümantasyon ağacında `vmscape`'ten yenisi yoktur. Bu yok anlamına gelmez, doğrulanamadı anlamına gelir.
+8. **Doğrulanmadı.** SEV-SNP ve TDX'in VMScape sınıfı branch predictor saldırılarına karşı ne ölçüde koruduğu; derin doğrulama yapılmamıştır.
+9. **Doğrulanmadı.** HTTP/3 ve QUIC üzerinde Timeless Timing Attack'ın pratik uygulanabilirliği; makale bunu değerlendirmediğini açıkça söylemektedir.
+10. **Düzeltme.** docs.rs'in `subtle` sayfası küçük bir modelce 2.6.1'in 1 Eylül 2026'da yayımlandığı biçiminde özetlenmiştir; bu yanlıştır. crates.io API'sine göre 2.6.1 24 Haziran 2024 tarihlidir. crates.io esas alınır.
+11. Rauthy kaynak kodu alıntıları `main` dalından, 8 Eylül 2026 tarihli snapshot'tan alınmıştır. Sürüm etiketi sabitlenmemiştir.
 
-**Güvenlik advisory'leri**
-- https://rustsec.org/advisories/RUSTSEC-2023-0071.html · https://github.com/advisories/GHSA-c38w-74pg-36hr
-- https://codeload.github.com/rustsec/advisory-db/tar.gz/refs/heads/main → RUSTSEC-2026-0003 (cmov/CVE-2026-23519, 2026-01-14), RUSTSEC-2025-0144 (ml-dsa/CVE-2026-22705, 2025-12-12), RUSTSEC-2026-0212 (libcrux-secrets, 2026-05-26), RUSTSEC-2026-0211 (libcrux-aesgcm, 2026-07-14), RUSTSEC-2024-0354 (vodozemac/CVE-2024-40640), RUSTSEC-2022-0018 (totp-rs/CVE-2022-29185)
-- https://github.com/advisories/GHSA-rhgq-f8x5-j2jc (Keycloak CVE-2026-4633, 2026-03-23) · https://github.com/keycloak/keycloak/issues/47619 · .../issues/26625
-- https://www.djangoproject.com/weblog/2024/jul/09/security-releases/ (CVE-2024-39329) · https://code.djangoproject.com/ticket/20760
+---
 
-**Akademik**
-- https://www.usenix.org/system/files/sec20-van_goethem.pdf (Timeless Timing Attacks, USENIX Sec 2020)
-- https://www.cs.rice.edu/~dwallach/pub/crosby-timing2009.pdf · https://dl.acm.org/doi/10.1145/1455526.1455530 (Crosby et al. 2009)
-- https://crypto.stanford.edu/~dabo/papers/ssl-timing.pdf (Brumley & Boneh 2003)
-- https://www.cl.cam.ac.uk/~rja14/Papers/whatyouc.pdf (Simon/Chisnall/Anderson, EuroS&P 2018)
-- https://eprint.iacr.org/2016/1123.pdf (dudect, DATE 2017) · https://github.com/oreparaz/dudect
-- https://www.usenix.org/conference/usenixsecurity16/technical-sessions/presentation/almeida (ct-verif)
-- arXiv:1912.08788 (Binsec/Rel, IEEE S&P 2020)
-- https://eprint.iacr.org/2023/1442 (Marvin, ESORICS 2023)
+## Kaynaklar
 
-**Araçlar / donanım / kernel**
-- https://www.imperialviolet.org/2010/04/01/ctgrind.html · https://post-apocalyptic-crypto.org/timecop/ · https://github.com/microwalk-project/Microwalk · https://github.com/veorq/cryptocoding
-- https://gofetch.fail/ (USENIX Sec 2024) · https://downfall.page/ · https://lock.cmpxchg8b.com/zenbleed.html
-- https://comsec.ethz.ch/research/microarch/{vmscape-...,breaking-the-barrier,microarchitectural-attacks-on-the-stack-engine,spring}/ · https://www.vusec.net/projects/training-solo/
-- https://git.kernel.org/.../Documentation/admin-guide/hw-vuln/{index,attack_vector_controls,core-scheduling,vmscape,srso}.rst · .../arch/arm64/kernel/{entry.S,cpufeature.c}
-- https://www.intel.com/.../data-operand-independent-timing-isa-guidance.html (güncelleme 2025-09-10)
-- https://raw.githubusercontent.com/openssl/openssl/master/CHANGES.md
-- https://people.redhat.com/~hkario/marvin/ · https://github.com/tomato42/marvin-toolkit
+Erişim tarihi 8 Eylül 2026'dır.
 
-**Standartlar / rehberler**
-- https://www.rfc-editor.org/rfc/rfc8725.txt · rfc7636.txt · rfc8628.txt · rfc9106.txt
-- https://www.ietf.org/archive/id/draft-ietf-jose-deprecate-none-rsa15-05.txt · https://datatracker.ietf.org/doc/draft-ietf-jose-deprecate-none-rsa15/
-- https://cheatsheetseries.owasp.org/cheatsheets/{Authentication,Password_Storage,Forgot_Password}_Cheat_Sheet.html
-- https://owasp.org/www-project-web-security-testing-guide/latest/.../04-Testing_for_Account_Enumeration_and_Guessable_User_Account.html
-- https://pages.nist.gov/800-63-4/sp800-63b.html
+**Rust ve crate'ler.** doc.rust-lang.org/std/hint/fn.black_box.html (Rust 1.98.1, build 1 Eylül 2026); raw.githubusercontent.com/dalek-cryptography/subtle/main/README.md, docs.rs/subtle/latest/subtle/, crates.io/api/v1/crates/subtle, github.com/dalek-cryptography/subtle/commits/main.atom; raw.githubusercontent.com/RustCrypto/utils/master/ctutils/README.md ile cmov ve aarch64-dit README'leri; raw.githubusercontent.com/RustCrypto/crypto-bigint/master/README.md; raw.githubusercontent.com/RustCrypto/RSA/master/README.md, CHANGELOG.md ve docs.rs/rsa/latest/rsa/index.html; github.com/RustCrypto/RSA/issues/390 (kapalı) ve issues/626 (açık, 7 Ocak 2026); crates.io API'sinde rsa, argon2, constant_time_eq, cmov, ctutils, dudect-bencher, jsonwebtoken, josekit, totp-rs, aws-lc-rs ve aarch64-dit; github.com/rozbb/dudect-bencher; raw.githubusercontent.com/constantoine/totp-rs/master/src/lib.rs ve token.rs; raw.githubusercontent.com/Keats/jsonwebtoken/master/src/crypto/mod.rs; raw.githubusercontent.com/hidekatsu-izuno/josekit-rs/master/README.md ve Cargo.toml.
 
-**Referans implementasyonlar**
-- https://github.com/sebadob/rauthy (main, 2026-09-08 tarball) — `login_delay.rs`, `oidc/authorize.rs`, `oidc/grant_types/device_code.rs`, `entity/{clients,api_keys,sessions,magic_links}.rs`, `config.toml` · https://sebadob.github.io/rauthy/config/argon2.html
-- https://www.keycloak.org/server/all-provider-config · https://www.keycloak.org/docs/latest/server_admin/index.html
-- https://github.com/kanidm/kanidm/discussions/610 (2021-11-14)
+**Güvenlik advisory'leri.** rustsec.org/advisories/RUSTSEC-2023-0071.html ve github.com/advisories/GHSA-c38w-74pg-36hr; rustsec/advisory-db ana dalından RUSTSEC-2026-0003 (cmov, CVE-2026-23519, 14 Ocak 2026), RUSTSEC-2025-0144 (ml-dsa, CVE-2026-22705, 12 Aralık 2025), RUSTSEC-2026-0212 (libcrux-secrets, 26 Mayıs 2026), RUSTSEC-2026-0211 (libcrux-aesgcm, 14 Temmuz 2026), RUSTSEC-2024-0354 (vodozemac, CVE-2024-40640) ve RUSTSEC-2022-0018 (totp-rs, CVE-2022-29185); github.com/advisories/GHSA-rhgq-f8x5-j2jc (Keycloak CVE-2026-4633, 23 Mart 2026), github.com/keycloak/keycloak/issues/47619 ve issues/26625; djangoproject.com/weblog/2024/jul/09/security-releases/ (CVE-2024-39329) ve code.djangoproject.com/ticket/20760.
+
+**Akademik.** usenix.org/system/files/sec20-van_goethem.pdf (Timeless Timing Attacks, USENIX Security 2020); cs.rice.edu/~dwallach/pub/crosby-timing2009.pdf ve dl.acm.org/doi/10.1145/1455526.1455530 (Crosby ve diğerleri, 2009); crypto.stanford.edu/~dabo/papers/ssl-timing.pdf (Brumley ve Boneh, 2003); cl.cam.ac.uk/~rja14/Papers/whatyouc.pdf (Simon, Chisnall, Anderson; EuroS&P 2018); eprint.iacr.org/2016/1123.pdf (dudect, DATE 2017) ve github.com/oreparaz/dudect; usenix.org/conference/usenixsecurity16/technical-sessions/presentation/almeida (ct-verif); arXiv:1912.08788 (Binsec/Rel, IEEE S&P 2020); eprint.iacr.org/2023/1442 (Marvin, ESORICS 2023).
+
+**Araçlar, donanım ve kernel.** imperialviolet.org/2010/04/01/ctgrind.html; post-apocalyptic-crypto.org/timecop/; github.com/microwalk-project/Microwalk; github.com/veorq/cryptocoding; gofetch.fail (USENIX Security 2024); downfall.page; lock.cmpxchg8b.com/zenbleed.html; comsec.ethz.ch/research/microarch/ altındaki vmscape, breaking-the-barrier, microarchitectural-attacks-on-the-stack-engine ve spring sayfaları; vusec.net/projects/training-solo/; git.kernel.org üzerinde Documentation/admin-guide/hw-vuln/ altındaki index, attack_vector_controls, core-scheduling, vmscape ve srso dosyaları ile arch/arm64/kernel/entry.S ve cpufeature.c; intel.com'daki data operand independent timing ISA rehberi (güncelleme 10 Eylül 2025); raw.githubusercontent.com/openssl/openssl/master/CHANGES.md; people.redhat.com/~hkario/marvin/ ve github.com/tomato42/marvin-toolkit.
+
+**Standartlar ve rehberler.** rfc-editor.org üzerinde RFC 8725, RFC 7636, RFC 8628 ve RFC 9106; ietf.org/archive/id/draft-ietf-jose-deprecate-none-rsa15-05.txt ve datatracker.ietf.org/doc/draft-ietf-jose-deprecate-none-rsa15/; cheatsheetseries.owasp.org üzerinde Authentication, Password Storage ve Forgot Password cheat sheet'leri; owasp.org WSTG'de hesap sayımı ve tahmin edilebilir kullanıcı hesabı testi; pages.nist.gov/800-63-4/sp800-63b.html.
+
+**Referans implementasyonlar.** github.com/sebadob/rauthy (main dalı, 8 Eylül 2026 tarball'ı): `login_delay.rs`, `oidc/authorize.rs`, `oidc/grant_types/device_code.rs`, `entity/clients.rs`, `api_keys.rs`, `sessions.rs`, `magic_links.rs` ve `config.toml`; sebadob.github.io/rauthy/config/argon2.html; keycloak.org/server/all-provider-config ve keycloak.org/docs/latest/server_admin/index.html; github.com/kanidm/kanidm/discussions/610 (14 Kasım 2021).
