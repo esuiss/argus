@@ -538,4 +538,42 @@ BEGIN;
   END $$;
 COMMIT;
 
-\echo 'RLS + schema: 24/24 passed'
+-- §1 karar 2: tenant_id taşıyan bir tablodan, yine tenant_id taşıyan bir
+-- tabloya giden HER yabancı anahtar tenant_id'yi içermelidir. Bu, davranışsal
+-- bir senaryo değil YAPISAL bir taramadır: composite_fk_cross_tenant yukarıda
+-- bugünkü belirli tabloları sınıyor, bu ise yarın eklenecek tabloyu da kapsar.
+--
+-- Kapının açık olduğu yer clients tablosudur: karar 5 küresel benzersizlik
+-- istediği için orada tek kolonlu bir UNIQUE vardır, yani dar bir yabancı
+-- anahtar Postgres tarafından reddedilmez. Onu reddeden tek şey bu tarama.
+BEGIN;
+  DO $$
+  DECLARE offending text;
+  BEGIN
+    SELECT string_agg(con.conrelid::regclass || '.' || con.conname, ', ')
+      INTO offending
+      FROM pg_constraint con
+     WHERE con.contype = 'f'
+       AND EXISTS (SELECT 1 FROM pg_attribute a
+                    WHERE a.attrelid = con.conrelid AND a.attname = 'tenant_id'
+                      AND a.attnum > 0 AND NOT a.attisdropped)
+       AND EXISTS (SELECT 1 FROM pg_attribute a
+                    WHERE a.attrelid = con.confrelid AND a.attname = 'tenant_id'
+                      AND a.attnum > 0 AND NOT a.attisdropped)
+       -- tenant_id'nin iki tarafta da AYNI konumda eşleşmesi gerekir; yalnızca
+       -- kolonun listede bulunması yetmez, başka bir kolona eşlenmiş olabilir.
+       AND NOT EXISTS (
+             SELECT 1
+               FROM generate_subscripts(con.conkey, 1) AS i
+              WHERE (SELECT a.attname FROM pg_attribute a
+                      WHERE a.attrelid = con.conrelid AND a.attnum = con.conkey[i]) = 'tenant_id'
+                AND (SELECT a.attname FROM pg_attribute a
+                      WHERE a.attrelid = con.confrelid AND a.attnum = con.confkey[i]) = 'tenant_id');
+
+    IF offending IS NOT NULL THEN
+      RAISE EXCEPTION 'FAIL every_fk_carries_the_tenant (decision #2): %', offending;
+    END IF;
+  END $$;
+COMMIT;
+
+\echo 'RLS + schema: 25/25 passed'
