@@ -22,7 +22,13 @@ use super::guard::{
 // couple fields, and get back a client with 50 fields").
 const SUBORDINATE_FIELDS: &[&str] = &["id", "jwks", "metadataPolicy", "constraints"];
 
-const CLIENT_FIELDS: &[&str] = &["clientId", "clientType", "authMethod", "redirectUris"];
+const CLIENT_FIELDS: &[&str] = &[
+    "clientId",
+    "displayName",
+    "clientType",
+    "authMethod",
+    "redirectUris",
+];
 
 // Router manifestodan üretildiği için bu ıskalayamaz. Unwrap yerine
 // fail-closed dönmek, ileride ıskalayabilir hâle gelse bile bunu korur.
@@ -347,15 +353,51 @@ pub(super) async fn delete_subordinate(
 }
 
 fn client_view(_permit: &Caller, client: &AdminClient) -> Value {
-    json!({
-        "clientId": client.client_id,
-        "clientType": client.client_type,
-        "authMethod": client.auth_method,
-        "redirectUris": client.redirect_uris,
-    })
+    let mut out = Map::new();
+    out.insert(
+        "clientId".to_owned(),
+        Value::String(client.client_id.clone()),
+    );
+    // §24 #26: kullanıcının set etmediği bir alan GET'te uydurulmaz.
+    if let Some(name) = client.display_name.as_ref() {
+        out.insert("displayName".to_owned(), Value::String(name.clone()));
+    }
+    out.insert(
+        "clientType".to_owned(),
+        Value::String(client.client_type.clone()),
+    );
+    out.insert(
+        "authMethod".to_owned(),
+        Value::String(client.auth_method.clone()),
+    );
+    out.insert(
+        "redirectUris".to_owned(),
+        Value::Array(
+            client
+                .redirect_uris
+                .iter()
+                .map(|uri| Value::String(uri.clone()))
+                .collect(),
+        ),
+    );
+    Value::Object(out)
 }
 
 fn client_from(body: &Value, id: &str) -> Result<AdminClient, Box<Response>> {
+    let display_name = match body.get("displayName") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(name)) if !name.is_empty() && name.chars().count() <= 255 => {
+            Some(name.clone())
+        }
+        Some(_) => {
+            return Err(Box::new(problem(
+                400,
+                "invalid_request",
+                "displayName must be a string of 1 to 255 characters",
+            )));
+        }
+    };
+
     let client_type = body
         .get("clientType")
         .and_then(Value::as_str)
@@ -401,6 +443,7 @@ fn client_from(body: &Value, id: &str) -> Result<AdminClient, Box<Response>> {
 
     Ok(AdminClient {
         client_id: id.to_owned(),
+        display_name,
         client_type,
         auth_method,
         redirect_uris,
@@ -561,7 +604,11 @@ pub(super) async fn create_client(
         Err(refusal) => return *refusal,
     };
 
-    let Some(id) = body.get("clientId").and_then(Value::as_str) else {
+    // §1 karar 30: kimliği çağıran koymaz. Sessizce yok saymak yerine reddetmek
+    // şart: karar 5 `client_id`'yi küresel benzersiz yapıyor ve seçilebilir
+    // kaldığı sürece ilk gelen adı alıp ikinci kiracıya bir benzersizlik ihlali
+    // döndürüyordu. İnsanın koyduğu ad `displayName` alanına gider.
+    if body.get("clientId").is_some() {
         close_idempotency(
             &state,
             &permit,
@@ -571,31 +618,16 @@ pub(super) async fn create_client(
             &Value::Null,
         )
         .await;
-        return problem(400, "invalid_request", "clientId is required");
-    };
-
-    if state
-        .store
-        .describe_client(permit.tenant(), id)
-        .await
-        .ok()
-        .flatten()
-        .is_some()
-    {
-        let response = problem(409, "already_exists", "this client is already registered");
-        close_idempotency(
-            &state,
-            &permit,
-            key.as_deref(),
-            Surface::Tenant,
-            409,
-            &Value::Null,
-        )
-        .await;
-        return response;
+        return problem(
+            400,
+            "invalid_request",
+            "clientId is issued by the server; send displayName for the label",
+        );
     }
 
-    save_client(&state, &permit, key.as_deref(), id, &body).await
+    let id = uuid::Uuid::new_v4().to_string();
+
+    save_client(&state, &permit, key.as_deref(), &id, &body).await
 }
 
 pub(super) async fn put_client(
@@ -608,6 +640,13 @@ pub(super) async fn put_client(
     let permit = match admit(&state, &headers, entry).await {
         Ok(permit) => permit,
         Err(refusal) => return *refusal,
+    };
+
+    // §1 karar 30: kimlik üretilen bir değer olduğu için PUT bir kaynak
+    // YARATAMAZ; çağıranın uydurduğu bir kimlik altında client açılması,
+    // seçilebilir `client_id`'nin arka kapıdan geri gelmesi olurdu.
+    let Ok(Some(_)) = state.store.describe_client(permit.tenant(), &id).await else {
+        return hidden();
     };
 
     let key = match open_idempotency(&state, &permit, &headers, Surface::Tenant, &body).await {

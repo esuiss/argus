@@ -14,27 +14,27 @@ Kapsam dışı: sektöre özgü dikey ürünler, uyum (compliance) ürünleri ve
 
 ## 1. Gün-1 kararları
 
-Bu bölümdeki kararların gün-1'de verilmesi zorunludur. Sonradan değiştirme maliyeti ya uygulanabilir değildir ya da tüm kurulumu durduran bir göç gerektirir.
+Bu bölümdeki kararların gün-1'de verilmesi zorunludur. Sonradan değiştirme maliyeti ya uygulanabilir değildir ya da tüm kurulumu durduran bir göç gerektirir. Tercih sebebi sütunu seçimin gerekçesini taşır; gerekçe sonradan değiştirmenin bedelinden ayrılamıyorsa o bedel de aynı hücrededir.
 
-| # | Karar | Sonradan değiştirme maliyeti | Kaynak |
+| # | Karar | Tercih sebebi | Kaynak |
 |---|---|---|---|
-| 1 | `tenant_id` her tabloda ve her birincil anahtarda | Tüm birincil anahtarların düşürülüp yeniden kurulması gerekir; çevrimdışı göç. SuperTokens örneğinde 33 tablo ve tüm PK'lar CASCADE ile etkilendi | §18 |
+| 1 | `tenant_id` her tabloda ve her birincil anahtarda | Kiracı, satırın kimliğinin parçası olur; ona işaret eden her FK de kiracıyı taşımak zorunda kalır ve çapraz kiracı referans ifade edilemez hâle gelir. Sonradan: tüm PK'ları düşürüp yeniden kurmak, çevrimdışı göç. SuperTokens örneğinde 33 tablo ve tüm PK'lar CASCADE ile etkilendi | §18 |
 | 2 | Her yabancı anahtar composite (`tenant_id` dahil) | Tek kolonlu FK'lar çapraz-kiracı referansa izin verir; RLS sonradan eklendiğinde okuma yollarını bozar | Logto PR #7596 |
-| 3 | RLS + `FORCE` + non-owner rol, istisnasız tüm tablolarda | Sonradan ekleme ya-hep-ya-hiç niteliğindedir; atlanan tek tablo sessiz veri sızıntısı üretir | Logto #7685 |
-| 4 | Kiracı başına imzalama anahtarı, varsayılan ES256 | Paylaşımlı anahtardan kiracı başına anahtara geçiş, tüm RP'lerde JWKS cache invalidasyonu ve koordineli kesinti gerektirir | Storm-0558, CVE-2026-23552 |
-| 5 | `client_id` global benzersiz (Keycloak'ın aksine) | Sonradan globalleştirme, müşteri `client_id` değerlerinin yeniden adlandırılması ve her RP konfigürasyonunun kırılması demektir | RFC 6749 §2.2 |
-| 6 | Kullanıcı benzersizliği kiracı-yerel: `UNIQUE(tenant_id, …)`, global değil | Global'den kiracı-yerele geçiş veri göçü ve güvenlik incelemesi gerektirir; ters yön uygulanabilir değildir | Zitadel: kullanıcıların organizasyonlar arası taşınması desteklenmiyor |
+| 3 | RLS + `FORCE` + non-owner rol, istisnasız tüm tablolarda | Atlanan tek bir tablo sessiz veri sızıntısı üretir; kısıt ya hep ya hiç niteliğindedir ve sonradan eklenmesi bunu değiştirmez | Logto #7685 |
+| 4 | Kiracı başına imzalama anahtarı, varsayılan ES256 | Anahtar paylaşımlıysa kiracı A'nın verdiği token kiracı B'nin JWKS'iyle de doğrulanır; `client_id` kiracılar arası çakışabildiği için `aud` kontrolü de geçer. Storm-0558 tam olarak bu zincirdir. Sonradan geçiş, tüm RP'lerde JWKS cache invalidasyonu ve koordineli kesinti demektir | Storm-0558, CVE-2026-23552 |
+| 5 | `client_id` global benzersiz (Keycloak'ın aksine) | RFC 6749 §2.2'ye göre `client_id` yalnızca AS içinde benzersiz olmak zorundadır; çok kiracılıkta bu, kiracılar arası çakışmanın spesifikasyona uygun olması ve `aud` karışıklığını mümkün kılması demektir. Global benzersizlik, kiracı başına anahtarın yanında ikinci bağımsız savunma katmanıdır. Sonradan globalleştirme her RP konfigürasyonunu kırar | RFC 6749 §2.2 |
+| 6 | Kullanıcı benzersizliği kiracı-yerel: `UNIQUE(tenant_id, …)`, global değil | Kimlik bilgisini kiracı sahiplenir; aynı e-posta iki kiracıda iki ayrı kullanıcıdır. Global'den kiracı-yerele geçiş veri göçü ve güvenlik incelemesi gerektirir, ters yön ise uygulanabilir değildir | Zitadel: kullanıcıların organizasyonlar arası taşınması desteklenmiyor |
 | 7 | Kiracı slug'ı değişmez | Slug issuer URL'inin parçasıdır; değişimi her RP'nin discovery akışını kırar | Keycloak: realm alias sonradan değiştirilemiyor |
-| 8 | Issuer stratejisi: subdomain birincil, RFC 9207 `iss` gün-1'de | Issuer değişimi tüm RP'lerin yeniden yapılandırılmasını gerektirir | RFC 8414 ile OIDC Discovery arasındaki çelişki |
-| 9 | `placement_id` silo-kaçış kolonu gün-1'de, kullanılmasa dahi | Kolon yoksa bir kiracının ayrı kümeye taşınması mimari yeniden yazım gerektirir | AWS silo/pool/bridge modeli |
-| 10 | Denetim logu kiracı ve zaman bazlı partition'lı | Milyarlarca satırlı bir tablonun sonradan partition'lanması uygulanabilir değildir | GDPR Md. 17 |
-| 11 | Yetkilendirme isim tabanlı değil, opak kimlik veya tam yol tabanlı | Token'da isim taşıyan her bileşen yeniden yazılır | CVE-2026-19608 |
+| 8 | Issuer stratejisi: subdomain birincil, RFC 9207 `iss` gün-1'de | Alt alan adı, RFC 8414 ile OIDC Discovery arasındaki well-known yolu çelişkisine girmez; yol tabanlı issuer girer. Tek joker sertifika sınırsız kiracıya ölçeklenir, kiracı başına sertifika ellinci kiracıda duvara çarpar. Issuer değişimi tüm RP'lerin yeniden yapılandırılması demektir | RFC 8414 ile OIDC Discovery arasındaki çelişki |
+| 9 | `placement_id` silo-kaçış kolonu gün-1'de, kullanılmasa dahi | Düzenlemeye tabi bir kiracı kendi kümesini isteyebilir; kolon varsa bu bir yerleştirme değişikliği, yoksa mimari yeniden yazımdır | AWS silo/pool/bridge modeli |
+| 10 | Denetim logu kiracı ve zaman bazlı partition'lı | Ölçekte silme hakkı ancak partition düşürerek karşılanır; satır bazlı silme milyarlarca satırda uygulanabilir değildir. Sonradan partition'lamak da uygulanabilir değildir | GDPR Md. 17 |
+| 11 | Yetkilendirme isim tabanlı değil, opak kimlik veya tam yol tabanlı | Token'da ve politikada isim taşınırsa yeniden adlandırma her bileşeni kırar; opak kimlik bunu yapısal olarak önler | CVE-2026-19608 |
 | 12 | WebAuthn RP ID apex alan adıdır; login alt alan adı veya satıcı alan adı kullanılmaz. Çok kiracılıkta her kiracı kendi RP ID'sini alır | WebAuthn tarafındaki tek geri alınamaz karardır. RP ID değiştiğinde kayıtlar silinmez ancak kullanılamaz hâle gelir; Okta'nın ifadesiyle tarayıcı bunları girişte sunmaz. ROR (`/.well-known/webauthn`) pratikte beş label ile sınırlıdır, dolayısıyla paylaşımlı RP ID çok kiracılıkta ölçeklenmez | §22 §39.1, §23 §5.3 |
-| 13 | WebAuthn `user.id` 64 rastgele bayttır; e-posta veya türevi kullanılmaz | Değişiklik tüm credential'ları geçersiz kılar | WebAuthn L3 §5.4.3, §14.6.1 |
-| 14 | Kullanıcı kimliği yeniden kullanılmaz; e-posta varsayılan olarak hiçbir zaman kimlik değildir | Tombstone tekillik kısıtının sonradan eklenmesi mevcut çakışan kayıtları çözemez | RFC 9967, Gmail, GitHub |
+| 13 | WebAuthn `user.id` 64 rastgele bayttır; e-posta veya türevi kullanılmaz | `user.id` authenticator'da saklanır ve sonradan değiştirilemez; e-posta türevi kullanılırsa hem kişisel veri authenticator'a yazılır hem de e-posta değişimi tüm credential'ları geçersiz kılar | WebAuthn L3 §5.4.3, §14.6.1 |
+| 14 | Kullanıcı kimliği yeniden kullanılmaz; e-posta varsayılan olarak hiçbir zaman kimlik değildir | Geri dönüştürülen bir tanımlayıcı, yeni sahibine eski hesabın erişimini devreder. Tombstone tekillik kısıtının sonradan eklenmesi mevcut çakışan kayıtları çözemez | RFC 9967, Gmail, GitHub |
 | 15 | `argus-core` I/O yapmaz: `async fn`, `tokio::`, `sqlx::`, `reqwest::` yasaktır ve CI'da zorlanır | Formel doğrulamanın uygulanabileceği tek katman budur; I/O sonradan sökülemez | §2 §5 |
 | 16 | Kimlik doğrulama akışı konfigüre edilebilir bir "flow" değil, tipli bir durum makinesidir | Keycloak #40744: akıştan adım silmek auth bypass üretiyor; kök neden akışın çalışma zamanında yorumlanan bir konfigürasyon olmasıdır. Agama sınıfı bir akış dili bu hatayı derleme zamanına taşıyabilir; Argus ikinci bir dili ve derleyicisini bakım yüzeyi olarak kabul etmediği için reddeder. Reddedilen **kompozisyondur**; askıya alınabilirlik reddedilmemiştir (§23 §8 #30) | §22 §10.3, §23 §8 #33 |
-| 17 | Her PII alanı kullanıcı başına DEK ile şifrelenir (envelope encryption) | Crypto-shredding'in sonradan eklenmesi tüm verinin yeniden yazılmasını gerektirir | ICO "put beyond use", EDPB CEF 2026 |
+| 17 | Her PII alanı kullanıcı başına DEK ile şifrelenir (envelope encryption) | Kullanıcı başına DEK, silme hakkını veriyi yeniden yazmadan anahtarı imha ederek karşılar; sonradan eklenmesi tüm verinin yeniden yazılmasını gerektirir | ICO "put beyond use", EDPB CEF 2026 |
 | 18 | Üç ayrı epoch: `session_epoch` (kullanıcı), `authz_epoch` (kiracı), `key_epoch` (kiracı) | Tek sayaca indirgenirse her izin değişikliği tüm oturumları düşürür | §2 §4, 9.3 A6 |
 | 19 | Kiracıya sunucu tarafında kod çalıştırma verilmez; şablon, betik, kural ve kanca aynı yasağa tabidir. Keycloak'ın FreeMarker modeli benimsenmez | Keycloak dokümantasyonuna göre kötü niyetli bir şablon Keycloak süreci yetkisiyle kod çalıştırabilir; çok kiracılı bir üründe bu, kiracının RCE elde etmesi demektir. Aynı risk şablon dışı üç yüzeyde de vardır: WSO2'nun adaptive auth betikleri, Zitadel'in actions'ı ve authentik'in expression policy'leri. Sonradan script'siz templating'e geçiş her kiracı temasının yeniden yazılmasını gerektirir; script'siz mekanizma §23 §5.5'tedir | §23 §5.2, §23 §5.5 |
 | 20 | Argus'un kendi admin konsolu ve hosted login'i OAuth kullanmaz; doğrudan session cookie kullanır | RFC 10017 §7.1, oturum yönetimini OAuth ile ikame etmenin basit uygulamaları gereksiz yere karmaşıklaştırdığını belirtir. Sonradan sökme tüm UI auth katmanının yeniden yazılması demektir | §23 §4.2 |
@@ -47,21 +47,21 @@ Bu bölümdeki kararların gün-1'de verilmesi zorunludur. Sonradan değiştirme
 | 27 | Minimum PostgreSQL 18 | Yerleşik `uuidv7()` insert'te 1,67× hız ve %26 daha küçük indeks veriyor (§6 §4.2); fast-path kilit düzeltmesi (commit `c4d5cb71d`) çok partition'lı iş yükündeki kilit uçurumunu kaldırıyor (§18 §2.2); `SET NOT NULL NOT VALID` expand-contract desenini sadeleştiriyor. Expand-contract'ın kendisi PG12'den beri mümkündür, PG18 gerekçesi değildir | §26 §4.1, §6 §4.2, §18 §2.2 |
 | 28 | Kiracı giriş sayfasının kabuğu script çalıştırmayan bir şablonla yazılır; giriş kutusu derlenmiş kodda kalır ve kiracı onu yalnızca konumlandırır | Yönetim yüzeyini ele geçiren aktör birinci taraf değildir; sunucuda kod çalıştıran bir şablon motoru tenant-admin yetkisini RCE'ye çevirir. Kazanç ihmal edilebilir: §26 tek binary modelini belirlediğinden her değişiklikte zaten dağıtım yapılır. Tam kayıt bölüm 2'dedir | §23 §5.1, §23 §5.2, karar 19, karar 20, §26 |
 | 29 | Tema verisi `(kiracı, istemci)` ile anahtarlanır ve başlangıçta kiracı kayıt defterine yüklenir | Kiracı logosu yıllık mertebede değişir ve istek başına okunmayı gerektirmez; render başına yapılan iş bir map aramasıdır, sorgu değil. Tam kayıt bölüm 2'dedir | §23 §5.1, §18, §26 |
+| 30 | `client_id` yönetici tarafından seçilmez; yerel kayıtta Argus üretir, CIMD yolunda istemcinin kendi URL'idir. İnsanın gördüğü ad ayrı bir `display_name` alanındadır ve kiracıya yereldir | Karar 5 `client_id`'yi küresel benzersiz yapıyor. Değer seçilebilir kaldığı sürece ilk gelen `webapp` adını alıyor ve ikinci kiracı bir benzersizlik ihlaline çarpıyor; yani karar 5 bir ürün hatasına dönüşüyor. Kimliği üretilen bir değer yapmak çakışmayı kaynağında bitiriyor. Sonradan geçiş mevcut istemci kimliklerinin yeniden adlandırılması, yani her RP konfigürasyonunun kırılması demektir. Tam kayıt bölüm 2'dedir | karar 5, §24, §14 |
 
-Yirmi dokuz maddenin tamamı şemayı, crate sınırlarını, UI mimarisini, API yüzeyini veya dağıtım modelini belirler. Hiçbiri implementasyon sonrasına ertelenebilir nitelikte değildir.
+Otuz maddenin tamamı şemayı, crate sınırlarını, UI mimarisini, API yüzeyini veya dağıtım modelini belirler. Hiçbiri implementasyon sonrasına ertelenebilir nitelikte değildir.
 
 ---
 
 ## 2. Karar kayıtları
 
-28 ve 29 numaralı kararlar, bölüm 9'da tanımlanan zorunlu karar kaydı alanlarının tamamıyla aşağıda kayıtlıdır.
+28, 29 ve 30 numaralı kararlar, bölüm 9'da tanımlanan zorunlu karar kaydı alanlarının tamamıyla aşağıda kayıtlıdır.
 
 ### Karar 28 — Kiracı giriş sayfası: script çalıştırmayan şablon, derlenmiş giriş kutusu
 
 | Alan | İçerik |
 |---|---|
 | Kimlik | 28 |
-| Statü | MT |
 | Karar | Kiracı, giriş sayfasının kabuğunu Liquid ile yazabilir. Giriş kutusu derlenmiş kodda kalır; kiracı onu yalnızca `argus_login_box` yer tutucusuyla konumlandırır. Sunucuda kod çalıştıran şablon motorları (FreeMarker sınıfı) implemente edilmez. |
 | Gerekçe | §23 §8 #18'in özgün gerekçesi kiracının düşman kabul edilmesiydi; Argus'ta kiracılar birinci taraf olduğundan bu gerekçe geçerli değildir. Karar iki daha dar sebeple korunmuştur. (a) Bu turda gerçek bir yönetim API'si tanımlandı ve yönetim yüzeyini ele geçiren aktör birinci taraf değildir; sunucuda çalışan bir şablon motoru tenant-admin yetkisini RCE'ye dönüştürür. (b) Kazanç ihmal edilebilir düzeydedir: §26 tek binary ve tek komut modelini belirler, dolayısıyla her değişiklikte zaten dağıtım yapılır. Performans bu kararı belirlemez; ölçümde aynı istekteki Argon2 bu donanımda yaklaşık 11 ms, şablon render'ı mikrosaniye mertebesindedir. |
 | Kutunun kiracıya açılmama gerekçesi | Alan adları, alan sıralaması, gönderilen veri kümesi ve identifier adımının sabit biçimli cevabı (§23 §8 #2) güvenlik garantileridir. Auth0 Universal Login aynı sınırı çizer: Liquid prompt'un çevresini kontrol eder, prompt'un kendisini değil. |
@@ -76,13 +76,25 @@ Yirmi dokuz maddenin tamamı şemayı, crate sınırlarını, UI mimarisini, API
 | Alan | İçerik |
 |---|---|
 | Kimlik | 29 |
-| Statü | MT |
 | Karar | Tema, `(kiracı, istemci)` ile anahtarlanmış bir veri kaydıdır; istemciye özel tema yoksa kiracı temasına, o da yoksa derlenmiş varsayılana düşülür. Veri veritabanında saklanır ancak başlangıçta kiracı kayıt defterine yüklenir; render başına yapılan iş bir map aramasıdır, sorgu değil. Değişiklik sonrası yönetim ucu ilgili kiracının girdisini tazeler; süreç yeniden başlatılmaz. |
 | Gerekçe | Kiracı logosu yıllık mertebede değişen bir veridir ve istek başına okunmayı gerektirmez. Keycloak'ın modeli de fiilen budur: tema JAR'ı bir dağıtım artefaktıdır ve üretimde şablonlar bellekte cache'lenir. Fark cache'in içeriğindedir: Keycloak yorumlanacak bir şablon ağacı tutar, Argus derlenmiş kod ve veri tutar. |
 | Granülerlik gerekçesi | Keycloak realm ve client düzeyinde tema seçimine izin verir. Aynı granülerlik veri modelinde yalnızca bir anahtar meselesidir ve ek maliyet doğurmaz. |
 | Kabul testi | Tema değişikliğinden sonra tazeleme ucu çağrıldığında yeni tema sunulur; tazeleme çağrılmadan eski tema sunulur. |
 | Geçersiz kılacak karşı örnek | Toplam tema hacminin süreç bellek bütçesini zorlaması; kiracı başına birden çok istemci temasının bellekte tutulamaz hâle gelmesi. Bu noktada doğru cevap veritabanına dönmek değil, sınırlı bir LRU uygulamaktır. |
 | Kaynak | §23 §5.1, §18, §26 |
+
+### Karar 30 — `client_id` üretilir, insanın gördüğü ad ayrı bir alandır
+
+| Alan | İçerik |
+|---|---|
+| Kimlik | 30 |
+| Karar | `POST /admin/api/clients/v1` gövdede `clientId` kabul etmez; gönderilirse 400 döner. Kimliği sunucu üretir ve yanıtta bildirir. `PUT /admin/api/clients/v1/{id}` kaynak yaratamaz, yalnızca günceller; olmayan bir kimlikte 404 döner. Toplu iş yolu aynı kurala tabidir. İnsanın gördüğü ad `display_name` kolonundadır, kiracıya yereldir ve üzerinde benzersizlik kısıtı yoktur. CIMD yolundan gelen istemcilerde kimlik istemcinin kendi URL'idir ve adını metadata dokümanından alır. |
+| Gerekçe | Karar 5 `client_id`'yi küresel benzersiz yapmaktadır ve gerekçesi sağlamdır: RFC 6749 §2.2 kiracılar arası çakışmaya izin verir, çakışma da karar 4'ün kestiği saldırı zincirinin `aud` halkasını yeniden açar. Ancak değer seçilebilir kaldığı sürece bu güvenlik kararı doğrudan kullanıcının gördüğü isme çarpar: ilk gelen `webapp` adını alır, ikinci kiracı bir benzersizlik ihlali görür ve söyleyecek bir şey yoktur, çünkü istemcinin başka bir adı yoktur. Sektörün cevabı üretilen kimliktir; Auth0, Okta, Entra ve Google'ın dördü de `client_id`'yi üretir, seçtiren tek ürün Keycloak'tır. |
+| Geçerlilik koşulu | `client_id`'nin insan tarafından okunabilir olmasının bir ürün gereksinimi olmaması. Kimliğin göründüğü yerler yetkilendirme adresi, token istekleri ile günlüklerdir; üçünde de okunabilirlik gerekmez. |
+| Kabul testi | `crates/argus-http/tests/admin_api.rs`. Sabitlenen davranışlar: gövdede `clientId` gönderen istek 400 alır; yaratma yanıtı üretilmiş bir `clientId` taşır ve bu değer etiketten farklıdır; aynı etiketle açılan iki istemci farklı kimlik alır ve ikisi de 201 döner; uydurulmuş bir kimliğe yapılan `PUT` 404 alır; toplu iş içinde `clientId` taşıyan öğe reddedilir. |
+| Geçersiz kılacak karşı örnek | Bir müşterinin, istemci kimliğini kendi kurumsal envanterindeki bir değere eşitlemesinin sözleşme gereği olması. Bu durumda doğru cevap seçilebilir `client_id` değil, kimliğe eşlik eden ve kiracıya yerel bir dış referans alanıdır. |
+| Kalan risk ve kontrolü | Üretilen kimlik UUIDv4'tür ve günlükte okunması zordur; kontrolü `display_name`'in listeleme yanıtlarında bulunmasıdır. Sürümün v7 değil v4 olması bilinçlidir: §1 §2'nin UUIDv7 kuralı birincil anahtarlar içindir ve gerekçesi indeks yerelliğidir. `client_id` ise yetkilendirme adresinde görünen açık bir tanımlayıcıdır; v7'nin gömdüğü zaman damgası istemcinin ne zaman yaratıldığını sızdırır ve kimlikleri sıralanabilir kılar. Aynı gerekçe §18'in `kid` değerinin opak olması kuralındadır. Ayrıca `clients` tablosunda karar 5 gereği tek kolonlu bir benzersizlik vardır, yani karar 2'nin uyardığı kaçış kapısı bu tabloda açıktır; bugün ona bakan yedi yabancı anahtarın hepsi bileşiktir ancak bunu şema değil disiplin sağlamaktadır. §18 §5.3'ün yapısal taraması bu yüzden gereklidir. |
+| Kaynak | karar 5, karar 2, §24 §2.7, §14, `crates/argus-store/migrations/0025_client_display_name.sql` |
 
 ---
 
@@ -483,21 +495,7 @@ Her iki aday aynı matriste sınanacaktır; karşılaştırma bundan önce yapı
 
 > **A6'nın açık kalan parçası.** `READ COMMITTED` altında ardışık sorgular farklı snapshot görür; "aynı transaction" ifadesi tek başına yeterli değildir. Ayrıca uçuşta olan bir kararın hangi anda geçerli sayıldığı tanımlı değildir: cache'e hiç yazılmadan doğrudan çağırana dönen bir karar, epoch anahtar karşılaştırmasının kapsamı dışında kalır. "İptal commit olduktan sonra hiçbir eski karar kullanılamaz" garantisi yalnızca cache karşılaştırmasından türetilemez. Replica'ya çıkıldığında sürüm veya LSN bariyeri gerekecektir; v1'de gerekmemektedir.
 
-### 9.4 Gün-1 kararlarının statü dağılımı
-
-Bölüm 1'deki yirmi dokuz maddenin tamamı aynı geri alınamazlık sınıfında değildir. Tek tip kesinlik atamak, sonradan hatalı olduğu anlaşılan bir tercihi değiştirmeyi zorlaştırır.
-
-Sınıflandırma yalnızca burada tutulur; bölüm 1'in tablosu kararı ve maliyetini verir, sınıfı vermez. Dağılım: KŞS 8, KKS 7, MT 13, DH 1; toplam 29.
-
-**KŞS — kalıcı şema sözleşmesi (8).** Veritabanının içindedir; değiştirmek çevrimdışı göç gerektirir: `tenant_id` her PK'da (1), composite FK (2), RLS `FORCE` (3), kiracı-yerel kullanıcı benzersizliği (6), `placement_id` (9), denetim partition'ları (10), kimlik yeniden kullanılmaması (14), kullanıcı başına DEK (17).
-
-**KKS — kalıcı kimlik sözleşmesi (7).** Dış dünyaya yerleşir; göç maliyeti yıkıcıdır: kiracı başına imzalama anahtarı (4), global `client_id` (5), değişmez kiracı slug'ı (7), issuer stratejisi (8), WebAuthn RP ID (12), `user.id` (13), platform ile kiracı admin API ayrımı (21; audience ve scope namespace'i token'larda görünür).
-
-**MT — kabul edilmiş mimari tercih (13).** Değiştirmesi pahalıdır ancak mümkündür: opak kimlik tabanlı yetkilendirme (11), `argus-core` I/O yasağı (15), tipli durum makinesi (16), üç epoch (18), sunucuda kiracı kodu çalıştırma yasağı (19), admin konsolu session cookie (20), veri katmanı filtresi (22), audit outbox (23), `redirect_uri` tam eşleşme (24), imzalama anahtarlarının veritabanı dışında olması (25), migration job modeli (26), giriş sayfası kabuğu ile derlenmiş giriş kutusu (28), tema verisinin kayıt defterinde tutulması (29).
-
-**DH — doğrulanacak hipotez (1).** Minimum PostgreSQL 18 (27).
-
-Bu tablonun dışında kalan ertelenmiş ve açık kararlar: iptal sözleşmesi 9.1'dedir, outbox teslimatı 9.2'dedir. Denetim kuyruğu (karar 23) 9.3 A1 ile kapanmış ve tabloya MT olarak girmiştir.
+Bölüm 9'un dışında kalan ertelenmiş ve açık kararlar: iptal sözleşmesi 9.1'dedir, outbox teslimatı 9.2'dedir. Denetim kuyruğu (karar 23) 9.3 A1 ile kapanmış ve bölüm 1'in tablosuna girmiştir.
 
 > **Kural.** "Yayımlanmış bir örnek bulunamadı" ifadesi "Argus bunu ilk yapan olacak" sonucuna dönüştürülmez. İkincisi ayrı bir iddiadır ve ayrı kanıt gerektirir.
 
