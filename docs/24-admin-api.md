@@ -1,81 +1,62 @@
-# 24. Admin API ve delege yönetim
+# §24 — Yönetim API'si ile devredilmiş yönetim
 
-> `ARGUS.md` §24'den taşındı. Numaralandırma korundu; bu dosyanın
-> içindeki `§24 §X` referansları aynı anlamda.
+Bu bölüm `ARGUS.md` dosyasının 24. kısmından taşınmıştır. Numaralandırma korunmuştur; dosya içindeki `§24 §X` referansları aynı anlamdadır.
 
-
-**Yöntem:** ~45 arama/fetch (2 alt-ajan dahil). Birincil kaynaklar önceliklendirildi.
+Yöntem yaklaşık 45 arama ile çekme işlemidir; iki alt ajan dahildir. Birincil kaynaklar önceliklendirilmiştir.
 
 ---
 
-## 1. Mevcut IdP'lerin Admin API Tasarımı
+## 1. Mevcut kimlik sağlayıcıların yönetim API'si tasarımı
 
-### 1.1 Keycloak Admin REST API — kendi maintainer'ının itiraf listesi
+### 1.1 Keycloak yönetim REST API'si, kendi bakımcısının itiraf listesi
 
-En değerli bulgu: Keycloak'ın core maintainer'ı **@stianst**, mevcut Admin API v1'in tasarım hatalarını [Discussion #37655](https://github.com/keycloak/keycloak/discussions/37655)'te (26 Şubat 2025) tek tek listelemiş. Bu bir blog eleştirisi değil, ürünün sahibinin pişmanlık listesi:
+En değerli bulgu şudur: Keycloak'ın çekirdek bakımcısı, mevcut birinci sürüm yönetim API'sinin tasarım hatalarını 26 Şubat 2025 tarihli 37655 numaralı tartışmada tek tek listelemiştir. Bu bir blog eleştirisi değil ürünün sahibinin pişmanlık listesidir.
 
-| Sorun | stianst'in kendi ifadesi (26 Şub 2025) |
+| Sorun | Bakımcının kendi ifadesi, 26 Şubat 2025 |
 |---|---|
-| Versiyonlama yok | *"Lack of versioning — this will be a must as we introduce a v2, and to solve known usability issues it will have to be a breaking change requiring a new major API version."* |
-| Verb semantiği tutarsız | *"POST sometimes work as a PUT, and sometimes as a PATCH, depends randomly on the endpoint."* |
-| OpenAPI kalitesiz | *"Bad quality OpenAPI specification — these are incomplete, and usually not sufficient to generate clients."* |
-| Create yanıtı boş | *"Creating new resources like a realm returns an empty response, with the ID in the location header — this is very inconvenient to use as it requires separating parsing of location headers."* |
-| Validation yok | *"Lack of validation — there's very little validation in Admin APIs today, often leading to issues later on."* |
-| Default şişmesi | *"I create a client with a couple fields, and get back a client with 50 fields."* |
-| ID ile lookup zorunlu | *"Not able to use user defined IDs when looking up resources; for example clients are looked up on UUID, and not on clientId."* |
+| Sürümleme yoktur | *"Lack of versioning — this will be a must as we introduce a v2, and to solve known usability issues it will have to be a breaking change requiring a new major API version."* |
+| Fiil semantiği tutarsızdır | *"POST sometimes work as a PUT, and sometimes as a PATCH, depends randomly on the endpoint."* |
+| OpenAPI kalitesizdir | *"Bad quality OpenAPI specification — these are incomplete, and usually not sufficient to generate clients."* |
+| Oluşturma yanıtı boştur | *"Creating new resources like a realm returns an empty response, with the ID in the location header — this is very inconvenient to use as it requires separating parsing of location headers."* |
+| Doğrulama yoktur | *"Lack of validation — there's very little validation in Admin APIs today, often leading to issues later on."* |
+| Varsayılan şişmesi vardır | *"I create a client with a couple fields, and get back a client with 50 fields."* |
+| Kimlikle arama zorunludur | *"Not able to use user defined IDs when looking up resources; for example clients are looked up on UUID, and not on clientId."* |
 
-Ek olarak (19 Mart 2025, stianst): **null ayarlanamıyor** — *"We don't know if `RealmRepresentation#displayName=null` means it was just not set, or if it was explicitly set to null."* Bu, JSON Merge Patch kullanılmamasının doğrudan sonucu.
+Ek olarak, 19 Mart 2025'te aynı bakımcı boş değer ayarlanamadığını belirtmiştir: bir alanın hiç ayarlanmamış mı yoksa açıkça boşa mı ayarlandığı bilinememektedir. Bu, JSON birleştirme yamasının kullanılmamasının doğrudan sonucudur.
 
-Topluluk katkıları:
-- **Pagination performansı** (17 Tem 2025, @Plasmadog): *"Skip/Take approach is not performant… when paging through all users, there is a very real possibility that a new user registers before finished. Since results are ordered by user Id, and user Ids are not sequential, that user can be skipped."* → offset pagination'da **kayıt kaçırma** (kayıp okuma) problemi.
-- **N+1 sorgu** (12 Tem 2025, @schuerg): kullanıcı + rol + grup çekmek için `1 + n + n` istek.
-- **Toplu silme yok** (27 Kas 2025, @jesperronn): milyonlarca hesap için doğrudan DB sorgusu gibi tehlikeli workaround'lara zorluyor.
+Topluluk katkıları şunlardır. Sayfalama performansı konusunda 17 Temmuz 2025'te belirtildiği gibi atla ile al yaklaşımı performanslı değildir; tüm kullanıcılar arasında sayfalanırken yeni bir kullanıcının kaydolma ihtimali çok gerçektir ile sonuçlar kullanıcı kimliğine göre sıralandığından ve kimlikler ardışık olmadığından o kullanıcı atlanabilmektedir. Yani uzaklık tabanlı sayfalamada kayıt kaçırma problemi vardır. N artı bir sorgu problemi 12 Temmuz 2025'te bildirilmiştir: kullanıcı, rol ile grup çekmek için bir artı n artı n istek gerekmektedir. Toplu silme yoktur; 27 Kasım 2025'te bildirildiği gibi milyonlarca hesap için doğrudan veritabanı sorgusu gibi tehlikeli geçici çözümlere zorlamaktadır.
 
-### 1.2 Keycloak'ın kendi REST API kılavuzu (yazılı ama uygulanmamış)
+### 1.2 Keycloak'ın kendi REST API kılavuzu, yazılı ancak uygulanmamıştır
 
-[keycloak-community/design/rest-api-guideline.md](https://github.com/keycloak/keycloak-community/blob/main/design/rest-api-guideline.md) — dikkat çekici: Keycloak'ın **yazılı bir API tasarım kılavuzu var** ve v1 bu kılavuza uymuyor. Kılavuzun kuralları:
+Topluluk deposundaki tasarım kılavuzunda dikkat çekici bir durum vardır: Keycloak'ın yazılı bir API tasarım kılavuzu bulunmakta ile birinci sürüm bu kılavuza uymamaktadır. Kılavuzun kuralları şunlardır.
 
-- Versiyonlama path'te: `/{realm}/apis/{API_GROUP}/{version}`. Versiyon **Keycloak sürüm numarasına bağlı değil** — API'nin kararlılık durumunu ifade ediyor.
-- Pagination: `first` + `max` query param, yanıtta **RFC 5988 `Link` header** (next/prev).
-- Hata gövdesi: `error` (zorunlu, snake_case kod) + `error_description` (opsiyonel).
-- PATCH: **RFC 7396 JSON Merge Patch**, `Content-Type` ile ayrışıyor, başarıda `204 No Content`.
-- Kaynak isimleri: store resource → çoğul isim; controller resource → fiil (camelCase).
-- OpenAPI hakkında **hiçbir kural yok** (kılavuzun kendi boşluğu).
+Sürümleme yoldadır ile sürüm Keycloak sürüm numarasına bağlı değildir; API'nin kararlılık durumunu ifade etmektedir. Sayfalama ilk ile azami sorgu parametreleriyle yapılmakta ile yanıtta RFC 5988 bağlantı başlığı bulunmaktadır. Hata gövdesi zorunlu bir hata kodu ile isteğe bağlı bir açıklama içermektedir. Yama işlemi RFC 7396 JSON birleştirme yamasıdır, içerik tipiyle ayrışmakta ile başarıda 204 dönmektedir. Kaynak isimlerinde depo kaynakları çoğul isim, denetleyici kaynakları ise fiil almaktadır. OpenAPI hakkında hiçbir kural yoktur; kılavuzun kendi boşluğudur.
 
-### 1.3 Admin API v2 — fiilen ne çıktı
+### 1.3 İkinci sürüm yönetim API'si, fiilen ne çıkmıştır
 
-[Issue #39220](https://github.com/keycloak/keycloak/issues/39220) (25 Nis 2025) "Admin API v2" epic'i **"closed as not planned"** olarak kapanmış. Ama iş ölmedi, kapsam daraltıldı: **Client Admin API v2** Keycloak **26.7.0**'da (Temmuz 2026) deneysel olarak çıktı ([26.7.0 release notes](https://www.keycloak.org/2026/07/keycloak-2670-released), [Discussion #50186](https://github.com/keycloak/keycloak/discussions/50186)).
+25 Nisan 2025 tarihli 39220 numaralı ikinci sürüm yönetim API'si destanı planlanmadı olarak kapanmıştır. Ancak iş ölmemiş kapsam daralmıştır: istemci yönetim API'sinin ikinci sürümü Keycloak 26.7.0'da, Temmuz 2026'da deneysel olarak çıkmıştır.
 
-Somut tasarımı ([admin-api-v2 reference](https://www.keycloak.org/admin-api/admin-api-v2)):
+Somut tasarımı şöyledir.
 
 ```
 /admin/api/{realmName}/clients/v2
 ```
 
-**Versiyon path'in SONUNDA, kaynak başına.** Yani API global olarak versiyonlanmıyor — her kaynak kendi hızında v2'ye geçiyor. Bu, big-bang v2 migrasyonundan kaçınmanın somut yolu.
+Sürüm yolun sonunda ile kaynak başınadır. Yani API global olarak sürümlenmemekte, her kaynak kendi hızında ikinci sürüme geçmektedir. Bu, tek seferlik büyük bir göçten kaçınmanın somut yoludur.
 
-- `POST` → 201 + **tam temsil gövdede** (v1'in Location-header sorunu düzeltilmiş)
-- `PUT` → upsert: yaratıldıysa 201, güncellendiyse 200 (idempotent)
-- `PATCH` → `application/merge-patch+json` (RFC 7396), 200
-- Pagination: `offset` (0-tabanlı, default 0) + `limit` (default 100)
-- Feature flag: `--features=client-admin-api:v2`
-- Keycloak Operator bu API'yi `KeycloakOIDCClient` / `KeycloakSAMLClient` CRD'leri için kullanıyor
+Gönderi 201 ile tam temsili gövdede döndürmektedir; birinci sürümün konum başlığı sorunu düzeltilmiştir. Yerleştirme bir ekle ya da güncelle işlemidir: yaratıldıysa 201, güncellendiyse 200 döner ile etkisiz kılınabilirdir. Yama birleştirme yaması içerik tipiyle çalışmakta ile 200 dönmektedir. Sayfalama sıfır tabanlı uzaklık ile varsayılanı 100 olan bir limitten oluşmaktadır. Bir özellik bayrağıyla açılmaktadır. Keycloak operatörü bu API'yi istemci özel kaynak tanımları için kullanmaktadır.
 
-**Sorgulama dili** ([querying guide](https://www.keycloak.org/admin-api/querying)) — bu çok önemli: Keycloak, **SCIM filter syntax'ının (RFC 7644 §3.4.2.2) bir alt kümesini** seçmiş, kendi DSL'ini icat etmemiş:
+Sorgulama dili çok önemlidir: Keycloak, SCIM filtre sözdiziminin bir alt kümesini seçmiş ile kendi alan diline özgü sözdizimini icat etmemiştir.
 
 ```
 GET /admin/api/{realm}/clients/v2?q=clientId eq "my-app" and enabled eq true&fields=clientId,displayName
 ```
 
-- Operatörler: `eq`, `ne`, `co`, `sw`, `ew`, `pr` + `and`/`or`/`not` + parantez
-- `gt`/`ge`/`lt`/`le` **desteklenmiyor** (bilinçli kısıtlama)
-- `fields=` ile projection
-- **Bilinmeyen alan → HTTP 400** (SCIM'in "sessizce yoksay" davranışının aksine — bu daha iyi bir karar)
-- ⚠️ Dokümanda sıralama (sort) ve cursor pagination'a dair açıklama yok
+Operatörler eşittir, eşit değildir, içerir, ile başlar, ile biter ile mevcuttur; bunlara ve, veya, değil ile parantez eklenmektedir. Büyüktür ile küçüktür operatörleri desteklenmemektedir; bilinçli bir kısıtlamadır. Alanlar parametresiyle izdüşüm yapılmaktadır. Bilinmeyen bir alan 400 döndürmektedir; SCIM'in sessizce yok say davranışının aksinedir ile daha iyi bir karardır. Dokümanda sıralama ile imleç tabanlı sayfalamaya dair açıklama yoktur.
 
-### 1.4 Admin API'nin kendi kimlik doğrulaması — Keycloak'ın merkezîlik problemi
+### 1.4 Yönetim API'sinin kendi kimlik doğrulaması, Keycloak'ın merkezîlik problemi
 
-[admin-rest-api.adoc](https://github.com/keycloak/keycloak/blob/main/docs/documentation/server_development/topics/admin-rest-api.adoc) (main branch):
+Sunucu geliştirme dokümanındaki örnek şöyledir.
 
 ```bash
 curl -d "client_id=admin-cli" -d "username=admin" -d "password=password" \
@@ -83,593 +64,527 @@ curl -d "client_id=admin-cli" -d "username=admin" -d "password=password" \
      http://localhost:8080/realms/master/protocol/openid-connect/token
 ```
 
-- Varsayılan `admin-cli` client'ı, **direct access grant** (ROPC) ile
-- **Token varsayılan olarak 1 dakika yaşıyor**
-- Service account alternatifi: master realm'de client + `admin` realm rolü + `client_credentials`
-- **Kritik:** *"The access token must come from the master realm regardless of which realm you're administering."*
+Varsayılan yönetim komut satırı istemcisi doğrudan erişim yetkisiyle çalışmaktadır. Token varsayılan olarak bir dakika yaşamaktadır. Servis hesabı alternatifi ana alanda bir istemci, bir yönetici alan rolü ile istemci kimlik bilgileri akışıdır. Kritik nokta şudur: erişim token'ı, hangi alan yönetiliyor olursa olsun ana alandan gelmek zorundadır.
 
-Bu son madde Keycloak'ın merkezî zayıflığı: **master realm bir tek-arıza-noktası ve tek-ele-geçirme-noktası.** Realm-per-tenant modelinde tenant admin'i yönetmek için ya master realm'de hesap açacaksın (cross-tenant risk) ya da `realm-management` client rollerine düşeceksin.
+Bu son madde Keycloak'ın merkezî zayıflığıdır: ana alan bir tek arıza noktası ile tek ele geçirme noktasıdır. Alan başına kiracı modelinde kiracı yöneticisini yönetmek için ya ana alanda hesap açılacaktır, ki kiracılar arası bir risktir, ya da alan yönetimi istemci rollerine düşülecektir.
 
-### 1.5 Okta Management API — rate limit mimarisi
+### 1.5 Okta yönetim API'si, hız sınırı mimarisi
 
-Okta'nın modeli üç bağımsız katmandan oluşuyor ve bu ayrım Argus için doğrudan kopyalanabilir:
+Okta'nın modeli üç bağımsız katmandan oluşmaktadır ile bu ayrım Argus için doğrudan kopyalanabilirdir.
 
-**(a) Bucket tabanlı zaman-penceresi limitleri** ([rl2-monitor](https://developer.okta.com/docs/reference/rl2-monitor/)):
-- "Rate limiting bucket" = bir kota paylaşan bir veya daha fazla endpoint kümesi
-- Bucket eşleşmesi **HTTP method + en-uzun-önek** ile: `/api/v1/users*` gibi wildcard bucket'lar tam eşleşme yoksa devreye giriyor
-- Header'lar: `X-Rate-Limit-Limit`, `X-Rate-Limit-Remaining`, `X-Rate-Limit-Reset` (UTC epoch saniye)
+Birincisi kova tabanlı zaman penceresi limitleridir. Bir hız sınırlama kovası, bir kotayı paylaşan bir veya daha fazla uç nokta kümesidir. Kova eşleşmesi HTTP yöntemiyle en uzun önek üzerinden yapılmakta; joker karakterli kovalar tam eşleşme yoksa devreye girmektedir. Başlıklar limit, kalan ile sıfırlama zamanını taşımakta, sonuncusu UTC epoch saniyesindedir.
 
-**(b) Eşzamanlılık (concurrency) limiti** — zaman penceresinden tamamen ayrı ([rl2-concurrency](https://developer.okta.com/docs/reference/rl2-concurrency/)):
-- *"Concurrency limits control how many requests your org can have processing at the same time—not over time, and not per second or minute."*
-- Workforce & Customer Identity org: **75 eşzamanlı transaction**
-- Integrator Free plan: **35**
-- Microsoft Office 365 trafiği **ayrı sayılıyor**, aynı varsayılanlarla
-- Aşımda: HTTP 429 + System Log'da `core.concurrency.org.limit.violation`
-- Concurrency ihlalinde `X-Rate-Limit-Limit` ve `-Remaining` **0** dönüyor, `-Reset` sadece **tahmini** bir değer
+İkincisi eşzamanlılık limitidir ile zaman penceresinden tamamen ayrıdır. Okta'nın ifadesiyle eşzamanlılık limitleri kuruluşunuzun aynı anda kaç isteği işleyebileceğini kontrol etmektedir; zaman içinde değil, saniye ya da dakika başına değil. İş gücü ile müşteri kimliği kuruluşlarında 75 eşzamanlı işlem, ücretsiz tümleştirici planında 35 işlem izinlidir. Microsoft Office 365 trafiği ayrı sayılmakta ile aynı varsayılanlar geçerlidir. Aşımda 429 ile bir sistem günlüğü olayı üretilmektedir. Eşzamanlılık ihlalinde limit ile kalan başlıkları sıfır dönmekte ile sıfırlama başlığı yalnızca tahmini bir değer taşımaktadır.
 
-**(c) Kullanıcı/endpoint bazlı koruma** ([rl-global-mgmt](https://developer.okta.com/docs/reference/rl-global-mgmt/)):
-- Admin Console + End-User Dashboard: **kullanıcı başına endpoint başına 10 saniyede 40 istek** — bir kullanıcının diğerlerini boğmasını engelliyor
-- Identity Engine: kullanıcı başına 5 saniyede 20 istek; **state token başına 5 saniyede 10 istek**
-- `/api/v1/authn` ve `/oauth2/v1/token`: kullanıcı başına saniyede 4 istek
+Üçüncüsü kullanıcı ile uç nokta bazlı korumadır. Yönetim konsolu ile son kullanıcı panosunda kullanıcı başına uç nokta başına 10 saniyede 40 istek izinlidir; bir kullanıcının diğerlerini boğmasını engellemektedir. Kimlik motorunda kullanıcı başına beş saniyede 20 istek ile durum belirteci başına beş saniyede 10 istek izinlidir. Kimlik doğrulama ile token uç noktalarında kullanıcı başına saniyede dört istek izinlidir.
 
-**(d) Rate Limit Dashboard** — bir ürün özelliği olarak gözlemlenebilirlik (Reports → Rate Limits):
-- Bucket başına: mevcut limit yüzdesi, 24 saatlik ve son 1 saatlik ortalama kullanım, etki süresi
-- **Top offenders**: IP adresi / API token / OAuth 2.0 app kırılımıyla ilk 10 tüketici
-- 4 System Log event tipi: `system.rate.limit.violation` (429), `core.concurrency.org.limit.violation`, `system.rate.limit.burst`, `system.rate.limit.warning`
-- Yapılandırılabilir yüzde eşiğinde **e-posta uyarısı** (sadece eşiğe ilk ulaşımda, org-scoped bucket kullanımına göre — token/app bazlı değil)
+Dördüncüsü bir ürün özelliği olarak gözlemlenebilirliktir, yani hız sınırı panosudur. Kova başına mevcut limit yüzdesi, 24 saatlik ile son bir saatlik ortalama kullanım ile etki süresi gösterilmektedir. En çok tüketenler bölümü IP adresi, API belirteci ile OAuth uygulaması kırılımıyla ilk on tüketiciyi listelemektedir. Dört sistem günlüğü olay tipi bulunmaktadır: hız sınırı ihlali, eşzamanlılık limiti ihlali, ani artış ile uyarı. Yapılandırılabilir bir yüzde eşiğinde e-posta uyarısı gönderilmektedir; yalnızca eşiğe ilk ulaşımda ile kuruluş kapsamlı kova kullanımına göre, belirteç ya da uygulama bazında değil.
 
-### 1.6 Auth0 Management API
+### 1.6 Auth0 yönetim API'si
 
-- **Token ömrü: 86.400 saniye (24 saat)** varsayılan ([management-api-access-tokens](https://auth0.com/docs/secure/tokens/access-tokens/management-api-access-tokens))
-- **Kritik güvenlik notu, Auth0'ın kendi ifadesi:** *"Once issued, an access token cannot be revoked."* → 24 saatlik, iptal edilemez, tam yetkili admin token. Bu kötü bir tasarım.
-- Audience: `https://{domain}/api/v2/`
-- Scope modeli endpoint başına ("Each Management API endpoint requires a specific set of scopes")
-- Rate limit: **token bucket** — bucket size = burst limit, refill rate = sustained limit ([rate-limit-policy](https://auth0.com/docs/troubleshoot/customer-support/operational-policies/rate-limit-policy)). Free/trial tenant: **2 rps, burst 10**. Enterprise "Public Performance Burst": 100 RPS default, add-on ile 200–400 RPS.
-- Header'lar: `X-RateLimit-Limit` / `-Remaining` / `-Reset`
+Token ömrü varsayılan 86.400 saniye, yani 24 saattir.
 
-### 1.7 Microsoft Graph — throttling
+Kritik güvenlik notu Auth0'ın kendi ifadesidir: verildikten sonra bir erişim token'ı iptal edilememektedir. Yani 24 saatlik, iptal edilemez ile tam yetkili bir yönetici token'ı söz konusudur. Bu kötü bir tasarımdır.
 
-- 429 + **`Retry-After` (saniye)**, ve bu değer otoriter ([graph/throttling](https://learn.microsoft.com/en-us/graph/throttling), 14 Oca 2025 / güncelleme 6 Ağu 2025)
-- Limitler **çok boyutlu**: per-app across-all-tenants, per-tenant across-all-apps, per-app-per-tenant, request tipine göre (GET/POST/PATCH)
-- **30 Eylül 2025'ten itibaren** per-app/per-user per-tenant limiti, toplam tenant limitinin **yarısına** düşürüldü — *tek bir app/kullanıcının tenant kotasını tüketmesini engellemek için*. Bu, "gürültülü komşu" probleminin sonradan yamalanması.
-- `x-ms-resource-unit` header'ı ile **istek başına maliyet** açıklanıyor — sabit "1 istek = 1 birim" değil
+İzleyici kitle yönetim API'sinin kendisidir. Kapsam modeli uç nokta başınadır; her uç nokta belirli bir kapsam kümesi gerektirmektedir. Hız sınırı bir jeton kovasıdır: kova boyutu ani artış limiti, doldurma hızı ise sürdürülebilir limittir. Ücretsiz ile deneme kiracılarında saniyede iki istek ile 10 ani artış izinlidir. Kurumsal genel performans ani artışında varsayılan saniyede 100 istek, ek modülle 200 ile 400 istektir. Başlıklar limit, kalan ile sıfırlama değerlerini taşımaktadır.
 
-**`$batch` endpoint'i** ([json-batching](https://learn.microsoft.com/en-us/graph/json-batching), 21 Şub 2025):
-- **Batch başına maksimum 20 istek**
-- `dependsOn` ile sıralı bağımlılık; bağımlılık başarısız olursa **424 Failed Dependency**
-- Microsoft'un kendi tavsiyesi: batch ya **tamamen sıralı ya tamamen paralel** olsun, karışık değil
-- Dış yanıt 200 döner (envelope parse edilebiliyorsa), her alt-istek kendi status'ünü taşır
-- **Batch throttling'i BYPASS ETMİYOR:** *"Requests in a batch are evaluated individually against the applicable throttling limits and if any request exceeds the limits, it fails with a status of 429."* SDK batch içindeki 429'ları otomatik retry etmiyor — caller, başarısız alt-isteklerin en büyük `Retry-After` değerini kullanarak manuel retry yapmalı.
-- Gerçek toplu veri çıkarımı için Microsoft REST'ten **tamamen vazgeçiriyor** ve **Graph Data Connect**'e yönlendiriyor ("not subject to throttling limits") — bu, `$batch`'in bulk için yetersizliğinin örtük itirafı.
+### 1.7 Microsoft Graph, kısıtlama
 
-### 1.8 OpenAPI: üreten mi, elle yazan mı?
+429 yanıtı bir yeniden dene başlığı saniye cinsinden taşımakta ile bu değer otoriterdir; doküman 14 Ocak 2025 tarihli ile 6 Ağustos 2025 güncellemelidir.
+
+Limitler çok boyutludur: tüm kiracılarda uygulama başına, tüm uygulamalarda kiracı başına, kiracı başına uygulama başına ile istek tipine göre.
+
+30 Eylül 2025'ten itibaren kiracı başına uygulama ya da kullanıcı limiti, toplam kiracı limitinin yarısına düşürülmüştür; tek bir uygulamanın ya da kullanıcının kiracı kotasını tüketmesini engellemek içindir. Bu, gürültülü komşu probleminin sonradan yamalanmasıdır.
+
+Bir kaynak birimi başlığıyla istek başına maliyet açıklanmaktadır; sabit bir istek eşittir bir birim kuralı yoktur.
+
+Yığın uç noktası, 21 Şubat 2025 dokümanına göre şöyledir. Yığın başına en fazla 20 istek gönderilebilmektedir. Bağımlılık alanıyla sıralı bağımlılık kurulmakta ile bağımlılık başarısız olursa 424 başarısız bağımlılık dönmektedir. Microsoft'un kendi tavsiyesi yığının ya tamamen sıralı ya tamamen paralel olması, karışık olmamasıdır. Dış yanıt 200 dönmektedir, zarf ayrıştırılabiliyorsa; her alt istek kendi durumunu taşımaktadır. Yığın kısıtlamayı atlamamaktadır: yığındaki istekler geçerli kısıtlama limitlerine karşı bireysel değerlendirilmekte ile herhangi biri limiti aşarsa 429 ile başarısız olmaktadır. Geliştirme kiti yığın içindeki 429'ları otomatik yeniden denememekte ile çağıran, başarısız alt isteklerin en büyük yeniden dene değerini kullanarak elle yeniden denemelidir. Gerçek toplu veri çıkarımı için Microsoft REST'ten tamamen vazgeçirmekte ile ayrı bir veri bağlantısı ürününe yönlendirmektedir, ki kısıtlama limitlerine tabi olmadığı belirtilmektedir. Bu, yığın uç noktasının toplu iş için yetersizliğinin örtük itirafıdır.
+
+### 1.8 OpenAPI: üretilen mi elle yazılan mı
 
 | Ürün | Durum | Kaynak |
 |---|---|---|
-| **Okta** | **Üretiliyor** — *"a snapshot of the OpenAPI spec generated directly from the Okta Management API"*. Repo **community PR kabul etmiyor**. Tüm management SDK'ları bu spec'ten build ediliyor. Eski elle-yazılmış Swagger'lar `tree/legacy-v1-swagger` branch'inde arşivde. | [okta/okta-management-openapi-spec](https://github.com/okta/okta-management-openapi-spec) |
-| **Keycloak v1** | Üretiliyor ama **kalitesiz** — maintainer'ın kendi ifadesiyle "incomplete, usually not sufficient to generate clients" | [#37655](https://github.com/keycloak/keycloak/discussions/37655) |
-| **Keycloak v2** | *"an accurate OpenAPI specification that enables reliable client generation"*; management interface üzerinde **ayrı bir OpenAPI endpoint'i** var — CLI/generator'lar bağlandıkları sunucunun sürümüne göre komutlarını uyarlayabiliyor | [26.7.0 release notes](https://www.keycloak.org/2026/07/keycloak-2670-released) |
-| **Auth0 / Microsoft Graph** | ⚠️ **DOĞRULANMADI** — arama bütçesi tükendiği için doğrulanamadı |
+| Okta | Üretilmektedir; yönetim API'sinden doğrudan üretilmiş bir anlık görüntü olduğu belirtilmektedir. Depo topluluk katkısı kabul etmemektedir. Tüm yönetim geliştirme kitleri bu şartnameden derlenmektedir. Eski elle yazılmış şartnameler bir arşiv dalındadır | okta/okta-management-openapi-spec |
+| Keycloak birinci sürüm | Üretilmektedir ancak kalitesizdir; bakımcının kendi ifadesiyle eksiktir ile genellikle istemci üretmeye yetmemektedir | 37655 numaralı tartışma |
+| Keycloak ikinci sürüm | Güvenilir istemci üretimini mümkün kılan doğru bir şartname sunulmaktadır; yönetim arayüzü üzerinde ayrı bir OpenAPI uç noktası bulunmakta ile komut satırı araçları ve üreticiler bağlandıkları sunucunun sürümüne göre komutlarını uyarlayabilmektedir | 26.7.0 sürüm notları |
+| Auth0 ile Microsoft Graph | Doğrulanamamıştır; arama bütçesi tükenmiştir | — |
 
-> **Argus için ders:** Okta'nın modeli doğru — spec **koddan üretilsin**, elle bakımı yapılmasın, ve SDK'lar **zorunlu olarak** spec'ten generate edilsin. Keycloak v2'nin runtime OpenAPI endpoint'i ek bir iyi fikir: CLI sürüm uyumsuzluğu problemini ortadan kaldırıyor.
+Argus için ders şudur: Okta'nın modeli doğrudur; şartname koddan üretilmeli, elle bakımı yapılmamalı ile geliştirme kitleri zorunlu olarak şartnameden üretilmelidir. Keycloak'ın ikinci sürümündeki çalışma zamanı OpenAPI uç noktası ek bir iyi fikirdir: komut satırı sürüm uyumsuzluğu problemini ortadan kaldırmaktadır.
 
 ---
 
-## 2. Delege Yönetim — en zor kısım
+## 2. Devredilmiş yönetim, en zor kısım
 
-### 2.1 Keycloak `realm-management` client rolleri
+### 2.1 Keycloak alan yönetimi istemci rolleri
 
-Her realm'de `realm-management` adında built-in bir client var; client-level rolleri realm yönetim izinlerini tanımlıyor. Bilinen roller: `realm-admin` (composite), `manage-users`, `view-users`, `query-users`, `query-groups`, `manage-clients`, `view-clients`, `query-clients`, `manage-realm`, `view-realm`, `manage-identity-providers`, `view-identity-providers`, `manage-events`, `view-events`, `manage-authorization`, `view-authorization`, `impersonation`, `create-client`.
+Her alanda alan yönetimi adında yerleşik bir istemci bulunmakta ile istemci seviyesindeki rolleri alan yönetim izinlerini tanımlamaktadır. Bilinen roller alan yöneticisi, ki bileşiktir, kullanıcıları yönet, kullanıcıları görüntüle, kullanıcı sorgula, grup sorgula, istemcileri yönet, istemcileri görüntüle, istemci sorgula, alanı yönet, alanı görüntüle, kimlik sağlayıcıları yönet, kimlik sağlayıcıları görüntüle, olayları yönet, olayları görüntüle, yetkilendirmeyi yönet, yetkilendirmeyi görüntüle, kimliğe bürünme ile istemci oluşturmadır.
 
-⚠️ **Kısmen doğrulandı:** Bu listenin tamamını tek bir birincil kaynaktan çekemedim — Red Hat 26.2 Server Administration Guide Chapter 11'in ilgili bölümü ("Full list of permissions") fetch sırasında kesildi. Rol isimleri Keycloak ekosisteminde yaygın ve tutarlı ama **resmî tablo doğrulanmadı**.
+Bu liste kısmen doğrulanmıştır: tamamı tek bir birincil kaynaktan çekilememiş, ilgili yönetim kılavuzu bölümü çekim sırasında kesilmiştir. Rol isimleri Keycloak ekosisteminde yaygın ile tutarlıdır ancak resmî tablo doğrulanmamıştır.
 
-**Granülerlik sınırları — somut örnekler:**
-- `query-users` tek başına verildiğinde kullanıcı listesi çağrısı **200 döner ama liste boştur**. Bu "sadece Users bölümünü konsolda gösterme" için tasarlanmış, veri erişimi için değil. Bu ayrım güvenlik açığına dönüştü (bkz. §3.2, CVE-2026-17059).
-- Ayrıcalık yükseltme koruması: dokümantasyon *"administrators can only delegate roles they themselves already possess"* prensibini beyan ediyor ([Keycloak Server Admin Guide](https://www.keycloak.org/docs/latest/server_admin/index.html#admin_permissions)) — yani `manage-users`'lı bir admin, sadece **kendisinde olan** admin rollerini atayabiliyor.
+Granülerlik sınırlarının somut örnekleri şunlardır. Kullanıcı sorgulama rolü tek başına verildiğinde kullanıcı listesi çağrısı 200 dönmekte ancak liste boş olmaktadır. Bu, yalnızca konsolda kullanıcılar bölümünü göstermek için tasarlanmıştır, veri erişimi için değil. Bu ayrım bir güvenlik açığına dönüşmüştür. Ayrıcalık yükseltme koruması tarafında dokümantasyon, yöneticilerin yalnızca kendilerinde zaten bulunan rolleri devredebileceği ilkesini beyan etmektedir; yani kullanıcıları yönet yetkisi olan bir yönetici yalnızca kendisinde olan yönetici rollerini atayabilmektedir.
 
-### 2.2 FGAP V2 — "bu grubun yöneticisi" YAPILABİLİYOR
+### 2.2 İnce taneli yönetici izinlerinin ikinci sürümü: bu grubun yöneticisi yapılabilmektedir
 
-Sorunun cevabı: **Evet, Keycloak 26.2'den beri.** [Fine-Grained Admin Permissions V2](https://www.keycloak.org/2025/05/fgap-kc-26-2) (Mayıs 2025):
+Sorunun cevabı evettir, Keycloak 26.2'den beri. Mayıs 2025 duyurusuna göre şunlar geçerlidir.
 
-- Keycloak'ın kendi ifadesiyle *"a major step towards introducing delegated administration to Keycloak"*
-- Kaynak tipleri: **Users, Clients, Groups, Roles** (Organizations sonradan geldi)
-- Scope'lar: `view-members`, `manage-members`, `map-roles`, `impersonate` — ve *"every scope is explicit"*, gizli bağımlılık yok
-- İki granülerlik seviyesi: **tekil kaynak** (belirli bir kullanıcı/client kümesi) VEYA **tip bazında tümü** (örn. tüm gruplar)
-- Admin Console'da tek bir **Permissions** bölümü: tüm fine-grained izinleri görüntüleme ve denetleme
-- **Realm başına bağımsız etkinleştirilebiliyor** — kademeli benimseme mümkün
-- ⚠️ V1'den **otomatik migrasyon yok** ("Automatic migration is not available")
+Keycloak'ın kendi ifadesiyle bu, devredilmiş yönetimi getirme yolunda büyük bir adımdır. Kaynak tipleri kullanıcılar, istemciler, gruplar ile rollerdir; organizasyonlar sonradan gelmiştir. Kapsamlar üyeleri görüntüle, üyeleri yönet, rolleri eşle ile kimliğe bürünmedir; her kapsam açıktır ile gizli bağımlılık yoktur. İki granülerlik seviyesi vardır: tekil kaynak, yani belirli bir kullanıcı veya istemci kümesi; ya da tip bazında tümü, örneğin tüm gruplar. Yönetim konsolunda tek bir izinler bölümü bulunmakta ile tüm ince taneli izinler görüntülenip denetlenebilmektedir. Alan başına bağımsız etkinleştirilebilmekte ile kademeli benimseme mümkün olmaktadır. Birinci sürümden otomatik göç yoktur.
 
-**Organizations için FGAP** ([org-fgap](https://www.keycloak.org/2026/05/org-fgap), 7 May 2026, Keycloak **26.7.0**):
-- Sadece iki scope: **`manage`** (tam kontrol) ve **`view`** (salt okuma)
-- **Resource hiding:** *"An administrator who is granted manage and view on Org A and view on Org B will see both organizations, but would be able to update just Org A… all other organizations are hidden entirely"* — hem Admin Console'da hem **REST API'de** gizli
-- ⚠️ İlk sürümde **alt-kaynak izinleri yok** (bir org'un members/groups/IdP'lerini ayrı ayrı kontrol etmek mümkün değil)
+Organizasyonlar için ince taneli izinler, 7 Mayıs 2026, Keycloak 26.7.0 ile gelmiştir. Yalnızca iki kapsam vardır: yönet, yani tam kontrol, ile görüntüle, yani salt okuma. Kaynak gizleme özelliği şöyledir: bir organizasyonda yönetme ile görüntüleme, başka birinde yalnızca görüntüleme yetkisi verilen bir yönetici her iki organizasyonu görmekte ancak yalnızca birincisini güncelleyebilmektedir; diğer tüm organizasyonlar tamamen gizlenmektedir, hem yönetim konsolunda hem REST API'sinde. İlk sürümde alt kaynak izinleri yoktur; bir organizasyonun üyelerini, gruplarını ya da kimlik sağlayıcılarını ayrı ayrı kontrol etmek mümkün değildir.
 
-### 2.3 Okta custom admin roles + resource sets
+### 2.3 Okta özel yönetici rolleri ile kaynak kümeleri
 
-- Resource set = kaynak koleksiyonu; **sadece custom admin role'ler için** ([custom-admin-roles](https://help.okta.com/oie/en-us/content/topics/security/custom-admin-role/custom-admin-roles.htm))
-- **Sert limitler:** maks. **10.000 resource set**, her set için maks. **1.000 kaynak**, aynı rol+resource-set kombinasyonuna maks. **1.000 admin**
-- İzin domain'leri ([role-permissions](https://help.okta.com/en-us/Content/Topics/Security/custom-admin-role/about-role-permissions.htm)): User, Group, IAM, Application, Support, Profile source, Workflow, Authorization server, Customization, Directories, Identity Provider, Devices, Realms, Agents, Resource collections, Separation of duties, Labels, Event hooks, Inline hooks, Disaster recovery, Policies, Bot Protection
-- ⚠️ **Önemli boşluk:** Okta'nın izin dokümantasyonu **ayrıcalık yükseltme riski taşıyan izinleri işaretlemiyor.** "Manage users" izni *"view, create, edit, and delete all profile and credential information"* veriyor — yani parola sıfırlama yoluyla hesap ele geçirme. "Manage API tokens" da benzer. Doküman bu tuzağa dair hiçbir uyarı içermiyor.
-- Kısmi koruma mevcut: Workflows Administrator rolüne sahip bir admin, **bu rolü başkasına atayamıyor** — sadece super admin atayabiliyor ([Okta blog, Nis 2024](https://www.okta.com/blog/2024/04/least-privilege-for-your-critical-identity-roles-introducing-govern-okta-admin-roles/))
+Kaynak kümesi bir kaynak koleksiyonudur ile yalnızca özel yönetici rolleri içindir.
 
-### 2.4 Entra ID — Administrative Units, PIM, Protected Actions
+Sert limitleri şunlardır: en fazla 10.000 kaynak kümesi, küme başına en fazla 1.000 kaynak ile aynı rol ve kaynak kümesi kombinasyonuna en fazla 1.000 yönetici.
 
-**Restricted Management Administrative Units (RMAU):** Sadece o birime atanmış admin'ler içindeki user objelerini değiştirebilir — bu kısıt **Global Administrator dahil** herkes için geçerli. Bu, "platform admin'i bile göremesin" gereksiniminin ürünleşmiş hali.
+İzin alanları kullanıcı, grup, kimlik ve erişim yönetimi, uygulama, destek, profil kaynağı, iş akışı, yetkilendirme sunucusu, özelleştirme, dizinler, kimlik sağlayıcı, cihazlar, alanlar, ajanlar, kaynak koleksiyonları, görevler ayrılığı, etiketler, olay kancaları, satır içi kancalar, felaket kurtarma, politikalar ile bot korumasıdır.
 
-⚠️ Ciddi kısıtlar: RMAU'ya sadece **Users, Devices, Security Groups** konabiliyor (M365/Distribution/Mail-enabled group'lar hayır). Ve **PIM, RMAU içindeki grupları desteklemiyor** — Entitlement Management de öyle. Yani en güçlü izolasyon mekanizması, en güçlü governance mekanizmasıyla birlikte çalışmıyor.
+Önemli bir boşluk vardır: Okta'nın izin dokümantasyonu ayrıcalık yükseltme riski taşıyan izinleri işaretlememektedir. Kullanıcıları yönet izni tüm profil ile kimlik bilgisi bilgisini görüntüleme, oluşturma, düzenleme ve silme yetkisi vermektedir; yani parola sıfırlama yoluyla hesap ele geçirmeye izin vermektedir. API belirteçlerini yönet izni de benzerdir. Doküman bu tuzağa dair hiçbir uyarı içermemektedir.
 
-**Protected Actions** ([protected-actions-overview](https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/protected-actions-overview), güncelleme 19 Şub 2026) — Argus için en kopyalanabilir fikir:
+Kısmi bir koruma mevcuttur: iş akışı yöneticisi rolüne sahip bir yönetici bu rolü başkasına atayamamakta, yalnızca süper yönetici atayabilmektedir.
 
-- Belirli **izinlere** Conditional Access policy iliştiriliyor; enforcement **sign-in'de veya rol aktivasyonunda değil, eylemin yapıldığı anda**: *"policy enforcement occurs at the time the user attempts to perform the protected action… users are prompted only when needed"*
-- Korunabilir izin kategorileri: Conditional Access policy yönetimi, cross-tenant access ayarları, **bazı directory objelerinin hard-delete'i**, named locations, protected action yönetiminin kendisi
-- Somut izin örnekleri: `microsoft.directory/conditionalAccessPolicies/{create,delete,basic/update}`, `microsoft.directory/deletedItems/delete`, `microsoft.directory/namedLocations/*`, `microsoft.directory/crossTenantAccessPolicy/*`
-- Mekanizma: **Conditional Access authentication context** — servis içindeki ince-taneli kaynaklar için policy uygulanmasını sağlıyor
-- **Kritik uygulama sınırı (Microsoft'un kendi listesi):** Entra admin center, Microsoft Graph PowerShell ve Graph Explorer step-up auth destekliyor; **Azure PowerShell BAŞARISIZ OLUYOR.** Ayrıca yeni Terms of Use / custom control oluşturmak da başarısız oluyor (bunlar CA'ya kaydolduğu için CA create/update/delete protected action'larına takılıyor) — çözüm olarak *geçici olarak policy'yi kaldırmak* öneriliyor.
-- Microsoft'un kendi uyarısı: *"Don't use protected actions to block access based on identity or group membership. …Who has access to specific permissions is an authorization decision and should be controlled by role assignment."* → **Protected actions ≠ authorization. İkisi ayrı katman.**
-- PIM ile ilişkisi: PIM rol aktivasyonunda enforce eder (daha kapsamlı), protected actions eylem anında enforce eder (role bağımsız). *"can be used together for stronger coverage."*
-- Emergency account (break-glass) policy'den hariç tutulmalı — kilitlenmeye karşı
-- Entra ID P1 lisansı gerekiyor
+### 2.4 Entra kimlik: yönetim birimleri, ayrıcalıklı kimlik yönetimi ile korunan eylemler
 
-### 2.5 Ayrıcalık yükseltme tuzağı — problemin adı ve gerçek CVE'ler
+Kısıtlı yönetim birimlerinde yalnızca o birime atanmış yöneticiler içindeki kullanıcı nesnelerini değiştirebilmektedir; bu kısıt küresel yönetici dahil herkes için geçerlidir. Platform yöneticisi bile göremesin gereksiniminin ürünleşmiş hâlidir.
 
-**Formal adı: "safety problem" (HRU model).** Harrison, Ruzzo, Ullman, *"Protection in Operating Systems"*, Communications of the ACM 19(8):461–471, 1976 ([ACM DL](https://dl.acm.org/doi/10.1145/360303.360333)).
+Ciddi kısıtları vardır: bu birimlere yalnızca kullanıcılar, cihazlar ile güvenlik grupları konabilmektedir; diğer grup tipleri konamamaktadır. Ayrıcalıklı kimlik yönetimi bu birimlerdeki grupları desteklememektedir; hak yönetimi de desteklememektedir. Yani en güçlü izolasyon mekanizması en güçlü yönetişim mekanizmasıyla birlikte çalışmamaktadır.
 
-Formal ifade: *"Given a protection state of an HRU model, the safety question asks if some subject can ever obtain a specific right with respect to some object."* Sonuç:
+Korunan eylemler, 19 Şubat 2026 güncellemesiyle, Argus için en kopyalanabilir fikirdir.
 
-- **Genel halde safety KARAR VERİLEMEZ (undecidable)** — protection sistemi keyfi bir Turing makinesini simüle edebiliyor; bir hakkın "sızması" makinenin final state'e girmesine karşılık geliyor.
-- Kısıtlı hallerde: **create operasyonları olmadan → PSPACE-complete**; delete/destroy olmadan → **hâlâ undecidable**; mono-operational komutlar (her subject eşit yaratılıyor, başlangıç hakkı yok) → **karar verilebilir**.
+Belirli izinlere koşullu erişim politikası iliştirilmekte ile zorlama girişte ya da rol aktivasyonunda değil eylemin yapıldığı anda gerçekleşmektedir; kullanıcılara yalnızca gerektiğinde istem gösterilmektedir. Korunabilir izin kategorileri koşullu erişim politikası yönetimi, kiracılar arası erişim ayarları, bazı dizin nesnelerinin kalıcı silinmesi, adlandırılmış konumlar ile korunan eylem yönetiminin kendisidir. Mekanizma koşullu erişim kimlik doğrulama bağlamıdır; servis içindeki ince taneli kaynaklar için politika uygulanmasını sağlamaktadır.
 
-> **Argus için doğrudan sonuç:** "Bu izin setiyle admin kendini yükseltebilir mi?" sorusuna **genel bir statik analizle cevap verilemez.** Bu matematiksel bir gerçek, mühendislik eksikliği değil. Tek uygulanabilir strateji: yükseltme yollarını **çalışma zamanında, invariant olarak** kapatmak (bkz. §7 kararlar).
+Kritik uygulama sınırı Microsoft'un kendi listesidir: Entra yönetim merkezi, Graph PowerShell modülü ile Graph gezgini yükseltilmiş kimlik doğrulamayı desteklemektedir; Azure PowerShell başarısız olmaktadır. Ayrıca yeni kullanım koşulları ya da özel kontrol oluşturmak da başarısız olmaktadır, çünkü bunlar koşullu erişime kaydolmakta ile ilgili korunan eylemlere takılmaktadır; çözüm olarak politikanın geçici kaldırılması önerilmektedir.
 
-**Ve bunun gerçekte ne kadar acı verdiği — Keycloak'ın FGAP V2 CVE serisi:**
+Microsoft'un kendi uyarısı şudur: korunan eylemler kimliğe ya da grup üyeliğine dayalı erişim engellemek için kullanılmamalıdır; belirli izinlere kimin erişimi olduğu bir yetkilendirme kararıdır ile rol ataması tarafından kontrol edilmelidir. Yani korunan eylemler yetkilendirme değildir; ikisi ayrı katmandır.
 
-| CVE / GHSA | Ne oldu | Sürüm | Tarih |
+Ayrıcalıklı kimlik yönetimiyle ilişkisi şudur: o, rol aktivasyonunda zorlamakta ile daha kapsamlıdır; korunan eylemler ise eylem anında zorlamakta ile rolden bağımsızdır. İkisi birlikte daha güçlü kapsama için kullanılabilmektedir.
+
+Acil erişim hesabı kilitlenmeye karşı politikadan hariç tutulmalıdır. Birinci kademe lisans gerekmektedir.
+
+### 2.5 Ayrıcalık yükseltme tuzağı: problemin adı ile gerçek güvenlik açıkları
+
+Formal adı güvenlik problemidir. Harrison, Ruzzo ile Ullman'ın 1976 tarihli işletim sistemlerinde koruma makalesinde tanımlanmıştır.
+
+Formal ifadesi şudur: bir koruma durumundan hareketle güvenlik sorusu, herhangi bir öznenin herhangi bir nesne üzerinde belirli bir hakkı elde edip edemeyeceğini sormaktadır. Sonuçları şunlardır.
+
+Genel hâlde güvenlik karar verilemezdir; koruma sistemi keyfi bir Turing makinesini simüle edebilmekte ile bir hakkın sızması makinenin nihai duruma girmesine karşılık gelmektedir. Kısıtlı hâllerde oluşturma işlemleri olmadan problem PSPACE tam olmaktadır; silme işlemleri olmadan hâlâ karar verilemezdir; tek işlemli komutlarda ise karar verilebilirdir.
+
+Argus için doğrudan sonuç şudur: bu izin setiyle bir yönetici kendini yükseltebilir mi sorusuna genel bir statik analizle cevap verilememektedir. Bu matematiksel bir gerçektir, bir mühendislik eksikliği değildir. Tek uygulanabilir strateji yükseltme yollarını çalışma zamanında bir değişmez olarak kapatmaktır.
+
+Bunun gerçekte ne kadar acı verdiği Keycloak'ın ince taneli izin güvenlik açığı serisidir.
+
+| Tanımlayıcı | Ne olmuştur | Sürüm | Tarih |
 |---|---|---|---|
-| **CVE-2025-7784** ([GHSA-27gp-8389-hm4w](https://github.com/keycloak/keycloak/security/advisories/GHSA-27gp-8389-hm4w)) | FGAPv2 açıkken `manage-users` yetkili admin, **role mapping işlemlerinde eksik ayrıcalık sınırı kontrolü** nedeniyle kendi hesabına **realm-admin** atayabiliyor | 26.2.0–26.2.5 etkilendi; 26.2.6 / 26.3.0 düzeltti | 2025 |
-| **CVE-2026-9099** ([GHSA-2qxf-v3g6-73v9](https://github.com/keycloak/keycloak/security/advisories/GHSA-2qxf-v3g6-73v9)) | `GroupResource.addChild()` endpoint'inde **yetkilendirme kontrolü yok** → düşük yetkili grup admin'i, `realm-admin` rolüne sahip yüksek yetkili bir grubu **kendi grubunun altına reparent** ediyor; hiyerarşik izin kalıtımı sayesinde o grubun üyelerine parola sıfırlama yetkisi kazanıyor → **tam realm devralma**. CWE-639 (Authorization Bypass Through User-Controlled Key), **CVSS 7.7 High** | <26.6.4; 26.6.4 düzeltti | 26 Haz 2026 |
-| **CVE-2026-3121** ([issue #46719](https://github.com/keycloak/keycloak/issues/46719)) | Realm seviyesinde Admin Permissions açıkken `manage-clients` yetkili admin roller ve kullanıcılar üzerinde yetkisiz kontrol kazanıyor. Bildiren: rmartinc (Keycloak ekibi), 2 Mar 2026 | 26.4.11 / 26.5.6 / 26.6.0 etiketli | 2026 |
-| **CVE-2026-9795** | Improper scope mapping enforcement yoluyla ayrıcalık yükseltme | — | Haz 2026 |
-| **CVE-2026-9796** | `manage-clients` rollerini etkileyen **TOCTOU race condition** | — | Haz 2026 |
-| **CVE-2024-3656** ([GHSA-2cww-fgmg-4jqc](https://github.com/keycloak/keycloak/security/advisories/GHSA-2cww-fgmg-4jqc)) | *"Unguarded admin REST API endpoints"* — realm'deki **düz kullanıcılar** yönetimsel fonksiyonları kullanabiliyor. CWE-269 + CWE-284, Moderate | <24.0.5 | 11 Haz 2024 |
+| CVE-2025-7784 | İkinci sürüm ince taneli izinler açıkken kullanıcıları yönet yetkili bir yönetici, rol eşleme işlemlerinde eksik ayrıcalık sınırı kontrolü nedeniyle kendi hesabına alan yöneticisi rolünü atayabilmektedir | 26.2.0 ile 26.2.5 etkilenmiştir; 26.2.6 ile 26.3.0 düzeltmiştir | 2025 |
+| CVE-2026-9099 | Alt grup ekleme uç noktasında yetkilendirme kontrolü yoktur; düşük yetkili bir grup yöneticisi, alan yöneticisi rolüne sahip yüksek yetkili bir grubu kendi grubunun altına taşımakta ile hiyerarşik izin kalıtımı sayesinde o grubun üyelerine parola sıfırlama yetkisi kazanmaktadır; sonuç tam alan devralmadır. Zayıflık sınıfı kullanıcı kontrollü anahtarla yetkilendirme atlatması, CVSS 7,7 yüksektir | 26.6.4 öncesi; 26.6.4 düzeltmiştir | 26 Haziran 2026 |
+| CVE-2026-3121 | Alan seviyesinde yönetici izinleri açıkken istemcileri yönet yetkili bir yönetici roller ile kullanıcılar üzerinde yetkisiz kontrol kazanmaktadır. Keycloak ekibinden bir geliştirici tarafından 2 Mart 2026'da bildirilmiştir | 26.4.11, 26.5.6 ile 26.6.0 etiketlidir | 2026 |
+| CVE-2026-9795 | Hatalı kapsam eşleme zorlaması yoluyla ayrıcalık yükseltmesidir | — | Haziran 2026 |
+| CVE-2026-9796 | İstemcileri yönet rollerini etkileyen bir kontrol ile kullanım arası yarış koşuludur | — | Haziran 2026 |
+| CVE-2024-3656 | Korumasız yönetim REST uç noktalarıdır; alandaki düz kullanıcılar yönetimsel fonksiyonları kullanabilmektedir. Zayıflık sınıfları hatalı ayrıcalık yönetimi ile hatalı erişim kontrolüdür, orta şiddettedir | 24.0.5 öncesi | 11 Haziran 2024 |
 
-Ayrıca bir tarihsel düzeltme: sınırlı realm yönetim izinli geliştiriciler, **client protocol mapper'ları veya client scope'ları yöneterek admin rollerini token'a map edip Admin API'ye erişebiliyordu** — artık engellendi.
+Ayrıca tarihsel bir düzeltme vardır: sınırlı alan yönetim izinli geliştiriciler, istemci protokol eşleyicilerini ya da istemci kapsamlarını yöneterek yönetici rollerini token'a eşleyip yönetim API'sine erişebilmekteydi; artık engellenmiştir.
 
-> **Bu tablo tek başına en güçlü bulgu:** Keycloak, delege yönetimi V2 olarak sıfırdan tasarladı ve **yayınlandığı ilk 14 ayda en az 5 ayrı ayrıcalık yükseltme CVE'si aldı.** Hepsi aynı sınıftan: bir endpoint izin kontrolünü atlıyor veya izin sınırını kendi üzerine uygulamıyor.
+Bu tablo tek başına en güçlü bulgudur: Keycloak devredilmiş yönetimi ikinci sürüm olarak sıfırdan tasarlamış ile yayımlandığı ilk 14 ayda en az beş ayrı ayrıcalık yükseltme açığı almıştır. Hepsi aynı sınıftandır: bir uç nokta izin kontrolünü atlamakta ya da izin sınırını kendi üzerine uygulamamaktadır.
 
 ### 2.6 Diğer ürünlerde aynı sınıf hatalar
 
-- **authentik CVE-2024-37905** ([docs.goauthentik.io](https://docs.goauthentik.io/security/cves/CVE-2024-37905/)): Yetersiz izin kontrolü nedeniyle **herhangi bir kimliği doğrulanmış kullanıcı** bir API token yaratıp **token'ın ait olduğu user ID'yi değiştirerek** superuser olabiliyordu. Düzeltme: 2024.6.0, 2024.4.3, 2024.2.4. Geçici çözüm olarak **reverse-proxy seviyesinde `/api/v3/core/tokens*` bloklamak** öneriliyordu. → Ders: **credential/token nesnelerinin `owner` alanı asla mutable olmamalı.**
-- **Zitadel CVE-2025-27507** ([GHSA-f3gh-529w-v32x](https://github.com/zitadel/zitadel/security/advisories/GHSA-f3gh-529w-v32x), **CVSS 9.0**): Admin API'de **12 HTTP endpoint**, IAM manager olmayan sıradan kimliği doğrulanmış kullanıcılara açıktı. Kök neden: **gRPC servis tanımlarında yanlış izin scope'u** — commit diff'i izinlerin `org.idp` (org-scoped) yerine `iam.idp` (system-scoped) olarak düzeltildiğini gösteriyor. Etki: instance LDAP ayarlarını değiştirip **tüm LDAP login'lerini saldırganın sunucusuna yönlendirmek**, LDAP sunucu parolasının ifşası. Düzeltme: 2.71.0, 2.70.1, 2.69.4, 2.68.4, 2.67.8, 2.66.11, 2.65.6, 2.64.5, 2.63.8.
-- **Zitadel CVE-2025-53895**: Session management API'de eksik izin kontrolü — hedef session ID'yi bilen herhangi bir kimliği doğrulanmış kullanıcı, **session token'ı sunmadan** o session'ı güncelleyebiliyordu. 2.53.0'da session token zorunluluğu gevşetilince ortaya çıktı; öncesi etkilenmiyor.
-- **Zitadel CVE-2026-27946**: V2 User API'de request payload'ı manipüle ederek **kendi e-posta/telefonunu challenge-response tamamlamadan doğrulama**.
-- **GitLab CVE-2026-35595**: Bir shared child project üzerinde Write (Admin değil) yetkisi olan kullanıcı, **`parent_project_id: 0` göndererek** projeyi parent'ından koparabiliyor — Admin gereksinimi baypas ediliyor. (Keycloak'ın reparenting CVE'siyle **aynı sınıf**: hiyerarşi mutasyonu, hem kaynak hem hedef üzerinde izin gerektirmiyor.)
-- **GitLab CVE-2026-6267** (CVSS 8.5, 29 Tem 2026): Yüksek ayrıcalık seviyesine veya iç operasyonlara yönelik bazı istekler, sadece **Developer** rolündeki kullanıcı tarafından başlatıldığında bile işlenip yanıtlanabiliyordu.
+authentik'in CVE-2024-37905 açığında yetersiz izin kontrolü nedeniyle herhangi bir kimliği doğrulanmış kullanıcı bir API belirteci yaratıp belirtecin ait olduğu kullanıcı kimliğini değiştirerek süper kullanıcı olabilmekteydi. Düzeltme sürümleri 2024.6.0, 2024.4.3 ile 2024.2.4'tür. Geçici çözüm olarak ters vekil seviyesinde belirteç uç noktalarını bloklamak önerilmiştir. Ders şudur: kimlik bilgisi ile belirteç nesnelerinin sahip alanı asla değiştirilebilir olmamalıdır.
 
-**Zitadel ve GitLab örneklerinin ortak dersi:** İzin kontrolü **endpoint başına annotation** olarak yazıldığında, birinin yanlış yazılması (`org.idp` vs `iam.idp`) sessizce 12 endpoint'i açıyor. Bu kaçınılmaz — insan yazıyor. Çözüm annotation'ı iyileştirmek değil, **her endpoint'in gerektirdiği izni test ile assert etmek.**
+Zitadel'in CVE-2025-27507 açığı, CVSS 9,0, yönetim API'sindeki 12 HTTP uç noktasının kimlik ve erişim yöneticisi olmayan sıradan kimliği doğrulanmış kullanıcılara açık olmasıdır. Kök neden gRPC servis tanımlarındaki yanlış izin kapsamıdır; işleme farkı, izinlerin organizasyon kapsamlı yerine sistem kapsamlı olarak düzeltildiğini göstermektedir. Etkisi örnek dizin ayarlarını değiştirip tüm dizin girişlerini saldırganın sunucusuna yönlendirmek ile dizin sunucusu parolasının ifşasıdır. Dokuz ayrı yama sürümüyle düzeltilmiştir.
+
+Zitadel'in CVE-2025-53895 açığı oturum yönetimi API'sindeki eksik izin kontrolüdür: hedef oturum kimliğini bilen herhangi bir kimliği doğrulanmış kullanıcı, oturum belirtecini sunmadan o oturumu güncelleyebilmekteydi. 2.53.0'da oturum belirteci zorunluluğu gevşetilince ortaya çıkmıştır; öncesi etkilenmemiştir.
+
+Zitadel'in CVE-2026-27946 açığında ikinci sürüm kullanıcı API'sinde istek yükü manipüle edilerek kendi e-posta ya da telefonunu meydan okuma yanıtı tamamlamadan doğrulamak mümkündü.
+
+GitLab'ın CVE-2026-35595 açığında paylaşılan bir alt proje üzerinde yazma yetkisi olan, yani yönetici olmayan bir kullanıcı, bir üst proje kimliği sıfır gönderek projeyi üstünden koparabilmekteydi; yönetici gereksinimi atlanmaktaydı. Keycloak'ın yeniden ebeveynleme açığıyla aynı sınıftandır: hiyerarşi mutasyonu hem kaynak hem hedef üzerinde izin gerektirmemektedir.
+
+GitLab'ın CVE-2026-6267 açığı, CVSS 8,5, 29 Temmuz 2026: yüksek ayrıcalık seviyesine ya da iç operasyonlara yönelik bazı istekler yalnızca geliştirici rolündeki bir kullanıcı tarafından başlatıldığında bile işlenip yanıtlanabilmekteydi.
+
+Zitadel ile GitLab örneklerinin ortak dersi şudur: izin kontrolü uç nokta başına bir ek açıklama olarak yazıldığında, birinin yanlış yazılması sessizce 12 uç noktayı açmaktadır. Bu kaçınılmazdır, çünkü insan yazmaktadır. Çözüm ek açıklamayı iyileştirmek değil, her uç noktanın gerektirdiği izni testle doğrulamaktır.
+
+### 2.7 WorkOS modeli, devretmenin ikinci ekseni
+
+Buraya kadarki bölüm devretmeyi tek bir eksende ele almaktadır: kimlik sağlayıcıyı işleten kuruluşun kendi içinde yetkiyi bölmesi. Keycloak'ın alan yönetimi rolleri, Okta'nın özel yönetici rolleri ile Entra'nın yönetim birimleri bu eksendedir. İkinci bir eksen vardır ile incelenen açık kaynak ürünlerin hiçbirinde bulunmamaktadır: kiracının kendi bilişim sorumlusuna devretme.
+
+WorkOS'un yönetim portalı bu ikinci ekseni ürünleştirmiştir. Dokümanına göre portal, bilişim sorumlusunun alan adı doğrulaması yapması, çoklu oturum ile dizin eşzamanlama bağlantılarını yapılandırması için hazır bir arayüz sunmaktadır; her kimlik sağlayıcı için ayrı yönlendirmeli doküman bulunmakta ile kuruluşlar satıcının mühendislik ekibinden destek almadan devreye alınabilmektedir. Yayımlanmış bir müşteri örneğinde 100'den fazla çoklu oturum bağlantısının kurulumunda 300 saatten fazla tasarruf bildirilmektedir. Erişim 13 Eylül 2026.
+
+Argus için önemi bir ürün özelliği olmasının ötesindedir. Kiracının bilişim sorumlusu, Argus'un yönetim API'sinin bir tüketicisidir ancak ne platform yöneticisidir ne de kiracı yöneticisinin tamamıdır; üçüncü bir aktördür ile yetkisi tek bir işe, yani kendi kuruluşunun kurumsal bağlantısını kurmaya indirgenmiştir. Bu aktör 19. maddedeki iki yüzeyli modelde yoktur. Yüzey ayrımı yapılmazsa iki sonuçtan biri çıkmaktadır: ya bilişim sorumlusuna kiracı yöneticisi yetkisi verilmekte, ki aşırı yetkidir, ya da bağlantı kurulumu satıcının destek ekibine düşmektedir, ki WorkOS'un ölçtüğü 300 saatlik maliyettir.
+
+İkinci bir bağlantı §27 §2.2'yedir. Kiracının kendi kimlik sağlayıcısını bağlaması, Argus'un Okta ile Entra tuhaflıklarına dayanıklı olmasını gerektirmektedir; o tuhaflıklar orada listelenmiştir. Kendi kendine hizmet yüzeyi, o listedeki her farkı bir destek biletine değil bir hata mesajına çevirmek zorundadır.
 
 ---
 
-## 3. Admin API Güvenliği
+## 3. Yönetim API'si güvenliği
 
-### 3.1 GHSA yoğunluğu — sınıf dağılımı
+### 3.1 Güvenlik danışmanlığı yoğunluğu, sınıf dağılımı
 
-Keycloak'ın [advisories sayfasından](https://github.com/keycloak/keycloak/security/advisories) sadece **ilk sayfa** (10 kayıt, hepsi 2026):
+Keycloak'ın danışmanlık sayfasından yalnızca ilk sayfa, yani 10 kayıt, hepsi 2026 tarihlidir.
 
-| GHSA | Başlık | Şiddet | Tarih |
+| Tanımlayıcı | Başlık | Şiddet | Tarih |
 |---|---|---|---|
-| GHSA-95cx-vmr5-3cmr | default dcr policy allows **role forgery** via user property mappers | High | 6 Ağu 2026 |
-| GHSA-95rm-h7g9-rhcf | dcr protocol mapper **type-swap policy bypass** allows privilege escalation | High | 6 Ağu 2026 |
-| GHSA-2888-g6qc-w4mj | **authorization bypass via unnormalized URI matching** in PathMatcher | High | 6 Ağu 2026 |
-| GHSA-f8m4-v488-rmrm | saml broker metadata import **disables response signature validation** | High | 6 Ağu 2026 |
-| GHSA-fgq2-hxm5-8xg2 | saml idp-initiated broker login **bypasses link-only restriction** | High | 6 Ağu 2026 |
-| GHSA-hmr6-pxx9-552p | ldap entry-dn user search **bypasses configured users DN boundary** | Moderate | 6 Ağu 2026 |
-| GHSA-3692-rrj9-24qw | **unbounded metric cardinality** via request-controlled error text | Moderate | 6 Ağu 2026 |
-| GHSA-j97h-3f8r-mrjr | authentication bypass via **JWT algorithm confusion** | High | 26 Haz 2026 |
-| GHSA-f5p5-6xmx-p252 | authorization bypass via **incorrect URI comparison** | High | 26 Haz 2026 |
-| GHSA-w3p3-7cjg-vgfw | unauthorized access via **UMA permission ticket bypass** | Moderate | 26 Haz 2026 |
+| GHSA-95cx-vmr5-3cmr | Varsayılan dinamik istemci kaydı politikası, kullanıcı özelliği eşleyicileri yoluyla rol sahteciliğine izin vermektedir | Yüksek | 6 Ağustos 2026 |
+| GHSA-95rm-h7g9-rhcf | Protokol eşleyici tip değiştirme yoluyla politika atlatması ayrıcalık yükseltmeye izin vermektedir | Yüksek | 6 Ağustos 2026 |
+| GHSA-2888-g6qc-w4mj | Yol eşleyicide normalize edilmemiş adres eşleştirmesiyle yetkilendirme atlatmasıdır | Yüksek | 6 Ağustos 2026 |
+| GHSA-f8m4-v488-rmrm | SAML aracı metadata içe aktarımı yanıt imza doğrulamasını devre dışı bırakmaktadır | Yüksek | 6 Ağustos 2026 |
+| GHSA-fgq2-hxm5-8xg2 | SAML kimlik sağlayıcı başlatmalı aracı girişi yalnızca bağlama kısıtını atlamaktadır | Yüksek | 6 Ağustos 2026 |
+| GHSA-hmr6-pxx9-552p | Dizin girdi adıyla kullanıcı arama, yapılandırılmış kullanıcı dizin sınırını atlamaktadır | Orta | 6 Ağustos 2026 |
+| GHSA-3692-rrj9-24qw | İstek kontrollü hata metniyle sınırsız metrik kardinalitesidir | Orta | 6 Ağustos 2026 |
+| GHSA-j97h-3f8r-mrjr | JWT algoritma karışıklığıyla kimlik doğrulama atlatmasıdır | Yüksek | 26 Haziran 2026 |
+| GHSA-f5p5-6xmx-p252 | Hatalı adres karşılaştırmasıyla yetkilendirme atlatmasıdır | Yüksek | 26 Haziran 2026 |
+| GHSA-w3p3-7cjg-vgfw | Yönetilen erişim izin bileti atlatmasıyla yetkisiz erişimdir | Orta | 26 Haziran 2026 |
 
-⚠️ **DOĞRULANMADI:** Toplam advisory sayısı — sayfa 1'den fazlasını çekemedim (arama bütçesi tükendi).
+Toplam danışmanlık sayısı doğrulanamamıştır; birinci sayfadan fazlası çekilememiştir.
 
-**Sınıf dağılımı gözlemi:** 10 kayıttan **7'si "bypass"** (authorization bypass, signature validation bypass, restriction bypass, boundary bypass, ticket bypass). Sıfır memory-safety, sıfır injection. **IdP'lerdeki gerçek zafiyet sınıfı bellek güvenliği değil, yetkilendirme mantığıdır.** Rust'ın bellek güvenliği bu kategoriye **sıfır** katkı sağlar.
+Sınıf dağılımı gözlemi şudur: 10 kayıttan yedisi bir atlatmadır, yani yetkilendirme atlatması, imza doğrulama atlatması, kısıt atlatması, sınır atlatması ile bilet atlatması. Sıfır bellek güvenliği, sıfır enjeksiyon vardır. Kimlik sağlayıcılardaki gerçek zafiyet sınıfı bellek güvenliği değil yetkilendirme mantığıdır. Rust'ın bellek güvenliği bu kategoriye sıfır katkı sağlamaktadır.
 
-Özellikle **GHSA-2888-g6qc-w4mj** ve **GHSA-f5p5-6xmx-p252**: ikisi de **URI normalizasyon/karşılaştırma** hatası. Path tabanlı yetkilendirme yapan her sistemin klasik tuzağı.
+Özellikle iki kayıt, yani normalize edilmemiş adres eşleştirmesi ile hatalı adres karşılaştırması, aynı sınıftandır: yola dayalı yetkilendirme yapan her sistemin klasik tuzağıdır.
 
-### 3.2 Yatay ayrıcalık ihlali — CVE-2026-17059 (en öğretici vaka)
+### 3.2 Yatay ayrıcalık ihlali, CVE-2026-17059, en öğretici vaka
 
-Escape Research (Enzo Mongin) tarafından bulundu ([escape.tech](https://escape.tech/blog/escape-research-pii-disclosure-keycloak-cve-2026-17059/)); Red Hat **24 Tem 2026**'da yayınladı, Keycloak **28 Tem 2026**'da **26.7.0** ile düzeltti.
+Escape Research'ten Enzo Mongin tarafından bulunmuştur; Red Hat 24 Temmuz 2026'da yayımlamış ile Keycloak 28 Temmuz 2026'da 26.7.0 ile düzeltmiştir.
 
-Mekanizma:
-- Sadece `query-users` + `view-realm` izinli kısıtlı bir admin
-- **`/users` endpoint'i bu token'a boş liste dönüyor** (doğru davranış)
-- Ama **`role-members` endpoint'i aynı token'a tam kullanıcı kayıtlarını veriyor**: username, e-posta, ad, soyad, hesap durumu, e-posta doğrulama durumu
-- Kök neden: *"The role-members endpoint enforced only broad role-viewing and user-query permissions without applying the same per-user authorization filter."*
+Mekanizma şudur: yalnızca kullanıcı sorgulama ile alanı görüntüleme izinli kısıtlı bir yönetici söz konusudur. Kullanıcılar uç noktası bu belirtece boş liste dönmektedir, ki doğru davranıştır. Ancak rol üyeleri uç noktası aynı belirtece tam kullanıcı kayıtlarını vermektedir: kullanıcı adı, e-posta, ad, soyad, hesap durumu ile e-posta doğrulama durumu. Kök neden şudur: rol üyeleri uç noktası yalnızca geniş rol görüntüleme ile kullanıcı sorgulama izinlerini zorlamakta ile aynı kullanıcı başına yetkilendirme filtresini uygulamamaktadır.
 
-> **Bu, "yan kapı endpoint" anti-pattern'inin ders kitabı örneği.** Ana listeleme endpoint'i doğru filtreliyor; kullanıcı nesnesi döndüren **ikincil** bir endpoint aynı filtreyi uygulamayı unutuyor. Endpoint başına yetkilendirme yazıldığı sürece bu hata **kaçınılmaz** — çünkü N endpoint × M kaynak tipi kombinasyonu insan denetimini aşıyor. Filtre **veri erişim katmanında** olmalı, handler'da değil.
+Bu, yan kapı uç noktası karşı deseninin ders kitabı örneğidir. Ana listeleme uç noktası doğru süzmekte; kullanıcı nesnesi döndüren ikincil bir uç nokta aynı filtreyi uygulamayı unutmaktadır. Uç nokta başına yetkilendirme yazıldığı sürece bu hata kaçınılmazdır, çünkü uç nokta çarpı kaynak tipi kombinasyonu insan denetimini aşmaktadır. Filtre veri erişim katmanında olmalıdır, işleyicide değil.
 
-### 3.3 Admin konsolu bir SPA — XSS/CSRF yüzeyi
+### 3.3 Yönetim konsolu bir tek sayfa uygulamasıdır, XSS ile siteler arası istek sahteciliği yüzeyi
 
-- **CVE-2024-4028** ([GHSA-q4xq-445g-g6ch](https://github.com/advisories/GHSA-q4xq-445g-g6ch)): Admin console'dan Resource/Permission yaratırken permission alanına kötü niyetli payload → **stored XSS**. 26.2.0 öncesi. Paket: `org.keycloak:keycloak-admin-ui`.
-- **[GHSA-755v-r4x4-qf7m](https://github.com/keycloak/keycloak/security/advisories/GHSA-755v-r4x4-qf7m)**: Grup adına payload → groups dropdown'da **stored XSS**.
-- **HOST header yansıması**: Keycloak admin console'da HOST header'ı web resource konumlarını belirlemek için kabul ediyordu → kötü niyetli sunucu üzerinden kimliği doğrulanmış kullanıcıya karşı **reflected XSS**.
-- **CSRF cookie session'a bağlı değildi**: *"the cookie used for CSRF prevention in Keycloak was not unique to each session"* → saldırgan kimliği doğrulanmış kullanıcı oturumuna erişebiliyordu.
+CVE-2024-4028'de yönetim konsolundan kaynak ya da izin yaratırken izin alanına kötü niyetli bir yük konarak depolanmış XSS elde edilmekteydi; 26.2.0 öncesi sürümlerde geçerlidir.
 
-**Kritik gözlem:** Bu XSS'lerin çoğu **"privileged attacker"** gerektiriyor — yani düşük yetkili bir admin, **yüksek yetkili bir admin'in tarayıcısında kod çalıştırıyor.** Delege yönetim + admin SPA kombinasyonunda XSS, ayrıcalık yükseltmeye giden en kısa yol. Tenant admin'in girdiği bir grup adı, platform admin'inin konsolunda render ediliyorsa, tenant izolasyonu XSS ile çöker.
+GHSA-755v-r4x4-qf7m'de grup adına konan bir yük gruplar açılır listesinde depolanmış XSS üretmekteydi.
 
-### 3.4 Admin oturumları için ayrı politika — Okta'nın modeli
+Ana bilgisayar başlığı yansımasında Keycloak yönetim konsolu, bu başlığı web kaynak konumlarını belirlemek için kabul etmekteydi; kötü niyetli bir sunucu üzerinden kimliği doğrulanmış kullanıcıya karşı yansımalı XSS mümkündü.
 
-[sec.okta.com/articles/protectingadminsessions](https://sec.okta.com/articles/protectingadminsessions/) — 2023 ihlali sonrası inşa edilmiş, tarihli katman katman:
+Siteler arası istek sahteciliği çerezi oturuma bağlı değildi: Keycloak'ta bu koruma için kullanılan çerez her oturuma özgü değildi ile saldırgan kimliği doğrulanmış kullanıcı oturumuna erişebilmekteydi.
+
+Kritik gözlem şudur: bu XSS açıklarının çoğu ayrıcalıklı bir saldırgan gerektirmektedir; yani düşük yetkili bir yönetici, yüksek yetkili bir yöneticinin tarayıcısında kod çalıştırmaktadır. Devredilmiş yönetimle yönetim tek sayfa uygulaması birleşince XSS, ayrıcalık yükseltmeye giden en kısa yoldur. Kiracı yöneticisinin girdiği bir grup adı platform yöneticisinin konsolunda işleniyorsa kiracı izolasyonu XSS ile çökmektedir.
+
+### 3.4 Yönetici oturumları için ayrı politika, Okta'nın modeli
+
+Okta'nın yönetici oturumlarını koruma yazısı 2023 ihlali sonrası inşa edilmiştir ile katman katman tarihlidir.
 
 | Kontrol | Detay | Tarih |
 |---|---|---|
-| **ASN Session Binding** | *"Okta automatically revokes an administrative session if the ASN observed during an API or web request differs from the ASN recorded when the session was established."* Yayından 3 ay içinde **9.000+ org** benimsedi → Okta tüm Workforce müşterileri için **varsayılan açık** yaptı | Admin Console'da varsayılan: **23 Eki 2023** |
-| **IP Session Binding** | Aynı mantık, IP seviyesinde. Yeni org'larda varsayılan açık | EA: 7 Şub 2024 (Console), 1 Mar 2024 (Workflows/Access Requests/PA) |
-| **Admin session lifetime** | Varsayılan **12 saat lifetime + 15 dk idle** | GA: 8 Oca 2024 |
-| **Protected Actions** | *"Admins receive re-authentication prompts when they perform critical tasks in the Admin Console"* | EA: 7 Şub 2024 |
-| **MFA zorunluluğu** | Tek faktörlü erişime izin veren authentication policy'leri engelliyor | EA: May 2024 |
+| Otonom sistem numarası oturum bağlaması | Bir API ya da web isteği sırasında gözlemlenen numara, oturum kurulduğunda kaydedilenden farklıysa Okta yönetimsel oturumu otomatik iptal etmektedir. Yayından üç ay içinde dokuz binden fazla kuruluş benimsemiş ile Okta tüm iş gücü müşterileri için varsayılan açık yapmıştır | Konsolda varsayılan 23 Ekim 2023 |
+| IP oturum bağlaması | Aynı mantık IP seviyesindedir. Yeni kuruluşlarda varsayılan açıktır | Erken erişim 7 Şubat 2024 ile 1 Mart 2024 |
+| Yönetici oturum ömrü | Varsayılan 12 saat ömür ile 15 dakika boşta kalma | Genel kullanım 8 Ocak 2024 |
+| Korunan eylemler | Yöneticiler konsolda kritik görevler yaptığında yeniden kimlik doğrulama istemi almaktadır | Erken erişim 7 Şubat 2024 |
+| Çok faktörlü zorunluluğu | Tek faktörlü erişime izin veren kimlik doğrulama politikaları engellenmektedir | Erken erişim Mayıs 2024 |
 
-Session lifetime konfigürasyon sınırları ([configure-admin-session](https://help.okta.com/en-us/content/topics/security/policies/configure-admin-session.htm)):
-- Lifetime: önerilen 12 saat, **maks 24 saat**, min 1 dakika
-- Idle: önerilen 15 dakika (**NIST kılavuzuna dayalı**), **maks 2 saat**, min 1 dakika
-- Kısıt: lifetime ≥ idle
-- Süre dolmadan önce **uyarı popup'ı**: timeout >10 dk ise son 5 dk içinde, <10 dk ise son 30 sn içinde
-- ⚠️ **Kapsam sınırı, Okta'nın kendi ifadesi:** *"Administrative sessions in other Okta applications are unaffected, including Okta Workflows, Okta Access Gateway, and Advanced Server Access."* → Admin session policy'si **tüm admin yüzeylerini kapsamıyor.** Argus için ders: admin session politikası **merkezî** olmalı, konsola özel değil.
+Oturum ömrü yapılandırma sınırları şunlardır: ömür önerilen 12 saat, azami 24 saat ile asgari bir dakikadır. Boşta kalma önerilen 15 dakikadır, NIST kılavuzuna dayanmaktadır; azami iki saat ile asgari bir dakikadır. Kısıt ömrün boşta kalmadan büyük ya da eşit olmasıdır. Süre dolmadan önce bir uyarı penceresi gösterilmektedir: zaman aşımı 10 dakikadan uzunsa son beş dakikada, kısaysa son 30 saniyede.
 
-**Auth0 ile karşılaştırma:** Auth0'ın Management API token'ı **24 saat, iptal edilemez**. Okta'nın admin console session'ı **12 saat + 15 dk idle + ASN binding + protected actions**. Aynı sorunun iki ucu — ve Auth0 tarafı belirgin şekilde zayıf.
+Kapsam sınırı Okta'nın kendi ifadesidir: diğer Okta uygulamalarındaki yönetimsel oturumlar etkilenmemektedir, yani iş akışları, erişim ağ geçidi ile gelişmiş sunucu erişimi. Yani yönetici oturum politikası tüm yönetici yüzeylerini kapsamamaktadır. Argus için ders şudur: yönetici oturum politikası merkezî olmalıdır, konsola özel değil.
 
-### 3.5 Impersonation
+Auth0 ile karşılaştırma şudur: Auth0'ın yönetim API'si token'ı 24 saatlik ile iptal edilemezdir. Okta'nın yönetim konsolu oturumu 12 saat artı 15 dakika boşta kalma artı numara bağlaması artı korunan eylemlerdir. Aynı sorunun iki ucudur ile Auth0 tarafı belirgin şekilde zayıftır.
 
-Keycloak'ta impersonation Admin REST API üzerinden programatik olarak erişilebilir ve **dönen `access_token` hedef kullanıcı için tam geçerli bir token** — downstream API çağrılarında kullanıcının kendi aldığı token'dan ayırt edilemez. FGAP V2 bunu `impersonate` scope'u olarak explicit hale getirdi.
+### 3.5 Kimliğe bürünme
 
-Denetim: Admin Console → Events → Admin events, `TOKEN_EXCHANGE` filtresi ile hangi hesapların ne zaman impersonate edildiği izlenebiliyor.
+Keycloak'ta kimliğe bürünme yönetim REST API'si üzerinden programatik olarak erişilebilirdir ile dönen erişim token'ı hedef kullanıcı için tam geçerli bir token'dır; aşağı akış API çağrılarında kullanıcının kendi aldığı token'dan ayırt edilememektedir. İkinci sürüm ince taneli izinler bunu açık bir kapsam hâline getirmiştir.
 
-⚠️ Bu bölümdeki "best practice"lerin (5 dk token ömrü, secrets manager) kaynağı Medium/blog yazıları — **birincil kaynak değil, DOĞRULANMADI.**
+Denetim tarafında yönetim konsolundaki yönetici olayları bölümünde token değişimi filtresiyle hangi hesapların ne zaman bürünüldüğü izlenebilmektedir.
+
+Bu bölümdeki en iyi uygulamaların, yani beş dakikalık token ömrü ile sır yöneticisi önerilerinin kaynağı blog yazılarıdır; birincil kaynak değildir ile doğrulanmamıştır.
 
 ---
 
-## 4. Konfigürasyon Yönetimi ve GitOps
+## 4. Yapılandırma yönetimi ile GitOps
 
-### 4.1 Keycloak realm import/export — config-as-code için yetersiz
+### 4.1 Keycloak alan içe ile dışa aktarımı, kod olarak yapılandırma için yetersizdir
 
-**Full CLI export (`kc.sh export`)** ([importExport.adoc](https://github.com/keycloak/keycloak/blob/main/docs/guides/server/importExport.adoc)):
-- **Tüm node'lar durdurulmalı**: *"Consistency of an export is not guaranteed unless all Keycloak nodes are stopped prior to running the export."* → canlı/online kullanım için tasarlanmamış
-- Hariç: user/admin events, persisted sessions, workflow state, revoked tokens
+Tam komut satırı dışa aktarımında tüm düğümler durdurulmalıdır: dışa aktarımın tutarlılığı, tüm düğümler durdurulmadıkça garanti edilmemektedir. Yani canlı kullanım için tasarlanmamıştır. Hariç tutulanlar kullanıcı ile yönetici olayları, kalıcılaştırılmış oturumlar, iş akışı durumu ile iptal edilmiş token'lardır.
 
-**Partial export (Admin Console)**:
-- Kullanıcıları **hiç export edemiyor**
-- Hassas değerler (parolalar, client secret'lar) **`*` ile maskeleniyor** → diff edilemez, yeniden uygulanamaz
-- Keycloak'ın kendi ifadesiyle **backup veya sunucular arası veri transferi için uygun değil**
-- `clientScopes` / `clientScopeMappings` partial import sırasında **yok sayılıyor** ([#16289](https://github.com/keycloak/keycloak/issues/16289))
-- Dokümantasyon yetersiz kabul ediliyor ([#41061](https://github.com/keycloak/keycloak/issues/41061))
+Kısmi dışa aktarımda kullanıcılar hiç dışa aktarılamamaktadır. Hassas değerler, yani parolalar ile istemci sırları maskelenmektedir; dolayısıyla fark alınamamakta ile yeniden uygulanamamaktadır. Keycloak'ın kendi ifadesiyle yedekleme ya da sunucular arası veri transferi için uygun değildir. İstemci kapsamları ile kapsam eşlemeleri kısmi içe aktarım sırasında yok sayılmaktadır. Dokümantasyon yetersiz kabul edilmektedir.
 
-**Determinizm — kabul edilmiş problem:** Export **deterministik değil**. Array sıralaması çalıştırmalar arası değişiyor; realm ID'leri delete/recreate'te yeniden üretiliyor → devasa sahte diff'ler ([keycloak-config-cli #799](https://github.com/adorsys/keycloak-config-cli/issues/799)). Düzeltme **Keycloak core'da değil**, config-cli'nin içinde (PR #1207, sıralı array'ler + ID substitution) yapıldı. Topluluk bunu doğrudan Keycloak ekibine de taşımış ([#30643](https://github.com/keycloak/keycloak/discussions/30643)).
+Determinizm kabul edilmiş bir problemdir: dışa aktarım deterministik değildir. Dizi sıralaması çalıştırmalar arası değişmekte ile alan kimlikleri silme ve yeniden oluşturmada yeniden üretilmektedir; sonuç devasa sahte farklardır. Düzeltme Keycloak çekirdeğinde değil yapılandırma komut satırı aracının içinde yapılmıştır, yani sıralı diziler ile kimlik yerine koymayla. Topluluk bunu doğrudan Keycloak ekibine de taşımıştır.
 
-### 4.2 keycloak-config-cli
+### 4.2 Keycloak yapılandırma komut satırı aracı
 
-[adorsys/keycloak-config-cli](https://github.com/adorsys/keycloak-config-cli) — deklaratif, idempotent YAML/JSON → Admin API senkronizasyonu. Raw import/export wrapper'ı **değil**: canlı realm durumuyla diff alıp inkremental değişiklik uyguluyor. Restart gerektirmiyor.
+adorsys/keycloak-config-cli deklaratif ile etkisiz kılınabilir bir YAML veya JSON'dan yönetim API'sine senkronizasyon aracıdır. Ham bir içe ve dışa aktarım sarmalayıcısı değildir: canlı alan durumuyla fark alıp artımlı değişiklik uygulamaktadır. Yeniden başlatma gerektirmemektedir.
 
-Kapsam ([FEATURES.md](https://github.com/adorsys/keycloak-config-cli/blob/main/docs/FEATURES.md)): clients, roles, groups, users+credentials, auth flows/executions, identity providers + mappers, client scopes, components, user federation, client policies, FGAP v1/v2, message bundles, Organizations, Workflows.
+Kapsamı istemciler, roller, gruplar, kimlik bilgileriyle birlikte kullanıcılar, kimlik doğrulama akışları ile yürütmeleri, kimlik sağlayıcılar ile eşleyicileri, istemci kapsamları, bileşenler, kullanıcı federasyonu, istemci politikaları, ince taneli izinlerin her iki sürümü, mesaj paketleri, organizasyonlar ile iş akışlarıdır.
 
-Kısıtlar:
-- **FGAP v2 (Keycloak ≥26.2) admin-permissions client authorization'ı system-managed ve import'ta explicit olarak atlanıyor**
-- Sürüme özgü tuzaklar manuel müdahale gerektiriyor (örn. Keycloak 25.0.1'in "basic" scope değişikliği `sub` claim'ini etkiliyor)
+Kısıtları şunlardır: ikinci sürüm ince taneli izinlerde yönetici izinleri istemci yetkilendirmesi sistem yönetimlidir ile içe aktarımda açıkça atlanmaktadır. Sürüme özgü tuzaklar elle müdahale gerektirmektedir.
 
-Bakım: **aktif.** En son **v6.5.1 (22 May 2026)**; öncesi v6.5.0 (12 Mar 2026), v6.4.1 (28 Oca 2026), v6.4.0 (21 Şub 2025). *"latest 4 Keycloak releases where possible"* politikası ([compatibility](https://adorsys.github.io/keycloak-config-cli/compatibility/keycloak-versions/)).
-⚠️ Gün-seviyesi tarihler WebFetch özetinden geldi, ham JSON'dan değil — **yaklaşık kabul edin.**
+Bakımı aktiftir. En son sürüm 22 Mayıs 2026 tarihli 6.5.1'dir; öncesinde 12 Mart 2026 tarihli 6.5.0, 28 Ocak 2026 tarihli 6.4.1 ile 21 Şubat 2025 tarihli 6.4.0 bulunmaktadır. Politikası mümkün olduğunca son dört Keycloak sürümünü desteklemektir. Gün seviyesindeki tarihler bir çekme özetinden gelmiştir, ham veriden değil; yaklaşık kabul edilmelidir.
 
-### 4.3 Terraform provider'ları
+### 4.3 Terraform sağlayıcıları
 
-**Keycloak:** `mrparkers/terraform-provider-keycloak` → **Keycloak projesi tarafından resmen devralındı, 9 Ara 2024** ([keycloak.org duyurusu](https://www.keycloak.org/2024/12/terraform-provider-adoption)). Yeni maintainer'lar: Sebastian Schuster, Thomas Darimont. Lisans **Apache 2.0**'a geçti. Migrasyon: `terraform state replace-provider mrparkers/keycloak keycloak/keycloak`. Devralma gerekçesi: topluluk anketi bunu **en yaygın realm-config aracı** olarak gösterdi ([#30643](https://github.com/keycloak/keycloak/discussions/30643)).
+Keycloak tarafında mrparkers sağlayıcısı 9 Aralık 2024'te Keycloak projesi tarafından resmen devralınmıştır. Yeni bakımcılar Sebastian Schuster ile Thomas Darimont'tur. Lisans Apache 2.0'a geçmiştir. Göç bir durum değiştirme komutuyla yapılmaktadır. Devralma gerekçesi şudur: topluluk anketi bunu en yaygın alan yapılandırma aracı olarak göstermiştir.
 
-Devralma sonrası aktif: v5.2.0 (Nis 2025) → **v5.9.0 (Tem 2026)**; FGAPv2 admin-permission kaynakları, realm-scope import, Keycloak 26.4 uyumu eklendi.
+Devralma sonrası aktiftir: Nisan 2025'teki 5.2.0'dan Temmuz 2026'daki 5.9.0'a gelmiştir; ikinci sürüm ince taneli izin kaynakları, alan kapsamlı içe aktarım ile 26.4 uyumu eklenmiştir.
 
-Bilinen problemler:
-- `keycloak_authentication_execution` sıralaması **API sınırlaması nedeniyle explicit `depends_on` gerektiriyor** ([#890](https://github.com/keycloak/terraform-provider-keycloak/issues/890)) — deklaratif olmayan bir bağımlılığı deklaratif araca zorla giydirme
-- Client secret taşıyan attribute'lar, config'de belirtilmese bile **Terraform state'inde cache'leniyor** ([#1058](https://github.com/keycloak/terraform-provider-keycloak/issues/1058))
+Bilinen problemleri şunlardır. Kimlik doğrulama yürütmesi sıralaması, API sınırlaması nedeniyle açık bir bağımlılık bildirimi gerektirmektedir; deklaratif olmayan bir bağımlılığı deklaratif bir araca zorla giydirmedir. İstemci sırrı taşıyan öznitelikler, yapılandırmada belirtilmese bile Terraform durumunda önbeleklenmektedir.
 
-**Auth0** (`auth0/terraform-provider-auth0`, resmî):
-- Kalıcı sahte drift: *"dummy config drifts consistently surface even though the actual config has reached desired state"* ([#1312](https://github.com/auth0/terraform-provider-auth0/issues/1312))
-- `ignore_changes` connection credential'ları için tam çalışmıyor → **credential sıfırlanma riski** ([#1291](https://github.com/auth0/terraform-provider-auth0/issues/1291))
-- API deprecation'ları provider'ı kırıyor: `enabled_clients` alanının kaldırılması (EOL 13 Tem 2026) provider <1.29.0'ı **tamamen kırdı** ([Auth0 Support](https://support.auth0.com/center/s/article/auth0-terraform-provider-operations-fail-after-legacy-field-end-of-life))
+Auth0'ın resmî sağlayıcısında kalıcı sahte kayma vardır: gerçek yapılandırma istenen duruma ulaşmış olsa bile sahte kaymalar tutarlı biçimde yüzeye çıkmaktadır. Değişiklikleri yok say direktifi bağlantı kimlik bilgileri için tam çalışmamaktadır; kimlik bilgisi sıfırlanma riski doğmaktadır. API kullanımdan kaldırmaları sağlayıcıyı kırmaktadır: etkin istemciler alanının kaldırılması, 13 Temmuz 2026 kullanım sonuyla, 1.29.0 öncesi sağlayıcıyı tamamen kırmıştır.
 
-**Okta** (`okta/terraform-provider-okta`, resmî):
-- Sunucu tarafı apply sonrası alanları **otomatik dolduruyor/düzeltiyor** → sonraki plan'larda state config'den ayrışıyor
-- `okta_user_group_memberships`'te sahte drift: attribute'lar gerçek değişiklik olmadan "Known after apply"a dönüyor ([#2254](https://github.com/okta/terraform-provider-okta/issues/2254))
+Okta'nın resmî sağlayıcısında sunucu tarafı, uygulamadan sonra alanları otomatik doldurmakta ya da düzeltmektedir; sonraki planlarda durum yapılandırmadan ayrışmaktadır. Kullanıcı grup üyeliklerinde sahte kayma vardır: öznitelikler gerçek bir değişiklik olmadan uygulamadan sonra bilinecek durumuna dönmektedir.
 
-### 4.4 Kubernetes operator'lar
+### 4.4 Kubernetes operatörleri
 
-**Keycloak Operator:**
-- `Keycloak` CRD: deployment/infra yönetiyor (Ingress, Service, admin-credential Secret) ama **veritabanını yönetmiyor** ([basic-deployment](https://www.keycloak.org/operator/basic-deployment))
-- `KeycloakRealmImport` CRD: **sadece create** — *"only supports creation of new realms and does not update or delete those… changes performed directly on Keycloak are not synced back in the CR"* ([realm-import](https://www.keycloak.org/operator/realm-import)). Yani **drift reconciliation yok.**
-- Bu boşluk için ayrı bir proje var: [`keycloak/keycloak-realm-operator`](https://github.com/keycloak/keycloak-realm-operator) — kendi tanımıyla **"temporary workaround"**, eski operator'dan fork'lanıp deployment mantığı çıkarılmış, Realm/Client/User için tam CRUD + drift reconciliation ekliyor. Native CRD desteği gelene kadar ana operator'ın yanında çalışacak. ⚠️ Küçük ölçek (~39 star), tek kaynaktan doğrulandı.
-- **26.7.0 ile yön değişti:** Operator artık `KeycloakOIDCClient` / `KeycloakSAMLClient` CRD'lerini **Client Admin API v2 üzerinden** yönetiyor — yani operator, v1'in imperative API'sinden çıkıp v2'nin deklaratif API'sine geçiyor.
+Keycloak operatörü şöyledir. Keycloak özel kaynak tanımı dağıtım ile altyapıyı yönetmekte, yani giriş, servis ile yönetici kimlik bilgisi sırrını, ancak veritabanını yönetmemektedir. Alan içe aktarma tanımı yalnızca oluşturmayı desteklemektedir: yeni alanların oluşturulmasını desteklemekte, bunları güncellememekte ya da silmemekte ile Keycloak üzerinde doğrudan yapılan değişiklikler kaynağa geri senkronize edilmemektedir. Yani kayma uzlaştırması yoktur. Bu boşluk için ayrı bir proje bulunmaktadır: kendi tanımıyla geçici bir çözüm olan alan operatörü, eski operatörden çatallanıp dağıtım mantığı çıkarılmış ile alan, istemci ve kullanıcı için tam oluştur oku güncelle sil ve kayma uzlaştırması eklemiştir. Yerel kaynak tanımı desteği gelene kadar ana operatörün yanında çalışacaktır. Küçük ölçeklidir ile tek kaynaktan doğrulanmıştır. 26.7.0 ile yön değişmiştir: operatör artık istemci kaynak tanımlarını ikinci sürüm istemci yönetim API'si üzerinden yönetmektedir; yani operatör birinci sürümün buyurgan API'sinden çıkıp ikinci sürümün deklaratif API'sine geçmektedir.
 
-**authentik — Blueprints:** İlk günden deklaratif tasarlanmış birinci-parti mekanizma ([blueprints](https://docs.goauthentik.io/customize/blueprints/)). YAML (schema version 1), `model` + `state` alanları: `present` / `created` / `must_created` / `absent`. İki uygulama modu: mount edilmiş dosya (worker ~60 dakikada bir yeniden okuyor) veya API/UI üzerinden tek seferlik import.
-⚠️ **Resmî Kubernetes operator YOK.** CRD/operator fikri [#5675](https://github.com/goauthentik/authentik/issues/5675)'te açılmış ama uygulanmamış görünüyor; resmî K8s dağıtımı **sadece Helm chart**.
+authentik'in taslakları ilk günden deklaratif tasarlanmış birinci taraf bir mekanizmadır. YAML tabanlıdır ile model ve durum alanları taşımaktadır; durum değerleri mevcut, oluşturulmuş, oluşturulmalı ile yok değerleridir. İki uygulama modu vardır: bağlanmış bir dosya, ki işçi yaklaşık 60 dakikada bir yeniden okumaktadır, ya da API veya arayüz üzerinden tek seferlik içe aktarım. Resmî bir Kubernetes operatörü yoktur; kaynak tanımı ile operatör fikri bir konuda açılmış ancak uygulanmamış görünmektedir ile resmî Kubernetes dağıtımı yalnızca bir Helm paketidir.
 
-**Zitadel — API-first:** Katmanlı config, öncelik sırasıyla: Go-struct default'ları → paketlenmiş `cmd/defaults.yaml` → özel `--config` YAML → env vars (`ZITADEL_*`) → CLI flag'leri ([configure](https://zitadel.com/docs/self-hosting/manage/configure), [defaults.yaml](https://github.com/zitadel/zitadel/blob/main/cmd/defaults.yaml)). İlk instance bootstrap'ı `FirstInstance` YAML bloğu + `zitadel setup --steps`.
-Tenant/org/app seviyesindeki sürekli config **API-first**: resmî [terraform-provider-zitadel](https://github.com/zitadel/terraform-provider-zitadel). Boşluklar: "Executions" için kaynak yok ([#271](https://github.com/zitadel/terraform-provider-zitadel/issues/271)); provider config'i eager yüklüyor → taze Helm deployment'larıyla **bootstrap sıralama çakışması** ([#167](https://github.com/zitadel/terraform-provider-zitadel/issues/167)).
+Zitadel API önceliklidir. Katmanlı yapılandırması öncelik sırasıyla Go yapı varsayılanları, paketlenmiş varsayılan YAML, özel yapılandırma YAML'ı, ortam değişkenleri ile komut satırı bayraklarıdır. İlk örnek önyüklemesi bir YAML bloğu ile bir kurulum komutuyla yapılmaktadır. Kiracı, organizasyon ile uygulama seviyesindeki sürekli yapılandırma API önceliklidir; resmî bir Terraform sağlayıcısı bulunmaktadır. Boşlukları şunlardır: yürütmeler için kaynak yoktur; sağlayıcı yapılandırmayı hevesle yüklemekte ile taze Helm dağıtımlarıyla önyükleme sıralama çakışması yaşanmaktadır.
 
-### 4.5 Deklaratif vs imperative — kim pişman oldu
+### 4.5 Deklaratifle buyurganın karşılaştırması, kim pişman olmuştur
 
-**Keycloak = ders kitabı vaka çalışması.** Sadece topluluk şikayeti değil, **maintainer'ın yazılı analizi** var: [Discussion #33049 "Declarative configuration API"](https://github.com/keycloak/keycloak/discussions/33049) (18 Eyl 2024, contributor **vmuzikar**). Mevcut API'nin deklaratif kullanıma neden direndiğini kataloglamış:
+Keycloak bir ders kitabı vaka çalışmasıdır. Yalnızca topluluk şikâyeti değil bakımcının yazılı analizi vardır: 18 Eylül 2024 tarihli deklaratif yapılandırma API'si tartışması. Mevcut API'nin deklaratif kullanıma neden direndiğini kataloglamıştır: gönderi ile yerleştirme tutarsızlığı; oluştur ya da güncelle semantiğinin olmaması; çok istekli varlık yaratma, örneğin istemci artı roller için iki çağrı; ile isim yerine benzersiz tanımlayıcı tabanlı adresleme.
 
-- POST/PUT tutarsızlığı
-- **create-or-update (upsert) semantiği yok**
-- Çok-istekli entity yaratma (örn. client + roller = 2 çağrı)
-- **İsim yerine UUID tabanlı adresleme**
+Önerdiği çözümler yerleştirme tabanlı oluştur ya da güncelle, isim tabanlı adresleme ile uzlaştırma döngüsünü önlemek için istenen durumla çalışma zamanı durumunun ayrılmasıdır. Açıkça ikinci sürüm yönetim API'sinin zemini olarak konumlandırılmıştır.
 
-Önerdiği çözümler: **PUT tabanlı upsert**, **isim tabanlı adresleme**, ve reconciliation döngüsünü önlemek için **"desired vs runtime state" ayrımı.** Explicit olarak Admin API v2'nin zemini olarak konumlandırılmış.
+Sonuç şudur: Keycloak'ın buyurgan ile gelişigüzel evrilmiş yönetim API'si yıllarca üçüncü taraf araçların, yani yapılandırma komut satırı aracının, birden fazla Terraform sağlayıcısının ile birden fazla operatörün her birinin bağımsız olarak etkisiz kılınabilirlik, fark alma ile normalleştirmeyi çözmesine yol açmıştır. Çekirdek ekip şimdi ikinci sürümle deklaratif semantiği geriye dönük giydirmeye çalışmaktadır.
 
-**Sonuç:** Keycloak'ın imperative, ad-hoc evrilmiş Admin API'si yıllarca üçüncü-parti araçların (config-cli, birden fazla Terraform provider, birden fazla operator) **her birinin bağımsız olarak idempotency/diffing/normalization çözmesine** yol açtı. Core ekip şimdi v2 ile deklaratif semantiği geriye dönük giydirmeye çalışıyor.
+Karşı örnekler şunlardır: authentik birinci günden deklaratiftir, yani birinci taraf taslaklarıyla. Zitadel API öncelikli yaklaşımla resmî Terraform sağlayıcısını sancılı yol olarak seçmiştir; yalnızca önyükleme ile örnek seviyesinde YAML kullanmaktadır.
 
-**Karşı örnekler:** authentik günü birinde deklaratif (Blueprints, birinci parti). Zitadel API-first + resmî Terraform provider'ı sancılı yol olarak seçmiş; sadece bootstrap/instance seviyesi YAML.
+### 4.6 Kayma tespiti, ne bozulmaktadır, ortak arıza sınıfları
 
-### 4.6 Drift tespiti — ne bozuluyor (ortak arıza sınıfları)
-
-1. **Deterministik olmayan serileştirme** (Keycloak): array sıralaması çalıştırmalar arası değişiyor; normalizasyon core'da değil, client tarafında ([#799](https://github.com/adorsys/keycloak-config-cli/issues/799))
-2. **Sunucu tarafı default'lar drift sanılıyor**: Auth0 ve Okta provider'larında kalıcı sahte diff'ler ([Auth0 #1312](https://github.com/auth0/terraform-provider-auth0/issues/1312), [Okta #2254](https://github.com/okta/terraform-provider-okta/issues/2254))
-3. **Secret'lar state/export içinde**: Keycloak partial export secret'ları `*` ile maskeliyor (diff edilemez); Terraform state secret'ları cache'liyor ([#1058](https://github.com/keycloak/terraform-provider-keycloak/issues/1058)); Auth0 `ignore_changes` credential'ları korumuyor ([#1291](https://github.com/auth0/terraform-provider-auth0/issues/1291))
-4. **Tek yönlü reconciliation**: `KeycloakRealmImport` sadece create — band-dışı değişiklikler **sessizce hiç düzeltilmiyor**
-5. **API'nin deklaratif ifade edemediği sıralama bağımlılıkları**: auth execution ordering ([#890](https://github.com/keycloak/terraform-provider-keycloak/issues/890))
-6. **Bootstrap yarışları**: Zitadel provider'ı taze Helm bring-up'ta çakışıyor ([#167](https://github.com/zitadel/terraform-provider-zitadel/issues/167))
+1. Deterministik olmayan serileştirme, Keycloak'ta: dizi sıralaması çalıştırmalar arası değişmekte ile normalleştirme çekirdekte değil istemci tarafındadır.
+2. Sunucu tarafı varsayılanların kayma sanılması: Auth0 ile Okta sağlayıcılarında kalıcı sahte farklar bulunmaktadır.
+3. Sırların durum ya da dışa aktarım içinde olması: Keycloak kısmi dışa aktarımı sırları maskelemekte ile fark alınamamaktadır; Terraform durumu sırları önbeleklemekte ile Auth0'da değişiklikleri yok say direktifi kimlik bilgilerini korumamaktadır.
+4. Tek yönlü uzlaştırma: alan içe aktarma tanımı yalnızca oluşturmaktadır ile bant dışı değişiklikler sessizce hiç düzeltilmemektedir.
+5. API'nin deklaratif ifade edemediği sıralama bağımlılıkları: kimlik doğrulama yürütmesi sıralaması buna örnektir.
+6. Önyükleme yarışları: Zitadel sağlayıcısı taze bir Helm kurulumunda çakışmaktadır.
 
 ---
 
-## 5. Admin API × Çok Kiracılık Kesişimi
+## 5. Yönetim API'siyle çok kiracılığın kesişimi
 
-### 5.1 Auth0'ın "My Organization API" — en önemli mimari bulgu
+### 5.1 Auth0'ın kendi organizasyonum API'si, en önemli mimari bulgu
 
-[auth0.com/blog/managing-auth0-organizations-my-organization-api](https://auth0.com/blog/managing-auth0-organizations-my-organization-api/) (**21 Nis 2026**):
-
-Auth0, Management API'yi delege org yönetimi için kullanmanın **çalışmadığını kabul edip ayrı bir API inşa etti.** Kendi gerekçesi:
+21 Nisan 2026 tarihli Auth0 blog yazısına göre Auth0, yönetim API'sini devredilmiş organizasyon yönetimi için kullanmanın çalışmadığını kabul edip ayrı bir API inşa etmiştir. Kendi gerekçesi şudur.
 
 > *"The Management API is intended to configure Auth0 tenants globally and is not designed for frequent, granular calls. It can quickly become a bottleneck for routine operations like updating settings or inviting members."*
 
-> Geliştiriciler *"often hit a wall with rate limits as their businesses grow and the number of organizations in their Auth0 tenant expands."*
+Geliştiricilerin, işleri büyüdükçe ile kiracıdaki organizasyon sayısı arttıkça hız sınırı duvarına çarptığı belirtilmektedir.
 
-| Boyut | Management API | My Organization API |
+| Boyut | Yönetim API'si | Kendi organizasyonum API'si |
 |---|---|---|
-| Amaç | Global tenant konfigürasyonu | Org-spesifik delege operasyonlar, *"much higher performance and scalability"* |
-| Audience | `https://{domain}/api/v2/` | **`https://{domain}/my-org/`** |
-| Scope'lar | `read:users`, `create:users`… (tenant-geniş) | **`read:my_org:details`, `update:my_org:details`** |
-| Tenant bağlamı | Path/parametre içinde org ID | **Kimliği doğrulanmış kullanıcının org üyeliğinden türetiliyor** |
-| Sınır | Tenant-geniş | Organizasyon sınırı içinde |
+| Amaç | Küresel kiracı yapılandırmasıdır | Organizasyona özgü devredilmiş operasyonlardır; çok daha yüksek performans ile ölçeklenebilirlik sunmaktadır |
+| İzleyici kitle | Genel yönetim adresidir | Ayrı bir organizasyon adresidir |
+| Kapsamlar | Kiracı geneli okuma ile yazma kapsamlarıdır | Organizasyona özgü ayrıntı okuma ile güncelleme kapsamlarıdır |
+| Kiracı bağlamı | Yolda ya da parametrede organizasyon kimliği taşınmaktadır | Kimliği doğrulanmış kullanıcının organizasyon üyeliğinden türetilmektedir |
+| Sınır | Kiracı genelidir | Organizasyon sınırı içindedir |
 
-**Bu, Argus için tek başına en aksiyona dönüştürülebilir mimari ders:** Platform-admin API'si ile tenant-admin (self-servis) API'si **ayrı yüzeyler** olmalı — ayrı audience, ayrı scope namespace'i, ayrı rate limit bütçesi. Tek bir admin API'yi hem platform hem tenant yönetimi için kullanmak, Auth0'ın kendi ifadesiyle rate limit duvarına ve performans darboğazına çarpıyor.
+Bu, Argus için tek başına en aksiyona dönüştürülebilir mimari derstir: platform yönetici API'siyle kiracı yönetici, yani kendin yap API'si ayrı yüzeyler olmalıdır; ayrı izleyici kitle, ayrı kapsam ad alanı ile ayrı hız sınırı bütçesi gerekmektedir. Tek bir yönetim API'sini hem platform hem kiracı yönetimi için kullanmak, Auth0'ın kendi ifadesiyle hız sınırı duvarına ile performans darboğazına çarpmaktadır.
 
-### 5.2 Tenant bağlamı kimden geliyor — güvenlik açısından
+### 5.2 Kiracı bağlamı kimden gelmektedir, güvenlik açısından
 
-**Değişmez kural (çapraz-kaynak doğrulanmış):** Tenant kimliği **doğrulanmış token claim'inden** türetilmeli; header/query/body'den **asla** güvenilmemeli. Path/subdomain/header'dan gelen tenant bağlamı varsa, token claim'iyle **eşleştiği doğrulanmalı**.
+Değişmez kural, çapraz kaynak doğrulanmıştır: kiracı kimliği doğrulanmış bir token iddiasından türetilmelidir; başlıktan, sorgudan ya da gövdeden asla güvenilmemelidir. Yoldan, alt alan adından ya da başlıktan gelen bir kiracı bağlamı varsa token iddiasıyla eşleştiği doğrulanmalıdır.
 
-Auth0'ın My Organization API'si bunu en temiz şekilde yapıyor: org bağlamı **kimliği doğrulanmış kullanıcının org üyeliğinden** geliyor — istemci hiçbir yerde org ID'si göndermiyor. Bu tasarım, IDOR sınıfını **yapısal olarak** ortadan kaldırıyor.
+Auth0'ın kendi organizasyonum API'si bunu en temiz şekilde yapmaktadır: organizasyon bağlamı kimliği doğrulanmış kullanıcının organizasyon üyeliğinden gelmekte ile istemci hiçbir yerde organizasyon kimliği göndermemektedir. Bu tasarım, güvensiz doğrudan nesne referansı sınıfını yapısal olarak ortadan kaldırmaktadır.
 
-⚠️ Bu bölümdeki genel best-practice literatürü çoğunlukla blog kaynaklı; **birincil spec kaynağı yok.** Ancak Auth0'ın somut tasarımı ve §2.6'daki Zitadel CVE-2025-27507 (org-scoped vs iam-scoped karışıklığı) bu kuralı ampirik olarak destekliyor.
+Bu bölümdeki genel en iyi uygulama literatürü çoğunlukla blog kaynaklıdır ile birincil bir şartname kaynağı yoktur. Ancak Auth0'ın somut tasarımı ile Zitadel'in organizasyon kapsamlıyla sistem kapsamlı karışıklığından doğan açığı bu kuralı ampirik olarak desteklemektedir.
 
 ### 5.3 Keycloak'ın iki modeli
 
-| | Realm-per-tenant | Organizations (tek realm) |
+| | Kiracı başına alan | Organizasyonlar, tek alan |
 |---|---|---|
-| İzolasyon | Sert — ayrı config, tema, admin | Yumuşak — paylaşılan realm |
-| OIDC issuer | **Her realm kendi issuer'ı** → her backend servisi belirli bir realm'in discovery endpoint'ine karşı konfigüre edilmeli | Tek issuer |
-| Admin token | **Master realm'den gelmeli** (§1.4) → merkezî risk | FGAP org scope'ları |
-| Delege yönetim | `realm-management` rolleri | `manage` / `view` + **resource hiding** |
-| Operasyonel maliyet | Yüksek | Düşük |
+| İzolasyon | Serttir; ayrı yapılandırma, tema ile yönetici vardır | Yumuşaktır; alan paylaşılmaktadır |
+| OIDC vereni | Her alanın kendi vereni vardır; her arka uç servisi belirli bir alanın keşif uç noktasına karşı yapılandırılmalıdır | Tek verendir |
+| Yönetici token'ı | Ana alandan gelmelidir; merkezî bir risktir | Organizasyon kapsamlı ince taneli izinlerdir |
+| Devredilmiş yönetim | Alan yönetimi rolleridir | Yönet ile görüntüle kapsamları artı kaynak gizlemedir |
+| Operasyonel maliyet | Yüksektir | Düşüktür |
 
-Keycloak'ın Organizations'ı 26.7.0'da FGAP ile birleşince gerçek delege yönetim sağlıyor: org admin'i Account Console'dan veya Organizations REST API'yi çağıran özel bir portaldan kendi org'unu yönetiyor, **diğer org'ları göremiyor veya etkileyemiyor.**
+Keycloak'ın organizasyonları 26.7.0'da ince taneli izinlerle birleşince gerçek bir devredilmiş yönetim sağlamaktadır: organizasyon yöneticisi hesap konsolundan ya da organizasyon REST API'sini çağıran özel bir portaldan kendi organizasyonunu yönetmekte ile diğer organizasyonları görememekte veya etkileyememektedir.
 
-Entra'nın RMAU'su daha güçlü bir garanti sunuyor: **Global Administrator dahil** hiç kimse RMAU içindeki objeleri değiştiremiyor. Bu, "platform admin'i bile göremesin" gereksiniminin ürünleşmiş hali — ama PIM ile birlikte çalışmıyor (§2.4).
+Entra'nın kısıtlı yönetim birimi daha güçlü bir garanti sunmaktadır: küresel yönetici dahil hiç kimse birim içindeki nesneleri değiştirememektedir. Platform yöneticisi bile göremesin gereksiniminin ürünleşmiş hâlidir; ancak ayrıcalıklı kimlik yönetimiyle birlikte çalışmamaktadır.
 
 ---
 
-## 6. Bulk / Batch İşlemler
+## 6. Toplu ile yığın işlemler
 
-### 6.1 SCIM `/Bulk` — spec var, kimse uygulamıyor
+### 6.1 SCIM toplu uç noktası: şartname vardır, kimse uygulamamaktadır
 
-**Spec** ([RFC 7644 §3.7](https://datatracker.ietf.org/doc/html/rfc7644#section-3.7), 2015):
-- `bulkId`: client-üretimi geçici tanımlayıcı, POST için **ZORUNLU**; henüz yaratılmamış kaynaklara aynı payload içinde referans vermeyi sağlıyor; sunucu aynı `bulkId`'yi gerçek kaynak ID'sine map ederek geri döndürmeli
-- `failOnErrors`: client'ın belirlediği, kaç hata sonrası batch'in durdurulacağı; yoksa hepsi işlenir ve tüm hatalar raporlanır
-- `maxOperations` / `maxPayloadSize`: **sunucu** tarafından `ServiceProviderConfig`'in `bulk` complex attribute'unda ilan ediliyor ([RFC 7643 §5](https://www.rfc-editor.org/rfc/rfc7643.html#section-5))
+RFC 7644'ün 3.7 bölümü, 2015, şunları tanımlamaktadır. Toplu kimlik istemci üretimi geçici bir tanımlayıcıdır ile gönderi için zorunludur; henüz yaratılmamış kaynaklara aynı yük içinde referans vermeyi sağlamakta ile sunucu aynı kimliği gerçek kaynak kimliğine eşleyip geri döndürmelidir. Hatada durma alanı istemcinin belirlediği, kaç hata sonrası yığının durdurulacağıdır; yoksa hepsi işlenmekte ile tüm hatalar raporlanmaktadır. Azami işlem sayısı ile azami yük boyutu sunucu tarafından servis sağlayıcı yapılandırmasında ilan edilmektedir.
 
-**Gerçek dünya benimseme — neredeyse sıfır:**
+Gerçek dünya benimsemesi neredeyse sıfırdır.
 
 | Ürün | Durum |
 |---|---|
-| **Keycloak** | `bulk.supported: false`; `POST /scim/v2/Bulk` düzgün `BulkResponse` bile dönmüyor. Açık feature request, milestone yok ([#50366](https://github.com/keycloak/keycloak/issues/50366)) |
-| **Microsoft Entra** | SCIM **client** olarak `/Bulk`'ı **hiç kullanmıyor** — kullanıcı başına ayrı çağrı. Tek istisna: gallery app'lerde 20 grup-üyelik değişikliğini tek PATCH'te toplama (RFC `/Bulk` mekanizması **değil**) |
-| **Okta** | Inbound provisioning'de SCIM bulk desteklemiyor; *"bulk operations for multiple resource changes in a single request aren't currently used by the Okta provisioning service"* |
-| **PingFederate** | `bulk.supported: false`, `maxOperations: 0`, `maxPayloadSize: 0` — ⚠️ **DOĞRULANMADI**, birincil doc fetch'i başarısız |
+| Keycloak | Toplu destek kapalıdır; toplu uç noktası düzgün bir yanıt bile dönmemektedir. Açık bir özellik talebi vardır ancak kilometre taşı yoktur |
+| Microsoft Entra | SCIM istemcisi olarak toplu uç noktasını hiç kullanmamakta, kullanıcı başına ayrı çağrı yapmaktadır. Tek istisna galeri uygulamalarında 20 grup üyelik değişikliğini tek bir yamada toplamaktır, ki RFC mekanizması değildir |
+| Okta | Gelen sağlamada SCIM toplu işlemini desteklememektedir; tek istekte çoklu kaynak değişikliği için toplu operasyonların şu anda sağlama servisi tarafından kullanılmadığı belirtilmektedir |
+| PingFederate | Toplu destek kapalıdır ile limitler sıfırdır; doğrulanamamıştır, birincil doküman çekimi başarısız olmuştur |
 
-> **Sonuç:** SCIM `/Bulk`, standardın **en az uygulanan** büyük özelliği. İncelenen her satıcı bunun yerine **spec dışı, kendi async job API'sini** inşa etmiş. Argus'un sadece RFC 7644 §3.7'ye yatırım yapması, gerçek dünyada karşılığı olmayan bir özelliği kopyalamak olur.
+Sonuç şudur: SCIM toplu uç noktası standardın en az uygulanan büyük özelliğidir. İncelenen her satıcı bunun yerine şartname dışı kendi eşzamansız iş API'sini inşa etmiştir. Argus'un yalnızca ilgili RFC bölümüne yatırım yapması, gerçek dünyada karşılığı olmayan bir özelliği kopyalamak olur.
 
-### 6.2 Auth0 jobs — çalışan async model
+### 6.2 Auth0 işleri, çalışan eşzamansız model
 
-`POST /api/v2/jobs/users-imports` ([post-users-imports](https://auth0.com/docs/api/management/v2/jobs/post-users-imports)):
-- **202** + `{id, status: "pending", type: "users_import", created_at}`; client `GET /api/v2/jobs/{id}` ile poll ediyor
-- **Dosya boyutu: 500KB–512KB** (Auth0'ın hata metni: *"Payload content length greater than maximum allowed: 512000"*) → metadata küçük tutulursa ~1.000 kullanıcı
-- **Eşzamanlılık: tenant başına 2 iş.** 3.'sü 429 + *"There are 2 active import users jobs, please wait until some of them are finished and try again."* Bu limitin üstündeki enterprise müşterilere Auth0 **dokümante edilmiş API çözümü değil, Technical Account Manager'a başvurma** öneriyor ([Auth0 Community](https://community.auth0.com/t/understanding-auth0s-limits-on-concurrent-bulk-user-import-jobs-per-tenant/125157))
-- Yaşam döngüsü: `pending` → `completed`/`failed`; **2 saatte timeout**; tüm iş verisi (hata detayı dahil) **24 saatte otomatik siliniyor**
-- **Hata dosyası**: `GET .../jobs/{id}/errors` → başarısız kayıt başına yapılandırılmış hata objesi, makine kodu (`CONFLICT_EMAIL`, `INVALID_TYPE`, `FORMAT`, `DUPLICATED_USER`, `ENUM_MISMATCH` — ~19 kod) + insan mesajı
-- `upsert` (bool) ve `external_id` ile idempotent-benzeri yeniden çalıştırma
-- Tamamlanma bildirimi: `send_completion_email` — **push webhook değil, e-posta**
+Kullanıcı içe aktarma işi uç noktası şöyle çalışmaktadır: 202 ile birlikte kimlik, bekliyor durumu, tip ile oluşturma zamanı dönmekte; istemci iş durumunu yoklamaktadır. Dosya boyutu 500 ile 512 kilobayt arasındadır; Auth0'ın hata metni azami izin verilen içerik uzunluğunun aşıldığını söylemektedir. Metadata küçük tutulursa yaklaşık bin kullanıcı sığmaktadır. Eşzamanlılık kiracı başına iki iştir; üçüncüsü 429 ile iki aktif içe aktarma işi bulunduğu mesajını almaktadır. Bu limitin üstündeki kurumsal müşterilere Auth0 dokümante bir API çözümü değil teknik hesap yöneticisine başvurmayı önermektedir. Yaşam döngüsü bekliyordan tamamlandı ya da başarısıza gitmektedir; iki saatte zaman aşımına uğramakta ile tüm iş verisi, hata detayı dahil, 24 saatte otomatik silinmektedir. Hata dosyası uç noktası başarısız kayıt başına yapılandırılmış bir hata nesnesi vermektedir: makine kodu, yaklaşık 19 kod vardır, artı insan mesajı. Ekle ya da güncelle bayrağı ile bir dış kimlikle etkisiz kılınabilir benzeri yeniden çalıştırma mümkündür. Tamamlanma bildirimi bir e-postadır, itmeli bir kanca değildir.
 
-`POST /api/v2/jobs/users-exports`: aynı async-job/poll deseni; connection scope, format (CSV/JSON), maks kayıt, alan listesi seçilebiliyor.
+Kullanıcı dışa aktarma işi aynı eşzamansız iş ile yoklama desenini kullanmaktadır; bağlantı kapsamı, format, azami kayıt ile alan listesi seçilebilmektedir.
 
-### 6.3 Okta bulk — çekirdek API'de yok
+### 6.3 Okta toplu işlemleri, çekirdek API'de yoktur
 
-Okta'nın core Users API'sinde Auth0'ın jobs endpoint'lerinin karşılığı **yok.** Okta'nın kendi migrasyon kılavuzu **script'lenmiş, sıralı, kullanıcı başına POST** tarif ediyor; rate-limit header'larına dayanmayı ve migrasyon pencerelerinde **Okta Support ile limitleri geçici yükseltmek için koordine olmayı** öneriyor ([migrate-to-okta-bulk](https://developer.okta.com/docs/guides/migrate-to-okta-bulk/main/), [migrate-to-okta-with-scripts](https://developer.okta.com/docs/guides/migrate-to-okta-with-scripts/main/)).
+Okta'nın çekirdek kullanıcılar API'sinde Auth0'ın iş uç noktalarının karşılığı yoktur. Okta'nın kendi göç kılavuzu betiklenmiş, sıralı ile kullanıcı başına gönderi tarif etmekte; hız sınırı başlıklarına dayanmayı ile göç pencerelerinde limitleri geçici yükseltmek için destekle koordine olmayı önermektedir.
 
-Gerçek batch mekanizması **Okta Workflows'ta**, platform API'sinde değil ([Bulk User Import connector](https://help.okta.com/wf/en-us/content/topics/workflows/connector-reference/okta/actions/bulkuserimport.htm)): oturum başına maks **10.000 kullanıcı**, en fazla **50 POST**, her biri **200 kullanıcı** (200 × 50 = 10.000).
+Gerçek yığın mekanizması iş akışları ürünündedir, platform API'sinde değil: oturum başına en fazla 10.000 kullanıcı, en fazla 50 gönderi ile her biri 200 kullanıcıdır.
 
-⚠️ **Dokümante edilen ile gözlenen davranış arasında fark:** Bir müşteri, doküman 10.000 derken bulk import'un **50 kayıttan sonra durduğunu** raporladı; Okta'nın kendi destek yanıtı mekanizmayı (200/batch × 50 istek) teyit etti ama **tutarsızlığı açıklayamadı** ve resmî destek kaydı açmaya yönlendirdi ([Okta Support](https://support.okta.com/help/s/question/0D54z0000AE7QiVCQV/bulk-user-import-stops-after-processing-50-records-documentation-states-10000-users-per-session)).
+Dokümante edilenle gözlenen davranış arasında bir fark vardır: bir müşteri, doküman 10.000 derken toplu içe aktarımın 50 kayıttan sonra durduğunu raporlamıştır. Okta'nın kendi destek yanıtı mekanizmayı teyit etmiş ancak tutarsızlığı açıklayamamış ile resmî bir destek kaydı açmaya yönlendirmiştir.
 
-### 6.4 Microsoft'un gerçek bulk cevabı: `/bulkUpload` (SCIM `/Bulk` değil)
+### 6.4 Microsoft'un gerçek toplu cevabı: yükleme uç noktası, SCIM toplu uç noktası değil
 
-[API-driven inbound provisioning](https://learn.microsoft.com/en-us/entra/identity/app-provisioning/inbound-provisioning-api-concepts) (güncelleme 20 Ağu 2026):
-- Senkron **202 Accepted**, sonra **provisioning logs API**'sini kayıt başına status için poll etme → tam olarak AIP-151/Azure LRO şekli
-- Throttle: **5 saniyelik pencerede 40 çağrı**
-- **Tenant seviyesinde: 24 saatte 2.000 çağrı (P1/P2) veya 6.000 çağrı (Governance lisansı)**
-- Microsoft'un kendi tavsiyesi: *"optimize SCIM bulk payloads to include up to 50 operations per API call"* — **günlük kotayı korumak için**
-- SCIM **şema** yapılarını kullanıyor ama SCIM `/Bulk` **protokol** endpoint'ini değil
+API güdümlü gelen sağlama, 20 Ağustos 2026 güncellemesiyle, şöyledir: senkron 202 kabul edildi dönmekte, sonra sağlama günlükleri API'si kayıt başına durum için yoklanmaktadır; tam olarak uzun süren işlem şeklidir. Kısıtlama beş saniyelik pencerede 40 çağrıdır. Kiracı seviyesinde 24 saatte 2.000 çağrı, yönetişim lisansıyla 6.000 çağrı izinlidir. Microsoft'un kendi tavsiyesi SCIM toplu yüklerini API çağrısı başına 50 operasyona kadar optimize etmektir; günlük kotayı korumak içindir. SCIM şema yapılarını kullanmakta ancak SCIM toplu protokol uç noktasını kullanmamaktadır.
 
 ### 6.5 Uzun süren işlem desenleri
 
-- **RFC 7240** (`Prefer: respond-async`, IETF 2014): 202 kodunun ötesinde *"little guidance is given on how and when to use the response code and the process for determining the subsequent final result of the operation is left entirely undefined"* — polling mekaniğini **bilinçli olarak standartlaştırmıyor**
-- **Google AIP-151** ([aip.dev/151](https://google.aip.dev/151)): **~10 saniyeden uzun** sürmesi beklenen her method ("a good rule of thumb") nihai kaynağı değil bir `google.longrunning.Operation` objesi dönmeli, + zorunlu `Operations` servisi. `Operation`, ilerleme/kısmî hata raporlaması için terminal `response` tipinden **ayrı bir `metadata` tipi** taşıyor.
-- **Microsoft/Azure REST guidelines**: **202 Accepted** (boş gövde) + `Location`/`Operation-Location` header'ı status-monitor kaynağına; her terminal-olmayan poll yanıtı **kendi `Retry-After`'ını** taşımalı; Azure ayrıca Operation-Location URL'inde `api-version` query param'ı istiyor
-- **Tradeoff:** Üç spec de (RFC 7240, AIP-151, MS) push bildirimi **zorunlu kılmıyor**; hepsi **poll tabanlı status monitor**'u baseline kabul edip push'u opsiyonel katman olarak bırakıyor. Polling basit, cache dostu, her HTTP altyapısından geçiyor; webhook polling yükünü azaltıyor ama caller'ın erişilebilir endpoint açmasını ve idempotent teslimat/retry yönetmesini gerektiriyor.
+RFC 7240, IETF 2014, eşzamansız yanıt tercihini tanımlamaktadır; 202 kodunun ötesinde bu kodun nasıl ve ne zaman kullanılacağına dair az rehberlik verildiği ile işlemin nihai sonucunun belirlenme sürecinin tamamen tanımsız bırakıldığı söylenmektedir. Yani yoklama mekaniğini bilinçli olarak standartlaştırmamaktadır.
 
-### 6.6 Idempotency key'ler
+Google'ın 151 numaralı API geliştirme ilkesi, yaklaşık 10 saniyeden uzun sürmesi beklenen her yöntemin, ki iyi bir kestirme kural denmektedir, nihai kaynağı değil bir uzun süren işlem nesnesi döndürmesini ile zorunlu bir işlemler servisi bulunmasını istemektedir. İşlem nesnesi, ilerleme ile kısmî hata raporlaması için terminal yanıt tipinden ayrı bir metadata tipi taşımaktadır.
 
-**IETF durumu (8 Eyl 2026 itibarıyla):** [`draft-ietf-httpapi-idempotency-key-header-07`](https://www.ietf.org/archive/id/draft-ietf-httpapi-idempotency-key-header-07.html), yayın 15 Eki 2025, expire 18 Nis 2026, Standards Track, HTTPAPI working group'ta **hâlâ aktif Internet-Draft — RFC değil.**
+Microsoft ile Azure REST kılavuzları boş gövdeli 202 kabul edildi artı bir durum izleyici kaynağına işaret eden konum başlığı istemektedir; her terminal olmayan yoklama yanıtı kendi yeniden dene değerini taşımalıdır. Azure ayrıca işlem konumu adresinde bir API sürümü parametresi istemektedir.
 
-- Header, RFC 8941 Structured Field String; UUID öneriliyor
-- Opsiyonel **"idempotency fingerprint"** (payload'ın checksum/digest'i) → sunucu aynı key + farklı payload'ı reddedebilsin
-- Önerilen status kodları: **400** (gereken yerde key yok), **422** (key farklı payload'la yeniden kullanılmış), **409** (aynı key'i paylaşan eşzamanlı in-flight istekler)
-- **Saklama penceresi kasıtlı olarak tanımsız** — her API kendi belirleyip yayınlamalı
-- Atıf yapılan uygulayıcılar: Stripe, PayPal (`PayPal-Request-Id`), Adyen, Square, WorldPay, Open Banking
+Takas şudur: üç şartname de itmeli bildirimi zorunlu kılmamakta ile hepsi yoklama tabanlı durum izleyicisini temel kabul edip itmeyi isteğe bağlı bir katman olarak bırakmaktadır. Yoklama basittir, önbellek dostudur ile her HTTP altyapısından geçmektedir; kanca yoklama yükünü azaltmakta ancak çağıranın erişilebilir bir uç nokta açmasını ile etkisiz kılınabilir teslimat ve yeniden deneme yönetmesini gerektirmektedir.
 
-**Stripe (referans uygulama)** ([docs.stripe.com/api/idempotent_requests](https://docs.stripe.com/api/idempotent_requests), [api-v2-overview](https://docs.stripe.com/api-v2-overview)):
-- **API v1:** key'ler **24 saat** tanınıyor; eşleşen key + uyuşmayan parametre → hata; **ilk** isteğin sonucu (başarı veya hata, **500'ler dahil**) retry'de aynen tekrar oynatılıyor
-- **API v2:** pencere **30 güne** uzatıldı, aynı API + aynı hesap/sandbox scope'unda. **Davranış değişti:** ilk deneme **başarısızsa retry'de yeniden çalıştırılıyor** (sadece replay değil); **başarılıysa** hâlâ kısa devre yapıp saklanmış sonucu dönüyor
-- **Kritik incelik:** Stripe idempotent sonucu **sadece çalıştırma başladıktan sonra** kalıcılaştırıyor — validation hataları veya aynı key üzerinde başka bir in-flight istekle çakışan istekler **saklanmıyor**, böylece güvenle retry edilebiliyorlar ve "farklı parametre" hatası tetiklenmiyor
-- Key maks **255 karakter**; key değerine **PII gömülmemesi** açıkça öneriliyor
+### 6.6 Etkisizleştirme anahtarları
 
-**IdP'lerde durum:**
-- **WorkOS**: bulunan tek IdP-komşusu; ve **çok dar** — `Idempotency-Key` sadece **Create Audit Log Event** endpoint'inde onurlandırılıyor; diğer endpoint'ler header'ı sessizce kabul edip **deduplication yapmıyor** → retry edilen bir mutation hâlâ çift-yaratabiliyor. SDK'ları POST'lara otomatik UUIDv4 ekliyor ama sadece iç retry'ler için, caller garantisi olarak değil.
-- **Auth0**: Management API sadece kaynak-seviyesi semantikle "kısmen idempotent" (örn. users-import job'ında `upsert`); **`Idempotency-Key` header desteği dokümante edilmemiş**
-- **Okta**: `Idempotency-Key` desteği bulunamadı; create için **client-supplied external ID** ile de-facto idempotency (request-token değil, natural-key idempotency'si)
+IETF durumu 8 Eylül 2026 itibarıyla şöyledir: ilgili taslağın yedinci revizyonu 15 Ekim 2025'te yayımlanmış, 18 Nisan 2026'da süresi dolmuştur; standartlar yolundadır ile HTTP API çalışma grubunda hâlâ aktif bir internet taslağıdır, bir RFC değildir.
 
-> **Hiçbir büyük genel amaçlı IdP (Okta, Auth0, Entra) IETF `Idempotency-Key` desenini Stripe'ın yaptığı gibi uygulamıyor. Argus'un farklılaşabileceği somut bir boşluk.**
+Başlık RFC 8941 yapılandırılmış alan dizgisidir ile UUID önerilmektedir. İsteğe bağlı bir etkisizleştirme parmak izi, yani yükün sağlama toplamı, tanımlanmaktadır; sunucu aynı anahtarla farklı yükü reddedebilsin diyedir. Önerilen durum kodları gereken yerde anahtar yoksa 400, anahtar farklı bir yükle yeniden kullanılmışsa 422 ile aynı anahtarı paylaşan eşzamanlı uçuştaki istekler için 409'dur. Saklama penceresi kasıtlı olarak tanımsızdır; her API kendi belirleyip yayımlamalıdır. Atıf yapılan uygulayıcılar Stripe, PayPal, Adyen, Square, WorldPay ile açık bankacılık girişimleridir.
 
-### 6.7 Rate limit ile bulk çelişkisi — dokümante edilmiş cevaplar
+Stripe referans uygulamadır. Birinci sürüm API'sinde anahtarlar 24 saat tanınmaktadır; eşleşen anahtarla uyuşmayan parametre hata vermekte ile ilk isteğin sonucu, başarı ya da hata, beş yüzlü kodlar dahil, yeniden denemede aynen tekrar oynatılmaktadır. İkinci sürümde pencere 30 güne uzatılmıştır, aynı API ile aynı hesap kapsamında. Davranış değişmiştir: ilk deneme başarısızsa yeniden denemede yeniden çalıştırılmakta, yalnızca tekrar oynatılmamaktadır; başarılıysa hâlâ kısa devre yapıp saklanmış sonucu döndürmektedir. Kritik incelik şudur: Stripe etkisizleştirme sonucunu yalnızca çalıştırma başladıktan sonra kalıcılaştırmaktadır; doğrulama hataları ya da aynı anahtar üzerinde başka bir uçuştaki istekle çakışan istekler saklanmamakta, böylece güvenle yeniden denenebilmekte ile farklı parametre hatası tetiklenmemektedir. Anahtar en fazla 255 karakterdir ile anahtar değerine kişisel veri gömülmemesi açıkça önerilmektedir.
 
-| Ürün | Batch kaç istek sayılıyor | Kaynak |
+Kimlik sağlayıcılarda durum şöyledir. WorkOS bulunan tek komşudur ile çok dardır: etkisizleştirme anahtarı yalnızca denetim günlüğü olayı oluşturma uç noktasında onurlandırılmaktadır; diğer uç noktalar başlığı sessizce kabul edip tekilleştirme yapmamaktadır, yani yeniden denenen bir değişiklik hâlâ çift yaratabilmektedir. Geliştirme kitleri gönderilere otomatik bir benzersiz tanımlayıcı eklemektedir ancak yalnızca iç yeniden denemeler için, bir çağıran garantisi olarak değil. Auth0'ın yönetim API'si yalnızca kaynak seviyesi semantikle kısmen etkisizleştirilebilirdir, örneğin içe aktarma işindeki ekle ya da güncelle bayrağıyla; etkisizleştirme anahtarı başlığı desteği dokümante edilmemiştir. Okta'da başlık desteği bulunamamıştır; oluşturma için istemcinin sağladığı bir dış kimlikle fiilî bir etkisizleştirme vardır, ki bir istek belirteci değil doğal anahtar etkisizleştirmesidir.
+
+Hiçbir büyük genel amaçlı kimlik sağlayıcı bu deseni Stripe'ın yaptığı gibi uygulamamaktadır. Argus'un farklılaşabileceği somut bir boşluktur.
+
+### 6.7 Hız sınırıyla toplu işlem çelişkisi, dokümante edilmiş cevaplar
+
+| Ürün | Yığın kaç istek sayılmaktadır | Kaynak |
 |---|---|---|
-| **Graph `$batch`** | **N** — her alt-istek ayrı değerlendiriliyor; envelope her alt-istek 429 olsa bile 200 dönüyor; her biri kendi `x-ms-resource-unit`'ini tüketiyor | [throttling](https://learn.microsoft.com/en-us/graph/throttling) |
-| **Entra `/bulkUpload`** | **1 çağrı** — içindeki ≤50 operasyondan bağımsız. Bu yüzden Microsoft "çağrı başına 50 op'a kadar doldurun" diyor: **çağrı sayısı bütçesini korumak için** | [inbound-provisioning-api-concepts](https://learn.microsoft.com/en-us/entra/identity/app-provisioning/inbound-provisioning-api-concepts) |
-| **Auth0 `/jobs/users-imports`** | **1 çağrı** normal rps/rpm bütçesinde, ama **ayrı bir concurrency bütçesiyle** yönetiliyor (tenant başına 2 iş) — dosyadaki kullanıcı sayısından bağımsız | Auth0 Community + API docs |
-| **Okta Workflows Bulk Import** | 50 POST'un her biri normal API çağrısı; doküman **muafiyet belirtmiyor** → **N çağrı**, N ≤ 50 | [concurrency limits](https://developer.okta.com/docs/reference/rl2-concurrency/) |
+| Graph yığın uç noktası | N sayılmaktadır; her alt istek ayrı değerlendirilmekte, zarf her alt istek 429 olsa bile 200 dönmekte ile her biri kendi kaynak birimini tüketmektedir | Kısıtlama dokümanı |
+| Entra yükleme uç noktası | Bir çağrı sayılmaktadır, içindeki en fazla 50 operasyondan bağımsız. Bu yüzden Microsoft çağrı başına 50 operasyona kadar doldurun demektedir; çağrı sayısı bütçesini korumak içindir | Gelen sağlama kavramları |
+| Auth0 içe aktarma işi | Bir çağrı sayılmakta ancak ayrı bir eşzamanlılık bütçesiyle yönetilmektedir, yani kiracı başına iki iş; dosyadaki kullanıcı sayısından bağımsızdır | Topluluk ile API dokümanı |
+| Okta iş akışları toplu içe aktarımı | 50 gönderinin her biri normal bir API çağrısıdır; doküman muafiyet belirtmemektedir, yani N çağrıdır, N en fazla 50'dir | Eşzamanlılık limitleri |
 
-**Desen:** Ölçeklenen iki tasarım ya (a) **alt-operasyon başına ücretlendirip** client'ı bütçelemeye zorluyor (Graph), ya da (b) **çağrı başına ücretlendirip** ama çağrı-başına-op ve günlük-toplam-çağrı'yı sınırlıyor (Entra) — yani **zarfı** rate-limit ediyor, payload'ı değil, ama zarf boyutunu sınırlayarak kimsenin tek çağrıda sınırsız iş kaçırmasını engelliyor. Auth0 soruyu tamamen atlatıyor: bulk işi rps limiter'ından çıkarıp **küçük tamsayılı bir concurrency semaphore'una** taşıyor. Üçü de meşru. **Hiçbiri "tek HTTP çağrısında N item"ı bedava saymıyor.**
+Desen şudur: ölçeklenen iki tasarım ya alt operasyon başına ücretlendirip istemciyi bütçelemeye zorlamaktadır, ki Graph böyledir; ya da çağrı başına ücretlendirip çağrı başına operasyon sayısını ve günlük toplam çağrıyı sınırlamaktadır, ki Entra böyledir. Yani zarfı hız sınırlamakta, yükü değil; ancak zarf boyutunu sınırlayarak kimsenin tek çağrıda sınırsız iş kaçırmasını engellemektedir. Auth0 soruyu tamamen atlatmakta: toplu işi istek hızı sınırlayıcısından çıkarıp küçük tam sayılı bir eşzamanlılık semaforuna taşımaktadır. Üçü de meşrudur. Hiçbiri tek bir HTTP çağrısında N öğeyi bedava saymamaktadır.
 
 ---
 
-## 7. Argus için Somut Tasarım Kararları
+## 7. Argus için somut tasarım kararları
 
-> Her madde bir kaynağa dayalı. Numaralar §referanslarına bağlı.
+Her madde bir kaynağa dayanmaktadır.
 
-**API şekli ve versiyonlama**
+### API şekli ile sürümleme
 
-1. **Versiyonu kaynak başına, path'in sonunda taşı** — Keycloak v2'nin `/admin/api/{tenant}/clients/v2` deseni gibi. Global API versiyonu bir big-bang migrasyona zorlar; kaynak-başına versiyonlama her kaynağın kendi hızında evrilmesine izin verir. Keycloak'ın global "Admin API v2" epic'i [#39220](https://github.com/keycloak/keycloak/issues/39220) **"not planned" olarak kapandı**, ama kaynak-bazlı Client API v2 26.7.0'da **çıktı.** Kapsam daraltmak işe yaradı. (§1.3)
+1. Sürüm kaynak başına ile yolun sonunda taşınmalıdır; Keycloak'ın ikinci sürüm deseni gibi. Global bir API sürümü tek seferlik büyük bir göçe zorlamaktadır; kaynak başına sürümleme her kaynağın kendi hızında evrilmesine izin vermektedir. Keycloak'ın global ikinci sürüm destanı planlanmadı olarak kapanmış ancak kaynak bazlı istemci API'si ikinci sürümü 26.7.0'da çıkmıştır. Kapsam daraltmak işe yaramıştır.
 
-2. **PUT = upsert, POST = create, PATCH = RFC 7396 JSON Merge Patch.** stianst'in *"POST sometimes work as a PUT, and sometimes as a PATCH, depends randomly on the endpoint"* itirafı ([#37655](https://github.com/keycloak/keycloak/discussions/37655)) ve vmuzikar'ın *"no create-or-update semantics"* tespiti ([#33049](https://github.com/keycloak/keycloak/discussions/33049)) bu kuralın maliyetini gösteriyor. Merge Patch ayrıca **explicit null** problemini çözüyor — Keycloak `displayName=null`'ın "set edilmedi" mi "null'a set edildi" mi olduğunu bilemiyor. (§1.1, §1.2)
+2. Yerleştirme bir ekle ya da güncelle, gönderi bir oluşturma ile yama bir JSON birleştirme yaması olmalıdır. Bakımcının gönderinin bazen yerleştirme bazen yama gibi çalıştığı itirafı ile bir başka katkıcının oluştur ya da güncelle semantiğinin bulunmadığı tespiti bu kuralın maliyetini göstermektedir. Birleştirme yaması ayrıca açık boş değer problemini çözmektedir; Keycloak bir alanın ayarlanmadığını mı yoksa boşa mı ayarlandığını bilememektedir.
 
-3. **Create yanıtı tam temsili gövdede dönsün** (201 + body), sadece `Location` header'ı değil. stianst: *"very inconvenient to use as it requires separating parsing of location headers."* (§1.1)
+3. Oluşturma yanıtı tam temsili gövdede döndürmelidir, yani 201 ile gövde; yalnızca konum başlığı değil. Bakımcının ifadesiyle konum başlığı ayrıştırmayı gerektirmesi çok elverişsizdir.
 
-4. **Kaynakları hem UUID hem stabil, insan-okunur doğal anahtarla adresle** (`clientId`, `tenantSlug`). Keycloak'ın UUID-only adreslemesi hem API kullanımını ([#37655](https://github.com/keycloak/keycloak/discussions/37655)) hem GitOps'u ([#33049](https://github.com/keycloak/keycloak/discussions/33049)) bozuyor: realm delete/recreate'te ID'ler yeniden üretiliyor ve devasa sahte diff üretiyor ([config-cli #799](https://github.com/adorsys/keycloak-config-cli/issues/799)). (§1.1, §4.1, §4.5)
+4. Kaynaklar hem benzersiz tanımlayıcıyla hem kararlı, insan okunur bir doğal anahtarla adreslenmelidir. Keycloak'ın yalnızca benzersiz tanımlayıcıya dayanan adreslemesi hem API kullanımını hem GitOps'u bozmaktadır: alan silinip yeniden oluşturulduğunda kimlikler yeniden üretilmekte ile devasa sahte farklar doğmaktadır.
 
-5. **Sorgu dili olarak SCIM filter syntax'ının (RFC 7644 §3.4.2.2) bir alt kümesini benimse, kendi DSL'ini icat etme** — Keycloak v2 bunu yaptı: `eq/ne/co/sw/ew/pr` + `and/or/not`, `fields=` ile projection. **Ve Keycloak'ın iyi kararını kopyala: bilinmeyen alan → HTTP 400**, SCIM'in "sessizce yoksay"ı değil. Sessiz yoksayma, filtresi hiç uygulanmamış bir sorgunun tüm kayıtları döndürmesi demektir — bu bir güvenlik hatasıdır. (§1.3)
+5. Sorgu dili olarak SCIM filtre sözdiziminin bir alt kümesi benimsenmeli, kendi alan diline özgü sözdizimi icat edilmemelidir; Keycloak'ın ikinci sürümde yaptığı budur. Keycloak'ın iyi kararı da kopyalanmalıdır: bilinmeyen alan 400 dönmelidir, SCIM'in sessizce yok saymasıyla değil. Sessiz yok sayma, filtresi hiç uygulanmamış bir sorgunun tüm kayıtları döndürmesi demektir; bu bir güvenlik hatasıdır.
 
-6. **Cursor tabanlı pagination kullan, offset değil.** Keycloak'ın kendi kullanıcısı @Plasmadog (17 Tem 2025) offset pagination'ın **kayıt kaçırdığını** gösterdi: *"Since results are ordered by user Id, and user Ids are not sequential, that user can be skipped."* Keycloak v2 bu uyarıya rağmen `offset`/`limit` seçti — bu hatayı tekrarlama. Yanıtta RFC 5988 `Link` header'ı ver (Keycloak'ın kendi kılavuzunun kuralı). (§1.1, §1.2, §1.3)
+6. İmleç tabanlı sayfalama kullanılmalıdır, uzaklık tabanlı değil. Keycloak'ın kendi kullanıcısı uzaklık tabanlı sayfalamanın kayıt kaçırdığını göstermiştir: sonuçlar kullanıcı kimliğine göre sıralandığından ile kimlikler ardışık olmadığından bir kullanıcı atlanabilmektedir. Keycloak ikinci sürümde bu uyarıya rağmen uzaklık ile limit seçmiştir; bu hata tekrarlanmamalıdır. Yanıtta RFC 5988 bağlantı başlığı verilmelidir, ki Keycloak'ın kendi kılavuzunun kuralıdır.
 
-7. **Bir kaynağı tek istekte tam yaratılabilir yap.** vmuzikar'ın tespiti: Keycloak'ta "client + roller = 2 çağrı" ([#33049](https://github.com/keycloak/keycloak/discussions/33049)). Çok-istekli entity yaratma her deklaratif aracı bir transaction/rollback problemine sokuyor. İlişkili N+1 problemi için de expansion desteği ver — @schuerg'ün `1 + n + n` şikayeti ([#37655](https://github.com/keycloak/keycloak/discussions/37655)). (§1.1, §4.5)
+7. Bir kaynak tek istekte tam yaratılabilir olmalıdır. Keycloak'ta bir istemci artı roller iki çağrı gerektirmektedir; çok istekli varlık yaratma her deklaratif aracı bir işlem ile geri alma problemine sokmaktadır. İlişkili N artı bir problemi için genişletme desteği de verilmelidir.
 
-8. **OpenAPI spec'i koddan üret, elle bakma, ve SDK'ları zorunlu olarak spec'ten generate et.** Okta'nın modeli: *"a snapshot of the OpenAPI spec generated directly from the Okta Management API"*, repo community PR kabul etmiyor, *"All of our management SDKs must be built from this spec."* Karşı örnek Keycloak v1: *"incomplete, and usually not sufficient to generate clients."* Ek olarak Keycloak v2'nin fikrini al: **runtime'da OpenAPI endpoint'i yayınla** — CLI/generator'lar bağlandıkları sunucunun sürümüne uyum sağlar. (§1.8)
+8. OpenAPI şartnamesi koddan üretilmeli, elle bakılmamalı ile geliştirme kitleri zorunlu olarak şartnameden üretilmelidir. Okta'nın modeli budur: şartname yönetim API'sinden doğrudan üretilmiş bir anlık görüntüdür, depo topluluk katkısı kabul etmemektedir ile tüm yönetim kitleri bu şartnameden derlenmek zorundadır. Karşı örnek Keycloak birinci sürümüdür: eksiktir ile genellikle istemci üretmeye yetmemektedir. Ek olarak Keycloak'ın ikinci sürümdeki fikri alınmalıdır: çalışma zamanında bir OpenAPI uç noktası yayımlanmalı ki araçlar bağlandıkları sunucunun sürümüne uyum sağlasın.
 
-**Yetkilendirme ve delegasyon**
+### Yetkilendirme ile devretme
 
-9. **Yetkilendirme filtresini veri erişim katmanına koy, handler'a değil.** CVE-2026-17059 tam olarak bunun yokluğundan doğdu: `/users` doğru filtreliyordu ama `role-members` *"without applying the same per-user authorization filter"* aynı token'a tam PII veriyordu. Rust'ta bu tip sistemiyle zorlanabilir: filtrelenmemiş bir kullanıcı koleksiyonunun serileştirilebilir bir tipe dönüşmesi **derleme zamanında imkânsız** olsun (örn. `Vec<User>` asla doğrudan response'a gitmesin, sadece `Authorized<Vec<User>>` gitsin). (§3.2)
+9. Yetkilendirme filtresi veri erişim katmanına konmalıdır, işleyiciye değil. CVE-2026-17059 tam olarak bunun yokluğundan doğmuştur: kullanıcılar uç noktası doğru süzmekte ancak rol üyeleri uç noktası aynı kullanıcı başına filtreyi uygulamadan aynı belirtece tam kişisel veri vermekteydi. Rust'ta bu tip sistemiyle zorlanabilir: süzülmemiş bir kullanıcı koleksiyonunun serileştirilebilir bir tipe dönüşmesi derleme zamanında imkânsız olmalıdır.
 
-10. **Her endpoint'in gerektirdiği izni test ile assert et — annotation'a güvenme.** Zitadel CVE-2025-27507 (**CVSS 9.0**), gRPC servis tanımlarında `org.idp` yerine `iam.idp` yazılmamış olmasından **12 endpoint'i** sıradan kullanıcılara açtı. Argus'ta: her route'un gerektirdiği izin makine-okunur bir manifest'te dursun, ve CI'da (a) manifest'i olmayan route derlemeyi kırsın, (b) her route için "bu izin olmadan 403 döner" testi otomatik üretilsin. (§2.6)
+10. Her uç noktanın gerektirdiği izin testle doğrulanmalıdır; ek açıklamaya güvenilmemelidir. Zitadel'in CVSS 9,0 puanlı açığı, gRPC servis tanımlarında bir kapsamın yanlış yazılmasından 12 uç noktayı sıradan kullanıcılara açmıştır. Argus'ta her yolun gerektirdiği izin makine okunur bir bildirimde durmalı ile sürekli tümleştirmede bildirimi olmayan bir yol derlemeyi kırmalı ve her yol için bu izin olmadan 403 döner testi otomatik üretilmelidir.
 
-11. **Hiyerarşi mutasyonu (reparent/move) hem kaynak hem hedef üzerinde izin gerektirsin.** CVE-2026-9099 (CVSS 7.7, CWE-639): `GroupResource.addChild()` yetkilendirme kontrolü yapmıyordu; düşük yetkili grup admin'i `realm-admin` grubunu kendi altına taşıyıp hiyerarşik kalıtımla o grubun üyelerine parola sıfırlama yetkisi kazandı → tam realm devralma. GitLab CVE-2026-35595 (`parent_project_id: 0`) **aynı sınıf.** Ek invariant: bir taşıma, taşıyanın efektif izin kümesini **artıramaz**. (§2.5, §2.6)
+11. Hiyerarşi mutasyonu, yani yeniden ebeveynleme ya da taşıma, hem kaynak hem hedef üzerinde izin gerektirmelidir. CVE-2026-9099'da alt grup ekleme yetkilendirme kontrolü yapmamakta; düşük yetkili bir grup yöneticisi alan yöneticisi grubunu kendi altına taşıyıp hiyerarşik kalıtımla o grubun üyelerine parola sıfırlama yetkisi kazanmakta ile tam alan devralmaktaydı. GitLab'ın üst proje kimliği açığı aynı sınıftandır. Ek bir değişmez gerekmektedir: bir taşıma, taşıyanın etkin izin kümesini artıramaz.
 
-12. **Credential/token nesnelerinin `owner` alanı immutable olsun.** authentik CVE-2024-37905: herhangi bir kimliği doğrulanmış kullanıcı bir API token yaratıp **token'ın user ID'sini değiştirerek** superuser oldu. Geçici çözüm reverse-proxy'de endpoint bloklamaktı — bu, tasarımın ne kadar kırıldığının göstergesi. Argus'ta token sahipliği yaratılışta sabitlensin, hiçbir update path'i onu değiştiremesin. (§2.6)
+12. Kimlik bilgisi ile belirteç nesnelerinin sahip alanı değişmez olmalıdır. authentik'in açığında herhangi bir kimliği doğrulanmış kullanıcı bir API belirteci yaratıp kullanıcı kimliğini değiştirerek süper kullanıcı olmuştu. Geçici çözüm ters vekilde uç nokta bloklamaktı; tasarımın ne kadar kırıldığının göstergesidir. Argus'ta belirteç sahipliği yaratılışta sabitlenmeli ile hiçbir güncelleme yolu onu değiştirememelidir.
 
-13. **Yükseltme kapatmayı statik analizle değil, çalışma zamanı invariant'ıyla çöz.** HRU safety problem (Harrison/Ruzzo/Ullman, CACM 19(8):461–471, 1976) genel halde **karar verilemez**; create operasyonları olmadan bile PSPACE-complete. Yani "bu izin seti güvenli mi?" sorusuna genel bir analizle cevap veremezsin. Uygulanabilir invariant: **hiçbir aktör, kendi efektif izin kümesinin üstünde bir izni hiçbir yolla veremez** (Keycloak'ın beyan ettiği *"administrators can only delegate roles they themselves already possess"* prensibi) — ve bu kontrol rol atama, grup üyeliği, hiyerarşi taşıma, scope mapping, protocol mapper ve token exchange yollarının **hepsinde** aynı merkezî fonksiyondan geçsin. Keycloak bu prensibi beyan etti ama **5 ayrı CVE aldı** çünkü kontrol her yolda uygulanmıyordu. (§2.1, §2.5)
+13. Yükseltme kapatma statik analizle değil bir çalışma zamanı değişmeziyle çözülmelidir. Güvenlik problemi genel hâlde karar verilemezdir; oluşturma işlemleri olmadan bile PSPACE tamdır. Yani bu izin seti güvenli midir sorusuna genel bir analizle cevap verilememektedir. Uygulanabilir değişmez şudur: hiçbir aktör kendi etkin izin kümesinin üstünde bir izni hiçbir yolla verememelidir. Keycloak bu prensibi beyan etmiş ancak beş ayrı açık almıştır, çünkü kontrol her yolda uygulanmamaktaydı. Kontrol rol atama, grup üyeliği, hiyerarşi taşıma, kapsam eşleme, protokol eşleyici ile token değişimi yollarının hepsinde aynı merkezî fonksiyondan geçmelidir.
 
-14. **Scope mapping ve protocol mapper'ı ayrıcalık yükseltme yüzeyi olarak sınıflandır.** Keycloak'ta sınırlı yetkili geliştiriciler client protocol mapper/client scope yöneterek **admin rollerini token'a map edip Admin API'ye erişebiliyordu**; CVE-2026-9795 (improper scope mapping enforcement) ve GHSA-95cx-vmr5-3cmr (DCR policy → role forgery via user property mappers, 6 Ağu 2026) aynı aileden. Token'a claim yazabilen her mekanizma, yetkilendirme kararını etkiliyorsa **yetki-veren bir işlemdir** ve #13'teki invariant'a tabidir. (§2.5, §3.1)
+14. Kapsam eşleme ile protokol eşleyici bir ayrıcalık yükseltme yüzeyi olarak sınıflandırılmalıdır. Keycloak'ta sınırlı yetkili geliştiriciler bunları yöneterek yönetici rollerini token'a eşleyip yönetim API'sine erişebilmekteydi; ilgili iki açık aynı ailedendir. Token'a iddia yazabilen her mekanizma, yetkilendirme kararını etkiliyorsa yetki veren bir işlemdir ile on üçüncü maddedeki değişmeze tabidir.
 
-15. **Kaynak gizleme (resource hiding) varsayılan olsun: yetkin olmadığın kaynak listede görünmesin, 403 bile alma.** Keycloak Organizations FGAP'ın modeli: *"all other organizations are hidden entirely"* — hem konsolda hem **REST API'de**. 403 dönmek varlık ifşasıdır (enumeration). (§2.2)
+15. Kaynak gizleme varsayılan olmalıdır: yetkin olmadığınız kaynak listede görünmemeli, 403 bile alınmamalıdır. Keycloak organizasyon izinlerinin modeli budur: diğer tüm organizasyonlar tamamen gizlenmektedir, hem konsolda hem REST API'sinde. 403 dönmek bir varlık ifşasıdır.
 
-16. **Kritik işlemler için re-authentication zorunlu kıl — ama bunu yetkilendirmenin YERİNE değil, ÜSTÜNE koy.** Entra Protected Actions'ın modeli: policy **sign-in'de değil, eylem anında** enforce ediliyor (*"users are prompted only when needed"*). Microsoft'un kendi uyarısını da uygula: *"Don't use protected actions to block access based on identity or group membership… Who has access to specific permissions is an authorization decision and should be controlled by role assignment."* Aday işlemler: hard-delete, izin/policy değişikliği, cross-tenant ayarları, signing key rotasyonu, impersonation başlatma, IdP/LDAP bağlantı ayarları (Zitadel CVE-2025-27507'nin hedefi tam olarak buydu). **Break-glass hesabını policy'den hariç tut** — Microsoft'un açık tavsiyesi. (§2.4, §2.6)
+16. Kritik işlemler için yeniden kimlik doğrulama zorunlu kılınmalı ancak bu yetkilendirmenin yerine değil üstüne konmalıdır. Entra korunan eylemlerinin modeli budur: politika girişte değil eylem anında zorlanmaktadır. Microsoft'un kendi uyarısı da uygulanmalıdır: korunan eylemler kimliğe ya da grup üyeliğine dayalı erişim engellemek için kullanılmamalıdır; bu bir yetkilendirme kararıdır ile rol atamasıyla kontrol edilmelidir. Aday işlemler kalıcı silme, izin ya da politika değişikliği, kiracılar arası ayarlar, imzalama anahtarı rotasyonu, kimliğe bürünme başlatma ile kimlik sağlayıcı bağlantı ayarlarıdır; Zitadel açığının hedefi tam olarak sonuncusuydu. Acil erişim hesabı politikadan hariç tutulmalıdır.
 
-17. **Admin session politikası merkezî olsun ve tüm admin yüzeylerini kapsasın.** Okta'nın 12 saat lifetime + 15 dk idle (NIST'e dayalı) + **ASN session binding** (23 Eki 2023'ten beri varsayılan açık; 3 ayda 9.000+ org benimsedi) + opsiyonel IP binding modelini benimse. Ama Okta'nın **hatasını yapma**: *"Administrative sessions in other Okta applications are unaffected, including Okta Workflows, Okta Access Gateway, and Advanced Server Access."* Bir admin session policy'si sadece konsolu koruyorsa, diğer yüzeyler açık kapıdır. (§3.4)
+17. Yönetici oturum politikası merkezî olmalı ile tüm yönetici yüzeylerini kapsamalıdır. Okta'nın 12 saat ömür artı 15 dakika boşta kalma artı otonom sistem numarası oturum bağlaması artı isteğe bağlı IP bağlaması modeli benimsenmelidir. Ancak Okta'nın hatası yapılmamalıdır: diğer ürünlerindeki yönetimsel oturumlar bu politikadan etkilenmemektedir. Bir yönetici oturum politikası yalnızca konsolu koruyorsa diğer yüzeyler açık kapıdır.
 
-18. **Admin API token'ları kısa ömürlü VE iptal edilebilir olsun.** Auth0'ın karşı örneği: Management API token'ı **24 saat** ve Auth0'ın kendi ifadesiyle *"Once issued, an access token cannot be revoked."* Keycloak'ın `admin-cli` token'ı **1 dakika** — bu tarafta doğru. Argus: kısa ömür + sunucu tarafı iptal listesi/introspection, admin token'ları için zorunlu. (§1.4, §1.6)
+18. Yönetim API'si token'ları kısa ömürlü ile iptal edilebilir olmalıdır. Auth0'ın karşı örneği 24 saatlik ile iptal edilemez bir token'dır. Keycloak'ın yönetim komut satırı token'ı bir dakikadır; bu tarafta doğrudur. Argus'ta kısa ömür artı sunucu tarafı iptal listesi ya da içgözlem, yönetici token'ları için zorunludur.
 
-**Çok kiracılık**
+### Çok kiracılık
 
-19. **Platform-admin API'si ile tenant-admin API'sini AYRI yüzeyler yap** — ayrı audience, ayrı scope namespace'i, ayrı rate limit bütçesi. Auth0 bunu 21 Nis 2026'da yapmak zorunda kaldı: Management API *"is intended to configure tenants globally and is not designed for frequent, granular calls… can quickly become a bottleneck"*, ve müşteriler *"hit a wall with rate limits."* Çözümleri: `my-org/` audience'ı + `read:my_org:details` gibi scope'lar. Argus bunu **1. günde** yapsın. (§5.1)
+19. Platform yönetici API'siyle kiracı yönetici API'si ayrı yüzeyler olmalıdır: ayrı izleyici kitle, ayrı kapsam ad alanı ile ayrı hız sınırı bütçesi. Auth0 bunu 21 Nisan 2026'da yapmak zorunda kalmıştır; yönetim API'sinin sık ile ince taneli çağrılar için tasarlanmadığını ile hızla bir darboğaza dönüşebildiğini kendisi söylemektedir. Argus bunu birinci günde yapmalıdır.
 
-20. **Tenant bağlamını istemciden ALMA — doğrulanmış token'dan türet.** Auth0 My Organization API'de org bağlamı *"the authenticated user's organization membership"*ten geliyor; istemci hiçbir yerde org ID'si göndermiyor. Bu, IDOR sınıfını **yapısal olarak** ortadan kaldırıyor. Path/subdomain'de tenant görünüyorsa bile, token claim'iyle eşleşme **her istekte** doğrulansın. (§5.2)
+20. Kiracı bağlamı istemciden alınmamalı, doğrulanmış token'dan türetilmelidir. Auth0'ın kendi organizasyonum API'sinde bağlam kimliği doğrulanmış kullanıcının üyeliğinden gelmekte ile istemci hiçbir yerde kimlik göndermemektedir. Bu, güvensiz doğrudan nesne referansı sınıfını yapısal olarak ortadan kaldırmaktadır. Yolda ya da alt alan adında kiracı görünüyorsa bile token iddiasıyla eşleşme her istekte doğrulanmalıdır.
 
-21. **"Master tenant'tan her şeyi yönet" modelinden kaçın.** Keycloak: *"The access token must come from the master realm regardless of which realm you're administering"* — master realm hem tek-arıza hem tek-ele-geçirme noktası. Argus'ta tenant admin'i **kendi tenant'ının issuer'ından** aldığı token'la yönetsin; platform admin'i ayrı, dar bir kontrol düzleminden. (§1.4, §5.3)
+21. Ana kiracıdan her şeyi yönet modelinden kaçınılmalıdır. Keycloak'ta erişim token'ı hangi alan yönetiliyor olursa olsun ana alandan gelmelidir; ana alan hem tek arıza hem tek ele geçirme noktasıdır. Argus'ta kiracı yöneticisi kendi kiracısının vereninden aldığı token'la yönetmeli ile platform yöneticisi ayrı, dar bir kontrol düzleminden çalışmalıdır.
 
-22. **"Platform admin'i bile göremesin" seçeneğini ürünleştir** — Entra'nın Restricted Management Administrative Unit'i gibi (*"this restriction applies to all other administrators, including Global Administrators"*). Ama Entra'nın tuzağına düşme: RMAU, **PIM ve Entitlement Management ile çalışmıyor.** Argus'ta izolasyon mekanizması, governance mekanizmasıyla aynı gün tasarlansın — sonradan birleştirilemiyor. (§2.4)
+22. Platform yöneticisi bile göremesin seçeneği ürünleştirilmelidir; Entra'nın kısıtlı yönetim birimi gibi, ki kısıt küresel yöneticiler dahil tüm yöneticilere uygulanmaktadır. Ancak Entra'nın tuzağına düşülmemelidir: bu birim ayrıcalıklı kimlik yönetimi ile hak yönetimiyle çalışmamaktadır. Argus'ta izolasyon mekanizması yönetişim mekanizmasıyla aynı gün tasarlanmalıdır; sonradan birleştirilememektedir.
 
-**Konfigürasyon**
+### Yapılandırma
 
-23. **Export deterministik ve diff'lenebilir olsun: sıralı array'ler, üretilmiş ID'ler ve timestamp'ler opsiyonel olarak çıkarılabilir.** Keycloak'ın export'u deterministik değil; düzeltme core'da değil, [config-cli #799](https://github.com/adorsys/keycloak-config-cli/issues/799)'da client tarafında yapıldı. Bu, her üçüncü-parti aracın aynı işi tekrar çözmesi demek. (§4.1, §4.6)
+23. Dışa aktarım deterministik ile fark alınabilir olmalıdır: sıralı diziler, üretilmiş kimlikler ile zaman damgaları isteğe bağlı olarak çıkarılabilmelidir. Keycloak'ın dışa aktarımı deterministik değildir ile düzeltme çekirdekte değil bir üçüncü taraf aracında yapılmıştır. Bu, her aracın aynı işi tekrar çözmesi demektir.
 
-24. **Secret'ları deklaratif dokümandan referansla ayır** (env var / secret-manager pointer) — asla gömülü, asla maskeli. Keycloak partial export secret'ları `*` ile maskeliyor → doküman ne diff edilebiliyor ne yeniden uygulanabiliyor; Terraform provider'ı ise secret'ları **state'e cache'liyor** ([#1058](https://github.com/keycloak/terraform-provider-keycloak/issues/1058)); Auth0'da `ignore_changes` credential'ları korumuyor ([#1291](https://github.com/auth0/terraform-provider-auth0/issues/1291)). Üçü de aynı kök nedenden: secret, config dokümanının bir alanı olarak modellenmiş. (§4.1, §4.3, §4.6)
+24. Sırlar deklaratif dokümandan referansla ayrılmalıdır, yani ortam değişkeni ya da sır yöneticisi işaretçisiyle; asla gömülü ile asla maskeli olmamalıdır. Keycloak kısmi dışa aktarımı sırları maskelemekte ile doküman ne fark alınabilmekte ne yeniden uygulanabilmektedir; Terraform sağlayıcısı sırları duruma önbeleklemekte ile Auth0'da değişiklikleri yok say direktifi kimlik bilgilerini korumamaktadır. Üçü de aynı kök nedendendir: sır, yapılandırma dokümanının bir alanı olarak modellenmiştir.
 
-25. **Tam CRUD + drift reconciliation ver, "create-only" import verme.** Keycloak'ın `KeycloakRealmImport` CRD'si *"only supports creation… changes performed directly on Keycloak are not synced back"* — o kadar yetersiz ki Keycloak **ayrı bir `keycloak-realm-operator` projesini "temporary workaround" olarak** yayınlamak zorunda kaldı. (§4.4)
+25. Tam oluştur oku güncelle sil artı kayma uzlaştırması verilmelidir, yalnızca oluşturan bir içe aktarım değil. Keycloak'ın alan içe aktarma tanımı yalnızca oluşturmayı desteklemekte ile doğrudan yapılan değişiklikler geri senkronize edilmemektedir; o kadar yetersizdir ki Keycloak ayrı bir alan operatörünü geçici çözüm olarak yayımlamak zorunda kalmıştır.
 
-26. **"Desired state" ile "runtime state"i API seviyesinde ayır.** vmuzikar'ın [#33049](https://github.com/keycloak/keycloak/discussions/33049)'daki önerisi; sunucu tarafı default'ların drift olarak görünmesini engelleyen tek yapısal çözüm. Auth0 ve Okta Terraform provider'larındaki kalıcı sahte drift ([Auth0 #1312](https://github.com/auth0/terraform-provider-auth0/issues/1312), [Okta #2254](https://github.com/okta/terraform-provider-okta/issues/2254)) bu ayrımın yokluğundan. Somut kural: bir GET, kullanıcının set etmediği alanları **set edilmiş gibi göstermesin** — stianst'in *"I create a client with a couple fields, and get back a client with 50 fields"* şikayeti. (§1.1, §4.6)
+26. İstenen durumla çalışma zamanı durumu API seviyesinde ayrılmalıdır. Bu, bir Keycloak katkıcısının önerisidir ile sunucu tarafı varsayılanların kayma olarak görünmesini engelleyen tek yapısal çözümdür. Auth0 ile Okta sağlayıcılarındaki kalıcı sahte kayma bu ayrımın yokluğundandır. Somut kural şudur: bir okuma çağrısı, kullanıcının ayarlamadığı alanları ayarlanmış gibi göstermemelidir.
 
-27. **Sıralamaya bağlı yapılandırmayı (auth flow execution'ları) deklaratif olarak ifade edilebilir yap.** Keycloak Terraform provider'ında bu, **API sınırlaması nedeniyle explicit `depends_on`** gerektiriyor ([#890](https://github.com/keycloak/terraform-provider-keycloak/issues/890)) — yani deklaratif araca imperative bir kaçış deliği açılmış. Sıra, kaynağın kendi alanı olsun (`order: 10`), ayrı bir API çağrısı değil. (§4.3, §4.6)
+27. Sıralamaya bağlı yapılandırma, yani kimlik doğrulama akışı yürütmeleri, deklaratif olarak ifade edilebilir olmalıdır. Keycloak Terraform sağlayıcısında bu, API sınırlaması nedeniyle açık bir bağımlılık bildirimi gerektirmektedir; yani deklaratif bir araca buyurgan bir kaçış deliği açılmıştır. Sıra kaynağın kendi alanı olmalıdır, ayrı bir API çağrısı değil.
 
-**Bulk ve rate limit**
+### Toplu işlem ile hız sınırı
 
-28. **Bulk için async job API'si yap; SCIM `/Bulk`'a yatırım yapma.** RFC 7644 §3.7 iyi spec'lenmiş ama incelenen **her** büyük satıcı (Keycloak, Entra, Okta, PingFederate) `bulk.supported: false` diyor veya hiç yönlendirmiyor; hepsi kendi async job API'sini yazmış. Argus'un modeli: `POST /jobs/...` → **202** + job kaynağı → poll. AIP-151'in eşiğini benimse: **~10 saniyeden uzun her işlem** LRO olsun. AIP-151'in `metadata`/`response` ayrımını al: ilerleme ve kısmî hatalar terminal sonuçtan ayrı tiplerde. (§6.1, §6.2, §6.5)
+28. Toplu işlem için eşzamansız bir iş API'si yapılmalı ile SCIM toplu uç noktasına yatırım yapılmamalıdır. İlgili RFC bölümü iyi şartnamelenmiştir ancak incelenen her büyük satıcı desteklemediğini söylemekte ya da hiç yönlendirmemektedir; hepsi kendi eşzamansız iş API'sini yazmıştır. Argus'un modeli bir iş gönderisi, 202 ile iş kaynağı ile yoklamadır. Yaklaşık 10 saniyeden uzun her işlem bir uzun süren işlem olmalıdır. İlerleme ile kısmî hatalar terminal sonuçtan ayrı tiplerde taşınmalıdır.
 
-29. **Job sonuçlarını yeterince uzun sakla ve yapılandırılmış per-item hata dosyası ver.** Auth0'ın hata formatı doğru (kayıt başına makine kodu + insan mesajı, ~19 kod) ama **24 saatte silmesi ve 2 saatte timeout etmesi** kısıtlayıcı. Ayrıca Auth0'ın **tenant başına 2 eşzamanlı iş** limiti o kadar dar ki enterprise müşterilere dokümante API çözümü yerine *"Technical Account Manager'a başvurun"* deniyor — bunu tekrarlama. (§6.2)
+29. İş sonuçları yeterince uzun saklanmalı ile yapılandırılmış bir öğe başına hata dosyası verilmelidir. Auth0'ın hata formatı doğrudur ancak 24 saatte silmesi ile iki saatte zaman aşımına uğraması kısıtlayıcıdır. Ayrıca kiracı başına iki eşzamanlı iş limiti o kadar dardır ki kurumsal müşterilere dokümante bir API çözümü yerine teknik hesap yöneticisine başvurmaları denmektedir; bu tekrarlanmamalıdır.
 
-30. **Rate limit'i üç bağımsız katman olarak tasarla** (Okta'nın modeli): (a) **bucket bazlı zaman-penceresi** — method + en-uzun-önek eşleşmesiyle endpoint grupları; (b) **eşzamanlılık semaforu** — *"how many requests processing at the same time, not over time"*, Okta'da org başına 75; (c) **aktör bazlı koruma** — kullanıcı başına endpoint başına 10 sn'de 40 istek, tek aktörün tenant kotasını yemesini engellemek için. Microsoft bu üçüncü katmanı **30 Eyl 2025'te sonradan eklemek zorunda kaldı** (per-app/per-user limitini tenant limitinin yarısına düşürdü) — baştan yap. (§1.5, §1.7)
+30. Hız sınırı üç bağımsız katman olarak tasarlanmalıdır, yani Okta'nın modeli: kova tabanlı zaman penceresi, yöntem ile en uzun önek eşleşmesiyle uç nokta grupları; eşzamanlılık semaforu, yani aynı anda kaç isteğin işlendiği; ile aktör bazlı koruma, yani kullanıcı başına uç nokta başına limit, tek bir aktörün kiracı kotasını yemesini engellemek için. Microsoft bu üçüncü katmanı 30 Eylül 2025'te sonradan eklemek zorunda kalmıştır; baştan yapılmalıdır.
 
-31. **Batch'i zarf olarak rate-limit et ama zarf boyutunu sınırla.** İki meşru model var: Graph **N sayıyor** (alt-istek başına, `x-ms-resource-unit` ile maliyet açık), Entra **1 sayıyor** ama çağrı başına ≤50 op + günde 2.000–6.000 çağrı ile sınırlıyor. Argus: Entra modelini seç (zarf sayılır, boyut sınırlı) — client'ın bütçe hesabı basitleşir. **Ama Graph'ın hatasını yapma:** batch envelope'u 200 dönerken içindeki her şey 429 olursa, client'lar sessizce veri kaybeder. Argus'un batch yanıtı, herhangi bir alt-işlem başarısızsa bunu **zarf seviyesinde de** sinyallesin. (§6.7, §1.7)
+31. Yığın bir zarf olarak hız sınırlanmalı ancak zarf boyutu sınırlanmalıdır. İki meşru model vardır: Graph alt istek başına saymaktadır, Entra bir çağrı saymakta ancak çağrı başına operasyon ile günlük çağrı sayısını sınırlamaktadır. Argus Entra modelini seçmelidir; istemcinin bütçe hesabı basitleşmektedir. Ancak Graph'ın hatası yapılmamalıdır: zarf 200 dönerken içindeki her şey 429 olursa istemciler sessizce veri kaybetmektedir. Argus'un yığın yanıtı, herhangi bir alt işlem başarısızsa bunu zarf seviyesinde de sinyallemelidir.
 
-32. **`dependsOn` benzeri bağımlılık desteği verirsen, Microsoft'un tavsiyesini kurala çevir: batch ya tamamen sıralı ya tamamen paralel.** Karışık bağımlılık grafiği hem client'ta hem server'da hata kaynağı; başarısız bağımlılık için **424 Failed Dependency** semantiği net. (§1.7)
+32. Bağımlılık desteği verilirse Microsoft'un tavsiyesi bir kurala çevrilmelidir: yığın ya tamamen sıralı ya tamamen paralel olmalıdır. Karışık bir bağımlılık grafiği hem istemcide hem sunucuda bir hata kaynağıdır; başarısız bağımlılık için 424 semantiği nettir.
 
-33. **`Idempotency-Key` header'ını 1. günden, tüm mutating endpoint'lerde destekle** — `draft-ietf-httpapi-idempotency-key-header-07` (15 Eki 2025, hâlâ Internet-Draft) semantiğiyle: RFC 8941 String, **payload fingerprint** ile key-reuse-farklı-payload tespiti, 400/422/409 kod ayrımı. Stripe'ın v2 davranışını al: **başarılı ilk deneme kısa devre yapar, başarısız olan yeniden çalıştırılır**; ve sonucu **sadece çalıştırma başladıktan sonra** kalıcılaştır (validation hataları ve in-flight çakışmalar saklanmasın ki güvenle retry edilebilsinler). Saklama penceresini **açıkça yayınla** (draft bunu API'ye bırakıyor); Stripe v2'nin 30 günü iyi bir referans. Key ≤255 karakter, PII yasak. **Bu bir farklılaşma noktası:** Okta, Auth0, Entra'nın hiçbiri bunu yapmıyor; WorkOS sadece tek bir endpoint'te ve diğerlerinde **header'ı sessizce yutup dedup yapmıyor** — sessiz yutma en kötü seçenek, ya destekle ya reddet. (§6.6)
+33. Etkisizleştirme anahtarı başlığı birinci günden tüm değiştiren uç noktalarda desteklenmelidir; ilgili taslağın semantiğiyle, yani yapılandırılmış dizgi, yük parmak iziyle anahtar yeniden kullanım tespiti ile 400, 422 ve 409 kod ayrımıyla. Stripe'ın ikinci sürüm davranışı alınmalıdır: başarılı ilk deneme kısa devre yapmakta, başarısız olan yeniden çalıştırılmaktadır; sonuç yalnızca çalıştırma başladıktan sonra kalıcılaştırılmalıdır ki doğrulama hataları ile uçuştaki çakışmalar güvenle yeniden denenebilsin. Saklama penceresi açıkça yayımlanmalıdır; Stripe'ın 30 günü iyi bir referanstır. Anahtar en fazla 255 karakter olmalı ile kişisel veri içermemelidir. Bu bir farklılaşma noktasıdır: büyük sağlayıcıların hiçbiri bunu yapmamaktadır ile WorkOS yalnızca tek bir uç noktada yapmakta ve diğerlerinde başlığı sessizce yutmaktadır; sessiz yutma en kötü seçenektir, ya desteklenmeli ya reddedilmelidir.
 
-**Admin UI ve gözlemlenebilirlik**
+### Yönetim arayüzü ile gözlemlenebilirlik
 
-34. **Admin konsolunu ayrı bir origin'de çalıştır ve tenant-kontrollü her string'i güvenilmez kabul et.** Keycloak'ın stored XSS'leri (CVE-2024-4028 permission adında, GHSA-755v-r4x4-qf7m grup adında) ve HOST-header reflected XSS'i hep **"privileged attacker"** senaryosu: düşük yetkili admin, yüksek yetkili admin'in tarayıcısında kod çalıştırıyor. Delege yönetimde bu, tenant izolasyonunu tek hamlede çökertir. CSRF token'ı **session'a bağlansın** — Keycloak'ın hatası tam olarak buydu (*"not unique to each session"*). Sıkı CSP + `Host` header'ına asla güvenmeyen URL üretimi. (§3.3)
+34. Yönetim konsolu ayrı bir kökende çalıştırılmalı ile kiracı kontrollü her dizgi güvenilmez kabul edilmelidir. Keycloak'ın depolanmış XSS açıkları ile ana bilgisayar başlığı yansımalı açığı hep ayrıcalıklı saldırgan senaryosudur: düşük yetkili bir yönetici, yüksek yetkili bir yöneticinin tarayıcısında kod çalıştırmaktadır. Devredilmiş yönetimde bu, kiracı izolasyonunu tek hamlede çökertmektedir. Siteler arası istek sahteciliği belirteci oturuma bağlanmalıdır; Keycloak'ın hatası tam olarak buydu. Sıkı bir içerik güvenlik politikası ile ana bilgisayar başlığına asla güvenmeyen adres üretimi gerekmektedir.
 
-35. **Rate limit gözlemlenebilirliğini ürün özelliği yap.** Okta'nın Rate Limit Dashboard'u referans: bucket başına anlık yüzde, 24 saatlik/1 saatlik ortalama, **top-10 offender** kırılımı (IP / API token / OAuth app), 4 ayrı System Log event tipi (`violation`, `burst`, `warning`, `concurrency violation`) ve yapılandırılabilir eşikte e-posta uyarısı. Bir admin API, kotasının nerede tükendiğini gösteremiyorsa operasyonel olarak kullanılamaz. **Uyarı:** metrik etiketlerini istekten türetme — GHSA-3692-rrj9-24qw (6 Ağu 2026) tam olarak *"unbounded metric cardinality via request-controlled error text"*. (§1.5, §3.1)
+35. Hız sınırı gözlemlenebilirliği bir ürün özelliği yapılmalıdır. Okta'nın hız sınırı panosu referanstır: kova başına anlık yüzde, 24 saatlik ile bir saatlik ortalama, en çok tüketen on kırılımı, dört ayrı sistem günlüğü olay tipi ile yapılandırılabilir eşikte e-posta uyarısı. Bir yönetim API'si kotasının nerede tükendiğini gösteremiyorsa operasyonel olarak kullanılamaz. Bir uyarı gerekmektedir: metrik etiketleri istekten türetilmemelidir; 6 Ağustos 2026 tarihli bir danışmanlık tam olarak istek kontrollü hata metniyle sınırsız metrik kardinalitesidir.
 
-36. **Impersonation'ı ayrı bir explicit scope yap ve her kullanımını denetlenebilir kıl.** Keycloak FGAP V2 `impersonate`'i explicit scope yaptı — doğru karar; ama dönen token hedef kullanıcının kendi token'ından **ayırt edilemiyor.** Argus: impersonation token'ı `act` (actor) claim'i taşısın ki downstream servisler ayırt edebilsin, ömrü normal token'dan **kısa** olsun, ve #16'daki re-auth kapısının arkasında dursun. (§3.5, §2.2)
+36. Kimliğe bürünme ayrı ile açık bir kapsam yapılmalı ile her kullanımı denetlenebilir kılınmalıdır. Keycloak ikinci sürümde bunu açık bir kapsam yapmıştır, ki doğru bir karardır; ancak dönen token hedef kullanıcının kendi token'ından ayırt edilememektedir. Argus'ta kimliğe bürünme token'ı bir eylemde bulunan iddiası taşımalı ki aşağı akış servisleri ayırt edebilsin; ömrü normal token'dan kısa olmalı ile yeniden kimlik doğrulama kapısının arkasında durmalıdır.
 
-37. **Rust'ın bellek güvenliğine güvenip yetkilendirme testlerinden kısma.** Keycloak advisory'lerinin ilk sayfasında (10 kayıt, 2026) **7'si "bypass"** sınıfı — authorization bypass, signature validation bypass, restriction bypass, boundary bypass. **Sıfır** memory-safety, **sıfır** injection. Özellikle iki tanesi (GHSA-2888-g6qc-w4mj "unnormalized URI matching", GHSA-f5p5-6xmx-p252 "incorrect URI comparison") **URI normalizasyonu** — path tabanlı yetkilendirme yapıyorsan, karşılaştırmadan önce tek bir kanonikleştirme fonksiyonundan geç ve bunu property test'le doğrula. (§3.1)
+37. Rust'ın bellek güvenliğine güvenip yetkilendirme testlerinden kısılmamalıdır. Keycloak danışmanlıklarının ilk sayfasındaki 10 kayıttan yedisi bir atlatma sınıfındadır; sıfır bellek güvenliği ile sıfır enjeksiyon vardır. Özellikle iki tanesi adres normalleştirmesiyle ilgilidir; yola dayalı yetkilendirme yapılıyorsa karşılaştırmadan önce tek bir kanonikleştirme fonksiyonundan geçilmeli ile bu, özellik testiyle doğrulanmalıdır.
 
-38. **FGAP'ı "bitmiş özellik" sanma — kademeli açılabilir ve kapatılabilir olsun.** Keycloak FGAP V2'yi Nisan 2025'te yayınladı ve **ilk ~14 ayda en az 5 ayrıcalık yükseltme CVE'si aldı** (CVE-2025-7784, CVE-2026-9099, CVE-2026-3121, CVE-2026-9795, CVE-2026-9796). Keycloak'ın doğru yaptığı şey: **realm başına bağımsız etkinleştirme** — sorun çıkan tenant'ta kapatılabiliyor. Argus'ta da delege yönetim tenant başına flag'lensin ve **V1'den V2'ye otomatik migrasyon vaat etme** (Keycloak da veremedi). (§2.2, §2.5)
+38. İnce taneli izinler bitmiş bir özellik sanılmamalı ile kademeli açılıp kapatılabilir olmalıdır. Keycloak ikinci sürümü Nisan 2025'te yayımlamış ile ilk yaklaşık 14 ayda en az beş ayrıcalık yükseltme açığı almıştır. Keycloak'ın doğru yaptığı şey alan başına bağımsız etkinleştirmedir; sorun çıkan kiracıda kapatılabilmektedir. Argus'ta da devredilmiş yönetim kiracı başına bayraklanmalı ile birinci sürümden ikinci sürüme otomatik göç vaat edilmemelidir; Keycloak da verememiştir.
+
+### Devredilmiş kendi kendine hizmet ile uzlaştırma
+
+39. Kiracının bilişim sorumlusu üçüncü bir aktör olarak modellenmelidir; 19. maddedeki iki yüzey yetmemektedir. Yetkisi tek bir işe indirgenmelidir: kendi kuruluşunun kurumsal bağlantısını, yani çoklu oturum ile dizin eşzamanlamasını kurmak ve alan adını doğrulamak. Bu yüzey kiracı yönetici API'sinin bir alt kümesi değil, ayrı bir izleyici kitle ile ayrı bir kapsam ad alanı taşıyan bağımsız bir yüzey olmalıdır; gerekçe 19. maddeyle aynıdır. Erişim bir davet bağlantısıyla verilmeli, süreli olmalı ile her oturumu denetlenmelidir. Model WorkOS'un yönetim portalıdır; 2.7'ye bakınız.
+
+40. Yönetim API'sinde bir kullanıcının kimlik bilgisini doğrudan yazan uç nokta bulunmamalıdır. Yalnızca tek kullanımlık, süreli bir kimlik bilgisi kurma niyet belirteci üreten bir uç nokta bulunmalıdır; kullanıcı kendi kimlik doğrulayıcısını kendisi kurmalıdır. Bu bir izin ayarı değil bir ayrıcalık tavanıdır ile 13. maddedeki değişmezin kurtarma yolundaki özel hâlidir: servis masası, hiçbir yolla, kullanıcının kimlik doğrulayıcısını seçememelidir. Model Kanidm'dir; öntanımlı belirteç ömrü bir saat, azami 24 saat, kullanımda derhâl geçersizleşme. Belirtecin üretilmesi ile kullanılması ayrı denetim olaylarıdır. Ayrıntı §22 §7.5'tedir.
+
+41. Uzlaştırmanın yönü ile çakışma semantiği açıkça tanımlanmalıdır; 25. madde uzlaştırma istemekte ancak yönü söylememektedir. authentik'in modeli birinci taraf taslaklarını 60 dakikada bir yeniden uygulamaktadır; bu, yönetim arayüzünden yapılan bir değişikliğin bir saat sonra sessizce geri alınması demektir. Bir kimlik sağlayıcıda bunun güvenlik sonucu vardır: acil bir müdahalede kapatılan bir istemci ya da iptal edilen bir bağlantı, kimse fark etmeden geri gelebilmektedir. Argus'ta üç kural gerekmektedir. Deklaratif kaynağın yönettiği alanlar açıkça işaretlenmeli ile yönetim arayüzünde salt okunur gösterilmelidir. İşaretli bir alana bant dışı yazma denemesi sessizce kabul edilip geri alınmamalı, reddedilmelidir. Acil müdahale için bir kaçış yolu bulunmalı ile bu yol uzlaştırmayı o kaynak için, bir işaretle ve denetim kaydıyla, açıkça durdurmalıdır.
 
 ---
 
 ## 8. Doğrulanamayanlar
 
-1. **Keycloak `realm-management` rollerinin tam resmî listesi ve açıklamaları** — Red Hat 26.2 Server Admin Guide Chapter 11 ve keycloak.org karşılığı, fetch sırasında "Full list of permissions" bölümünden önce kesildi. Rol isimleri ekosistemde tutarlı ama **resmî tablo doğrulanmadı.**
-2. **Keycloak'ın toplam GHSA advisory sayısı ve tam sınıf dağılımı** — sadece ilk sayfa (10 kayıt, hepsi 2026) çekilebildi; arama bütçesi tükendi.
-3. **CVE-2026-3121, CVE-2026-9795, CVE-2026-9796 için CVSS skorları, tam saldırı yolu ve kesin düzeltme sürümleri** — GitHub issue'ları advisory placeholder'ı niteliğinde, teknik detay içermiyor.
-4. **Auth0 ve Microsoft Graph'ın OpenAPI spec'i üretip üretmediği / elle mi yazdığı** — arama bütçesi tükendiği için hiç araştırılamadı.
-5. **Auth0 Management API'nin güncel rps/rpm rakamları** — topluluk kaynakları ~50 rps / 1000 rpm diyor ama resmî sayfada tier bazlı tablo bulunamadı; Auth0 bu sayıları geçmişte değiştirdi. **Gösterge niteliğinde, bugün için otoriter değil.**
-6. **Okta'nın `/api/v1/users` gibi spesifik endpoint'ler için sayısal rate limit tavanları ve abonelik tier'ına göre farkları** — Okta bunları dokümanda vermiyor, org içindeki Rate Limit Dashboard'a yönlendiriyor.
-7. **PingFederate'in `bulk.supported: false` değeri** — birincil PingFederate doc sayfası fetch edilemedi; arama özeti üzerinden. **Muhtemelen doğru ama bağımsız doğrulanmadı.**
-8. **Salesforce, OneLogin, Google Workspace'in SCIM `ServiceProviderConfig.bulk.supported` değerleri** — hiç araştırılmadı.
-9. **AIP-151'in `WaitOperation` semantiği ve polling-vs-notification tradeoff'unun resmî ele alınışı** — çekilen AIP-151 sayfası bunları içermiyordu; ayrı `operations.proto`/linter dokümanlarında.
-10. **keycloak-config-cli ve terraform-provider-keycloak release'lerinin gün-seviyesi tarihleri** — GitHub API rate-limit'lendiği için WebFetch özetlerinden alındı, ham JSON'dan değil. **Sürüm sırası ve "aktif bakımda" durumu sağlam; kesin tarihler yaklaşık.**
-11. **`keycloak/keycloak-realm-operator`'ın güncel star/issue sayıları ve olgunluk değerlendirmesi** — tek fetch'ten, ikinci kaynakla çapraz kontrol edilmedi.
-12. **authentik'in resmî Kubernetes operator konusundaki en güncel duruşu** — sadece 2023 tarihli, uygulanmamış [#5675](https://github.com/goauthentik/authentik/issues/5675) ve topluluk alternatifleri bulundu; çok yeni bir değişiklik olmuş olabilir.
-13. **Keycloak impersonation "best practice"leri** (5 dk token ömrü, secrets manager kullanımı) — kaynak Medium/blog yazıları, **birincil kaynak değil.**
-14. **Çok kiracılıkta tenant bağlamı taşıma konusunda birincil spec/standart kaynağı** — bulunanlar ağırlıklı blog; §5.2'deki sonuç Auth0'ın somut tasarımı ve Zitadel CVE'sinden **çıkarım** yoluyla desteklendi, normatif bir dokümandan değil.
-15. **CVE-2024-3656'nın hangi spesifik admin REST endpoint'lerinin korumasız olduğu** — advisory endpoint isimlerini, kök nedeni ve CVSS'i vermiyor.
-16. **Okta Workflows Bulk User Import'un "10.000 vs 50 kayıt" tutarsızlığının çözümü** — Okta'nın kendi destek yanıtı da açıklayamadı, resmî destek kaydına yönlendirdi.
-
+1. Keycloak alan yönetimi rollerinin tam resmî listesi ile açıklamaları; ilgili kılavuz bölümü çekim sırasında kesilmiştir. Rol isimleri ekosistemde tutarlıdır ancak resmî tablo doğrulanmamıştır.
+2. Keycloak'ın toplam danışmanlık sayısı ile tam sınıf dağılımı; yalnızca ilk sayfa çekilebilmiştir.
+3. Üç 2026 açığı için puanlar, tam saldırı yolu ile kesin düzeltme sürümleri; ilgili kayıtlar teknik detay içermemektedir.
+4. Auth0 ile Microsoft Graph'ın OpenAPI şartnamesini üretip üretmediği ya da elle mi yazdığı; arama bütçesi tükendiği için araştırılamamıştır.
+5. Auth0 yönetim API'sinin güncel istek hızı rakamları; topluluk kaynakları bir tahmin vermekte ancak resmî sayfada katman bazlı bir tablo bulunamamıştır. Gösterge niteliğindedir, bugün için otoriter değildir.
+6. Okta'nın belirli uç noktalar için sayısal hız sınırı tavanları ile abonelik katmanına göre farkları; Okta bunları dokümanda vermemekte ile kuruluş içindeki panoya yönlendirmektedir.
+7. PingFederate'in toplu destek değeri; birincil doküman sayfası çekilememiştir, arama özeti üzerindendir. Muhtemelen doğrudur ancak bağımsız doğrulanmamıştır.
+8. Salesforce, OneLogin ile Google Workspace'in SCIM toplu destek değerleri hiç araştırılmamıştır.
+9. Google'ın ilgili ilkesindeki bekleme semantiği ile yoklamaya karşı bildirim takasının resmî ele alınışı; çekilen sayfa bunları içermemektedir.
+10. Yapılandırma aracı ile Terraform sağlayıcısı sürümlerinin gün seviyesi tarihleri; GitHub API hız sınırına takıldığı için çekme özetlerinden alınmıştır. Sürüm sırası ile aktif bakımda olma durumu sağlamdır, kesin tarihler yaklaşıktır.
+11. Alan operatörünün güncel yıldız ile konu sayıları ile olgunluk değerlendirmesi; tek bir çekimdendir ile ikinci bir kaynakla çapraz kontrol edilmemiştir.
+12. authentik'in resmî Kubernetes operatörü konusundaki en güncel duruşu; yalnızca 2023 tarihli ile uygulanmamış bir konu ve topluluk alternatifleri bulunmuştur, çok yeni bir değişiklik olmuş olabilir.
+13. Keycloak kimliğe bürünme en iyi uygulamaları; kaynak blog yazılarıdır, birincil kaynak değildir.
+14. Çok kiracılıkta kiracı bağlamı taşıma konusunda birincil bir şartname ya da standart kaynağı; bulunanlar ağırlıklı olarak bloglardır. İlgili sonuç Auth0'ın somut tasarımı ile Zitadel açığından çıkarım yoluyla desteklenmiştir, normatif bir dokümandan değil.
+15. CVE-2024-3656'nın hangi belirli yönetim uç noktalarının korumasız olduğu; danışmanlık uç nokta isimlerini, kök nedeni ile puanı vermemektedir.
+16. Okta iş akışları toplu içe aktarımındaki 10.000 ile 50 kayıt tutarsızlığının çözümü; Okta'nın kendi destek yanıtı da açıklayamamış ile resmî bir destek kaydına yönlendirmiştir.
 
 ---
 
-# KISIM VII — İŞLETİM
+# Kısım VII — İşletim
 
-*Gözlemlenebilirlik, dağıtım ve test — ürünü çalışır ve doğrulanabilir tutan katman.*
+Gözlemlenebilirlik, dağıtım ile test: ürünü çalışır ile doğrulanabilir tutan katman.

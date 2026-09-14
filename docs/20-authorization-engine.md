@@ -1,34 +1,31 @@
-# 20. Yetkilendirme motoru
+# §20 — Yetkilendirme motoru
 
-> `ARGUS.md` §20'den taşındı. Numaralandırma korundu; bu dosyanın
-> içindeki `§20 §X` referansları aynı anlamda.
+Bu bölüm `ARGUS.md` dosyasının 20. kısmından taşınmıştır. Numaralandırma korunmuştur; dosya içindeki `§20 §X` referansları aynı anlamdadır.
 
+## 0. Yönetici özeti: önce üç düzeltme
 
-
-### 0. YÖNETİCİ ÖZETİ — ÖNCE ÜÇ DÜZELTME
-
-**(1) "2,6 µs/karar" referansı gerçek ama yanıltıcı.** arXiv:2609.00267 mevcut: *"Delegation Without Trust: An Empirical Gap Analysis of Identity, Authorization, and Runtime Governance in Multi-Agent LLM Systems"*, Dantuluri & Sundi, 31 Ağustos 2026 (cs.CR). Ancak PDF'ten çıkardığım metodoloji şu:
+Birincisi, saniyenin 2,6 milyonda biri başına karar referansı gerçektir ancak yanıltıcıdır. arXiv'deki 2609.00267 numaralı çalışma mevcuttur: Dantuluri ile Sundi'nin 31 Ağustos 2026 tarihli, çok ajanlı büyük dil modeli sistemlerinde kimlik, yetkilendirme ile çalışma zamanı yönetişiminin ampirik boşluk analizi başlıklı yazısı. Ancak PDF'ten çıkarılan metodoloji şudur.
 
 > "We implement the broker in Python (∼160 lines, standard library only). Tokens are HMAC-signed in the style of macaroons and OAuth Token Exchange"
 > "Enforcement costs ∼2.6µs per authorization (∼3.9×10⁵ decisions/s) and a token exchange ∼5.4µs, measured over 2×10⁵ calls each on a laptop."
 
-Bu **ReBAC graph çözümlemesi değil** — bir capability token'ın caveat'lerinin HMAC ile doğrulanmasıdır. Grafik yürüyüşü, veritabanı okuması, ilişki çözümlemesi yok. 160 satırlık Python'un 2,6 µs'de yaptığı iş, OpenFGA/SpiceDB'nin yaptığı işin **aynı problem sınıfı değildir**. Bu rakamı Argus'un ReBAC check hedefi olarak almak kategori hatası olur. Doğru okuma: *"yetki token'a gömülüyse doğrulama neredeyse bedava"* — ki bu Argus için gerçekten kullanışlı bir mimari sinyaldir (bkz. Bölüm 4.5).
+Bu bir ilişki tabanlı erişim kontrolü graf çözümlemesi değildir; bir yetenek token'ının koşullarının HMAC ile doğrulanmasıdır. Grafik yürüyüşü, veritabanı okuması ile ilişki çözümlemesi yoktur. 160 satırlık Python'un 2,6 mikrosaniyede yaptığı iş, OpenFGA ile SpiceDB'nin yaptığı işle aynı problem sınıfında değildir. Bu rakamı Argus'un ilişki tabanlı kontrol hedefi olarak almak bir kategori hatası olur. Doğru okuma şudur: yetki token'a gömülüyse doğrulama neredeyse bedavadır. Bu, Argus için gerçekten kullanışlı bir mimari sinyaldir ve 4.5'te ele alınmaktadır.
 
-**(2) "1-10 ms" iddiasının gerçek kaynağı Zanzibar makalesidir ve koşulları çok spesifiktir.** Google'ın kendi rakamı: Check Safe p95 = 9,46 ms. Ama bu, zookie'si 10 saniyeden eski olan istekler içindir. Zookie'si taze olan ("Recent") isteklerde p95 = **60,0 ms**. Yani "10 ms" rakamı, tutarlılıktan feragat edilmiş yoldur.
+İkincisi, bir ile 10 milisaniye iddiasının gerçek kaynağı Zanzibar makalesidir ile koşulları çok spesifiktir. Google'ın kendi rakamı güvenli yolda 95. yüzdelik için 9,46 milisaniyedir. Ancak bu, tutarlılık belirteci 10 saniyeden eski olan istekler içindir. Belirteci taze olan, yani yakın zamanlı isteklerde 95. yüzdelik 60,0 milisaniyedir. Yani 10 milisaniye rakamı, tutarlılıktan feragat edilmiş yoldur.
 
-**(3) OpenFGA'nın CVE sicili ciddi bir risk sinyalidir.** OSV'den çektiğim kayıtlara göre OpenFGA'nın **26 güvenlik danışmanlığı** var ve bunların çoğu doğrudan **authorization bypass** sınıfında. Sadece 2026'da 7 tane. Bu, bir IdP'nin sıcak yoluna gömülecek bileşen için hafife alınacak bir istatistik değil.
+Üçüncüsü, OpenFGA'nın güvenlik açığı sicili ciddi bir risk sinyalidir. OSV'den çekilen kayıtlara göre OpenFGA'nın 26 güvenlik danışmanlığı vardır ile bunların çoğu doğrudan yetkilendirme atlatma sınıfındadır. Yalnızca 2026'da yedi tanesi bulunmaktadır. Bu, bir kimlik sağlayıcının sıcak yoluna gömülecek bir bileşen için hafife alınacak bir istatistik değildir.
 
-**Kararım kısaca:** Argus **kendi ReBAC motorunu Rust'ta yazmalı**, harici motora bağımlı olmamalı; dış dünyaya **AuthZEN PDP** olarak konuşmalı; token'a gömme ile merkezî check'i **açıkça iki ayrı katman** olarak sunmalı. Gerekçeler Bölüm 7'de.
+Karar kısaca şudur: Argus kendi ilişki tabanlı erişim kontrolü motorunu Rust'ta yazmalı ile harici bir motora bağımlı olmamalıdır; dış dünyaya AuthZEN politika karar noktası olarak konuşmalıdır; token'a gömme ile merkezî denetimi açıkça iki ayrı katman olarak sunmalıdır. Gerekçeler yedinci bölümdedir.
 
 ---
 
-## BÖLÜM 1 — ZANZIBAR VE TÜREVLERİ
+## Bölüm 1 — Zanzibar ve türevleri
 
-### 1.1 Zanzibar makalesi (USENIX ATC 2019) — birincil kaynaktan
+### 1.1 Zanzibar makalesi, USENIX ATC 2019, birincil kaynaktan
 
-Makaleyi indirip metnini çıkardım. Aşağıdakiler makalenin kendi ifadeleridir.
+Makale indirilmiş ile metni çıkarılmıştır. Aşağıdakiler makalenin kendi ifadeleridir.
 
-#### Relation tuple grameri
+#### İlişki demeti grameri
 
 ```
 ⟨tuple⟩   ::= ⟨object⟩ '#' ⟨relation⟩ '@' ⟨user⟩
@@ -37,13 +34,13 @@ Makaleyi indirip metnini çıkardım. Aşağıdakiler makalenin kendi ifadelerid
 ⟨userset⟩ ::= ⟨object⟩ '#' ⟨relation⟩
 ```
 
-Birincil anahtar: `⟨namespace⟩, ⟨object id⟩, ⟨relation⟩, ⟨user⟩`. `⟨user id⟩` bir **integer** (Google'ın iç kullanıcı ID'si), `⟨object id⟩` bir string.
+Birincil anahtar ad alanı, nesne kimliği, ilişki ile kullanıcıdan oluşmaktadır. Kullanıcı kimliği bir tam sayıdır, yani Google'ın iç kullanıcı kimliğidir; nesne kimliği bir dizgidir.
 
-Kritik tasarım kararı, makalenin kendi cümlesiyle: *"Defining our data model around tuples, instead of per-object ACLs, allows us to unify the concepts of ACLs and groups and to support efficient reads and incremental updates."* — ACL ile grup **aynı şeydir**. Grup, üyelik semantiği taşıyan bir ACL'dir. Argus için doğrudan aktarılabilir bir ilke.
+Kritik tasarım kararı makalenin kendi cümlesiyle şudur: *"Defining our data model around tuples, instead of per-object ACLs, allows us to unify the concepts of ACLs and groups and to support efficient reads and incremental updates."* Yani erişim denetim listesiyle grup aynı şeydir. Grup, üyelik semantiği taşıyan bir erişim denetim listesidir. Argus için doğrudan aktarılabilir bir ilkedir.
 
-#### New enemy problem — makaledeki tam iki örnek
+#### Yeni düşman problemi, makaledeki tam iki örnek
 
-Makale bunu iki senaryoyla tanımlıyor:
+Makale bunu iki senaryoyla tanımlamaktadır.
 
 > **Example A: Neglecting ACL update order**
 > 1. Alice removes Bob from the ACL of a folder;
@@ -55,362 +52,360 @@ Makale bunu iki senaryoyla tanımlıyor:
 > 2. Alice then asks Charlie to add new contents to the document;
 > 3. Bob should not be able to see the new contents, but may do so if the ACL check is evaluated with a stale ACL from before Bob's removal.
 
-Çözüm için **iki** özellik gerekiyor (makale bunu "two key consistency properties" diye adlandırıyor):
-1. **External consistency** — nedensel olarak ilişkili x ≺ y güncellemeleri Tx < Ty timestamp alır.
-2. **Snapshot reads with bounded staleness** — check'in değerlendirme snapshot'ı, içerik güncellemesine atanan nedensel timestamp'ten daha eski olamaz.
+Çözüm için iki özellik gerekmektedir; makale bunları iki temel tutarlılık özelliği olarak adlandırmaktadır. Birincisi dışsal tutarlılıktır: nedensel olarak ilişkili x ile y güncellemeleri sıralı zaman damgası almaktadır. İkincisi sınırlı bayatlıkla anlık görüntü okumasıdır: denetimin değerlendirme anlık görüntüsü, içerik güncellemesine atanan nedensel zaman damgasından daha eski olamaz.
 
-Zanzibar bunu Spanner'ın **TrueTime**'ı üzerine kuruyor: *"Zanzibar builds on Spanner's TrueTime abstraction to provide linearizable commit timestamps encoded as zookies."*
+Zanzibar bunu Spanner'ın TrueTime soyutlaması üzerine kurmaktadır: *"Zanzibar builds on Spanner's TrueTime abstraction to provide linearizable commit timestamps encoded as zookies."*
 
-**Neden TTL'li cache bunu çözemez:** Problem tazelik değil, **nedensellik**. 10 saniyelik TTL, Bob'un çıkarılmasından 200 ms sonra eklenen belgeyi korumaz — çünkü sorun sürenin uzunluğu değil, iki olayın sırasının kaybolmasıdır. Zookie, istemcinin "bu içerik şu andan sonra yazıldı, o yüzden ACL'i de en az o andan itibaren oku" diyebilmesini sağlar. Bu, uygulamanın zookie'yi **korunan kaynağın yanında saklamasını** gerektirir — yani zookie sadece bir motor özelliği değil, bir **uygulama sözleşmesidir**.
+Yaşam süreli bir önbelleğin bunu neden çözemediği şudur: problem tazelik değil nedenselliktir. 10 saniyelik bir yaşam süresi, Bob'un çıkarılmasından 200 milisaniye sonra eklenen belgeyi korumaz, çünkü sorun sürenin uzunluğu değil iki olayın sırasının kaybolmasıdır. Tutarlılık belirteci, istemcinin bu içerik şu andan sonra yazılmıştır, o yüzden erişim listesini de en az o andan itibaren oku diyebilmesini sağlamaktadır. Bu, uygulamanın belirteci korunan kaynağın yanında saklamasını gerektirmektedir; yani belirteç yalnızca bir motor özelliği değil bir uygulama sözleşmesidir.
 
 #### Leopard indeksleme sistemi
 
-Devreye girme koşulu makalede net: *"Recursive pointer chasing during check evaluation has difficulty maintaining low latency with groups that are deeply nested or have a large number of child groups. For selected namespaces that exhibit such structure..."* — yani **tüm namespace'ler için değil**, seçilmiş olanlar için.
+Devreye girme koşulu makalede nettir: *"Recursive pointer chasing during check evaluation has difficulty maintaining low latency with groups that are deeply nested or have a large number of child groups. For selected namespaces that exhibit such structure..."* Yani tüm ad alanları için değil, seçilmiş olanlar içindir.
 
-Veri yapısı: `(T, s, e)` üçlüleri; T = set tipi enum, s ve e = 64-bit set ID ve element ID. İki set tipi:
-- `GROUP2GROUP(s) → {e}` — s atası grup, e doğrudan/dolaylı alt grup
-- `MEMBER2GROUP(s) → {e}` — s kullanıcı, e doğrudan üyesi olduğu grup
+Veri yapısı küme tipi, 64 bitlik küme kimliği ile eleman kimliğinden oluşan üçlülerdir. İki küme tipi vardır: gruptan gruba eşleme, ki kaynak ata grup ile hedef doğrudan ya da dolaylı alt gruptur; ile üyeden gruba eşleme, ki kaynak kullanıcı ile hedef doğrudan üyesi olduğu gruptur.
 
-Üyelik testi:
+Üyelik testi şudur.
+
 ```
 (MEMBER2GROUP(U) ∩ GROUP2GROUP(G)) ≠ ∅
 ```
 
-Depolama: *"Index tuples are stored as ordered lists of integers in a structure such as a skip list, thus allowing for efficient union and intersections among sets."*
+Depolama şöyle anlatılmaktadır: *"Index tuples are stored as ordered lists of integers in a structure such as a skip list, thus allowing for efficient union and intersections among sets."*
 
-Üç parçalı: (a) serving system, (b) offline periyodik index builder, (c) online real-time incremental layer.
+Sistem üç parçalıdır: servis sistemi, çevrimdışı periyodik indeks oluşturucu ile çevrimiçi gerçek zamanlı artımlı katman.
 
-**Argus için ders:** Bu, "grup üyeliği reachability problemidir, düzleştirilebilir" fikrinin kanonik ifadesi. Ve düzleştirme **sıralı integer listeleri + kesişim** ile yapılıyor — roaring bitmap'e çok yakın bir şey. Rust'ta bu, en verimli yapabileceğimiz işlerden biri.
+Argus için ders şudur: bu, grup üyeliğinin bir erişilebilirlik problemi olduğu ile düzleştirilebileceği fikrinin kanonik ifadesidir. Düzleştirme sıralı tam sayı listeleri ile kesişimle yapılmaktadır; roaring bitmap'e çok yakın bir şeydir. Rust'ta bu, en verimli yapabileceğimiz işlerden biridir.
 
-#### Üretim rakamları (Tablo 2 ve §4, Aralık 2018, 7 günlük örneklem)
+#### Üretim rakamları, Tablo 2 ile dördüncü bölüm, Aralık 2018, yedi günlük örneklem
 
-**Ölçek:**
+Ölçek şöyledir.
 
 | Metrik | Değer |
 |---|---|
-| Relation tuple sayısı | **> 2 trilyon** |
-| Toplam veri | **~100 TB** |
-| Namespace başına tuple | onlarca → 1 trilyon, **medyan ~15.000** |
-| Namespace config boyutu | onlarca → binlerce satır, **medyan ~500 satır** |
-| Replikasyon | **30+ coğrafi lokasyon**, tam replikasyon |
-| Sunucu | **> 10.000**, birkaç düzine cluster, medyan ~500 sunucu/cluster |
-| Toplam istemci QPS | **> 10 milyon** |
-| Check tepe | **4,2M QPS** |
-| Read tepe | **8,2M QPS** |
-| Expand tepe | **760K QPS** |
-| Write tepe | **25K QPS** |
+| İlişki demeti sayısı | İki trilyondan fazladır |
+| Toplam veri | Yaklaşık 100 terabayttır |
+| Ad alanı başına demet | Onlarcadan bir trilyona kadardır, medyan yaklaşık 15.000'dir |
+| Ad alanı yapılandırma boyutu | Onlarcadan binlerce satıra kadardır, medyan yaklaşık 500 satırdır |
+| Replikasyon | 30'dan fazla coğrafi lokasyonda tam replikasyondur |
+| Sunucu | 10.000'den fazladır, birkaç düzine küme, medyan küme başına yaklaşık 500 sunucudur |
+| Toplam istemci sorgu hızı | Saniyede 10 milyondan fazladır |
+| Denetim tepe | Saniyede 4,2 milyondur |
+| Okuma tepe | Saniyede 8,2 milyondur |
+| Genişletme tepe | Saniyede 760 bindir |
+| Yazma tepe | Saniyede 25 bindir |
 
-Okuma/yazma oranı iki mertebe — bu, cache tasarımının neden bu kadar merkezî olduğunu açıklıyor.
+Okuma yazma oranı iki mertebedir; bu, önbellek tasarımının neden bu kadar merkezî olduğunu açıklamaktadır.
 
-**Gecikme (Tablo 2 — ortalama (std. sapma), milisaniye):**
+Gecikme, Tablo 2'den, ortalama ile standart sapma, milisaniye cinsinden şöyledir.
 
-| API | p50 | p95 | p99 |
+| API | 50. yüzdelik | 95. yüzdelik | 99. yüzdelik |
 |---|---|---|---|
-| **Safe** Check | 3,0 (0,091) | 9,46 (0,3) | 15,0 (1,19) |
-| **Safe** Read | 2,18 (0,031) | 3,71 (0,094) | 8,03 (3,28) |
-| **Safe** Expand | 4,27 (0,313) | 8,84 (0,586) | 34,1 (4,35) |
-| **Recent** Check | 2,86 (0,087) | **60,0 (2,1)** | **76,3 (2,59)** |
-| **Recent** Read | 2,21 (0,054) | 40,1 (2,03) | 86,2 (3,84) |
-| **Recent** Expand | 5,79 (0,224) | 45,6 (3,44) | 121,0 (2,38) |
-| **Write** | 127,0 (3,65) | 233,0 (23,0) | 401,0 (133,0) |
+| Güvenli denetim | 3,0 (0,091) | 9,46 (0,3) | 15,0 (1,19) |
+| Güvenli okuma | 2,18 (0,031) | 3,71 (0,094) | 8,03 (3,28) |
+| Güvenli genişletme | 4,27 (0,313) | 8,84 (0,586) | 34,1 (4,35) |
+| Yakın zamanlı denetim | 2,86 (0,087) | 60,0 (2,1) | 76,3 (2,59) |
+| Yakın zamanlı okuma | 2,21 (0,054) | 40,1 (2,03) | 86,2 (3,84) |
+| Yakın zamanlı genişletme | 5,79 (0,224) | 45,6 (3,44) | 121,0 (2,38) |
+| Yazma | 127,0 (3,65) | 233,0 (23,0) | 401,0 (133,0) |
 
-Ayrıca Şekil 4 (Check Safe, 7 gün): p50/p95/p99/p99.9 tepe değerleri **~3, 11, 20, 93 ms**.
+Ayrıca Şekil 4, yani yedi günlük güvenli denetim eğrisi, 50, 95, 99 ile 99,9. yüzdelik tepe değerlerini yaklaşık 3, 11, 20 ile 93 milisaniye vermektedir.
 
-**Safe/Recent ayrımının tanımı:** Replikasyon heartbeat aralığı 8 saniye. Zookie'si **10 saniyeden eski** olan istekler "Safe" — çoğunlukla bölge içinde servis edilir. **10 saniyeden yeni** olanlar "Recent" — sıklıkla bölgeler arası gidiş-dönüş gerektirir. Safe istekleri Recent'ten **iki mertebe** daha fazla.
+Güvenli ile yakın zamanlı ayrımının tanımı şudur: replikasyon kalp atışı aralığı sekiz saniyedir. Tutarlılık belirteci 10 saniyeden eski olan istekler güvenlidir ile çoğunlukla bölge içinde servis edilmektedir. 10 saniyeden yeni olanlar yakın zamanlıdır ile sıklıkla bölgeler arası gidiş dönüş gerektirmektedir. Güvenli istekler yakın zamanlılardan iki mertebe daha fazladır.
 
-**Bu, raporun en önemli tek tablosu.** "Zanzibar 10 ms'de check yapar" cümlesi, ancak "istemci 10 saniye bayat veriyi kabul ederse" kaydıyla doğrudur. Tazelik istendiği anda p95 6 katına çıkıyor.
+Bu, raporun en önemli tek tablosudur. Zanzibar 10 milisaniyede denetim yapar cümlesi, ancak istemci 10 saniye bayat veriyi kabul ederse kaydıyla doğrudur. Tazelik istendiği anda 95. yüzdelik altı katına çıkmaktadır.
 
-**Erişilebilirlik:** 3 yıl boyunca > %99,999. Tanım: Safe için 5 sn, Recent için 15 sn eşiği içinde başarıyla yanıtlanan "nitelikli" RPC oranı; 90 günlük pencerelerde prober'larla ölçülmüş (canlı trafikle değil). Çeyrek başına < 2 dakika global kesinti.
+Erişilebilirlik üç yıl boyunca %99,999'un üzerindedir. Tanım şudur: güvenli için beş saniye, yakın zamanlı için 15 saniye eşiği içinde başarıyla yanıtlanan nitelikli uzak yordam çağrısı oranıdır ile 90 günlük pencerelerde yoklayıcılarla ölçülmüştür, canlı trafikle değil. Çeyrek başına iki dakikanın altında küresel kesinti vardır.
 
-**İç mekanikler (§4.4) — cache verimliliği hakkında çarpıcı gerçek:**
+İç mekanikler, yani 4.4 bölümü, önbellek verimliliği hakkında çarpıcı bir gerçek vermektedir.
 
 | Metrik | Değer |
 |---|---|
-| Tepe "delegated" iç RPC | 22M/sn (read ve check arasında ~eşit) |
-| In-memory cache lookup | ~200M/sn (150M check, 50M read) |
-| Check cache hit — delegate tarafı | **%10** (+ lock table %12) |
-| Check cache hit — delegator tarafı | **%2** (+ lock table %3) |
-| Read cache hit — delegate tarafı | %24 (+ lock table %9) |
-| Read cache hit — delegator tarafı | **< %1** |
-| "Super-hot" grup ön-yükleme | grupların %0,1'i |
-| Spanner'a giden read RPC | 20M/sn |
-| Spanner read boyutu | medyan 1,5 satır/RPC, **p99 ~1000 satır** |
-| Spanner read gecikmesi | 0,5 ms medyan, 2 ms p95 |
-| Hedging'den faydalanan | %1 (200K/sn) |
+| Tepe devredilmiş iç uzak yordam çağrısı | Saniyede 22 milyon, okuma ile denetim arasında yaklaşık eşit |
+| Bellek içi önbellek araması | Saniyede yaklaşık 200 milyon, 150 milyonu denetim ile 50 milyonu okumadır |
+| Denetim önbellek isabeti, devredilen taraf | %10, artı kilit tablosu %12 |
+| Denetim önbellek isabeti, devreden taraf | %2, artı kilit tablosu %3 |
+| Okuma önbellek isabeti, devredilen taraf | %24, artı kilit tablosu %9 |
+| Okuma önbellek isabeti, devreden taraf | %1'in altındadır |
+| Çok sıcak grup ön yüklemesi | Grupların binde biridir |
+| Spanner'a giden okuma çağrısı | Saniyede 20 milyondur |
+| Spanner okuma boyutu | Çağrı başına medyan 1,5 satır, 99. yüzdelik yaklaşık 1000 satırdır |
+| Spanner okuma gecikmesi | Medyan 0,5 milisaniye, 95. yüzdelik iki milisaniyedir |
+| Riskten korunmadan faydalanan | %1, yani saniyede 200 bindir |
 
-Makalenin kendi yorumu: *"While these hit rates appear low, they prevent 500K internal RPCs per second from creating hot spots."*
+Makalenin kendi yorumu şudur: *"While these hit rates appear low, they prevent 500K internal RPCs per second from creating hot spots."*
 
-**Argus için kritik ders:** Zanzibar'ın check cache hit oranı **%10**. Cache burada latency optimizasyonu değil, **hot-spot koruması**. Kim "cache koyarız, %90 hit alırız" diyorsa Google'ın kendi verisiyle çelişiyor. ReBAC check'lerinin anahtar uzayı (user × relation × object) devasadır ve doğal olarak seyrektir.
+Argus için kritik ders şudur: Zanzibar'ın denetim önbelleği isabet oranı %10'dur. Önbellek burada bir gecikme optimizasyonu değil bir sıcak nokta korumasıdır. Kim önbellek koyarız ile %90 isabet alırız diyorsa Google'ın kendi verisiyle çelişmektedir. İlişki tabanlı denetimlerin anahtar uzayı, yani kullanıcı çarpı ilişki çarpı nesne, devasadır ile doğal olarak seyrektir.
 
-**Leopard performansı:** medyan 1,56M QPS, p99 2,22M QPS; yanıt **< 150 µs medyan, < 1 ms p99**; incremental layer medyan ~500 index güncellemesi/sn, p99 ~1,5K/sn.
+Leopard performansı şudur: medyan saniyede 1,56 milyon sorgu, 99. yüzdelik saniyede 2,22 milyon sorgu; yanıt medyanda 150 mikrosaniyenin, 99. yüzdelikte bir milisaniyenin altındadır; artımlı katman medyanda saniyede yaklaşık 500, 99. yüzdelikte saniyede yaklaşık 1.500 indeks güncellemesi yapmaktadır.
 
-Bu, materialize edilmiş indeksin ham graph yürüyüşüne karşı üstünlüğünün sayısal kanıtı: **150 µs vs 3 ms — 20 kat.**
+Bu, gerçeklenmiş indeksin ham graf yürüyüşüne karşı üstünlüğünün sayısal kanıtıdır: 150 mikrosaniyeye karşı üç milisaniye, yani 20 kat.
 
-### 1.2 OpenFGA — iç mimari ve 2026 durumu
+### 1.2 OpenFGA, iç mimari ile 2026 durumu
 
-**Kimlik:** v1.19.0 (25 Ağustos 2026). CNCF **Incubating** — 28 Ekim 2025 (sandbox: 14 Eylül 2022). CNCF proje sayfasındaki metrikler: 2.548 katkıcı, 898 katkıda bulunan kuruluş, sağlık skoru 87/100. Apache-2.0. Go ile yazılmış.
+Kimliği şudur: sürüm 1.19.0, 25 Ağustos 2026. CNCF kuluçka aşamasındadır, 28 Ekim 2025; kum havuzuna girişi 14 Eylül 2022'dir. CNCF proje sayfasındaki metrikler 2.548 katkıcı, 898 katkıda bulunan kuruluş ile 100 üzerinden 87 sağlık skorudur. Apache 2.0 lisanslıdır ile Go ile yazılmıştır.
 
-#### En kritik mimari fark: **zookie yok**
+#### En kritik mimari fark: tutarlılık belirteci yoktur
 
-OpenFGA'nın kendi dokümanı:
+OpenFGA'nın kendi dokümanı şunu söylemektedir.
 
-> "The Zanzibar paper has a feature called Zookies, which is a consistency token that is returned from Write operation. **OpenFGA is considering a similar feature in future releases.**"
+> "The Zanzibar paper has a feature called Zookies, which is a consistency token that is returned from Write operation. OpenFGA is considering a similar feature in future releases."
 
-Bunun yerine iki modlu bir seçenek var:
+Bunun yerine iki modlu bir seçenek vardır.
 
 | Mod | Davranış |
 |---|---|
-| `MINIMIZE_LATENCY` (varsayılan) | "OpenFGA will serve queries from the cache when possible" |
+| `MINIMIZE_LATENCY`, varsayılan | "OpenFGA will serve queries from the cache when possible" |
 | `HIGHER_CONSISTENCY` | "OpenFGA will skip the cache and query the database directly" |
 
-Ve doküman açıkça uyarıyor:
+Doküman açıkça uyarmaktadır.
 
 > "If you write a tuple and you immediately make a Check on a relation affected by that tuple using MINIMIZE_LATENCY, the tuple change might not be taken in consideration if OpenFGA serves the result from the cache."
 > "Always specifying HIGHER_CONSISTENCY will have a significant impact in performance."
 
-**Yani OpenFGA'da new enemy problem çözülmemiştir; istemciye "her istek için ya hızlı ya doğru seç" ikilemi olarak devredilmiştir.** Bu, Zanzibar'ın çözdüğü asıl problemin türevde kaybolmuş olması demektir. Argus gibi güvenlik-kritik bir üründe bu, bilinçli bir kabul olmalıdır — kaza olmamalıdır.
+Yani OpenFGA'da yeni düşman problemi çözülmemiştir; istemciye her istek için ya hızlı ya doğru seç ikilemi olarak devredilmiştir. Bu, Zanzibar'ın çözdüğü asıl problemin türevde kaybolmuş olması demektir. Argus gibi güvenlik kritik bir üründe bu bilinçli bir kabul olmalı ile bir kaza olmamalıdır.
 
-Doküman bile bir "hile" öneriyor: uygulamanızın kendi veritabanında değişiklik zaman damgasını kontrol edip hangi sorgunun hangi tutarlılık seviyesine ihtiyacı olduğuna karar verin. Bu, aslında **zookie'yi elle uygulamak** demektir.
+Doküman bir hile bile önermektedir: uygulamanın kendi veritabanında değişiklik zaman damgası kontrol edilip hangi sorgunun hangi tutarlılık seviyesine ihtiyaç duyduğuna karar verilmelidir. Bu, aslında tutarlılık belirtecini elle uygulamak demektir.
 
-#### Konfigürasyon ve sabit limitler (varsayılanlarla)
+#### Yapılandırma ile sabit limitler, varsayılanlarıyla
 
-Bunlar Argus'un tasarım kısıtlarını anlamak için önemli — çünkü kendi motorumuzda bu limitleri biz seçeceğiz.
+Bunlar Argus'un tasarım kısıtlarını anlamak için önemlidir, çünkü kendi motorumuzda bu limitleri biz seçeceğiz.
 
-| Ayar | Env var | Varsayılan |
+| Ayar | Ortam değişkeni | Varsayılan |
 |---|---|---|
-| Check sorgu cache | `OPENFGA_CHECK_QUERY_CACHE_ENABLED` | **false** |
-| Check cache boyutu | `OPENFGA_CHECK_QUERY_CACHE_LIMIT` | 10.000 |
-| Check cache TTL | `OPENFGA_CHECK_QUERY_CACHE_TTL` | **10s** |
-| Iterator cache | `OPENFGA_CHECK_ITERATOR_CACHE_ENABLED` | false |
-| Iterator cache max sonuç | `OPENFGA_CHECK_ITERATOR_CACHE_MAX_RESULTS` | 10.000 |
-| Cache controller | `OPENFGA_CACHE_CONTROLLER_ENABLED` | false |
-| Cache controller TTL | `OPENFGA_CACHE_CONTROLLER_TTL` | 10s |
-| Shared iterator | `OPENFGA_SHARED_ITERATOR_ENABLED` | false |
-| **Çözümleme derinliği** | `OPENFGA_RESOLVE_NODE_LIMIT` | **25** |
-| **Çözümleme genişliği** | `OPENFGA_RESOLVE_NODE_BREADTH_LIMIT` | **10** |
-| ListObjects deadline | `OPENFGA_LIST_OBJECTS_DEADLINE` | **3s** |
-| ListObjects max sonuç | `OPENFGA_LIST_OBJECTS_MAX_RESULTS` | **1000** |
-| ListUsers deadline | `OPENFGA_LIST_USERS_DEADLINE` | 3s |
-| ListUsers max sonuç | `OPENFGA_LIST_USERS_MAX_RESULTS` | 1000 |
-| Yazma başına max tuple | `OPENFGA_MAX_TUPLES_PER_WRITE` | **100** |
-| Model başına max tip | `OPENFGA_MAX_TYPES_PER_AUTHORIZATION_MODEL` | 100 |
-| İstek zaman aşımı | `OPENFGA_REQUEST_TIMEOUT` | 3s |
-| DB max bağlantı | `OPENFGA_DATASTORE_MAX_OPEN_CONNS` | 30 |
-| Dispatch throttling | `OPENFGA_CHECK_DISPATCH_THROTTLING_ENABLED` | false (eşik 100) |
+| Denetim sorgu önbelleği | `OPENFGA_CHECK_QUERY_CACHE_ENABLED` | false |
+| Denetim önbellek boyutu | `OPENFGA_CHECK_QUERY_CACHE_LIMIT` | 10.000 |
+| Denetim önbellek yaşam süresi | `OPENFGA_CHECK_QUERY_CACHE_TTL` | 10 saniye |
+| Yineleyici önbelleği | `OPENFGA_CHECK_ITERATOR_CACHE_ENABLED` | false |
+| Yineleyici önbelleği azami sonuç | `OPENFGA_CHECK_ITERATOR_CACHE_MAX_RESULTS` | 10.000 |
+| Önbellek denetleyicisi | `OPENFGA_CACHE_CONTROLLER_ENABLED` | false |
+| Önbellek denetleyicisi yaşam süresi | `OPENFGA_CACHE_CONTROLLER_TTL` | 10 saniye |
+| Paylaşılan yineleyici | `OPENFGA_SHARED_ITERATOR_ENABLED` | false |
+| Çözümleme derinliği | `OPENFGA_RESOLVE_NODE_LIMIT` | 25 |
+| Çözümleme genişliği | `OPENFGA_RESOLVE_NODE_BREADTH_LIMIT` | 10 |
+| Nesne listeleme son tarihi | `OPENFGA_LIST_OBJECTS_DEADLINE` | üç saniye |
+| Nesne listeleme azami sonuç | `OPENFGA_LIST_OBJECTS_MAX_RESULTS` | 1000 |
+| Kullanıcı listeleme son tarihi | `OPENFGA_LIST_USERS_DEADLINE` | üç saniye |
+| Kullanıcı listeleme azami sonuç | `OPENFGA_LIST_USERS_MAX_RESULTS` | 1000 |
+| Yazma başına azami demet | `OPENFGA_MAX_TUPLES_PER_WRITE` | 100 |
+| Model başına azami tip | `OPENFGA_MAX_TYPES_PER_AUTHORIZATION_MODEL` | 100 |
+| İstek zaman aşımı | `OPENFGA_REQUEST_TIMEOUT` | üç saniye |
+| Veritabanı azami bağlantı | `OPENFGA_DATASTORE_MAX_OPEN_CONNS` | 30 |
+| Gönderim kısıtlaması | `OPENFGA_CHECK_DISPATCH_THROTTLING_ENABLED` | false, eşik 100 |
 
-**Dikkat: tüm cache'ler varsayılan olarak KAPALI.** Yani "kutudan çıkan" OpenFGA her check'te veritabanına gider. Yayımlanmış "hızlı" rakamlar cache açıkken alınmışsa bu belirtilmelidir.
+Dikkat edilmelidir: tüm önbellekler varsayılan olarak kapalıdır. Yani kutudan çıkan OpenFGA her denetimde veritabanına gitmektedir. Yayımlanmış hızlı rakamlar önbellek açıkken alınmışsa bu belirtilmelidir.
 
-**resolveNodeLimit = 25** — 25 seviyeden derin ilişki zinciri çözülmez, hata döner. resolveNodeBreadthLimit = 10 — eşzamanlı dallanma sınırı.
+Çözümleme düğüm limiti 25'tir; 25 seviyeden derin bir ilişki zinciri çözülmez ile hata döner. Genişlik limiti 10'dur ile eşzamanlı dallanma sınırıdır.
 
-#### API'ler ve maliyetleri
+#### API'ler ile maliyetleri
 
 | API | İş | Maliyet karakteri |
 |---|---|---|
-| `Check` | tek user-relation-object | Nokta sorgu, graph yürüyüşü |
-| `BatchCheck` | çoklu check | `maxBatchSize` vars. **50**, `maxParallelRequests` vars. **10**. Doküman: *"Less efficient than parallel Check calls for fewer than 10 checks"* |
-| `Expand` | bir nesnenin userset ağacı | Özyinelemeli; debug için |
-| `ListObjects` | kullanıcının eriştiği nesneler | **Reverse expansion.** Doküman: "designed for access-aware filtering on **small** collections", "can be resource-intensive for large datasets" |
-| `StreamedListObjects` | streaming varyant | Max-results sınırını aşmak için |
-| `ListUsers` | nesneye erişen kullanıcılar | Aynı sınıf maliyet |
+| `Check` | Tek kullanıcı, ilişki ile nesne | Nokta sorgu ile graf yürüyüşü |
+| `BatchCheck` | Çoklu denetim | Azami yığın boyutu varsayılan 50, azami paralel istek varsayılan 10. Doküman şunu demektedir: *"Less efficient than parallel Check calls for fewer than 10 checks"* |
+| `Expand` | Bir nesnenin kullanıcı kümesi ağacı | Özyinelemelidir ile hata ayıklama içindir |
+| `ListObjects` | Kullanıcının eriştiği nesneler | Ters genişletmedir. Doküman şunu demektedir: küçük koleksiyonlarda erişim farkındalıklı süzme için tasarlanmıştır ile büyük veri kümelerinde kaynak yoğun olabilir |
+| `StreamedListObjects` | Akış varyantı | Azami sonuç sınırını aşmak içindir |
+| `ListUsers` | Nesneye erişen kullanıcılar | Aynı sınıf maliyettir |
 
-#### Weighted graph resolution (yeni ve önemli)
+#### Ağırlıklı graf çözümlemesi, yeni ile önemli
 
-21 Temmuz 2026 tarihli OpenFGA blog yazısı (Tyler Nix): *"OpenFGA's Move to Weighted Graph Resolution: What's Changing"*. Ağırlıklı graf tabanlı bir çözümleme algoritması Check, BatchCheck, ListObjects, Expand ve ListUsers'a yayılıyor; ListObjects zaten kullanıyor. Sürüm notlarında `weighted_graph_check` deneysel bayrak olarak görünüyor (v1.18.1–v1.19.0 arası birçok düzeltme).
+21 Temmuz 2026 tarihli OpenFGA blog yazısı, Tyler Nix'in ağırlıklı graf çözümlemesine geçiş yazısı, bunu anlatmaktadır. Ağırlıklı graf tabanlı bir çözümleme algoritması denetim, yığın denetimi, nesne listeleme, genişletme ile kullanıcı listelemeye yayılmaktadır; nesne listeleme zaten kullanmaktadır. Sürüm notlarında `weighted_graph_check` deneysel bir bayrak olarak görünmektedir ile 1.18.1 ile 1.19.0 arasında birçok düzeltme vardır.
 
-Bu, esasen bir **sorgu planlayıcıdır**: model grafındaki kenarlara maliyet ağırlığı atayıp hangi yoldan gidileceğine karar veriyor. Argus için doğrudan çalınabilir bir fikir (Bölüm 7.4).
+Bu esasen bir sorgu planlayıcıdır: model grafındaki kenarlara maliyet ağırlığı atayıp hangi yoldan gidileceğine karar vermektedir. Argus için doğrudan alınabilir bir fikirdir ve 7.4'te ele alınmaktadır.
 
-**Uyarı:** v1.18.2 ve v1.18.3 sürüm notları `weighted_graph_check`'te "intermittent false returns" ve "cache key collisions" düzeltmelerinden bahsediyor. Yani yeni motor **hâlâ yanlış cevap veriyordu**. Deneysel özellik, deneysel.
+Bir uyarı gerekmektedir: 1.18.2 ile 1.18.3 sürüm notları `weighted_graph_check` içinde aralıklı yanlış dönüşler ile önbellek anahtarı çakışmaları düzeltmelerinden bahsetmektedir. Yani yeni motor hâlâ yanlış cevap vermekteydi. Deneysel özellik deneyseldir.
 
-#### Model versiyonlama
+#### Model sürümleme
 
-- Modeller **immutable**. Her değişiklik yeni bir model ID üretir.
-- Kritik davranış: *"The tuples that are not valid according to the specified model, are ignored when evaluating queries."* — geçersiz tuple'lar silinmez, **sessizce yok sayılır**, ama sorgu performansını düşürür.
-- Migrasyon: yeni model yayımla → yeni tuple'ları yaz → uygulamayı güncelle → model ID'yi değiştir.
+Modeller değişmezdir. Her değişiklik yeni bir model kimliği üretmektedir.
 
-**Bu sessiz yok sayma davranışı bir güvenlik tuzağıdır.** Bir relation'ı yeniden adlandırırsanız, eski tuple'lar hâlâ veritabanındadır ve modeli geri alırsanız **yeniden canlanırlar**. Argus'ta bu davranış açıkça log'lanmalı ve metriklenmelidir.
+Kritik davranış şudur: *"The tuples that are not valid according to the specified model, are ignored when evaluating queries."* Yani geçersiz demetler silinmemekte, sessizce yok sayılmakta ancak sorgu performansını düşürmektedir.
+
+Göç sırası şudur: yeni model yayımlanır, yeni demetler yazılır, uygulama güncellenir ile model kimliği değiştirilir.
+
+Bu sessiz yok sayma davranışı bir güvenlik tuzağıdır. Bir ilişki yeniden adlandırılırsa eski demetler hâlâ veritabanındadır ile model geri alınırsa yeniden canlanmaktadırlar. Argus'ta bu davranış açıkça günlüğe yazılmalı ile metriklenmelidir.
 
 #### Üretim rehberi
 
-- *"a small pool of servers with high capacity (memory and CPU cores) instead of a big pool of servers"* — cache hit oranını artırmak için.
-- Veritabanı OpenFGA sunucularıyla **aynı fiziksel datacenter/ağda**, **başka uygulamayla paylaşılmamış**.
-- Cache açmak *"will reduce latency of requests, but it will increase the staleness of OpenFGA's responses."*
+Doküman, önbellek isabet oranını artırmak için çok sayıda sunucudan oluşan büyük bir havuz yerine yüksek kapasiteli, yani bellek ile işlemci çekirdeği bakımından güçlü, küçük bir sunucu havuzu önermektedir.
 
-**Gömülebilirlik:** OpenFGA bir Go modülüdür ve teknik olarak in-process kullanılabilir; ancak dokümantasyon **gömülü kullanım için resmî bir rehber vermiyor** — deployment topolojisi (sidecar/merkezî/gömülü) hakkında hiçbir şey söylemiyor. Rust'tan yalnızca gRPC/HTTP istemcisiyle kullanılabilir.
+Veritabanı OpenFGA sunucularıyla aynı fiziksel veri merkezinde ile ağda olmalı ile başka bir uygulamayla paylaşılmamalıdır.
 
-### 1.3 SpiceDB — iç mimari
+Önbellek açmak isteklerin gecikmesini azaltmakta ancak OpenFGA yanıtlarının bayatlığını artırmaktadır.
 
-**Kimlik:** v1.56.1 (26 Ağustos 2026). Go. Authzed tarafından geliştiriliyor.
+Gömülebilirlik konusunda durum şudur: OpenFGA bir Go modülüdür ile teknik olarak süreç içinde kullanılabilir; ancak dokümantasyon gömülü kullanım için resmî bir rehber vermemekte ile dağıtım topolojisi, yani yardımcı kap, merkezî ya da gömülü, hakkında hiçbir şey söylememektedir. Rust'tan yalnızca gRPC ya da HTTP istemcisiyle kullanılabilir.
 
-*Lisans notu: crates/GitHub API rate limit'i nedeniyle lisansı bu oturumda birincil kaynaktan teyit edemedim — **DOĞRULANMADI**. Geçmişte Apache-2.0'dı; kullanmadan önce LICENSE dosyası kontrol edilmelidir.*
+### 1.3 SpiceDB, iç mimari
 
-#### ZedToken ve dört tutarlılık seviyesi
+Kimliği şudur: sürüm 1.56.1, 26 Ağustos 2026, Go ile yazılmıştır ile Authzed tarafından geliştirilmektedir.
 
-SpiceDB, Zanzibar'ın zookie'sini **gerçekten uygulamıştır**. OpenFGA'ya karşı en büyük mimari avantajı budur.
+Lisans konusunda bir not gerekmektedir: crates ile GitHub API hız sınırı nedeniyle lisans bu oturumda birincil kaynaktan teyit edilememiştir ile doğrulanmamıştır. Geçmişte Apache 2.0'dı; kullanmadan önce lisans dosyası kontrol edilmelidir.
+
+#### ZedToken ile dört tutarlılık seviyesi
+
+SpiceDB, Zanzibar'ın tutarlılık belirtecini gerçekten uygulamıştır. OpenFGA'ya karşı en büyük mimari avantajı budur.
 
 | Seviye | Davranış | Not |
 |---|---|---|
-| `minimize_latency` | Cache'ten servis; new enemy penceresi açık | Okumalar için varsayılan |
-| `at_least_as_fresh` | Verilen ZedToken'dan **en az** o kadar taze | Dengeli seçim; önerilen |
-| `at_exact_snapshot` | Tam o snapshot | **"Snapshot Expired"** riski (`--datastore-gc-window`); sadece kısa pencerede sayfalama için |
-| `fully_consistent` | Cache tamamen atlanır | Yazmalar için varsayılan; *"dramatically increasing latency"* |
+| `minimize_latency` | Önbellekten servis edilir ile yeni düşman penceresi açıktır | Okumalar için varsayılandır |
+| `at_least_as_fresh` | Verilen belirteçten en az o kadar tazedir | Dengeli seçimdir ile önerilmektedir |
+| `at_exact_snapshot` | Tam o anlık görüntüdür | Anlık görüntü süresi doldu riski vardır, çöp toplama penceresine bağlıdır; yalnızca kısa pencerede sayfalama içindir |
+| `fully_consistent` | Önbellek tamamen atlanır | Yazmalar için varsayılandır; *"dramatically increasing latency"* denmektedir |
 
-Ve önemli bir ince nokta: *"the snapshot used will be loaded at the beginning of the API call, and that new data written after the API starts executing will be ignored."*
+Önemli bir ince nokta vardır: *"the snapshot used will be loaded at the beginning of the API call, and that new data written after the API starts executing will be ignored."*
 
-**CockroachDB uyarısı (Argus'un çok dikkat etmesi gereken):**
+CockroachDB uyarısı Argus'un çok dikkat etmesi gereken bir noktadır.
 
-> "fully_consistent does not guarantee read-after-write consistency on CockroachDB" — düğüm saat kayması nedeniyle (`max_offset`, tipik olarak **500 ms**). Bunun yerine ZedToken + `at_least_as_fresh` kullanılmalı.
+> "fully_consistent does not guarantee read-after-write consistency on CockroachDB"
 
-Yani en güçlü tutarlılık seviyesi, en çok önerilen backend'de en güçlü garantiyi **vermiyor**. Zookie mekanizması opsiyonel bir konfor değil, **zorunluluk**.
+Sebep düğüm saat kaymasıdır, yani tipik olarak 500 milisaniyelik azami sapmadır. Bunun yerine belirteçle birlikte `at_least_as_fresh` kullanılmalıdır.
 
-#### Datastore soyutlaması
+Yani en güçlü tutarlılık seviyesi, en çok önerilen arka uçta en güçlü garantiyi vermemektedir. Tutarlılık belirteci mekanizması isteğe bağlı bir konfor değil bir zorunluluktur.
 
-| Backend | Üretim durumu | Revision mekanizması | Not |
+#### Veri deposu soyutlaması
+
+| Arka uç | Üretim durumu | Revizyon mekanizması | Not |
 |---|---|---|---|
-| **CockroachDB** | Self-hosted için **önerilen** | `cluster_logical_timestamp()` | Çok bölgeli; yüksek operasyonel karmaşıklık |
-| **Cloud Spanner** | GCP için önerilen | **TrueTime** | Linearizability varsayımı; overlap stratejisi gereksiz |
-| **PostgreSQL** | **Tek bölge için önerilen** | Özel MVCC, satırlarda transaction ID | PG 15+ ideal; **standart dışı eklenti gerekmez**; Watch API için `track_commit_timestamp=on`; 16 read replica URI'ye kadar |
-| **MySQL** | *"Not recommended; only use if you cannot use PostgreSQL"* | Özel MVCC | Replika tutarlılığı için iki round-trip |
-| **memdb** | Sadece geliştirme/test | In-memory MVCC | Süreç ölünce veri gider; HA yok |
+| CockroachDB | Kendi barındıran için önerilmektedir | `cluster_logical_timestamp()` | Çok bölgelidir ile yüksek operasyonel karmaşıklık taşımaktadır |
+| Cloud Spanner | GCP için önerilmektedir | TrueTime | Doğrusallaştırılabilirlik varsayımı vardır ile örtüşme stratejisi gereksizdir |
+| PostgreSQL | Tek bölge için önerilmektedir | Özel çok sürümlü eşzamanlılık denetimi, satırlarda işlem kimliği | PostgreSQL 15 ve üstü idealdir; standart dışı eklenti gerekmez; izleme API'si için `track_commit_timestamp=on` gerekir; 16 okuma replikası adresine kadar desteklenir |
+| MySQL | *"Not recommended; only use if you cannot use PostgreSQL"* | Özel çok sürümlü eşzamanlılık denetimi | Replika tutarlılığı için iki gidiş dönüş gerekmektedir |
+| memdb | Yalnızca geliştirme ile testtir | Bellek içi çok sürümlü eşzamanlılık denetimi | Süreç ölünce veri gider ile yüksek erişilebilirlik yoktur |
 
-**Argus için değerli:** SpiceDB'nin Postgres backend'i standart dışı eklenti gerektirmiyor ve satırlara transaction ID gömerek MVCC'yi kendisi uyguluyor. Bu, Argus'un Postgres'te aynı yaklaşımı kopyalayabileceğini gösteriyor — Argus zaten Postgres'e bağımlı olacak.
+Argus için değerli olan şudur: SpiceDB'nin PostgreSQL arka ucu standart dışı eklenti gerektirmemekte ile satırlara işlem kimliği gömerek çok sürümlü eşzamanlılık denetimini kendisi uygulamaktadır. Bu, Argus'un PostgreSQL'de aynı yaklaşımı kopyalayabileceğini göstermektedir; Argus zaten PostgreSQL'e bağımlı olacaktır.
 
-#### Dispatch katmanı
+#### Gönderim katmanı
 
-SpiceDB'nin dispatch/caching dokümantasyon sayfalarına bu oturumda erişemedim (404). Bilinen mimari — consistent hashing ile cluster dispatch, singleflight deduplikasyon, dispatch cache — **bu oturumda birincil kaynaktan doğrulanmadı**; Zanzibar'ın delegation modelinin uyarlaması olduğu genel olarak bilinir ama sayısal iddiada bulunmayacağım.
+SpiceDB'nin gönderim ile önbellekleme dokümantasyon sayfalarına bu oturumda erişilememiştir, 404 dönmüştür. Bilinen mimari, yani tutarlı özetlemeyle küme gönderimi, tek uçuş tekilleştirmesi ile gönderim önbelleği, bu oturumda birincil kaynaktan doğrulanmamıştır. Zanzibar'ın devretme modelinin bir uyarlaması olduğu genel olarak bilinmektedir ancak sayısal bir iddiada bulunulmayacaktır.
 
-### 1.4 Ory Keto — hâlâ aktif mi?
+### 1.4 Ory Keto hâlâ aktif midir
 
-**Kısa cevap: teknik olarak evet, pratik olarak hayır.**
+Kısa cevap şudur: teknik olarak evet, pratik olarak hayır.
 
 | Sürüm | Tarih |
 |---|---|
-| v26.2.0 | **20 Mart 2026** |
-| v25.4.0 | 7 Kasım 2024 |
-| v0.14.0 | 6 Mart 2024 |
+| 26.2.0 | 20 Mart 2026 |
+| 25.4.0 | 7 Kasım 2024 |
+| 0.14.0 | 6 Mart 2024 |
 
-**16 aylık sürüm boşluğu** (Kasım 2024 → Mart 2026). Ve v26.2.0'ın içeriği ağırlıklı olarak bug fix ve güvenlik: GHSA-7h2j-956f-4vf2, Postgres transaction retry, SQL NULL işleme, keyset pagination. Yani bu bir özellik sürümü değil, bir **bakım sürümü**.
+Kasım 2024 ile Mart 2026 arasında 16 aylık bir sürüm boşluğu vardır. 26.2.0'ın içeriği ağırlıklı olarak hata düzeltmesi ile güvenliktir: GHSA-7h2j-956f-4vf2, PostgreSQL işlem yeniden denemesi, SQL boş değer işleme ile anahtar kümesi sayfalaması. Yani bu bir özellik sürümü değil bir bakım sürümüdür.
 
-README'nin kendi ifadesi, Ory'nin konumlandırmasını açık ediyor:
+Deponun kendi açıklaması Ory'nin konumlandırmasını açık etmektedir: kendi barındırılan Keto, deney yapmak, prototip üretmek ya da önemsiz iş yükleri çalıştırmak isteyen bireyler, araştırmacılar, hacker'lar ile şirketler için iyi bir seçimdir denmektedir.
 
-> Self-hosted Keto "is a great fit for individuals, researchers, hackers, and companies that want to experiment, prototype, or **run unimportant workloads**."
+Önemsiz iş yükleri ifadesini kendi projesi hakkında yazan bir ekibin ürününü bir kimlik sağlayıcının yetkilendirme çekirdeğine koymak savunulamaz. Üretim için Ory Network ile Ory Permissions'a yönlendirilmektedir.
 
-"Unimportant workloads" — kendi projesi hakkında bunu yazan bir ekibin ürününü bir IdP'nin yetkilendirme çekirdeğine koymak savunulamaz. Üretim için Ory Network / Ory Permissions'a yönlendiriyorlar.
+Mart 2026'da CVE-2026-33505 açıklanmıştır; yüksek önem derecesindedir ile CVSS 3.1 vektörü `AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H` şeklindedir. Açıklama şudur: *"Ory Keto has a SQL injection via forged pagination tokens"*. Bir yetkilendirme motorunda sayfalama belirteci üzerinden SQL enjeksiyonu mimari bir kod kalitesi sinyalidir.
 
-Ve Mart 2026'da **CVE-2026-33505** (HIGH, CVSS 3.1 AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H): *"Ory Keto has a SQL injection via forged pagination tokens"*. Bir yetkilendirme motorunda pagination token'ı üzerinden SQL injection, mimari bir kod kalitesi sinyalidir.
+Karar şudur: Keto Argus için değerlendirilmemelidir.
 
-**Karar: Keto Argus için değerlendirilmemeli.**
+### 1.5 Nesne ile kullanıcı listeleme, gizli darboğaz
 
-### 1.5 list-objects / list-users — gizli darboğaz
+Bu, soruda haklı olarak öne çıkarılan bir noktadır ile verilerle desteklenmektedir.
 
-Bu, sorunuzda haklı olarak öne çıkardığınız nokta ve verilerle destekleniyor.
+Neden pahalı olduğu şudur: denetim bir nokta sorgusudur, yani şu kullanıcının şu nesneyle şu ilişkisi var mıdır sorusudur; grafta hedeften kaynağa doğru yürünmekte ile ilk pozitif yolda durulabilmektedir. Nesne listeleme ters yöndedir, yani şu kullanıcının şu ilişkiye sahip olduğu tüm nesneler sorusudur; bu, kullanıcıdan başlayıp erişilebilir tüm nesneleri keşfetmeyi gerektirmektedir. Yayılım sınırsızdır ile erken çıkış yoktur.
 
-**Neden pahalı:** Check bir *nokta sorgusudur* — "U'nun O'ya R ilişkisi var mı?" — grafta hedeften kaynağa doğru yürünür ve ilk pozitif yolda durulabilir. ListObjects **ters yöndedir**: "U'nun R ilişkisi olan TÜM O'lar" — bu, U'dan başlayıp erişilebilir tüm nesneleri keşfetmeyi gerektirir. Fan-out sınırsızdır ve erken çıkış yoktur.
+Ürünlerin kendi itirafları şunlardır. OpenFGA nesne listelemeyi küçük koleksiyonlarda erişim farkındalıklı süzme için tasarlandığı ile büyük veri kümelerinde kaynak yoğun olabileceği şeklinde tanımlamaktadır. Varsayılan üç saniyelik son tarih ile 1000 sonuç limiti bir performans ayarı değil bir hasar kontrolüdür. Google tarafında Leopard'ın var oluş sebebi tam olarak budur: denetim değerlendirmesi sırasındaki özyinelemeli işaretçi takibi, derin iç içe geçmiş ya da çok sayıda alt gruba sahip gruplarda düşük gecikmeyi korumakta zorlanmaktadır.
 
-**Ürünlerin kendi itirafları:**
-- OpenFGA: ListObjects *"designed for access-aware filtering on small collections"*, *"can be resource-intensive for large datasets"*. Varsayılan **3 saniye deadline** ve **1000 sonuç** limiti — bunlar performans ayarı değil, **hasar kontrolüdür**.
-- Google: Leopard'ın var oluş sebebi tam olarak bu — *"Recursive pointer chasing during check evaluation has difficulty maintaining low latency with groups that are deeply nested or have a large number of child groups."*
+En tehlikeli kısmı nesne listelemenin denetimle tutarsız olabilmesidir. Güvenlik açığı listesi bunu kanıtlamaktadır.
 
-**Ve en tehlikeli kısmı: ListObjects ile Check tutarsız olabilir.** CVE listesi bunu kanıtlıyor:
-
-| CVE | Ürün | Sorun |
+| Tanımlayıcı | Ürün | Sorun |
 |---|---|---|
-| CVE-2025-65111 | SpiceDB (<1.47.1) | *"LookupResources with Multiple Entrypoints across Different Definitions Can Return **Incomplete Results**"* |
-| CVE-2023-35930 | SpiceDB (1.22.0–1.22.2) | *"LookupResources may return **partial results**"* |
-| CVE-2024-32001 | SpiceDB (<1.30.1) | *"LookupSubjects may return **partial results**"* |
-| CVE-2022-21646 | SpiceDB (1.3.0–1.4.0) | *"Lookup operations do not take into account **wildcards**"* |
-| CVE-2022-39340 | OpenFGA (<0.2.4) | *"Information Disclosure via **streamed-list-objects** endpoint"* |
+| CVE-2025-65111 | SpiceDB, 1.47.1 öncesi | *"LookupResources with Multiple Entrypoints across Different Definitions Can Return Incomplete Results"* |
+| CVE-2023-35930 | SpiceDB, 1.22.0 ile 1.22.2 | *"LookupResources may return partial results"* |
+| CVE-2024-32001 | SpiceDB, 1.30.1 öncesi | *"LookupSubjects may return partial results"* |
+| CVE-2022-21646 | SpiceDB, 1.3.0 ile 1.4.0 | *"Lookup operations do not take into account wildcards"* |
+| CVE-2022-39340 | OpenFGA, 0.2.4 öncesi | *"Information Disclosure via streamed-list-objects endpoint"* |
 
-**Beş ayrı CVE, iki ayrı üründe, aynı operasyon sınıfında.** Bu tesadüf değil — ListObjects'i doğru yapmak Check'i doğru yapmaktan kategorik olarak zordur ve sektörün en olgun iki motoru da defalarca yanlış yapmıştır.
+Beş ayrı güvenlik açığı, iki ayrı üründe ile aynı operasyon sınıfındadır. Bu bir tesadüf değildir: nesne listelemeyi doğru yapmak denetimi doğru yapmaktan kategorik olarak zordur ile sektörün en olgun iki motoru da defalarca yanlış yapmıştır.
 
-**Argus için doğrudan sonuç:** ListObjects'i **birinci sınıf API olarak sunmak riskli**. Alternatifler:
-1. **Check-per-item**: uygulama kendi veritabanından sayfayı çeker (LIMIT 50), sonra 50 elemanlık BatchCheck yapar. Doğruluk garantisi Check ile aynıdır. Maliyet: sayfa doldurma sorunları (filtrelenen elemanlar sayfayı seyrekleştirir).
-2. **Materialized index (Leopard yolu)**: yalnızca ihtiyaç duyulan (kullanıcı, relation, tip) üçlüleri için düzleştirilmiş bitmap tutmak.
-3. **Filtre ifadesine indirgeme**: yetki sorgusunu SQL `WHERE` yan tümcesine çevirmek (OPA partial evaluation'ın yaptığı). Sadece dar model sınıflarında mümkün.
+Argus için doğrudan sonuç şudur: nesne listelemeyi birinci sınıf bir API olarak sunmak risklidir. Alternatifler şunlardır.
 
-Önerim Bölüm 7.5'te.
+1. Öğe başına denetim: uygulama kendi veritabanından sayfayı çekmekte, yani 50 satırlık bir limit koymakta, sonra 50 elemanlık bir yığın denetimi yapmaktadır. Doğruluk garantisi denetimle aynıdır. Maliyeti sayfa doldurma sorunlarıdır, çünkü süzülen elemanlar sayfayı seyrekleştirmektedir.
+2. Gerçeklenmiş indeks, yani Leopard yolu: yalnızca ihtiyaç duyulan kullanıcı, ilişki ile tip üçlüleri için düzleştirilmiş bitmap tutmaktır.
+3. Filtre ifadesine indirgeme: yetki sorgusunu bir SQL `WHERE` yan tümcesine çevirmektir, ki OPA'nın kısmi değerlendirmesinin yaptığıdır. Yalnızca dar model sınıflarında mümkündür.
 
-### 1.6 Gömme mi, yan servis mi?
+Öneri 7.5'tedir.
 
-**Verilerle karşılaştırma:**
+### 1.6 Gömme mi yan servis mi
+
+Verilerle karşılaştırma şöyledir.
 
 | Yaklaşım | Karar gecikmesi mertebesi | Erişilebilirlik | Kaynak |
 |---|---|---|---|
-| In-process (Rust, Cedar) | **4–11 µs medyan** | Süreçle aynı | arXiv:2403.04651 ölçümü |
-| In-process (Go, OpenFGA memdb) | **89–746 µs medyan** | Süreçle aynı | Aynı ölçüm |
-| Yerel gRPC (sidecar) | + ~0,1–1 ms | Sidecar bağımlılığı | Mertebe tahmini — **kesin sayı DOĞRULANMADI** |
-| Ağ üzerinden merkezî | **3–15 ms** (Zanzibar Safe) / **60–76 ms** (Recent) | Ayrı hata alanı | Zanzibar Tablo 2 |
+| Süreç içi, Rust ile Cedar | Medyan dört ile 11 mikrosaniyedir | Süreçle aynıdır | arXiv 2403.04651 ölçümüdür |
+| Süreç içi, Go ile OpenFGA bellek veritabanı | Medyan 89 ile 746 mikrosaniyedir | Süreçle aynıdır | Aynı ölçümdür |
+| Yerel gRPC, yardımcı kap | Yaklaşık 0,1 ile bir milisaniye eklemektedir | Yardımcı kap bağımlılığı vardır | Bir mertebe tahminidir; kesin sayı doğrulanmamıştır |
+| Ağ üzerinden merkezî | Zanzibar güvenli yolda üç ile 15, yakın zamanlıda 60 ile 76 milisaniyedir | Ayrı hata alanıdır | Zanzibar Tablo 2'dir |
 
-**Ne OpenFGA ne de SpiceDB'nin resmî gömülü kütüphane hikâyesi var.** OpenFGA'nın üretim dokümanı deployment topolojisi hakkında hiçbir şey söylemiyor. İkisi de Go'dur; Rust'a gömülemezler (cgo/FFI köprüsü teorik olarak mümkün ama Go runtime'ını Rust sürecine sokmak — GC, scheduler, sinyal işleme — ciddi bir mühendislik borcudur ve **bunu üretimde yapan bilinen bir örnek bulamadım**).
+Ne OpenFGA'nın ne de SpiceDB'nin resmî bir gömülü kütüphane hikâyesi vardır. OpenFGA'nın üretim dokümanı dağıtım topolojisi hakkında hiçbir şey söylememektedir. İkisi de Go'dur ile Rust'a gömülemezler. cgo ya da yabancı fonksiyon arayüzü köprüsü teorik olarak mümkündür ancak Go çalışma zamanını, yani çöp toplayıcıyı, zamanlayıcıyı ile sinyal işlemeyi, bir Rust sürecine sokmak ciddi bir mühendislik borcudur ile bunu üretimde yapan bilinen bir örnek bulunamamıştır.
 
-**Argus Rust olduğu için bu tercih zaten yapılmıştır:** Harici motor kullanacaksak ağ/gRPC hop'u kaçınılmazdır. Bu da her istekte 1–15 ms demektir. Bir IdP'nin token endpoint'i için bu kabul edilemez.
+Argus Rust olduğu için bu tercih zaten yapılmıştır: harici bir motor kullanılacaksa ağ ya da gRPC sıçraması kaçınılmazdır. Bu da her istekte bir ile 15 milisaniye demektir. Bir kimlik sağlayıcının token uç noktası için bu kabul edilemez.
 
 ---
 
-## BÖLÜM 2 — RUST'TA YETKİLENDİRME
+## Bölüm 2 — Rust'ta yetkilendirme
 
-Tüm rakamlar crates.io API'sinden 8 Eylül 2026'da çekildi.
+Tüm rakamlar crates.io API'sinden 8 Eylül 2026'da çekilmiştir.
 
 ### 2.1 Ekosistem tablosu
 
 | Crate | Sürüm | Son yayın | Toplam indirme | Son 90 gün | Lisans | Değerlendirme |
 |---|---|---|---|---|---|---|
-| **cedar-policy** | 4.12.0 | 2026-07-28 | 8.375.517 | **2.698.101** | Apache-2.0 | Olgun, aktif, formal doğrulanmış |
-| **biscuit-auth** | 6.0.0 | 2025-07-16 | 11.159.305 | 1.116.227 | Apache-2.0 | Olgun ama 14 aydır sürüm yok |
-| **casbin** | 2.20.0 | 2026-02-04 | 3.032.454 | 1.479.081 | Apache-2.0 | Aktif; model sınırlı |
-| **regorus** | 0.12.0 | **2026-09-01** | 2.157.219 | 1.001.705 | MIT/Apache-2.0/BSD-3 | Çok aktif; 0.x |
-| **openfga-client** | 0.6.1 | 2026-08-06 | 74.567 | 30.650 | Apache-2.0 | Tek ciddi OpenFGA Rust istemcisi |
-| **oso** | 0.27.3 | 2024-01-13 | 942.295 | 65.026 | Apache-2.0 | **2,5 yıldır sürüm yok** |
-| **spicedb-rust** | 0.3.4 | 2024-12-01 | 12.637 | 771 | MIT | Bakımsız |
-| **openfga-rs** | 0.1.0 | 2024-04-08 | 1.632 | **25** | MIT/Apache-2.0 | **Ölü** |
-| **authzed** | 0.0.1 | 2021-01-26 | 1.876 | **9** | Apache-2.0 | **Ölü** |
+| cedar-policy | 4.12.0 | 28 Temmuz 2026 | 8.375.517 | 2.698.101 | Apache 2.0 | Olgun, aktif ile formel doğrulanmıştır |
+| biscuit-auth | 6.0.0 | 16 Temmuz 2025 | 11.159.305 | 1.116.227 | Apache 2.0 | Olgundur ancak 14 aydır sürüm yoktur |
+| casbin | 2.20.0 | 4 Şubat 2026 | 3.032.454 | 1.479.081 | Apache 2.0 | Aktiftir; modeli sınırlıdır |
+| regorus | 0.12.0 | 1 Eylül 2026 | 2.157.219 | 1.001.705 | MIT, Apache 2.0 ile BSD 3 maddeli | Çok aktiftir; sıfır ana sürümdedir |
+| openfga-client | 0.6.1 | 6 Ağustos 2026 | 74.567 | 30.650 | Apache 2.0 | Tek ciddi OpenFGA Rust istemcisidir |
+| oso | 0.27.3 | 13 Ocak 2024 | 942.295 | 65.026 | Apache 2.0 | İki buçuk yıldır sürüm yoktur |
+| spicedb-rust | 0.3.4 | 1 Aralık 2024 | 12.637 | 771 | MIT | Bakımsızdır |
+| openfga-rs | 0.1.0 | 8 Nisan 2024 | 1.632 | 25 | MIT ile Apache 2.0 | Ölüdür |
+| authzed | 0.0.1 | 26 Ocak 2021 | 1.876 | 9 | Apache 2.0 | Ölüdür |
 
-**Datalog/incremental motorlar (kendi ReBAC'ını yazacaksan):**
+Kendi ilişki tabanlı motorunu yazacaklar için Datalog ile artımlı motorlar şunlardır.
 
 | Crate | Sürüm | Son yayın | Toplam | Son 90 gün | Lisans |
 |---|---|---|---|---|---|
-| **ascent** | 0.8.1 | **2026-08-29** | 494.673 | 161.281 | MIT |
-| **crepe** | 0.2.0 | 2025-12-14 | 790.590 | 82.103 | MIT/Apache-2.0 |
-| **differential-dataflow** | 0.25.1 | 2026-07-15 | 454.556 | 60.589 | MIT |
-| **proptest** | 1.11.0 | 2026-03-24 | 182.638.062 | 46.079.380 | MIT/Apache-2.0 |
+| ascent | 0.8.1 | 29 Ağustos 2026 | 494.673 | 161.281 | MIT |
+| crepe | 0.2.0 | 14 Aralık 2025 | 790.590 | 82.103 | MIT ile Apache 2.0 |
+| differential-dataflow | 0.25.1 | 15 Temmuz 2026 | 454.556 | 60.589 | MIT |
+| proptest | 1.11.0 | 24 Mart 2026 | 182.638.062 | 46.079.380 | MIT ile Apache 2.0 |
 
-### 2.2 Sonuç: Rust'ta üretim-hazır Zanzibar YOK
+### 2.2 Sonuç: Rust'ta üretime hazır bir Zanzibar yoktur
 
-Bu, raporun en net bulgularından biri. `openfga-rs` son 90 günde **25 kez** indirildi. `authzed` crate'i **9 kez**, 2021'den beri güncellenmemiş. `spicedb-rust` 771. Bunlar terk edilmiş projelerdir.
+Bu, raporun en net bulgularından biridir. `openfga-rs` son 90 günde 25 kez indirilmiştir. `authzed` crate'i dokuz kez indirilmiş ile 2021'den beri güncellenmemiştir. `spicedb-rust` 771'dedir. Bunlar terk edilmiş projelerdir.
 
-Tek ciddi seçenek `openfga-client` (0.6.1, Ağustos 2026, 30.650 indirme/90gün) — ama bu bir **istemci**, motor değil. Argus'un yanında bir OpenFGA sunucusu çalıştırmayı gerektirir.
+Tek ciddi seçenek `openfga-client`'tır, yani 0.6.1, Ağustos 2026, 90 günde 30.650 indirme. Ancak bu bir istemcidir, motor değildir. Argus'un yanında bir OpenFGA sunucusu çalıştırmayı gerektirmektedir.
 
-**Yani: Rust'ta ReBAC istiyorsan ya Go'ya gRPC ile konuşacaksın ya kendin yazacaksın.** Üçüncü seçenek yok.
+Yani Rust'ta ilişki tabanlı erişim kontrolü isteniyorsa ya Go'ya gRPC ile konuşulacak ya da kendi yazılacaktır. Üçüncü bir seçenek yoktur.
 
-### 2.3 Cedar (AWS) — derinlemesine
+### 2.3 Cedar, AWS, derinlemesine
 
-#### Kimlik ve API
+#### Kimlik ile API
 
-cedar-policy 4.12.0, 28 Temmuz 2026, Apache-2.0. **Rust ile yazılmış** — Argus için birinci sınıf uyum.
+cedar-policy 4.12.0, 28 Temmuz 2026, Apache 2.0 lisanslıdır. Rust ile yazılmıştır ile Argus için birinci sınıf bir uyumdur.
 
-Ana tipler: `Authorizer`, `PolicySet`, `Entities`, `Request`, `Schema`, `EntityUid`, `Context`, `Response`, `Diagnostics`, `Validator`.
+Ana tipleri `Authorizer`, `PolicySet`, `Entities`, `Request`, `Schema`, `EntityUid`, `Context`, `Response`, `Diagnostics` ile `Validator`'dır.
 
-Çağrı: `Authorizer::is_authorized(&request, &policy_set, &entities) -> Response`, `response.decision()`.
+Çağrı `Authorizer::is_authorized(&request, &policy_set, &entities) -> Response` ile `response.decision()` şeklindedir.
 
-**Feature flag'ler:**
-- Varsayılan: `ipaddr`, `decimal`, `datetime`
-- Opsiyonel: `heap-profiling`, `corpus-timing`, `wasm`
-- **Deneysel (kararsız):** `partial-eval`, `tpe` (type-aware partial evaluation), `entity-manifest` (**deprecated**), `protobufs`, `tolerant-ast`, `extended-schema`
+Özellik bayrakları şunlardır. Varsayılanlar `ipaddr`, `decimal` ile `datetime`'dır. İsteğe bağlı olanlar `heap-profiling`, `corpus-timing` ile `wasm`'dır. Deneysel ile kararsız olanlar `partial-eval`, tip farkındalıklı kısmi değerlendirme anlamına gelen `tpe`, kullanımdan kaldırılmış `entity-manifest`, `protobufs`, `tolerant-ast` ile `extended-schema`'dır.
 
-**Not:** Partial evaluation hâlâ deneyseldir ve `entity-manifest` (entity slicing) deprecate edilmiştir. Yani "Cedar ile SQL filtresi üretme" yolu **üretim-hazır değildir**.
+Bir not gerekmektedir: kısmi değerlendirme hâlâ deneyseldir ile varlık dilimleme sağlayan `entity-manifest` kullanımdan kaldırılmıştır. Yani Cedar ile SQL filtresi üretme yolu üretime hazır değildir.
 
-#### Formal doğrulama — ne tam olarak kanıtlandı
+#### Formel doğrulama, tam olarak ne kanıtlanmıştır
 
-Kaynak: *"How We Built Cedar: A Verification-Guided Approach"* (arXiv:2407.01688, FSE Companion '24). PDF'ten çıkardığım **yedi** kanıtlanmış özellik:
+Kaynak, arXiv 2407.01688 numaralı, FSE Companion 2024'te yayımlanan Cedar'ı doğrulama güdümlü bir yaklaşımla nasıl inşa ettik başlıklı yazıdır. PDF'ten çıkarılan yedi kanıtlanmış özellik şunlardır.
 
-1. **Forbid trumps permit** — herhangi bir forbid politikası sağlanırsa istek reddedilir.
-2. **Default deny** — hiçbir permit sağlanmazsa reddedilir.
-3. **Explicit allow** — izin verildiyse bir permit sağlanmıştır.
-4. **Order independence** — authorizer, politika değerlendirme sırasından ve tekrarlardan bağımsız aynı kararı verir.
-5. **Sound slicing** — slicing algoritması, tam politika kümesiyle aynı kararı üreten bir alt küme seçer.
-6. **Validation soundness** — validator bir politikayı kabul ederse, değerlendirmesi asla tip hatası üretmez. *(Makale bunu "the most involved proof we have done so far" diye niteliyor.)*
-7. **Termination** — Cedar fonksiyonları her zaman sonlanır.
+1. Yasak izni alt eder: herhangi bir yasak politikası sağlanırsa istek reddedilmektedir.
+2. Varsayılan reddir: hiçbir izin sağlanmazsa reddedilmektedir.
+3. Açık izin: izin verildiyse bir izin politikası sağlanmıştır.
+4. Sıra bağımsızlığı: yetkilendirici, politika değerlendirme sırasından ile tekrarlardan bağımsız olarak aynı kararı vermektedir.
+5. Sağlam dilimleme: dilimleme algoritması, tam politika kümesiyle aynı kararı üreten bir alt küme seçmektedir.
+6. Doğrulama sağlamlığı: doğrulayıcı bir politikayı kabul ederse değerlendirmesi asla tip hatası üretmemektedir. Makale bunu şimdiye kadar yaptıkları en karmaşık kanıt diye nitelemektedir.
+7. Sonlanma: Cedar fonksiyonları her zaman sonlanmaktadır.
 
-Örnek olarak Property 1'in tam Lean ifadesi makalede veriliyor:
+Örnek olarak birinci özelliğin tam Lean ifadesi makalede verilmektedir.
+
 ```lean
 theorem forbid_trumps_permit (request : Request)
   (entities : Entities) (policies : Policies) :
@@ -419,156 +414,173 @@ theorem forbid_trumps_permit (request : Request)
   (isAuthorized request entities policies).decision = deny
 ```
 
-**Dafny → Lean geçişi gerçekleşti** (RFC 0032, cedar-policy/rfcs). Model **Lean 4**'te.
+Dafny'den Lean'e geçiş gerçekleşmiştir, yani cedar-policy deposundaki 0032 numaralı öneri. Model Lean 4'tedir.
 
-**Ölçek (Tablo 1, LOC):**
+Ölçek, Tablo 1'den, satır sayısı cinsinden şöyledir.
 
 | Bileşen | Lean model | Lean kanıt | Rust üretim | Rust test |
 |---|---|---|---|---|
-| Custom sets/maps | 244 | 681 | — | — |
-| Parser | — | — | 4.114 | 3.599 |
-| Evaluator + Authorizer | 897 | 347 | 4.877 | 7.061 |
-| Validator | 532 | **4.686** | 6.702 | 9.798 |
-| **Toplam** | **1.673** | **5.714** | **15.693** | **20.458** |
+| Özel kümeler ile eşlemeler | 244 | 681 | — | — |
+| Ayrıştırıcı | — | — | 4.114 | 3.599 |
+| Değerlendirici ile yetkilendirici | 897 | 347 | 4.877 | 7.061 |
+| Doğrulayıcı | 532 | 4.686 | 6.702 | 9.798 |
+| Toplam | 1.673 | 5.714 | 15.693 | 20.458 |
 
-Kanıt/model oranı **3,4:1**. Tüm kanıtların doğrulanması **~3 dakika**.
+Kanıtın modele oranı 3,4'e birdir. Tüm kanıtların doğrulanması yaklaşık üç dakika sürmektedir.
 
-**Bulunan hatalar:** Kanıt süreci validator'da **4 hata** ortaya çıkardı; DRT + PBT ek **21 hata** buldu. Toplam 25.
+Bulunan hatalar şunlardır: kanıt süreci doğrulayıcıda dört hata ortaya çıkarmıştır; diferansiyel rastgele test ile özellik tabanlı test 21 hata daha bulmuştur. Toplam 25'tir.
 
-**Çok önemli bir nüans:** Kanıtlar **Lean modeli** hakkındadır, Rust üretim kodu hakkında değil. Rust ile model arasındaki bağ **differential random testing** ile kurulur — kanıtla değil. Yani "Cedar formal olarak doğrulanmıştır" cümlesi doğru ama eksiktir: *tasarımı* doğrulanmıştır, *implementasyonu* diferansiyel olarak test edilmiştir. Makale bunu dürüstçe söylüyor.
+Çok önemli bir nüans vardır: kanıtlar Lean modeli hakkındadır, Rust üretim kodu hakkında değildir. Rust ile model arasındaki bağ diferansiyel rastgele testle kurulmakta, kanıtla kurulmamaktadır. Yani Cedar formel olarak doğrulanmıştır cümlesi doğru ancak eksiktir: tasarımı doğrulanmıştır ile gerçeklemesi diferansiyel olarak test edilmiştir. Makale bunu dürüstçe söylemektedir.
 
-#### Cedar performansı — gerçek ölçüm
+#### Cedar performansı, gerçek ölçüm
 
-Kaynak: arXiv:2403.04651 (OOPSLA 2024 genişletilmiş sürüm), §5.2.
+Kaynak arXiv 2403.04651'dir, yani OOPSLA 2024 genişletilmiş sürümünün 5.2 bölümüdür.
 
-**Deney koşulları (tam olarak):**
-- Donanım: **Amazon EC2 m5.4xlarge**, Amazon Linux 2
-- Sürümler: Cedar 3.0.1, Rego (OPA) 0.61.0, OpenFGA commit `bbb4a07`
-- Her veri noktası için 200 ayrı datastore × 500 rastgele istek = **100.000 istek**
-- **Tüm politika ve entity verisi bellekte**; depolama erişimi, parse, HTTP hariç tutulmuş
-- Sadece çekirdek `is_authorized()` ölçülmüş
+Deney koşulları tam olarak şunlardır. Donanım Amazon EC2 m5.4xlarge ile Amazon Linux 2'dir. Sürümler Cedar 3.0.1, OPA Rego 0.61.0 ile OpenFGA'nın `bbb4a07` işlemesidir. Her veri noktası için 200 ayrı veri deposu çarpı 500 rastgele istek, yani 100.000 istek koşulmuştur. Tüm politika ile varlık verisi bellektedir; depolama erişimi, ayrıştırma ile HTTP hariç tutulmuştur. Yalnızca çekirdek yetkilendirme fonksiyonu ölçülmüştür.
 
-**Sonuçlar (medyan, µs):**
+Sonuçlar, medyan ile mikrosaniye cinsinden şöyledir.
 
-| Motor | gdrive (5 entity) | gdrive (50 entity) | github (5→50) |
+| Motor | gdrive, beş varlık | gdrive, 50 varlık | github, beşten 50'ye |
 |---|---|---|---|
-| **Cedar** | **4,0** | **5,0** | ~11,0 (aralık boyunca sabit) |
-| **OpenFGA** | 89 | 219 | 235 → 746 |
-| **Rego** | 76 | 676 | — |
+| Cedar | 4,0 | 5,0 | Yaklaşık 11,0; aralık boyunca sabittir |
+| OpenFGA | 89 | 219 | 235'ten 746'ya |
+| Rego | 76 | 676 | — |
 
-**p99:**
+99. yüzdelik şöyledir.
 
 | Motor | gdrive |
 |---|---|
-| **Cedar** | **< 10 µs** (tüm boyutlarda) |
-| **OpenFGA** | 283 → **3012 µs** |
-| **Rego** | 391 → 1933 µs |
+| Cedar | Tüm boyutlarda 10 mikrosaniyenin altındadır |
+| OpenFGA | 283'ten 3012 mikrosaniyeye çıkmaktadır |
+| Rego | 391'den 1933 mikrosaniyeye çıkmaktadır |
 
-**Toplu oranlar:** Cedar, OpenFGA'dan **28,7× / 34,4× / 35,2×** (gdrive/github/TinyTodo), Rego'dan **60,4× / 80,8× / 42,8×** daha hızlı.
+Toplu oranlar şöyledir: Cedar, OpenFGA'dan gdrive, github ile TinyTodo veri kümelerinde sırasıyla 28,7, 34,4 ile 35,2 kat; Rego'dan ise 60,4, 80,8 ile 42,8 kat daha hızlıdır.
 
-**Bu ölçümün dürüst okunması — üç önemli kayıt:**
+Bu ölçümün dürüst okunması için üç kayıt gerekmektedir.
 
-1. **Makalenin kendi dipnotu (fn. 6):** *"Based on communication with the OpenFGA developers, the OpenFGA in-memory datastore is intended mainly for debugging and is not optimized."* Yani OpenFGA en kötü konfigürasyonunda ölçüldü.
-2. **Veri kümeleri minik:** 5–50 entity. Gerçek dünyada milyonlarca tuple var. Cedar'ın "sabit kalması", tüm entity grafını belleğe koyabildiği içindir — bu, ölçekte geçerli olmayan bir varsayımdır.
-3. **AWS'nin kendi makalesi, kendi ürünü lehine.** Bağımsız replikasyon **DOĞRULANMADI**.
+1. Makalenin kendi altıncı dipnotu şunu söylemektedir: *"Based on communication with the OpenFGA developers, the OpenFGA in-memory datastore is intended mainly for debugging and is not optimized."* Yani OpenFGA en kötü yapılandırmasında ölçülmüştür.
+2. Veri kümeleri minik, yani beş ile 50 varlıktır. Gerçek dünyada milyonlarca demet vardır. Cedar'ın sabit kalması tüm varlık grafını belleğe koyabildiği içindir ile bu, ölçekte geçerli olmayan bir varsayımdır.
+3. Bu, AWS'nin kendi makalesidir ile kendi ürünü lehinedir. Bağımsız replikasyon doğrulanmamıştır.
 
-**Buna rağmen 4–11 µs rakamı Argus için anlamlı bir üst sınırdır:** Rust'ta, bellekteki veriyle, politika değerlendirme mertebesinin **tek haneli mikrosaniye** olduğunu gösteriyor.
+Buna rağmen dört ile 11 mikrosaniye rakamı Argus için anlamlı bir üst sınırdır: Rust'ta, bellekteki veriyle, politika değerlendirme mertebesinin tek haneli mikrosaniye olduğunu göstermektedir.
 
-İkinci bağımsız veri noktası (VGD makalesi, §3.2): DRT sırasında **Lean authorizer medyan 6 µs, Rust 10 µs**. İki bağımsız ölçüm aynı mertebeyi veriyor.
+İkinci bağımsız veri noktası doğrulama güdümlü geliştirme makalesinin 3.2 bölümüdür: diferansiyel rastgele test sırasında Lean yetkilendiricisi medyanda altı, Rust 10 mikrosaniyededir. İki bağımsız ölçüm aynı mertebeyi vermektedir.
 
 #### Cedar'ın SMT analizi
 
-Cedar'ın symbolic compiler'ı politikaları SMT-LIB'e indirger. Örnek modellerdeki politikalar için analiz soruları **ortalama 75,1 ms**'de kodlanıp çözülüyor. Bu, "bu refactor yetkileri değiştirdi mi?" gibi soruları **CI'da** sorabilmek demektir — çalışma zamanında değil.
+Cedar'ın sembolik derleyicisi politikaları SMT-LIB'e indirgemektedir. Örnek modellerdeki politikalar için analiz soruları ortalama 75,1 milisaniyede kodlanıp çözülmektedir. Bu, şu yeniden düzenleme yetkileri değiştirdi mi gibi soruları sürekli tümleştirme hattında sorabilmek demektir, çalışma zamanında değil.
 
-#### Cedar'ın ReBAC sınırı — kritik
+#### Cedar'ın ilişki tabanlı erişim kontrolü sınırı, kritik
 
-Cedar'ın ilişki modeli **entity hierarchy** (`in` operatörü) üzerinden gider ve bu bir DAG'dır. Makale: *"The parent relation on entities forms a directed acyclic graph (DAG), called the entity hierarchy."*
+Cedar'ın ilişki modeli varlık hiyerarşisi üzerinden, yani `in` operatörüyle gitmektedir ile bu bir yönlü çevrimsiz graftır. Makale şunu söylemektedir: *"The parent relation on entities forms a directed acyclic graph (DAG), called the entity hierarchy."*
 
-**Cedar'ın YAPAMADIĞI iki şey:**
+Cedar'ın yapamadığı iki şey vardır.
 
-1. **Entity store yoktur.** Cedar'a `Entities` nesnesini **siz verirsiniz**. Yani "Alice hangi gruplarda?" sorusunu Cedar cevaplamaz — cevabı Cedar'a siz beslersiniz. ReBAC'ın zor kısmı (transitive closure'ın depolanması ve sorgulanması) Cedar'ın kapsamı **dışındadır**.
-2. **"Kullanıcının erişebildiği tüm kaynaklar" sorgusu yoktur.** ListObjects karşılığı yok.
+1. Varlık deposu yoktur. `Entities` nesnesi Cedar'a dışarıdan verilmektedir. Yani Alice hangi gruplardadır sorusunu Cedar cevaplamamakta, cevap Cedar'a beslenmektedir. İlişki tabanlı erişim kontrolünün zor kısmı, yani geçişli kapanışın depolanması ile sorgulanması, Cedar'ın kapsamı dışındadır.
+2. Kullanıcının erişebildiği tüm kaynaklar sorgusu yoktur. Nesne listelemenin bir karşılığı bulunmamaktadır.
 
-**Bu, Cedar ile Zanzibar'ın rakip değil tamamlayıcı olduğu anlamına gelir.** Cedar = politika değerlendirme motoru. Zanzibar = ilişki deposu + graph çözümleyici. Argus'un ikisine de ihtiyacı var ve Cedar ikincisini vermez.
+Bu, Cedar ile Zanzibar'ın rakip değil tamamlayıcı olduğu anlamına gelmektedir. Cedar bir politika değerlendirme motorudur. Zanzibar bir ilişki deposu ile graf çözümleyicisidir. Argus'un ikisine de ihtiyacı vardır ile Cedar ikincisini vermemektedir.
 
 ### 2.4 biscuit-auth
 
-**Ne veriyor:** Ed25519 imzalı, **offline attenuation** yapılabilen capability token. Herhangi bir tutucu yeni bir blok ekleyerek yetkiyi **daraltabilir**, ama asla **genişletemez**. Third-party block'lar ile delegasyon; sealing ile daha fazla değişikliği engelleme; **Datalog** tabanlı authorizer.
+Ne verdiği şudur: Ed25519 imzalı ile çevrimdışı zayıflatma yapılabilen bir yetenek token'ıdır. Herhangi bir tutucu yeni bir blok ekleyerek yetkiyi daraltabilmekte ancak asla genişletememektedir. Üçüncü taraf bloklarıyla devretme, mühürlemeyle daha fazla değişikliği engelleme ile Datalog tabanlı bir yetkilendirici sunmaktadır.
 
-**Güvenlik denetimi durumu — dikkat:** Deponun kendi ifadesi: *"looking for an audit of the token's design, cryptographic primitives and implementations."* Yani **tamamlanmış bağımsız denetim yok**.
+Güvenlik denetimi durumu dikkat gerektirmektedir. Deponun kendi ifadesi şudur: *"looking for an audit of the token's design, cryptographic primitives and implementations."* Yani tamamlanmış bağımsız bir denetim yoktur.
 
-Ve sicil temiz değil:
+Sicil de temiz değildir.
 
-| CVE | Tarih | Şiddet | Etkilenen | Açıklama |
+| Tanımlayıcı | Tarih | Şiddet | Etkilenen | Açıklama |
 |---|---|---|---|---|
-| CVE-2022-31053 | 2022-06-17 | **CRITICAL** | biscuit-auth < 2.0.0 | **Signature forgery in Biscuit** |
-| CVE-2024-41949 / CVE-2024-42350 | 2024-07-31 | LOW | 4.0.0 ≤ v < 5.0.0 | Third party block'ta public key confusion |
+| CVE-2022-31053 | 17 Haziran 2022 | Kritik | biscuit-auth 2.0.0 öncesi | Biscuit'te imza sahteciliğidir |
+| CVE-2024-41949 ile CVE-2024-42350 | 31 Temmuz 2024 | Düşük | 4.0.0 ile 5.0.0 arası | Üçüncü taraf blokta açık anahtar karışıklığıdır |
 
-Bir capability token kütüphanesinde **imza sahteciliği** (2022, kritik) ciddi bir olaydır — düzeltilmiş olsa da denetimsiz kripto kodunun riskini gösterir.
+Bir yetenek token'ı kütüphanesinde imza sahteciliği, yani 2022'deki kritik açık, ciddi bir olaydır. Düzeltilmiş olsa da denetimsiz kripto kodunun riskini göstermektedir.
 
-**Sürüm durumu:** 6.0.0, 16 Temmuz 2025 — **14 aydır yeni sürüm yok**. İndirme hacmi yüksek (11,2M toplam) ama momentum düşük.
+Sürüm durumu şudur: 6.0.0, 16 Temmuz 2025; 14 aydır yeni sürüm yoktur. İndirme hacmi yüksektir, yani toplam 11,2 milyondur, ancak momentum düşüktür.
 
-**Kullananlar:** Clever Cloud, Apache Pulsar (biscuit-pulsar).
+Kullananlar Clever Cloud ile Apache Pulsar'dır, yani biscuit-pulsar'dır.
 
-**IdP'de yeri:** Argus için **doğrudan token formatı olarak önerilmez** (OIDC/OAuth ekosistemi JWT bekler, interop kırılır). Ancak **fikir olarak** çok değerli: attenuation, delegasyon zincirinde yetki daraltmanın doğru yoludur ve ajan senaryolarının cevabıdır. arXiv:2609.00267'nin brokerı tam olarak bunu macaroon tarzıyla yapıyor. Argus bunu **JWT içinde kısıtlama claim'leri** olarak taklit edebilir (RFC 9396 RAR / OAuth Token Exchange ile).
+Kimlik sağlayıcıdaki yeri şudur: Argus için doğrudan bir token formatı olarak önerilmemektedir, çünkü OIDC ile OAuth ekosistemi JWT beklemekte ile birlikte çalışabilirlik kırılmaktadır. Ancak fikir olarak çok değerlidir: zayıflatma, devretme zincirinde yetki daraltmanın doğru yoludur ile ajan senaryolarının cevabıdır. arXiv 2609.00267'nin komisyoncusu tam olarak bunu macaroon tarzıyla yapmaktadır. Argus bunu JWT içinde kısıtlama iddiaları olarak taklit edebilir, yani RFC 9396 zengin yetkilendirme istekleriyle ya da OAuth token değişimiyle.
 
-### 2.5 regorus (Microsoft) — Rust'ta Rego
+### 2.5 regorus, Microsoft, Rust'ta Rego
 
-**Kimlik:** 0.12.0, **1 Eylül 2026** (bir hafta önce — çok aktif). MIT AND Apache-2.0 AND BSD-3-Clause. 1,0M indirme/90gün.
+Kimliği şudur: 0.12.0, 1 Eylül 2026, yani bir hafta öncesi; çok aktiftir. Lisansı MIT ile Apache 2.0 ile BSD 3 maddelidir. 90 günde bir milyon indirmesi vardır.
 
-**OPA uyumu (README'den):** *"Regorus is mostly compliant with the latest OPA release v1.2.0."* — *"passes all the non-builtin specific tests"*, ancak **20 test suite** eksik builtin'ler nedeniyle tam geçmiyor (JWT, kriptografik, ağ fonksiyonları).
+OPA uyumu deponun kendi ifadesiyle şudur: Regorus, OPA'nın son sürümü olan 1.2.0 ile büyük ölçüde uyumludur ile yerleşiğe özgü olmayan tüm testleri geçmektedir. Ancak 20 test paketi, eksik yerleşikler nedeniyle, yani JWT, kriptografik ile ağ fonksiyonları nedeniyle, tam geçmemektedir.
 
-**Performans (README'deki ACI politikası benchmark'ı):**
-- Regorus: **4,6 ms ± 0,2 ms**
-- OPA: **45,2 ms ± 0,6 ms**
-- **~10× hızlı**
+Performans, deponun Azure Container Instances politikası kıyaslamasında şöyledir: Regorus 4,6 artı eksi 0,2 milisaniye, OPA 45,2 artı eksi 0,6 milisaniyedir; yaklaşık 10 kat hızlıdır.
 
-*Not: Bu Microsoft'un kendi benchmark'ı, tek bir politika kümesi (Azure Container Instances) üzerinde. Bağımsız doğrulama **DOĞRULANMADI**. Ayrıca 4,6 ms mutlak değeri Cedar'ın 4–11 µs'inden **~1000× yavaştır** — Rego semantiği pahalıdır.*
+Bu, Microsoft'un kendi kıyaslamasıdır ile tek bir politika kümesi üzerindedir. Bağımsız doğrulaması yapılmamıştır. Ayrıca 4,6 milisaniyelik mutlak değer Cedar'ın dört ile 11 mikrosaniyesinden yaklaşık 1000 kat yavaştır; Rego semantiği pahalıdır.
 
-**Eksikler:** *"Cryptographic builtins are not supported by design."* — JWT doğrulama, `glob.match`, GraphQL, CIDR işlemleri yok.
+Eksikleri şunlardır: kriptografik yerleşikler tasarım gereği desteklenmemektedir. JWT doğrulama, `glob.match`, GraphQL ile CIDR işlemleri yoktur.
 
-**Bağlamalar:** C, C++, C#, Java, Python, Go, JS/WASM, Ruby. **`no_std` uyumlu** — gömülü senaryolar için dikkate değer.
+Bağlamaları C, C++, C#, Java, Python, Go, JavaScript ile WebAssembly'dir. `no_std` uyumludur ile gömülü senaryolar için dikkate değerdir.
 
-**Argus için değerlendirme:** Rego'nun IdP'de yeri, ancak müşteriler zaten Rego politikası yazıyorsa vardır. Sıcak yol için 4,6 ms kabul edilemez. **Konfigürasyon-zamanı politika değerlendirmesi** için (örn. "bu client bu grant type'ı kullanabilir mi?") uygun olabilir.
+Argus için değerlendirme şudur: Rego'nun kimlik sağlayıcıda yeri ancak müşteriler zaten Rego politikası yazıyorsa vardır. Sıcak yol için 4,6 milisaniye kabul edilemez. Yapılandırma zamanı politika değerlendirmesi için, örneğin şu istemci şu yetki tipini kullanabilir mi sorusu için, uygun olabilir.
 
-### 2.6 casbin-rs ve oso
+### 2.6 casbin-rs ile oso
 
-**casbin (2.20.0, 4 Şubat 2026, 1,48M indirme/90gün):** Aktif. PERM metamodeli (Policy, Effect, Request, Matchers) ile RBAC/ABAC/ACL. **Ancak Zanzibar tarzı ReBAC için tasarlanmamıştır** — transitif ilişki çözümlemesi ve tuple deposu semantiği yoktur. RBAC'ın rol hiyerarşisini destekler, o kadar. Argus'un ihtiyacını karşılamaz. OSV'de **CVE kaydı yok** (crates.io ekosisteminde).
+casbin, yani 2.20.0, 4 Şubat 2026, 90 günde 1,48 milyon indirme, aktiftir. İlke, etki, istek ile eşleştiriciden oluşan PERM metamodeliyle rol tabanlı, öznitelik tabanlı ile liste tabanlı erişim kontrolü sunmaktadır. Ancak Zanzibar tarzı ilişki tabanlı erişim kontrolü için tasarlanmamıştır: geçişli ilişki çözümlemesi ile demet deposu semantiği yoktur. Rol hiyerarşisini desteklemektedir, o kadar. Argus'un ihtiyacını karşılamamaktadır. OSV'de crates.io ekosisteminde bir güvenlik açığı kaydı yoktur.
 
-**oso (0.27.3, 13 Ocak 2024):** **2,5 yıldır sürüm yok.** Oso'nun dokümantasyonu artık tamamen **Oso Cloud**'u — *"a centralized authorization service built on Polar"* — anlatıyor. OSS kütüphanenin resmî deprecation açıklamasını bulamadım (**DOĞRULANMADI**), ama sürüm geçmişi kendi başına yeterince açık. Son 90 günde hâlâ 65K indirme var (eski bağımlılıklar), ama yeni proje için seçilmemeli.
+oso, yani 0.27.3, 13 Ocak 2024, iki buçuk yıldır sürüm çıkarmamıştır. Oso'nun dokümantasyonu artık tamamen Oso Cloud'u, yani Polar üzerine kurulmuş merkezî bir yetkilendirme servisini anlatmaktadır. Açık kaynak kütüphanenin resmî kullanımdan kaldırma açıklaması bulunamamıştır ile doğrulanmamıştır, ancak sürüm geçmişi kendi başına yeterince açıktır. Son 90 günde hâlâ 65 bin indirme vardır, ki eski bağımlılıklardandır, ancak yeni bir proje için seçilmemelidir.
 
 ### 2.7 Kendi motorunu yazmak için Rust altyapısı
 
-Eğer Argus kendi ReBAC motorunu yazacaksa (önerim bu), Rust ekosistemi güçlü:
+Argus kendi ilişki tabanlı erişim kontrolü motorunu yazacaksa, ki öneri budur, Rust ekosistemi güçlüdür.
 
 | Crate | Ne için | Değerlendirme |
 |---|---|---|
-| **ascent** (0.8.1, 29 Ağu 2026) | Rust içinde Datalog, makro tabanlı | Aktif geliştirme (161K/90gün); userset rewrite kurallarını Datalog olarak ifade etmek için doğal aday |
-| **crepe** (0.2.0, Ara 2025) | Prosedürel makro Datalog | Daha basit, daha az esnek |
-| **differential-dataflow** (0.25.1, Tem 2026) | Incremental hesaplama | Leopard benzeri materialized index'i **incremental** tutmak için teorik olarak ideal. **Ancak ReBAC materialization için üretimde kullanan bilinen bir örnek bulamadım — DOĞRULANMADI.** Operasyonel karmaşıklığı yüksek |
-| **proptest** (1.11.0) | Property-based testing | Yetkilendirme invariant'larını test etmek için zorunlu (Bölüm 6.2) |
+| ascent, 0.8.1, 29 Ağustos 2026 | Rust içinde makro tabanlı Datalog | Aktif geliştirmededir, 90 günde 161 bin indirme; kullanıcı kümesi yeniden yazma kurallarını Datalog olarak ifade etmek için doğal bir adaydır |
+| crepe, 0.2.0, Aralık 2025 | Prosedürel makro Datalog | Daha basit ile daha az esnektir |
+| differential-dataflow, 0.25.1, Temmuz 2026 | Artımlı hesaplama | Leopard benzeri gerçeklenmiş indeksi artımlı tutmak için teorik olarak idealdir. Ancak ilişki tabanlı gerçekleme için üretimde kullanan bilinen bir örnek bulunamamıştır ile doğrulanmamıştır. Operasyonel karmaşıklığı yüksektir |
+| proptest, 1.11.0 | Özellik tabanlı test | Yetkilendirme değişmezlerini test etmek için zorunludur, 6.2'ye bakınız |
 
-**Not:** `roaring` crate'i (roaring bitmap) bu oturumda sorgulanmadı ama Leopard tarzı set kesişimi için standart araçtır.
+Bir not gerekmektedir: `roaring` crate'i, yani roaring bitmap, bu oturumda sorgulanmamıştır ancak Leopard tarzı küme kesişimi için standart araçtır.
+
+### 2.8 Cedarling: Cedar'ın istemciye kadar itilmesi
+
+1.6 gömme ile yan servis arasında seçim yapmaktadır. Üçüncü bir konum vardır ile bu bölümde eksiktir: karar noktasının kimlik sağlayıcının dışına, tüketen uygulamanın içine yerleştirilmesi. Janssen Projesi bunu Cedarling adıyla gerçeklemiştir ile Argus için önemi doğrudandır, çünkü Argus'un yazabileceği şeyin çalışan örneğidir.
+
+Ne olduğu şudur, kaynak Janssen deposu ile Cedarling genel bakış dokümanıdır, erişim 13 Eylül 2026. Gömülebilir, durumlu bir politika karar noktasıdır. Sorduğu soru şudur: bu JWT'ler verildiğinde uygulama bu kaynak üzerinde bu eylemi yapmaya izin vermeli midir. Rust ile yazılmıştır; WebAssembly, iOS, Android ile Python bağlamaları bulunmaktadır. Cedar'ın Rust motoru üzerine kuruludur; JWT'leri doğrulamakta ile JSON yük taleplerini Cedar varlıklarına eşlemektedir. Tarayıcıda WebAssembly bileşeni olarak, mobil uygulamada ya da sunucuda çalışabilmektedir.
+
+Argus için üç çıkarım vardır.
+
+Birincisi, 2.3'teki Cedar değerlendirmesi eksik kalmaktadır. Cedar orada bir politika dili ile bir kütüphane olarak ele alınmaktadır; Cedarling, aynı motorun kimlik sağlayıcının verdiği belirteçleri anlayan bir dağıtım biçimi olduğunu göstermektedir. Yani belirteç ile politika arasındaki eşleme, motorun değil ürünün katmanıdır ile o katman yazılabilirdir.
+
+İkincisi, bu konum 4.5'teki token'a gömmek ile her istekte sormak ikilemini üçüncü bir noktaya taşımaktadır. İstemci içi karar noktası her istekte sormamakta ancak kararı token'a da gömmemektedir; politikayı ile gerekli varlıkları önceden almakta ile kararı yerel olarak vermektedir. Maliyeti nettir: karar tanım gereği bayat çalışmaktadır. Bayatlık penceresi, politikanın ile varlık verisinin tazelenme aralığıdır ile bu §1 §9.1'deki açık iptal sözleşmesinin istemci tarafındaki hâlidir.
+
+Üçüncüsü, bu bir farklılaşma fırsatıdır ancak §1 §9.1 kapatılmadan değerlendirilemez. Argus istemci içi bir karar noktası dağıtacaksa, iptalin o noktaya ne kadar sürede ulaştığını sözleşmeye bağlamak zorundadır; bugün sunucu tarafı için bile bağlanmamıştır.
+
+Doğrulanamayan nokta şudur ile önemlidir: Cedarling'in durumlu olduğu doğrulanmıştır, ancak hangi durumu tuttuğu, iptali nasıl aldığı ile bayatlık penceresinin ne olduğu doğrulanamamıştır. Bu üç soru cevaplanmadan model Argus'a kopyalanamaz.
+
+### 2.9 Durumsuz karar noktası, üçüncü tasarım ekseni
+
+Bölüm 1 ilişki verisini motorun tuttuğu modeli, 2.3 ise politikanın dil olduğu modeli incelemektedir. Üçüncü bir eksen daha vardır: motorun hiçbir veri düzlemi tutmaması ile ilişki verisinin her istekte çağıran tarafından gönderilmesi. Cerbos bu noktadadır; politikalar YAML dosyalarıdır ile motor bir karar fonksiyonudur. Topaz ise açık politika aracısıyla Zanzibar modelini birleştirerek politika dili artı yerel ilişki deposu sunmaktadır. İkisinin de ayrıntıları bu oturumda birincil kaynaktan doğrulanmamıştır.
+
+Argus açısından bu eksen en yakın olandır ile bu bölümde konumlandırılmamıştır. Gerekçe şudur: Argus ilişki verisini zaten PostgreSQL'de, kiracı kapsamlı ile satır seviyesi güvenlikli tutmaktadır. Bir Zanzibar motoruna ikinci bir kopya vermek, 4.2'deki geçersizleştirme problemini ikiye katlamakta ile §1 kararı 2 ile 3'ün kapsamı dışına veri çıkarmaktadır. Durumsuz bir karar fonksiyonu bu ikinci kopyayı hiç yaratmamaktadır.
+
+Karşı argüman da kayda geçirilmelidir: durumsuz model, 1.5'teki nesne listeleme problemini çözmemektedir. Çağıran, kararı verdirmek için gereken ilişki kümesini kendisi getirmek zorundadır; ters sorgu, yani bu kullanıcının erişebildiği tüm nesneler, durumsuz bir motorda ifade edilememektedir. Argus'un üç katmanlı sıcak yolu bu yüzden saf durumsuz olamaz; ancak karar katmanının kendisi durumsuz bir fonksiyon olarak yazılabilir ile veri getirme ayrı bir katman olarak kalabilir. Bu ayrım, motorun test edilebilirliğini doğrudan artırmaktadır: karar fonksiyonu saf olduğunda özellik testi veri deposu olmadan koşmaktadır.
 
 ---
 
-## BÖLÜM 3 — AuthZEN
+## Bölüm 3 — AuthZEN
 
-### 3.1 Doğrulama: tarih doğru
+### 3.1 Doğrulama: tarih doğrudur
 
-Belirttiğiniz tarih doğrudur. Spec dokümanının kendi yayın tarihi **11 Ocak 2026**; OpenID Foundation'ın onay duyurusu **12 Ocak 2026**.
+Belirtilen tarih doğrudur. Şartname dokümanının kendi yayın tarihi 11 Ocak 2026, OpenID Foundation'ın onay duyurusu 12 Ocak 2026'dır.
 
-**Oylama:** 81 kabul, 1 ret, 25 çekimser = 107 oy (378 üyenin %28,3'ü; %20 yeter sayısının üzerinde).
+Oylama 81 kabul, bir ret ile 25 çekimser, yani 107 oydur; 378 üyenin %28,3'üdür ile %20'lik yeter sayının üzerindedir.
 
-**Aşamalar:** Implementer's Draft — Kasım 2024 → Final — Ocak 2026.
+Aşamalar şöyledir: gerçekleyici taslağı Kasım 2024'te, nihai şartname Ocak 2026'dadır.
 
-Final Specification statüsü, implementer'lara IP koruması sağlar ve *"is not subject to further revision"* — yani API yüzeyi dondurulmuştur. Argus için bu iyi haber: hedef sabit.
+Nihai şartname statüsü gerçekleyicilere fikrî mülkiyet koruması sağlamaktadır ile daha fazla revizyona tabi değildir; yani API yüzeyi dondurulmuştur. Argus için bu iyi bir haberdir: hedef sabittir.
 
-### 3.2 Spec'in tam teknik içeriği
+### 3.2 Şartnamenin tam teknik içeriği
 
-#### Access Evaluation API — `POST /access/v1/evaluation`
+#### Erişim değerlendirme API'si, `POST /access/v1/evaluation`
 
-**İstek şeması:**
+İstek şeması şöyledir.
+
 ```json
 {
   "subject":  { "type": "string (REQUIRED)", "id": "string (REQUIRED)", "properties": "object (OPTIONAL)" },
@@ -578,7 +590,8 @@ Final Specification statüsü, implementer'lara IP koruması sağlar ve *"is not
 }
 ```
 
-Spec'ten birebir örnek:
+Şartnameden birebir örnek şudur.
+
 ```json
 {
   "subject":  { "type": "user", "id": "alice@example.com" },
@@ -588,12 +601,14 @@ Spec'ten birebir örnek:
 }
 ```
 
-**Yanıt:**
+Yanıt şöyledir.
+
 ```json
 { "decision": true }
 ```
 
-Gerekçeli ret:
+Gerekçeli ret şöyledir.
+
 ```json
 {
   "decision": false,
@@ -604,11 +619,11 @@ Gerekçeli ret:
 }
 ```
 
-`reason_admin` / `reason_user` ayrımı iyi bir tasarım: yönetici tam nedeni görür, kullanıcı bilgi sızdırmayan bir mesaj alır.
+Yönetici gerekçesiyle kullanıcı gerekçesi ayrımı iyi bir tasarımdır: yönetici tam nedeni görmekte, kullanıcı bilgi sızdırmayan bir mesaj almaktadır.
 
-#### Access Evaluations API (batch) — `POST /access/v1/evaluations`
+#### Toplu erişim değerlendirme API'si, `POST /access/v1/evaluations`
 
-Üst seviyede `subject`, `action`, `resource`, `context` **varsayılan** olarak verilir; `evaluations` dizisindeki her eleman bunları **override eder**. Bu, N+1 sorununu ağ katmanında çözer:
+Üst seviyede özne, eylem, kaynak ile bağlam varsayılan olarak verilmekte; `evaluations` dizisindeki her eleman bunları geçersiz kılmaktadır. Bu, N artı bir sorununu ağ katmanında çözmektedir.
 
 ```json
 {
@@ -622,7 +637,7 @@ Gerekçeli ret:
 }
 ```
 
-**`options.evaluations_semantic` üç değeri:**
+`options.evaluations_semantic` alanının üç değeri şunlardır.
 
 | Değer | Anlam |
 |---|---|
@@ -630,19 +645,20 @@ Gerekçeli ret:
 | `deny_on_first_deny` | *"Any denial (error, or `"decision": false`) short-circuits."* |
 | `permit_on_first_permit` | *"Converse short-circuiting semantic."* |
 
-**Argus için önemli:** `deny_on_first_deny`, "tüm bu koşullar sağlanmalı" (AND) semantiğini ağ seviyesinde verir ve erken çıkışla iş tasarrufu sağlar. Bu, sıcak yol için birinci sınıf bir optimizasyon kancasıdır.
+Argus için önemli olan şudur: `deny_on_first_deny`, tüm bu koşullar sağlanmalıdır anlamındaki ve semantiğini ağ seviyesinde vermekte ile erken çıkışla iş tasarrufu sağlamaktadır. Bu, sıcak yol için birinci sınıf bir optimizasyon kancasıdır.
 
-#### Search API'leri — **Final spec'in İÇİNDE**
+#### Arama API'leri, nihai şartnamenin içindedir
 
-Üçü de v1.0 Final'e dahil (ayrı draft değil):
+Üçü de 1.0 nihai sürüme dahildir, ayrı bir taslak değildir.
 
-| Endpoint | Soru |
+| Uç nokta | Soru |
 |---|---|
-| `POST /access/v1/search/subject` | "Bu kaynağa bu eylemi yapabilen **kim**?" (`subject.id` **omit edilmeli**) |
-| `POST /access/v1/search/resource` | "Bu özne bu eylemi **hangi kaynaklarda** yapabilir?" (`resource.id` omit) — **ListObjects karşılığı** |
-| `POST /access/v1/search/action` | "Bu özne bu kaynakta **hangi eylemleri** yapabilir?" (`action` alanı yok) |
+| `POST /access/v1/search/subject` | Bu kaynağa bu eylemi kim yapabilir; öznenin kimliği atlanmalıdır |
+| `POST /access/v1/search/resource` | Bu özne bu eylemi hangi kaynaklarda yapabilir; kaynağın kimliği atlanır. Nesne listelemenin karşılığıdır |
+| `POST /access/v1/search/action` | Bu özne bu kaynakta hangi eylemleri yapabilir; eylem alanı yoktur |
 
-**Ortak yanıt şeması (pagination ile):**
+Ortak yanıt şeması sayfalamayla birlikte şöyledir.
+
 ```json
 {
   "page":    { "next_token": "string (REQUIRED)", "count": "int (OPT)", "total": "int (OPT)", "properties": "object (OPT)" },
@@ -650,128 +666,120 @@ Gerekçeli ret:
   "results": "array (REQUIRED)"
 }
 ```
-İstek `page` nesnesi: `token` (opaque, önceki `next_token`), `limit`, `properties`. Yanıtta `next_token` **boş string** = liste bitti.
 
-**Bu, Bölüm 1.5'teki tehlikeli operasyonun standartlaştırılmış hâlidir.** Spec, pagination'ı zorunlu kılarak (`next_token` REQUIRED) en azından sınırsız fan-out'u yapısal olarak engelliyor. Argus bu endpoint'i implemente ederken **her zaman** deadline + max-results uygulamalıdır.
+İstekteki `page` nesnesi opak bir `token`, yani önceki `next_token`, bir `limit` ile `properties` alanlarını taşımaktadır. Yanıtta `next_token` boş bir dizgiyse liste bitmiştir.
+
+Bu, 1.5'teki tehlikeli operasyonun standartlaştırılmış hâlidir. Şartname sayfalamayı zorunlu kılarak, yani `next_token` alanını zorunlu yaparak, en azından sınırsız yayılımı yapısal olarak engellemektedir. Argus bu uç noktayı gerçeklerken her zaman bir son tarih ile azami sonuç sınırı uygulamalıdır.
 
 #### `.well-known/authzen-configuration`
 
-`GET`, 200 OK, `application/json`.
+`GET` ile 200 OK döner ile `application/json` içerir.
 
 | Alan | Zorunluluk |
 |---|---|
-| `policy_decision_point` | **REQUIRED** — HTTPS URL, query/fragment yok |
-| `access_evaluation_endpoint` | **REQUIRED** |
-| `access_evaluations_endpoint` | OPTIONAL |
-| `search_subject_endpoint` | OPTIONAL |
-| `search_action_endpoint` | OPTIONAL |
-| `search_resource_endpoint` | OPTIONAL |
-| `capabilities` | OPTIONAL — IANA URN dizisi |
-| `signed_metadata` | OPTIONAL — metadata claim'leri içeren JWT |
+| `policy_decision_point` | Zorunludur; HTTPS adresidir, sorgu ile parça içermez |
+| `access_evaluation_endpoint` | Zorunludur |
+| `access_evaluations_endpoint` | İsteğe bağlıdır |
+| `search_subject_endpoint` | İsteğe bağlıdır |
+| `search_action_endpoint` | İsteğe bağlıdır |
+| `search_resource_endpoint` | İsteğe bağlıdır |
+| `capabilities` | İsteğe bağlıdır; IANA tekdüzen kaynak adı dizisidir |
+| `signed_metadata` | İsteğe bağlıdır; metadata iddialarını içeren bir JWT'dir |
 
-Doğrulama kuralı: dönen `policy_decision_point`, well-known URI'nin inşa edildiği PDP tanımlayıcısıyla **aynı olmak ZORUNDA**.
+Doğrulama kuralı şudur: dönen politika karar noktası, iyi bilinen adresin inşa edildiği tanımlayıcıyla aynı olmak zorundadır.
 
-#### Hata yönetimi ve güvenlik
+#### Hata yönetimi ile güvenlik
 
 | Kod | Durum |
 |---|---|
-| 200 | Başarılı (karar `decision` alanında) |
-| 400 / 401 / 403 / 500 | Bad request / Unauthorized / Forbidden / Internal |
+| 200 | Başarılıdır; karar `decision` alanındadır |
+| 400, 401, 403 ile 500 | Sırasıyla hatalı istek, yetkisiz, yasak ile iç hatadır |
 
-**Kritik semantik ayrım:** *"A successful request that results in a deny is indicated by a 200 OK status code with a `{ "decision": false }` payload."* — Ret, HTTP hatası **değildir**. 403 ise PEP'in PDP'ye erişim yetkisinin olmamasıdır. Bu ayrımı karıştırmak fail-open'a yol açar.
+Kritik semantik ayrım şudur: *"A successful request that results in a deny is indicated by a 200 OK status code with a `{ "decision": false }` payload."* Yani ret bir HTTP hatası değildir. 403 ise politika uygulama noktasının karar noktasına erişim yetkisinin olmamasıdır. Bu ayrımı karıştırmak açık başarısızlığa yol açmaktadır.
 
-`X-Request-ID` header'ı varsa PDP yanıtta **aynı header ile** bir istek tanımlayıcısı döndürmek ZORUNDA.
+`X-Request-ID` başlığı varsa karar noktası yanıtta aynı başlıkla bir istek tanımlayıcısı döndürmek zorundadır.
 
-**Güvenlik bölümü:**
-- PEP↔PDP bağlantısı *"MUST be secured"* (HTTP REST için TLS).
-- PDP çağıran PEP'i *"SHOULD authenticate"* — mTLS, OAuth 2.0 (önerilen), API key.
-- PDP yanıtını **imzalayabilir** (MAY).
-- I-JSON profili (RFC 7493) — UTF-8, IEEE 754 double sınırları.
-- DoS koruması: payload boyutu, istek sayısı, geçersiz JSON, iç içe JSON saldırıları, bellek tüketimi.
-- **Güven modeli:** *"The architecture of this model assumes the PDP must trust the PEP, as the PEP is ultimately responsible for enforcing the decision the PDP produces."*
+Güvenlik bölümü şunları söylemektedir. Uygulama noktasıyla karar noktası arasındaki bağlantı güvenli kılınmak zorundadır, yani HTTP REST için TLS gerekmektedir. Karar noktası çağıran uygulama noktasını kimlik doğrulamalıdır; mTLS, önerilen yol olarak OAuth 2.0 ya da API anahtarı kullanılabilir. Karar noktası yanıtını imzalayabilir. I-JSON profili, yani RFC 7493, geçerlidir; UTF-8 ile IEEE 754 çift duyarlık sınırları uygulanır. Hizmet reddi koruması yük boyutu, istek sayısı, geçersiz JSON, iç içe JSON saldırıları ile bellek tüketimini kapsamalıdır. Güven modeli şöyle ifade edilmektedir: *"The architecture of this model assumes the PDP must trust the PEP, as the PEP is ultimately responsible for enforcing the decision the PDP produces."*
 
-**Transport:** HTTPS+JSON binding normatiftir; gRPC/CoAP binding'leri **profillerde** tanımlanabilir. Endpoint'ler `v1` içermeli (SHOULD). Alıcılar bilinmeyen alanları **yok saymak ZORUNDA** (forward compatibility). JSON üye sıralaması varsayılmamalı.
+Taşıma katmanında HTTPS ile JSON bağlaması normatiftir; gRPC ile CoAP bağlamaları profillerde tanımlanabilir. Uç noktalar `v1` içermelidir. Alıcılar bilinmeyen alanları yok saymak zorundadır, ki ileri uyumluluk içindir. JSON üye sıralaması varsayılmamalıdır.
 
-### 3.3 2026'nın yeni profilleri — Argus için doğrudan alakalı
+### 3.3 2026'nın yeni profilleri, Argus için doğrudan alakalıdır
 
-15 Haziran 2026'da (Identiverse'te) **iki yeni Working Group Draft** onaylandı:
+15 Haziran 2026'da, Identiverse etkinliğinde, iki yeni çalışma grubu taslağı onaylanmıştır.
 
-**1. AuthZEN Access Request and Approval Profile (AARP)**
-Politika bir eylemi henüz yetkilendiremediğinde — onay, rıza, attestation, risk değerlendirmesi gibi ön koşullar eksik olduğunda — bunları **isteme, izleme, karşılama ve yeniden değerlendirme** için birlikte çalışabilir kalıplar tanımlıyor. Yani "hayır" yerine "henüz değil, şu gerekiyor".
+Birincisi AuthZEN erişim isteği ile onay profilidir. Politika bir eylemi henüz yetkilendiremediğinde, yani onay, rıza, kanıtlama ya da risk değerlendirmesi gibi ön koşullar eksik olduğunda, bunları isteme, izleme, karşılama ile yeniden değerlendirme için birlikte çalışabilir kalıplar tanımlamaktadır. Yani hayır yerine henüz değil, şu gerekmektedir demektedir.
 
-**2. AuthZEN Profile for Model Context Protocol Tool Authorization (COAZ)**
-Farklı bilgi modellerinin AuthZEN'in **SARC** (Subject-Action-Resource-Context) yapısına nasıl eşleneceğini standartlaştırıyor; MCP araçlarının ajan iş akışlarında yetkilendirme gereksinimlerini açığa vurmasını hedefliyor.
+İkincisi model bağlam protokolü araç yetkilendirmesi için AuthZEN profilidir. Farklı bilgi modellerinin AuthZEN'in özne, eylem, kaynak ile bağlam yapısına nasıl eşleneceğini standartlaştırmakta; model bağlam protokolü araçlarının ajan iş akışlarında yetkilendirme gereksinimlerini açığa vurmasını hedeflemektedir.
 
-**Ve GitHub deposunda (openid/authzen) ek taslaklar var — bunlar bir IdP için kritik:**
+GitHub deposunda, yani openid/authzen içinde, ek taslaklar vardır ile bunlar bir kimlik sağlayıcı için kritiktir.
 
-| Taslak | Neden Argus'u ilgilendiriyor |
+| Taslak | Neden Argus'u ilgilendirmektedir |
 |---|---|
-| **OAuth 2.0 Token Issuance Profile** | Token verme kararının dışsallaştırılması — **doğrudan Argus'un token endpoint'i** |
-| **OAuth 2.0 Token Exchange Binding** | RFC 8693 ile AuthZEN entegrasyonu — delegasyon zincirleri |
-| **Authorization Claims Profile** | **AuthZEN'den JWT claim'lerinin kaynaklanması** — "yetkiyi token'a gömme"nin standart yolu |
-| COAZ Framework + COAZ-MCP Binding | Protokol-nötr eşleme; MCP |
+| OAuth 2.0 token verme profili | Token verme kararının dışsallaştırılmasıdır ile doğrudan Argus'un token uç noktasıdır |
+| OAuth 2.0 token değişimi bağlaması | RFC 8693 ile AuthZEN tümleşmesidir ile devretme zincirlerini ilgilendirmektedir |
+| Yetkilendirme iddiaları profili | JWT iddialarının AuthZEN'den kaynaklanmasıdır ile yetkiyi token'a gömmenin standart yoludur |
+| COAZ çerçevesi ile model bağlam protokolü bağlaması | Protokolden bağımsız eşlemedir |
 
-**Bu, raporun en stratejik bulgusu.** "Authorization Claims Profile", tam olarak Bölüm 4.5'te tartıştığımız "token'a gömmek mi, sormak mı" ikilemine standart bir cevap veriyor. Argus bunu **erken** takip etmeli — çünkü bir IdP'nin bu profili implemente etmesi, onu AuthZEN ekosisteminde benzersiz bir konuma koyar (çoğu PDP satıcısı token *vermez*).
+Bu, raporun en stratejik bulgusudur. Yetkilendirme iddiaları profili, tam olarak 4.5'te tartışılan token'a gömmek mi sormak mı ikilemine standart bir cevap vermektedir. Argus bunu erken takip etmelidir, çünkü bir kimlik sağlayıcının bu profili gerçeklemesi onu AuthZEN ekosisteminde benzersiz bir konuma koymaktadır; çoğu karar noktası satıcısı token vermemektedir.
 
-### 3.4 Interop ve sertifikasyon
+### 3.4 Birlikte çalışabilirlik ile sertifikasyon
 
-**Sertifikasyon:** OpenID Foundation *"developing a conformance certification program for the Authorization API, so that implementers can demonstrate that a Policy Decision Point conforms to the specification."* — **Lansman tarihi yok.**
+Sertifikasyon tarafında OpenID Foundation, yetkilendirme API'si için bir uygunluk sertifikasyon programı geliştirmektedir; böylece gerçekleyiciler bir politika karar noktasının şartnameye uyduğunu gösterebilecektir. Lansman tarihi yoktur.
 
-**Interop altyapısı:** `authzen-interop.net` — bir "Todo" uygulaması üzerine kurulu senaryolar; Docusaurus sitesi, React frontend (`todo.authzen-interop.net`), TypeScript backend. *Katılımcı satıcı listesini bu oturumda birincil kaynaktan çekemedim (site erişilemedi) — **belirli PDP/PEP satıcı listesi DOĞRULANMADI**.*
+Birlikte çalışabilirlik altyapısı `authzen-interop.net` adresindedir; bir yapılacaklar uygulaması üzerine kurulu senaryolardan oluşmaktadır. Docusaurus sitesi, React ön yüzü ile TypeScript arka ucu vardır. Katılımcı satıcı listesi bu oturumda birincil kaynaktan çekilememiştir, yani site erişilememiştir; belirli karar noktası ile uygulama noktası satıcı listesi doğrulanmamıştır.
 
-**Etkinlikler (OpenID blog başlıklarından):**
-- Gartner IAM Summit — *"AuthZEN shows enterprise readiness"*, ~100 katılımcı
-- Gartner IAM London — *"From 'what is this' to 'how do we implement it'"*
-- Identiverse 2026 — *"authorization in the agent era"*; AuthZEN oturumları masterclass ve ana program seviyesine yükseldi
+Etkinlikler, OpenID blog başlıklarından, şunlardır: Gartner kimlik ile erişim yönetimi zirvesinde AuthZEN'in kurumsal hazırlığı gösterdiği, yaklaşık 100 katılımcıyla; Gartner Londra etkinliğinde bu nedir sorusundan bunu nasıl gerçekleriz sorusuna geçildiği; ile Identiverse 2026'da ajan çağında yetkilendirme temasıyla AuthZEN oturumlarının ustalık sınıfı ile ana program seviyesine yükseldiği.
 
-### 3.5 AuthZEN + Zanzibar birlikte nasıl çalışır
+### 3.5 AuthZEN ile Zanzibar birlikte nasıl çalışmaktadır
 
-Bunlar **rakip değil, farklı katmanlar**:
-- **AuthZEN** = taşıma protokolü / API sözleşmesi. Politika dili tanımlamaz — bilinçli olarak.
-- **Zanzibar** = veri modeli + karar algoritması.
+Bunlar rakip değil farklı katmanlardır. AuthZEN bir taşıma protokolü ile API sözleşmesidir; politika dili tanımlamamaktadır ile bu bilinçlidir. Zanzibar bir veri modeli ile karar algoritmasıdır.
 
-Bir Zanzibar motorunun AuthZEN cephesi sunması **doğal** ama üç impedance mismatch var:
+Bir Zanzibar motorunun AuthZEN cephesi sunması doğaldır ancak üç empedans uyuşmazlığı vardır.
 
-**(1) SARC → tuple eşlemesi.** AuthZEN'in `subject{type,id} × action{name} × resource{type,id}` üçlüsü, Zanzibar'ın `object#relation@user` tuple'ına neredeyse birebir oturur:
+Birincisi özne, eylem, kaynak ile bağlam yapısının demete eşlenmesidir. AuthZEN'in özne tipi ile kimliği, eylem adı ile kaynak tipi ile kimliğinden oluşan üçlüsü, Zanzibar'ın nesne, ilişki ile kullanıcı demetine neredeyse birebir oturmaktadır.
+
 ```
 resource.type:resource.id # action.name @ subject.type:subject.id
 ```
-Sorun `action.name` ↔ `relation` eşlemesinde. Zanzibar'da relation'lar model tarafından tanımlanır (`viewer`, `editor`); AuthZEN'de action'lar uygulama fiilleridir (`can_read`, `can_delete`). Bir **eşleme tablosu** gerekir. COAZ profili tam olarak bu problemi çözmeye çalışıyor.
 
-**(2) Search Resource ↔ ListObjects.** Semantik olarak aynı, ama AuthZEN pagination'ı zorunlu kılıyor (`next_token` REQUIRED) — bu iyi. Zanzibar motorlarının cursor'lu ListObjects'i buna eşlenebilir.
+Sorun eylem adının ilişkiye eşlenmesindedir. Zanzibar'da ilişkiler model tarafından tanımlanmaktadır, örneğin görüntüleyen ile düzenleyen; AuthZEN'de eylemler uygulama fiilleridir, örneğin okuyabilir ile silebilir. Bir eşleme tablosu gerekmektedir. COAZ profili tam olarak bu problemi çözmeye çalışmaktadır.
 
-**(3) Consistency token'ı nereye koyacağız — çözülmemiş.** AuthZEN spec'inde zookie/ZedToken için **ayrılmış bir alan yok**. Tek yer `context` nesnesi (serbest form, OPTIONAL). Yani:
+İkincisi kaynak aramasının nesne listelemeye karşılık gelmesidir. Semantik olarak aynıdır ancak AuthZEN sayfalamayı zorunlu kılmaktadır ile bu iyidir. Zanzibar motorlarının imleçli nesne listelemesi buna eşlenebilir.
+
+Üçüncüsü tutarlılık belirtecinin nereye konulacağıdır ile bu çözülmemiştir. AuthZEN şartnamesinde belirteç için ayrılmış bir alan yoktur. Tek yer serbest formlu ile isteğe bağlı `context` nesnesidir.
+
 ```json
 "context": { "zookie": "GhUKEzE3NTc..." }
 ```
-Bu işe yarar ama **satıcıya özgüdür** — interop kırılır. Aynı şekilde yanıtta yeni zookie'yi döndürmek için de standart alan yok; `context` kullanılmalı.
 
-**Argus için tavsiye:** `context.consistency_token` anahtarını kullanın, `.well-known` içindeki `capabilities` dizisinde bunu ilan edin, ve AuthZEN WG'ye bu boşluğu bildirin. Bu, standart-öncü bir konum sağlar.
+Bu işe yaramakta ancak satıcıya özgüdür ile birlikte çalışabilirlik kırılmaktadır. Aynı şekilde yanıtta yeni belirteci döndürmek için de standart bir alan yoktur ile `context` kullanılmalıdır.
+
+Argus için tavsiye şudur: `context.consistency_token` anahtarı kullanılmalı, iyi bilinen yapılandırmadaki yetenekler dizisinde bu ilan edilmeli ile AuthZEN çalışma grubuna bu boşluk bildirilmelidir. Bu, standart öncüsü bir konum sağlamaktadır.
 
 ---
 
-## BÖLÜM 4 — SICAK YOL PERFORMANSI
+## Bölüm 4 — Sıcak yol performansı
 
-### 4.1 Mertebe haritası — kanıtlı
+### 4.1 Mertebe haritası, kanıtlı
 
-Bu tablo, tüm mimari kararların dayanması gereken temeldir. Her satır ölçülmüş bir kaynaktan gelir.
+Bu tablo tüm mimari kararların dayanması gereken temeldir. Her satır ölçülmüş bir kaynaktan gelmektedir.
 
-| Katman | Gecikme | Kaynak ve koşullar |
+| Katman | Gecikme | Kaynak ile koşullar |
 |---|---|---|
-| HMAC caveat doğrulama (Python, in-process) | **2,6 µs** | arXiv:2609.00267 — 160 satır Python, laptop, 2×10⁵ çağrı |
-| Capability token exchange (Python) | **5,4 µs** | Aynı |
-| Cedar policy eval (Rust, bellekte, 5–50 entity) | **4–11 µs** medyan, **<10–20 µs** p99 | arXiv:2403.04651 — EC2 m5.4xlarge, 100K istek |
-| Cedar (Lean referans modeli) | 6 µs medyan | arXiv:2407.01688, DRT |
-| **Leopard indeks lookup** | **< 150 µs** medyan, **< 1 ms** p99 | Zanzibar §4.4, 1,56M QPS medyan |
-| OpenFGA in-process check (Go, memdb) | **89–746 µs** medyan, **283–3012 µs** p99 | arXiv:2403.04651 — *optimize edilmemiş memdb* |
-| Regorus (Rust Rego) ACI politikası | **4,6 ms** ± 0,2 | Microsoft README |
-| OPA (Go Rego) ACI politikası | **45,2 ms** ± 0,6 | Aynı |
-| Spanner read (Zanzibar'ın DB'si) | 0,5 ms medyan, 2 ms p95 | Zanzibar §4.4 |
-| **Zanzibar Check Safe** (zookie >10sn) | **3,0 ms** p50, **9,46 ms** p95, **15,0 ms** p99 | Zanzibar Tablo 2 |
-| **Zanzibar Check Recent** (zookie <10sn) | 2,86 ms p50, **60,0 ms** p95, **76,3 ms** p99 | Zanzibar Tablo 2 |
-| Zanzibar Write | 127 ms p50, 401 ms p99 | Zanzibar Tablo 2 |
+| HMAC koşul doğrulama, Python, süreç içi | 2,6 mikrosaniye | arXiv 2609.00267; 160 satır Python, dizüstü, 200 bin çağrı |
+| Yetenek token değişimi, Python | 5,4 mikrosaniye | Aynı kaynak |
+| Cedar politika değerlendirme, Rust, bellekte, beş ile 50 varlık | Medyan dört ile 11, 99. yüzdelik 10 ile 20 mikrosaniyenin altı | arXiv 2403.04651; EC2 m5.4xlarge, 100 bin istek |
+| Cedar, Lean referans modeli | Medyan altı mikrosaniye | arXiv 2407.01688, diferansiyel rastgele test |
+| Leopard indeks araması | Medyan 150 mikrosaniyenin, 99. yüzdelik bir milisaniyenin altı | Zanzibar 4.4; medyan saniyede 1,56 milyon sorgu |
+| OpenFGA süreç içi denetim, Go, bellek veritabanı | Medyan 89 ile 746, 99. yüzdelik 283 ile 3012 mikrosaniye | arXiv 2403.04651; optimize edilmemiş bellek veritabanı |
+| Regorus, Rust Rego, Azure Container Instances politikası | 4,6 artı eksi 0,2 milisaniye | Microsoft deposu |
+| OPA, Go Rego, aynı politika | 45,2 artı eksi 0,6 milisaniye | Aynı kaynak |
+| Spanner okuması, Zanzibar'ın veritabanı | Medyan 0,5, 95. yüzdelik iki milisaniye | Zanzibar 4.4 |
+| Zanzibar güvenli denetim, belirteç 10 saniyeden eski | 50. yüzdelik 3,0, 95. yüzdelik 9,46, 99. yüzdelik 15,0 milisaniye | Zanzibar Tablo 2 |
+| Zanzibar yakın zamanlı denetim, belirteç 10 saniyeden yeni | 50. yüzdelik 2,86, 95. yüzdelik 60,0, 99. yüzdelik 76,3 milisaniye | Zanzibar Tablo 2 |
+| Zanzibar yazma | 50. yüzdelik 127, 99. yüzdelik 401 milisaniye | Zanzibar Tablo 2 |
 
-**Dört mertebe var ve aralarındaki sıçramalar 10–100×:**
+Dört mertebe vardır ile aralarındaki sıçramalar 10 ile 100 kattır.
 
 ```
 ~µs        : in-process, bellekteki veri, derlenmiş politika
@@ -781,122 +789,119 @@ Bu tablo, tüm mimari kararların dayanması gereken temeldir. Her satır ölç�
 ~60-100 ms : ağ + taze veri gerektiren dağıtık çözümleme
 ```
 
-**Bir IdP'nin token endpoint'i için bütçe tipik olarak 50–200 ms'dir** (imzalama, DB, oturum). Yetkilendirmeye ayrılabilecek pay gerçekçi olarak **birkaç ms**. Yani en alttaki iki satır kabul edilemez; ilk üçü hedeflenmelidir.
+Bir kimlik sağlayıcının token uç noktası için bütçe tipik olarak 50 ile 200 milisaniyedir, yani imzalama, veritabanı ile oturumu kapsamaktadır. Yetkilendirmeye ayrılabilecek pay gerçekçi olarak birkaç milisaniyedir. Yani en alttaki iki satır kabul edilemez ile ilk üçü hedeflenmelidir.
 
-### 4.2 Cache stratejileri ve invalidation
+### 4.2 Önbellek stratejileri ile geçersizleştirme
 
-#### Google'ın gerçek cache verimliliği (tekrar, çünkü çok önemli)
+#### Google'ın gerçek önbellek verimliliği, çok önemli olduğu için tekrar
 
-| Cache katmanı | Hit oranı |
+| Önbellek katmanı | İsabet oranı |
 |---|---|
-| Check — delegate tarafı | **%10** |
-| Check — delegate lock table | %12 |
-| Check — delegator tarafı | **%2** |
-| Check — delegator lock table | %3 |
-| Read — delegate tarafı | %24 |
-| Read — delegator tarafı | **< %1** |
+| Denetim, devredilen taraf | %10 |
+| Denetim, devredilen taraf kilit tablosu | %12 |
+| Denetim, devreden taraf | %2 |
+| Denetim, devreden taraf kilit tablosu | %3 |
+| Okuma, devredilen taraf | %24 |
+| Okuma, devreden taraf | %1'in altı |
 
-Google'ın kendi değerlendirmesi: *"While these hit rates appear low, they prevent 500K internal RPCs per second from creating hot spots."*
+Google'ın kendi değerlendirmesi şudur: *"While these hit rates appear low, they prevent 500K internal RPCs per second from creating hot spots."*
 
-**Ders: karar cache'i bir latency çözümü değil, bir hot-spot çözümüdür.** Argus'un tasarımı %90 hit oranı varsayımı üzerine kurulmamalıdır. `(user, relation, object)` anahtar uzayı doğal olarak seyrektir; aynı kullanıcı aynı nesneyi kısa sürede tekrar sormaz — ama aynı *ara düğümü* (örn. "acme-org#member") çok sık sorar. **Bu yüzden cache'lenmesi gereken şey nihai karar değil, ara alt-problem sonuçlarıdır.** OpenFGA'nın `checkQueryCache`'i tam olarak bunu yapıyor: *"caching of check subproblem result"*.
+Ders şudur: karar önbelleği bir gecikme çözümü değil bir sıcak nokta çözümüdür. Argus'un tasarımı %90 isabet oranı varsayımı üzerine kurulmamalıdır. Kullanıcı, ilişki ile nesne anahtar uzayı doğal olarak seyrektir; aynı kullanıcı aynı nesneyi kısa sürede tekrar sormamakta ancak aynı ara düğümü, örneğin bir kuruluşun üye ilişkisini, çok sık sormaktadır. Bu yüzden önbeleklenmesi gereken şey nihai karar değil ara alt problem sonuçlarıdır. OpenFGA'nın denetim sorgu önbelleği tam olarak bunu yapmakta ile denetim alt problemi sonucunu önbeleklemektedir.
 
-#### Invalidation — dört yaklaşım
+#### Geçersizleştirme, dört yaklaşım
 
 | Strateji | Nasıl | Artı | Eksi |
 |---|---|---|---|
-| **TTL** | Süre dolunca at | Basit | Nedenselliği korumaz; new enemy açık kalır |
-| **Write-through** | Yazma anında ilgili girdileri düşür | Taze | Hangi girdiler etkilendi? Transitif kapanış problemi — bir grup üyeliği değişince binlerce karar etkilenir |
-| **Event-driven** | Changelog/Watch stream'i dinle | Ölçeklenir | Gecikme var; sıralama garantisi gerekir |
-| **Versioned snapshot (zookie)** | Cache anahtarına revision koy | **Nedensel doğruluk** | İstemci sözleşmesi gerekir |
+| Yaşam süresi | Süre dolunca atılır | Basittir | Nedenselliği korumaz ile yeni düşman açık kalır |
+| Yazarken geçirme | Yazma anında ilgili girdiler düşürülür | Tazedir | Hangi girdilerin etkilendiği bir geçişli kapanış problemidir; bir grup üyeliği değişince binlerce karar etkilenir |
+| Olay güdümlü | Değişiklik günlüğü ya da izleme akışı dinlenir | Ölçeklenir | Gecikme vardır ile sıralama garantisi gerekir |
+| Sürümlü anlık görüntü, yani tutarlılık belirteci | Önbellek anahtarına revizyon konur | Nedensel doğruluk sağlar | İstemci sözleşmesi gerektirir |
 
-**OpenFGA'nın yaklaşımı:** `ReadChanges` API'si — kronolojik sıralı tuple değişiklik listesi, continuation token ile. Sayfa boyutu ≤100. Nesne tipine göre filtrelenebilir. `cacheController` bunu polling ile kullanıyor (varsayılan TTL 10s). Doküman açıkça uyarıyor: *"does not include other changes, like updates to your authorization model"* — **model değişiklikleri cache invalidation'ı tetiklemiyor.**
+OpenFGA'nın yaklaşımı `ReadChanges` API'sidir: devam belirteciyle kronolojik sıralı bir demet değişiklik listesidir. Sayfa boyutu en fazla 100'dür ile nesne tipine göre süzülebilir. Önbellek denetleyicisi bunu yoklamayla kullanmaktadır, varsayılan yaşam süresi 10 saniyedir. Doküman açıkça uyarmaktadır: bu, yetkilendirme modelindeki güncellemeler gibi diğer değişiklikleri içermemektedir. Yani model değişiklikleri önbellek geçersizleştirmesini tetiklememektedir.
 
-**SpiceDB'nin yaklaşımı:** ZedToken. Cache anahtarı revision'ı içerdiği için, `at_least_as_fresh` ile yapılan bir sorgu eski cache girdisini **yapısal olarak** kullanamaz. Invalidation problemi ortadan kalkar çünkü eski girdi yanlış anahtar altındadır. Bu, TTL'e karşı kategorik olarak üstün bir tasarımdır.
+SpiceDB'nin yaklaşımı tutarlılık belirtecidir. Önbellek anahtarı revizyonu içerdiği için `at_least_as_fresh` ile yapılan bir sorgu eski önbellek girdisini yapısal olarak kullanamamaktadır. Geçersizleştirme problemi ortadan kalkmaktadır, çünkü eski girdi yanlış anahtar altındadır. Bu, yaşam süresine karşı kategorik olarak üstün bir tasarımdır.
 
-**Argus için: zookie eşdeğerini baştan koyun.** Sonradan eklenemez — çünkü API sözleşmesini ve istemci davranışını değiştirir. OpenFGA'nın "sonraki sürümlerde düşünüyoruz" durumu, bu borcun ne kadar ağır olduğunun kanıtıdır.
+Argus için tavsiye şudur: tutarlılık belirteci eşdeğeri baştan konulmalıdır. Sonradan eklenemez, çünkü API sözleşmesini ile istemci davranışını değiştirmektedir. OpenFGA'nın sonraki sürümlerde düşünüyoruz durumu bu borcun ne kadar ağır olduğunun kanıtıdır.
 
-#### Negatif cache — özel dikkat
+#### Olumsuz önbellek, özel dikkat
 
-"Bu kullanıcının bu yetkisi YOK" sonucunu cache'lemek cazip ve etkilidir (deny'lar genellikle allow'lardan çok daha sık). Ama iki risk:
-1. **Yetki verildikten sonra kullanıcı hâlâ giremiyor** — kullanıcı deneyimi felaketi, destek yükü.
-2. Negatif cache TTL'i pozitiften **kısa** olmalıdır — güvenlik açısından bayat "hayır" zararsız, bayat "evet" tehlikelidir. Ama ürün açısından tam tersi.
+Bu kullanıcının bu yetkisi yoktur sonucunu önbeleklemek cazip ile etkilidir, çünkü retler genellikle izinlerden çok daha sıktır. Ancak iki risk vardır. Birincisi, yetki verildikten sonra kullanıcının hâlâ girememesidir; bu bir kullanıcı deneyimi felaketi ile destek yüküdür. İkincisi, olumsuz önbellek yaşam süresinin olumludan kısa olması gerektiğidir; güvenlik açısından bayat bir hayır zararsız, bayat bir evet tehlikelidir. Ancak ürün açısından tam tersidir.
 
-**Öneri:** Negatif cache TTL'i çok kısa (≤1 sn) veya write-through invalidation ile. Yetki verme (`Write`) işlemi ilgili negatif girdileri **senkron** olarak düşürmelidir.
+Öneri şudur: olumsuz önbellek yaşam süresi çok kısa, yani bir saniye ya da altı olmalı, ya da yazarken geçersizleştirme kullanılmalıdır. Yetki verme işlemi ilgili olumsuz girdileri senkron olarak düşürmelidir.
 
 ### 4.3 Politika derleme
 
-#### Cedar'ın yaklaşımı: slicing + optional typing
+#### Cedar'ın yaklaşımı: dilimleme ile isteğe bağlı tipleme
 
-Cedar'ın "sound slicing" özelliği **formal olarak kanıtlanmıştır** (Property 5). Politika scope'undaki `principal in ?principal` / `resource == ?resource` kısıtları **indeksleme anahtarı** olarak kullanılır: gelen istek için sadece ilgili politika alt kümesi değerlendirilir.
+Cedar'ın sağlam dilimleme özelliği formel olarak kanıtlanmıştır, yani beşinci özelliktir. Politika kapsamındaki asıl ile kaynak kısıtları bir indeksleme anahtarı olarak kullanılmaktadır: gelen istek için yalnızca ilgili politika alt kümesi değerlendirilmektedir.
 
-Makalenin ölçümü (§5.3): `gdrive-templates` 4 statik politika + 1 template, `github-templates` 3 statik + 5 template. Template link'ler entity çifti başına 0,05 olasılıkla üretiliyor — yani link sayısı entity sayısında **kuadratik**. Slicing bu senaryoda anlamlı kazanç sağlıyor.
+Makalenin 5.3 bölümündeki ölçümü şudur: gdrive şablonlarında dört statik politika ile bir şablon, github şablonlarında üç statik ile beş şablon vardır. Şablon bağlantıları varlık çifti başına 0,05 olasılıkla üretilmektedir; yani bağlantı sayısı varlık sayısında kuadratiktir. Dilimleme bu senaryoda anlamlı bir kazanç sağlamaktadır.
 
-Ama kritik nüans: *"The sound policy slicing scheme does not benefit our Cedar gdrive and github examples because their policies do not have scope-level constraints on principal and resource."* — **Slicing ancak politikalar doğru yazılırsa işe yarar.** Otomatik bir kazanç değil, bir modelleme disiplini.
+Kritik nüans şudur: *"The sound policy slicing scheme does not benefit our Cedar gdrive and github examples because their policies do not have scope-level constraints on principal and resource."* Yani dilimleme ancak politikalar doğru yazılırsa işe yaramaktadır. Otomatik bir kazanç değil bir modelleme disiplinidir.
 
-#### OpenFGA'nın yaklaşımı: weighted graph resolution
+#### OpenFGA'nın yaklaşımı: ağırlıklı graf çözümlemesi
 
-Model grafındaki kenarlara ağırlık atayıp çözümleme yolunu seçen bir **sorgu planlayıcı** (blog, 21 Temmuz 2026). Check, BatchCheck, ListObjects, Expand, ListUsers'a yayılıyor.
+Model grafındaki kenarlara ağırlık atayıp çözümleme yolunu seçen bir sorgu planlayıcıdır, yani 21 Temmuz 2026 tarihli blog yazısıdır. Denetim, yığın denetimi, nesne listeleme, genişletme ile kullanıcı listelemeye yayılmaktadır.
 
-Bu, klasik veritabanı sorgu optimizasyonunun ReBAC'a uygulanmasıdır ve doğru fikirdir: `viewer or editor from parent` gibi bir ifadede hangi dalın önce denenmesi gerektiği, o dalın beklenen fan-out'una bağlıdır.
+Bu, klasik veritabanı sorgu optimizasyonunun ilişki tabanlı erişim kontrolüne uygulanmasıdır ile doğru bir fikirdir: üst nesneden gelen görüntüleyen ya da düzenleyen gibi bir ifadede hangi dalın önce denenmesi gerektiği, o dalın beklenen yayılımına bağlıdır.
 
-**Uyarı (tekrar):** v1.18.2/v1.18.3 sürüm notları bu motorda "intermittent false returns" ve "cache key collisions" düzeltiyor. **Sorgu planlayıcı yazmak, yanlış cevap üretme riskini artırır.** Argus bunu yaparsa, planlayıcılı ve planlayıcısız yolların **diferansiyel test edilmesi zorunludur** (Cedar'ın DRT'sinin yaptığı gibi).
+Uyarı tekrar edilmelidir: 1.18.2 ile 1.18.3 sürüm notları bu motorda aralıklı yanlış dönüşleri ile önbellek anahtarı çakışmalarını düzeltmektedir. Sorgu planlayıcı yazmak yanlış cevap üretme riskini artırmaktadır. Argus bunu yaparsa planlayıcılı ile planlayıcısız yolların diferansiyel test edilmesi zorunludur, ki Cedar'ın diferansiyel rastgele testinin yaptığıdır.
 
-#### Materialized index (Leopard yolu)
+#### Gerçeklenmiş indeks, Leopard yolu
 
-En büyük kazanç burada: **150 µs vs 3 ms — 20 kat.**
+En büyük kazanç buradadır: 150 mikrosaniyeye karşı üç milisaniye, yani 20 kat.
 
-Mekanizma: transitif grup kapanışını önceden hesapla, sıralı integer listeleri (skip list / roaring bitmap) olarak sakla, üyelik testini **set kesişimi**ne indirge:
+Mekanizma şudur: geçişli grup kapanışı önceden hesaplanmakta, sıralı tam sayı listeleri olarak, yani atlama listesi ya da roaring bitmap olarak saklanmakta ile üyelik testi bir küme kesişimine indirgenmektedir.
+
 ```
 (MEMBER2GROUP(U) ∩ GROUP2GROUP(G)) ≠ ∅
 ```
 
-**Maliyeti:** Incremental güncelleme katmanı. Zanzibar'ın Leopard'ı medyan ~500, p99 ~1,5K index güncellemesi/sn işliyor — 25K QPS'lik Write yüküne karşı. Yani **yazma yükünün küçük bir yüzdesi** index güncellemesi tetikliyor (çünkü çoğu tuple grup üyeliği değil).
+Maliyeti artımlı güncelleme katmanıdır. Zanzibar'ın Leopard'ı saniyede medyan yaklaşık 500, 99. yüzdelikte yaklaşık 1.500 indeks güncellemesi işlemektedir; buna karşılık yazma yükü saniyede 25 bindir. Yani yazma yükünün küçük bir yüzdesi indeks güncellemesi tetiklemektedir, çünkü çoğu demet grup üyeliği değildir.
 
-**Argus için:** Bu, `differential-dataflow` crate'inin teorik olarak parladığı yer. Ama üretimde ReBAC materialization için kullanan bilinen örnek **bulamadım (DOĞRULANMADI)**. Daha güvenli yol: elle yazılmış incremental closure + roaring bitmap.
+Argus için bu, `differential-dataflow` crate'inin teorik olarak parladığı yerdir. Ancak üretimde ilişki tabanlı gerçekleme için kullanan bilinen bir örnek bulunamamıştır ile doğrulanmamıştır. Daha güvenli yol elle yazılmış artımlı kapanış ile roaring bitmap'tir.
 
-### 4.4 Batch check
+### 4.4 Yığın denetimi
 
 | Sistem | Mekanizma | Limitler |
 |---|---|---|
-| **OpenFGA** | `BatchCheck` | `maxBatchSize` **50**, `maxParallelRequests` **10**. *"Less efficient than parallel Check calls for fewer than 10 checks"* |
-| **SpiceDB** | `CheckBulkPermissions` | *Limitler bu oturumda doğrulanmadı* |
-| **AuthZEN** | `/access/v1/evaluations` | Varsayılan alan devralma + üç short-circuit semantiği |
+| OpenFGA | `BatchCheck` | Azami yığın boyutu 50, azami paralel istek 10. *"Less efficient than parallel Check calls for fewer than 10 checks"* |
+| SpiceDB | `CheckBulkPermissions` | Limitler bu oturumda doğrulanmamıştır |
+| AuthZEN | `/access/v1/evaluations` | Varsayılan alan devralma ile üç kısa devre semantiği |
 
-**N+1 yetkilendirme problemi:** Bir liste sayfasında 50 öğe gösteriliyorsa, naif kod 50 ayrı check yapar. Ağ üzerinden bu 50 × 3 ms = 150 ms'dir. Batch ile bu, tek round-trip + paralel çözümleme olur.
+N artı bir yetkilendirme problemi şudur: bir liste sayfasında 50 öğe gösteriliyorsa naif kod 50 ayrı denetim yapmaktadır. Ağ üzerinden bu 50 çarpı üç milisaniye, yani 150 milisaniyedir. Yığınla bu tek bir gidiş dönüş ile paralel çözümleme olmaktadır.
 
-**AuthZEN'in `deny_on_first_deny` semantiği** özellikle değerlidir: "bu 5 koşulun hepsi sağlanmalı" sorusunda ilk ret'te durur.
+AuthZEN'in ilk rette durma semantiği özellikle değerlidir: bu beş koşulun hepsi sağlanmalıdır sorusunda ilk rette durulmaktadır.
 
-### 4.5 Token'a gömmek vs her istekte sormak
+### 4.5 Token'a gömmek ile her istekte sormak
 
-Bu, Argus'un vereceği **en önemli tek mimari karardır**.
+Bu, Argus'un vereceği en önemli tek mimari karardır.
 
 #### Karşılaştırma
 
-| Boyut | Token'a gömme | Her istekte check |
+| Boyut | Token'a gömme | Her istekte denetim |
 |---|---|---|
-| Sıcak yol maliyeti | **~µs** (imza doğrulama) | 0,1–15 ms |
-| Tazelik | Token TTL kadar bayat | Cache TTL kadar bayat |
-| Revocation | **Zor** — token süresi dolana kadar geçerli | Anında |
-| Boyut | **Şişer** | Sabit |
-| PDP erişilemezse | Çalışmaya devam eder | Durur (veya fail-open riski) |
-| Denetlenebilirlik | Karar anı ≠ kullanım anı | Her kullanım loglanır |
-| İnce tanelilik | Kaba (rol/scope) | **İnce (kaynak başına)** |
+| Sıcak yol maliyeti | Mikrosaniye mertebesindedir, yani imza doğrulamadır | 0,1 ile 15 milisaniyedir |
+| Tazelik | Token yaşam süresi kadar bayattır | Önbellek yaşam süresi kadar bayattır |
+| İptal | Zordur; token süresi dolana kadar geçerlidir | Anındadır |
+| Boyut | Şişmektedir | Sabittir |
+| Karar noktası erişilemezse | Çalışmaya devam etmektedir | Durmaktadır, ya da açık başarısızlık riski taşımaktadır |
+| Denetlenebilirlik | Karar anı kullanım anından farklıdır | Her kullanım günlüğe yazılmaktadır |
+| İnce tanelilik | Kabadır, yani rol ile kapsam düzeyindedir | İncedir, yani kaynak başınadır |
 
-#### Token şişmesi — gerçek limitler
+#### Token şişmesi, gerçek limitler
 
-Bunlar mimari sabitlerdir:
-- **Cookie: 4 KB** (RFC 6265 uyumlu tarayıcı limiti)
-- **HTTP header: 8 KB** varsayılan (nginx `large_client_header_buffers`, Envoy `max_request_headers_kb` varsayılanı 60 KB ama upstream'ler genelde 8 KB)
+Bunlar mimari sabitlerdir. Çerez sınırı dört kibibayttır, ki RFC 6265 uyumlu tarayıcı limitidir. HTTP başlık sınırı varsayılan olarak sekiz kibibayttır; nginx'te büyük istemci başlık arabellekleriyle, Envoy'da azami istek başlığı kibibayt ayarıyla belirlenmektedir, ki Envoy varsayılanı 60 kibibayttır ancak yukarı akış sunucuları genelde sekiz kibibayttadır.
 
-*Not: bu değerler yaygın varsayılanlardır; bu oturumda birincil dokümantasyondan yeniden doğrulanmadı — **kesin sürüm-spesifik değerler DOĞRULANMADI**.*
+Bu değerler yaygın varsayılanlardır; bu oturumda birincil dokümantasyondan yeniden doğrulanmamıştır ile kesin sürüme özgü değerler doğrulanmamıştır.
 
-Bir kullanıcının 500 belgeye erişimi varsa, bu ID'leri token'a koymak imkânsızdır. **İnce taneli yetki token'a sığmaz — bu matematiksel bir gerçektir, bir mühendislik tercihi değil.**
+Bir kullanıcının 500 belgeye erişimi varsa bu kimlikleri token'a koymak imkânsızdır. İnce taneli yetki token'a sığmamaktadır; bu matematiksel bir gerçektir, bir mühendislik tercihi değildir.
 
-#### Keycloak'ın UMA/RPT yaklaşımı neden ölçeklenmiyor
+#### Keycloak'ın UMA ile talep eden taraf token'ı yaklaşımı neden ölçeklenmemektedir
 
-Keycloak'ın Authorization Services'i, izinleri bir "Requesting Party Token" (RPT) içine koyar. Kullanıcının erişebildiği kaynak sayısı arttıkça RPT büyür. Bu, tam olarak yukarıdaki duvara çarpar. Projenizin README'sinde de bu "kaba taneli zayıflık" olarak not edilmiş — teknik kökeni budur.
+Keycloak'ın yetkilendirme servisleri izinleri bir talep eden taraf token'ının içine koymaktadır. Kullanıcının erişebildiği kaynak sayısı arttıkça bu token büyümektedir. Bu, tam olarak yukarıdaki duvara çarpmaktadır. Projenin kendi açıklamasında da bu bir kaba tanelilik zayıflığı olarak not edilmiştir ile teknik kökeni budur.
 
-#### Doğru sentez: **iki katmanlı**
+#### Doğru sentez: iki katmanlı
 
 ```
 Katman 1 — Token'a göm (kaba, sabit boyutlu):
@@ -911,47 +916,47 @@ Katman 2 — Her istekte sor (ince, kaynak başına):
   • Maliyet: in-process ~µs-ms
 ```
 
-**Ve kritik kural:** Katman 1 asla tek başına yetki kanıtı olmamalıdır. Token'daki `role: admin` claim'i, "admin olduğu iddia ediliyor" bilgisidir — "bu kaynağa erişebilir" kararı değildir. Bu ayrımı bulanıklaştırmak, IDOR'un doğduğu yerdir.
+Kritik kural şudur: birinci katman asla tek başına bir yetki kanıtı olmamalıdır. Token'daki yönetici rolü iddiası, yönetici olduğu iddia edilmektedir bilgisidir; bu kaynağa erişebilir kararı değildir. Bu ayrımı bulanıklaştırmak, güvensiz doğrudan nesne referanslarının doğduğu yerdir.
 
-**AuthZEN'in "Authorization Claims Profile" taslağı tam olarak Katman 1'i standartlaştırıyor.** Argus'un bunu takip etmesi gerekir.
+AuthZEN'in yetkilendirme iddiaları profili taslağı tam olarak birinci katmanı standartlaştırmaktadır. Argus'un bunu takip etmesi gerekmektedir.
 
-### 4.6 Rust'ta mikrosaniye altı karar mümkün mü?
+### 4.6 Rust'ta mikrosaniye altı karar mümkün müdür
 
-**Dürüst cevap: kararın türüne bağlı.**
+Dürüst cevap kararın türüne bağlıdır.
 
-| Karar türü | Mikrosaniye altı? | Gerekçe |
+| Karar türü | Mikrosaniye altı mıdır | Gerekçe |
 |---|---|---|
-| İmza/HMAC doğrulama | **Evet** | 2,6 µs Python'da; Rust'ta ~0,3–1 µs beklenebilir (Ed25519 doğrulama tipik olarak ~50 µs, HMAC-SHA256 ~1 µs — *mertebe tahmini, DOĞRULANMADI*) |
-| Bitmap AND + boşluk testi | **Evet** | Roaring bitmap kesişimi, tek gruplarda yüzlerce ns mertebesinde |
-| Önceden derlenmiş rol tablosu lookup | **Evet** | HashMap lookup ~20–50 ns mertebesi |
-| Cedar tarzı politika değerlendirme | **Hayır** — 4–11 µs | Ölçülmüş |
-| ReBAC graph yürüyüşü (bellekte) | **Hayır** — ≥10 µs | Fan-out'a bağlı |
-| ReBAC + DB okuması | **Kesinlikle hayır** — ≥1 ms | Spanner bile 0,5 ms |
+| İmza ile HMAC doğrulama | Evet | Python'da 2,6 mikrosaniyedir; Rust'ta 0,3 ile bir mikrosaniye beklenebilir. Ed25519 doğrulama tipik olarak yaklaşık 50, HMAC-SHA256 yaklaşık bir mikrosaniyedir; bu bir mertebe tahminidir ile doğrulanmamıştır |
+| Bitmap kesişimi ile boşluk testi | Evet | Roaring bitmap kesişimi tek gruplarda yüzlerce nanosaniye mertebesindedir |
+| Önceden derlenmiş rol tablosu araması | Evet | Karma tablo araması 20 ile 50 nanosaniye mertebesindedir |
+| Cedar tarzı politika değerlendirme | Hayır; dört ile 11 mikrosaniyedir | Ölçülmüştür |
+| İlişki tabanlı graf yürüyüşü, bellekte | Hayır; 10 mikrosaniye ve üstüdür | Yayılıma bağlıdır |
+| İlişki tabanlı denetim artı veritabanı okuması | Kesinlikle hayır; bir milisaniye ve üstüdür | Spanner bile 0,5 milisaniyededir |
 
-**Yani: "mikrosaniye altı yetkilendirme" ancak kararın önceden materialize edilmiş olması hâlinde mümkündür.** 2,6 µs'lik broker bunu yapıyor — karar zaten token'da yazılı, sadece imzası doğrulanıyor.
+Yani mikrosaniye altı yetkilendirme ancak kararın önceden gerçeklenmiş olması hâlinde mümkündür. 2,6 mikrosaniyelik komisyoncu bunu yapmaktadır: karar zaten token'da yazılıdır ile yalnızca imzası doğrulanmaktadır.
 
-**Argus için gerçekçi hedef:**
+Argus için gerçekçi hedef şudur.
 
 | Yol | Hedef |
 |---|---|
-| Token doğrulama + kaba yetki (Katman 1) | **< 5 µs** p99 |
-| İnce taneli check, cache hit / materialized | **< 100 µs** p99 |
-| İnce taneli check, cache miss, yerel DB | **< 5 ms** p99 |
-| Search/ListObjects | **< 50 ms** p99, zorunlu deadline |
+| Token doğrulama artı kaba yetki, birinci katman | 99. yüzdelikte beş mikrosaniyenin altı |
+| İnce taneli denetim, önbellek isabeti ya da gerçeklenmiş | 99. yüzdelikte 100 mikrosaniyenin altı |
+| İnce taneli denetim, önbellek ıskası, yerel veritabanı | 99. yüzdelikte beş milisaniyenin altı |
+| Arama ile nesne listeleme | 99. yüzdelikte 50 milisaniyenin altı, zorunlu son tarihle |
 
-Bunlar Zanzibar'ın ürettiğinden daha iyidir — çünkü Argus tek bölgede, in-process çalışacak, global replikasyon vergisi ödemeyecek.
+Bunlar Zanzibar'ın ürettiğinden daha iyidir, çünkü Argus tek bölgede ile süreç içinde çalışacak ile küresel replikasyon vergisi ödemeyecektir.
 
 ---
 
-## BÖLÜM 5 — VERİ MODELİ VE MİGRASYON
+## Bölüm 5 — Veri modeli ile göç
 
-### 5.1 RBAC'tan ReBAC'a — doğru soyutlama
+### 5.1 Rol tabanlıdan ilişki tabanlıya, doğru soyutlama
 
-Projenizin README'sinde şu tavsiye var: *"Rol tablosuyla başla; ilişki karmaşıklığı çıkınca OpenFGA/SpiceDB'ye taşı."*
+Projenin kendi açıklamasında şu tavsiye vardır: rol tablosuyla başlanmalı ile ilişki karmaşıklığı çıkınca OpenFGA ya da SpiceDB'ye taşınmalıdır.
 
-**Bu tavsiyenin tehlikeli tarafı şudur:** Rol tablosuyla başlarsanız, uygulama kodunuz `if user.role == "admin"` yazar. Bu, kaynak-özgü olmayan bir sorudur ve ReBAC'a taşınırken **her çağrı yerinin yeniden yazılması** gerekir. Maliyet, tablo migrasyonunda değil, **uygulama kodunun tamamındadır**.
+Bu tavsiyenin tehlikeli tarafı şudur: rol tablosuyla başlanırsa uygulama kodu kullanıcının rolünü yönetici mi diye sormaktadır. Bu, kaynağa özgü olmayan bir sorudur ile ilişki tabanlı modele taşınırken her çağrı yerinin yeniden yazılması gerekmektedir. Maliyet tablo göçünde değil uygulama kodunun tamamındadır.
 
-**Doğru soyutlama, ilk günden `check(subject, action, resource)` şeklindedir.** İçeride ne olduğu önemli değil:
+Doğru soyutlama, ilk günden özne, eylem ile kaynak alan bir denetim çağrısıdır. İçeride ne olduğu önemli değildir.
 
 ```rust
 // Gün 1 — arkasında basit bir rol tablosu olabilir
@@ -961,152 +966,151 @@ authz.check(&user, "read", &Resource::document("doc-42")).await?
 authz.check(&user, "read", &Resource::document("doc-42")).await?
 ```
 
-**Anahtar ilke: `resource` parametresi ilk günden zorunlu olmalıdır**, o gün için modelde kullanılmasa bile. Çünkü sonradan eklenemez — eklemek her çağrı yerini bulmayı gerektirir.
+Anahtar ilke şudur: kaynak parametresi ilk günden zorunlu olmalıdır, o gün için modelde kullanılmasa bile. Çünkü sonradan eklenemez; eklemek her çağrı yerini bulmayı gerektirmektedir.
 
-RBAC, ReBAC'ın bir alt kümesidir: `role:admin#member@user:alice` bir tuple'dır. Yani ReBAC modeliyle başlayıp sadece RBAC şekilli tuple'lar yazmak **hiçbir şey kaybettirmez** ve migrasyon maliyetini sıfırlar.
+Rol tabanlı erişim kontrolü ilişki tabanlının bir alt kümesidir: bir yönetici rolünün üyeliği de bir demettir. Yani ilişki tabanlı modelle başlayıp yalnızca rol şeklinde demetler yazmak hiçbir şey kaybettirmemekte ile göç maliyetini sıfırlamaktadır.
 
 ### 5.2 Şema evrimi
 
-**OpenFGA'nın modeli:** Immutable model'ler, her değişiklikte yeni model ID. Uygulama hangi model ID'yi kullanacağını belirtir. Tuple'lar modelden bağımsız saklanır.
+OpenFGA'nın modeli değişmez modellerdir; her değişiklikte yeni bir model kimliği üretilmektedir. Uygulama hangi model kimliğini kullanacağını belirtmektedir. Demetler modelden bağımsız saklanmaktadır.
 
-**Kritik ve tehlikeli davranış:** *"The tuples that are not valid according to the specified model, are ignored when evaluating queries."*
+Kritik ile tehlikeli davranış şudur: *"The tuples that are not valid according to the specified model, are ignored when evaluating queries."*
 
-Bunun üç sonucu var:
-1. Bir relation'ı silerseniz, tuple'lar **kalır** ve performansı düşürür.
-2. Modeli **geri alırsanız**, o tuple'lar **yeniden aktif olur** — sessizce yetki geri gelir.
-3. Yeniden adlandırma sırasında hem eski hem yeni tuple'lar bir süre yaşar — çift yazma penceresi.
+Bunun üç sonucu vardır.
 
-**Argus için tasarım kararı:** Geçersiz tuple'lar sessizce yok sayılmamalı. En azından:
-- `authz_orphaned_tuples_total{store,type,relation}` metriği
-- Model yayımlarken "bu değişiklik N tuple'ı yetimleştirecek" uyarısı
-- Yetim tuple'lar için açık bir temizleme (GC) işi
+1. Bir ilişki silinirse demetler kalmakta ile performansı düşürmektedir.
+2. Model geri alınırsa o demetler yeniden aktif olmakta ile yetki sessizce geri gelmektedir.
+3. Yeniden adlandırma sırasında hem eski hem yeni demetler bir süre yaşamaktadır, yani bir çift yazma penceresi vardır.
 
-### 5.3 Yetkilendirme verisini kim yazar?
+Argus için tasarım kararı şudur: geçersiz demetler sessizce yok sayılmamalıdır. En azından şunlar gerekmektedir: depo, tip ile ilişki etiketli bir yetim demet sayacı metriği; model yayımlarken bu değişikliğin kaç demeti yetimleştireceği uyarısı; ile yetim demetler için açık bir temizleme işi.
 
-Bu, sektörün en az konuşulan ama en çok soruna yol açan problemidir.
+### 5.3 Yetkilendirme verisini kim yazmaktadır
+
+Bu, sektörün en az konuşulan ancak en çok soruna yol açan problemidir.
 
 | Model | Nasıl | Risk |
 |---|---|---|
-| **Uygulama yazar** | Belge oluşturulunca app tuple yazar | **İki-fazlı commit problemi**: app DB'sine yazıldı, authz'a yazılamadı → yetim kaynak (kimse erişemez) veya tersi (herkes erişir) |
-| **IdP/authz yazar** | Merkezî API | App'in iş mantığını bilmez |
-| **Outbox pattern** | App kendi transaction'ında outbox tablosuna yazar, ayrı worker authz'a taşır | En sağlam; **eventual consistency** kabul edilir |
-| **CDC** | App DB'sinden change data capture | Şema bağımlılığı kırılgan |
+| Uygulama yazar | Belge oluşturulunca uygulama demeti yazar | İki fazlı işleme problemidir: uygulama veritabanına yazılmış ancak yetkilendirmeye yazılamamıştır; sonuç yetim bir kaynaktır, yani kimse erişememektedir, ya da tersidir, yani herkes erişmektedir |
+| Kimlik sağlayıcı ya da yetkilendirme yazar | Merkezî bir API üzerinden | Uygulamanın iş mantığını bilmemektedir |
+| Giden kutusu deseni | Uygulama kendi işleminde giden kutusu tablosuna yazar, ayrı bir işçi yetkilendirmeye taşır | En sağlamdır; nihai tutarlılık kabul edilmektedir |
+| Değişiklik verisi yakalama | Uygulama veritabanından yakalanır | Şema bağımlılığı kırılgandır |
 
-**Senkronizasyon problemi somut örneği:**
+Senkronizasyon probleminin somut örneği şudur.
+
 ```
-1. App: INSERT INTO documents (id, owner) VALUES ('doc-42', 'alice')  ✓ COMMIT
-2. App: authz.write(document:doc-42#owner@user:alice)                 ✗ TIMEOUT
-→ Belge var, sahibi yok. Alice kendi belgesini göremiyor.
+1. App: INSERT INTO documents (id, owner) VALUES ('doc-42', 'alice')  COMMIT
+2. App: authz.write(document:doc-42#owner@user:alice)                 TIMEOUT
+Sonuç: Belge var, sahibi yok. Alice kendi belgesini göremiyor.
 ```
 
-**Ters yön daha kötü:**
+Ters yön daha kötüdür.
+
 ```
-1. App: authz.write(document:doc-42#viewer@user:bob)   ✓
-2. App: DELETE FROM documents WHERE id='doc-42'        ✓
+1. App: authz.write(document:doc-42#viewer@user:bob)   OK
+2. App: DELETE FROM documents WHERE id='doc-42'        OK
 3. Yeni belge oluşturuldu, ID yeniden kullanıldı: 'doc-42'
-→ Bob yeni belgeyi görüyor. YETKİ SIZINTISI.
+Sonuç: Bob yeni belgeyi görüyor. YETKİ SIZINTISI.
 ```
 
-**Argus için zorunlu kurallar:**
-1. **Kaynak ID'leri asla yeniden kullanılmamalı.** UUID/ULID kullanın. Bu, tuple sızıntısının tek yapısal savunmasıdır.
-2. **Outbox pattern'i birinci sınıf destekleyin** — Argus bir "pending writes" API'si sunmalı, idempotent tuple yazma (aynı tuple'ı iki kez yazmak hata olmamalı — OpenFGA bunu 31 Ekim 2025'te ekledi: *"Ignore Duplicate Tuples On Write"*).
-3. **Silme işleminde cascade semantiği**: `document:doc-42` silinince, o objeye ait tüm tuple'lar silinmeli. Argus bunu bir API olarak sunmalı (`DeleteObject`), yoksa her uygulama kendi eksik versiyonunu yazar.
+Argus için zorunlu kurallar şunlardır.
+
+1. Kaynak kimlikleri asla yeniden kullanılmamalıdır. UUID ya da ULID kullanılmalıdır. Bu, demet sızıntısının tek yapısal savunmasıdır.
+2. Giden kutusu deseni birinci sınıf desteklenmelidir. Argus bekleyen yazmalar için bir API sunmalı ile demet yazma etkisiz kılınabilir olmalıdır; aynı demeti iki kez yazmak bir hata olmamalıdır, ki OpenFGA bunu 31 Ekim 2025'te yinelenen demetleri yazarken yok say özelliğiyle eklemiştir.
+3. Silme işleminde art arda silme semantiği gerekmektedir: bir nesne silinince o nesneye ait tüm demetler silinmelidir. Argus bunu bir API olarak sunmalıdır, yoksa her uygulama kendi eksik sürümünü yazacaktır.
 
 ---
 
-## BÖLÜM 6 — GÜVENLİK
+## Bölüm 6 — Güvenlik
 
-### 6.1 CVE tablosu — gerçek veriler (OSV.dev, 8 Eylül 2026)
+### 6.1 Güvenlik açığı tablosu, gerçek veriler, OSV.dev, 8 Eylül 2026
 
-#### OpenFGA — 26 danışmanlık
+#### OpenFGA, 26 danışmanlık
 
-En kritik olanlar (authorization bypass sınıfı kalınlaştırılmıştır):
+En kritik olanlar şunlardır; yetkilendirme atlatma sınıfı ayrıca belirtilmiştir.
 
-| CVE | Tarih | Şiddet | Etkilenen | Özet |
+| Tanımlayıcı | Tarih | Şiddet | Etkilenen | Özet |
 |---|---|---|---|---|
-| **CVE-2026-55689** | 2026-06-19 | MODERATE (C:H/I:H) | < 1.18.0 | **OIDC audience doğrulaması `--authn-oidc-audience` ayarlanmamışsa atlanıyor** |
-| **CVE-2026-55170** | 2026-06-18 | LOW | < 1.18.0 | Improper Policy Enforcement |
-| **CVE-2026-48096** | 2026-06-11 | MODERATE | < 1.16.0 | **shared-iterator ve v2 iterator'da cache-key delimiter injection → store içi karar zehirlenmesi** |
-| **CVE-2026-41131** | 2026-04-22 | MODERATE | < 1.14.1 | Improper Policy Enforcement |
-| **CVE-2026-40293** | 2026-04-08 | MODERATE | 0.1.4–1.14.0 | **Kimlik doğrulamasız playground endpoint'i preshared API key'i HTML yanıtta sızdırıyor** |
-| **CVE-2026-34972** | 2026-04-07 | MODERATE | 1.8.0–1.14.0 | **BatchCheck içi deduplikasyon, list-value cache-key çakışması ile yanlış karar üretiyor** |
-| **CVE-2026-33729** | 2026-03-26 | MODERATE | < 1.13.1 | **Cache'lenmiş anahtarlar üzerinden authorization bypass** |
-| **CVE-2026-24851** | 2026-02-05 | MODERATE | 1.8.5–1.11.3 | Improper Policy Enforcement |
-| **CVE-2025-64751** | 2025-11-20 | MODERATE | 1.4.0–1.11.1 | Improper Policy Enforcement |
-| **CVE-2025-55213** | 2025-08-18 | MODERATE | 1.9.3–1.9.5 | Authorization Bypass |
-| **CVE-2025-48371** | 2025-05-23 | MODERATE | 1.8.0–1.8.13 | Authorization Bypass |
-| **CVE-2025-46331** | 2025-04-30 | MODERATE | 1.3.6–1.8.11 | Authorization Bypass |
-| **CVE-2025-25196** | 2025-02-19 | MODERATE | < 1.8.5 | Authorization Bypass |
-| **CVE-2024-56323** | 2025-01-13 | MODERATE | 1.3.8–1.8.3 | Authorization Bypass |
-| **CVE-2024-42473** | 2024-08-09 | **HIGH** (VI:H) | 1.5.7–1.5.9 | Authorization Bypass |
-| **CVE-2024-31452** | 2024-04-16 | **HIGH** (C:H/I:H/A:H) | 1.5.0–1.5.3 | Authorization Bypass |
-| CVE-2024-23820 | 2024-01-26 | MODERATE | < 1.4.3 | DoS |
-| CVE-2023-45810 | 2023-10-18 | HIGH | < 1.3.4 | DoS |
-| CVE-2023-43645 | 2023-09-28 | MODERATE | < 1.3.2 | **Dairesel ilişki tanımlarından DoS** |
-| CVE-2023-40579 | 2023-08-25 | MODERATE (C:H) | < 1.3.1 | Authorization Bypass |
-| CVE-2023-35933 | 2023-06-28 | MODERATE | < 1.1.1 | Dairesel ilişki DoS |
-| CVE-2022-23542 | 2022-12-20 | HIGH | 0.3.0–0.3.1 | Authorization Bypass |
-| CVE-2022-39352 | 2022-11-08 | MODERATE | < 0.2.5 | Authorization Bypass |
-| CVE-2022-39342 | 2022-10-25 | MODERATE (I:H) | < 0.2.4 | Authorization Bypass |
-| CVE-2022-39341 | 2022-10-25 | MODERATE (I:H) | < 0.2.4 | **Tupleset wildcard ile Authorization Bypass** |
-| CVE-2022-39340 | 2022-10-25 | MODERATE | < 0.2.4 | streamed-list-objects ile bilgi ifşası |
+| CVE-2026-55689 | 19 Haziran 2026 | Orta | 1.18.0 öncesi | OIDC izleyici kitle doğrulaması, ilgili bayrak ayarlanmamışsa atlanmaktadır |
+| CVE-2026-55170 | 18 Haziran 2026 | Düşük | 1.18.0 öncesi | Hatalı politika uygulamasıdır |
+| CVE-2026-48096 | 11 Haziran 2026 | Orta | 1.16.0 öncesi | Paylaşılan yineleyici ile ikinci sürüm yineleyicide önbellek anahtarı ayırıcı enjeksiyonudur; depo içi karar zehirlenmesine yol açmaktadır |
+| CVE-2026-41131 | 22 Nisan 2026 | Orta | 1.14.1 öncesi | Hatalı politika uygulamasıdır |
+| CVE-2026-40293 | 8 Nisan 2026 | Orta | 0.1.4 ile 1.14.0 arası | Kimlik doğrulamasız oyun alanı uç noktası önceden paylaşılmış API anahtarını HTML yanıtta sızdırmaktadır |
+| CVE-2026-34972 | 7 Nisan 2026 | Orta | 1.8.0 ile 1.14.0 arası | Yığın denetimi içi tekilleştirme, liste değerli önbellek anahtarı çakışmasıyla yanlış karar üretmektedir |
+| CVE-2026-33729 | 26 Mart 2026 | Orta | 1.13.1 öncesi | Önbeleklenmiş anahtarlar üzerinden yetkilendirme atlatmasıdır |
+| CVE-2026-24851 | 5 Şubat 2026 | Orta | 1.8.5 ile 1.11.3 arası | Hatalı politika uygulamasıdır |
+| CVE-2025-64751 | 20 Kasım 2025 | Orta | 1.4.0 ile 1.11.1 arası | Hatalı politika uygulamasıdır |
+| CVE-2025-55213 | 18 Ağustos 2025 | Orta | 1.9.3 ile 1.9.5 arası | Yetkilendirme atlatmasıdır |
+| CVE-2025-48371 | 23 Mayıs 2025 | Orta | 1.8.0 ile 1.8.13 arası | Yetkilendirme atlatmasıdır |
+| CVE-2025-46331 | 30 Nisan 2025 | Orta | 1.3.6 ile 1.8.11 arası | Yetkilendirme atlatmasıdır |
+| CVE-2025-25196 | 19 Şubat 2025 | Orta | 1.8.5 öncesi | Yetkilendirme atlatmasıdır |
+| CVE-2024-56323 | 13 Ocak 2025 | Orta | 1.3.8 ile 1.8.3 arası | Yetkilendirme atlatmasıdır |
+| CVE-2024-42473 | 9 Ağustos 2024 | Yüksek | 1.5.7 ile 1.5.9 arası | Yetkilendirme atlatmasıdır |
+| CVE-2024-31452 | 16 Nisan 2024 | Yüksek | 1.5.0 ile 1.5.3 arası | Yetkilendirme atlatmasıdır |
+| CVE-2024-23820 | 26 Ocak 2024 | Orta | 1.4.3 öncesi | Hizmet reddidir |
+| CVE-2023-45810 | 18 Ekim 2023 | Yüksek | 1.3.4 öncesi | Hizmet reddidir |
+| CVE-2023-43645 | 28 Eylül 2023 | Orta | 1.3.2 öncesi | Dairesel ilişki tanımlarından hizmet reddidir |
+| CVE-2023-40579 | 25 Ağustos 2023 | Orta | 1.3.1 öncesi | Yetkilendirme atlatmasıdır |
+| CVE-2023-35933 | 28 Haziran 2023 | Orta | 1.1.1 öncesi | Dairesel ilişki hizmet reddidir |
+| CVE-2022-23542 | 20 Aralık 2022 | Yüksek | 0.3.0 ile 0.3.1 arası | Yetkilendirme atlatmasıdır |
+| CVE-2022-39352 | 8 Kasım 2022 | Orta | 0.2.5 öncesi | Yetkilendirme atlatmasıdır |
+| CVE-2022-39342 | 25 Ekim 2022 | Orta | 0.2.4 öncesi | Yetkilendirme atlatmasıdır |
+| CVE-2022-39341 | 25 Ekim 2022 | Orta | 0.2.4 öncesi | Demet kümesi joker karakteriyle yetkilendirme atlatmasıdır |
+| CVE-2022-39340 | 25 Ekim 2022 | Orta | 0.2.4 öncesi | Akışlı nesne listelemeyle bilgi ifşasıdır |
 
-**Kalıp analizi — bu tablo bir hikâye anlatıyor:**
-- **~16 tanesi doğrudan yetkilendirme bypass'ı.** Bu bir DoS veya bilgi sızıntısı değil; motorun **temel işlevini yanlış yapması**.
-- **En az 3 tanesi cache kaynaklı** (CVE-2026-48096, CVE-2026-33729, CVE-2026-34972). Cache anahtarı üretimi, bu sınıfta tekrarlayan bir zayıflık noktası.
-- 2026'da **7 yeni danışmanlık** — hız yavaşlamıyor.
+Kalıp analizi bir hikâye anlatmaktadır. Yaklaşık 16 tanesi doğrudan yetkilendirme atlatmasıdır; bu bir hizmet reddi ya da bilgi sızıntısı değil motorun temel işlevini yanlış yapmasıdır. En az üç tanesi önbellek kaynaklıdır, yani 2026'nın 48096, 33729 ile 34972 numaralı kayıtlarıdır; önbellek anahtarı üretimi bu sınıfta tekrarlayan bir zayıflık noktasıdır. 2026'da yedi yeni danışmanlık vardır ile hız yavaşlamamaktadır.
 
-#### SpiceDB — 16 danışmanlık
+#### SpiceDB, 16 danışmanlık
 
-| CVE | Tarih | Şiddet | Etkilenen | Özet |
+| Tanımlayıcı | Tarih | Şiddet | Etkilenen | Özet |
 |---|---|---|---|---|
-| **CVE-2026-55866** | 2026-06-19 | LOW | 1.34.0–1.54.0 | **Caveat'li relation'larda check, koşullu izin beklenirken KOŞULSUZ izin verebiliyor** |
-| **CVE-2026-46668** | 2026-05-21 | LOW | 1.15.0–1.52.0 | **İç içe listeli caveat yapıları → hatalı cache yeniden kullanımı** |
-| CVE-2026-40091 | 2026-04-14 | MODERATE | 1.49.0–1.51.1 | `SPICEDB_DATASTORE_CONN_URI` başlangıç loglarında sızıyor |
-| GHSA-vhvq-fv9f-wh4q | 2026-02-06 | LOW | 1.29.3–1.49.1 | LookupResources cursor kurcalama → `tuple.MustParse` panic ile süreç çökmesi |
-| **CVE-2025-65111** | 2025-11-21 | LOW | < 1.47.1 | **LookupResources eksik sonuç döndürüyor** |
-| CVE-2025-64529 | 2025-11-13 | LOW | < 1.45.2 | WriteRelationships payload çok büyükse **sessizce başarısız** |
-| **CVE-2025-49011** | 2025-06-06 | LOW | < 1.44.2 | Caveat'li check, izin beklenirken izin vermiyor |
-| CVE-2024-48909 | 2024-10-14 | LOW | 1.35.0–1.37.1 | LookupResources2 caveat "context missing" hatası |
-| **CVE-2024-46989** | 2024-09-18 | MODERATE | < 1.35.3 | Aynı tipte çoklu caveat → hatalı izin yok |
-| **CVE-2024-38361** | 2024-06-20 | MODERATE | < 1.33.1 | **Exclusion'lar izin beklenirken izin vermiyor** |
-| CVE-2024-32001 | 2024-04-10 | LOW | < 1.30.1 | LookupSubjects kısmi sonuç |
-| CVE-2024-27101 | 2024-03-01 | **HIGH** | < 1.29.2 | Chunking helper'da integer overflow → dispatch eleman kaçırıyor veya panic |
-| CVE-2023-46255 | 2023-10-31 | MODERATE | < 1.27.0-rc1 | URI parse edilemezse log sızıntısı |
-| CVE-2023-35930 | 2023-06-28 | LOW | 1.22.0–1.22.2 | LookupResources kısmi sonuç |
-| CVE-2023-29193 | 2023-04-13 | **HIGH** | < 1.19.1 | Metrics portu güvensiz ağa bağlanıyor, CLI flag'leri sızdırıyor |
-| **CVE-2022-21646** | 2022-01-13 | **HIGH** | 1.3.0–1.4.0 | **Lookup operasyonları wildcard'ları hesaba katmıyor** |
+| CVE-2026-55866 | 19 Haziran 2026 | Düşük | 1.34.0 ile 1.54.0 arası | Koşullu ilişkilerde denetim, koşullu izin beklenirken koşulsuz izin verebilmektedir |
+| CVE-2026-46668 | 21 Mayıs 2026 | Düşük | 1.15.0 ile 1.52.0 arası | İç içe listeli koşul yapıları hatalı önbellek yeniden kullanımına yol açmaktadır |
+| CVE-2026-40091 | 14 Nisan 2026 | Orta | 1.49.0 ile 1.51.1 arası | Veri deposu bağlantı adresi başlangıç günlüklerinde sızmaktadır |
+| GHSA-vhvq-fv9f-wh4q | 6 Şubat 2026 | Düşük | 1.29.3 ile 1.49.1 arası | Kaynak arama imleci kurcalanınca ayrıştırma paniğiyle süreç çökmektedir |
+| CVE-2025-65111 | 21 Kasım 2025 | Düşük | 1.47.1 öncesi | Kaynak arama eksik sonuç döndürmektedir |
+| CVE-2025-64529 | 13 Kasım 2025 | Düşük | 1.45.2 öncesi | İlişki yazma yükü çok büyükse sessizce başarısız olmaktadır |
+| CVE-2025-49011 | 6 Haziran 2025 | Düşük | 1.44.2 öncesi | Koşullu denetim, izin beklenirken izin vermemektedir |
+| CVE-2024-48909 | 14 Ekim 2024 | Düşük | 1.35.0 ile 1.37.1 arası | İkinci sürüm kaynak aramada koşul bağlamı eksik hatasıdır |
+| CVE-2024-46989 | 18 Eylül 2024 | Orta | 1.35.3 öncesi | Aynı tipte çoklu koşulda hatalı olarak izin verilmemektedir |
+| CVE-2024-38361 | 20 Haziran 2024 | Orta | 1.33.1 öncesi | Dışlamalar izin beklenirken izin vermemektedir |
+| CVE-2024-32001 | 10 Nisan 2024 | Düşük | 1.30.1 öncesi | Özne aramada kısmi sonuç dönmektedir |
+| CVE-2024-27101 | 1 Mart 2024 | Yüksek | 1.29.2 öncesi | Parçalama yardımcısında tam sayı taşmasıdır; gönderim eleman kaçırmakta ya da panik oluşmaktadır |
+| CVE-2023-46255 | 31 Ekim 2023 | Orta | 1.27.0-rc1 öncesi | Adres ayrıştırılamazsa günlük sızıntısıdır |
+| CVE-2023-35930 | 28 Haziran 2023 | Düşük | 1.22.0 ile 1.22.2 arası | Kaynak aramada kısmi sonuçtur |
+| CVE-2023-29193 | 13 Nisan 2023 | Yüksek | 1.19.1 öncesi | Metrik portu güvensiz ağa bağlanmakta ile komut satırı bayraklarını sızdırmaktadır |
+| CVE-2022-21646 | 13 Ocak 2022 | Yüksek | 1.3.0 ile 1.4.0 arası | Arama operasyonları joker karakterleri hesaba katmamaktadır |
 
-**SpiceDB'nin kalıbı farklı ve öğretici:** Çoğu bulgu **fail-closed** yönde (izin verilmesi gerekirken verilmiyor) — kullanılabilirlik sorunu, güvenlik açığı değil. Bu, SpiceDB'nin tasarımının hata durumunda güvenli tarafa düştüğünü gösteriyor. **İstisna: CVE-2026-55866** — koşullu izin beklenirken koşulsuz izin. Bu gerçek bir bypass.
+SpiceDB'nin kalıbı farklı ile öğreticidir. Çoğu bulgu kapalı başarısızlık yönündedir, yani izin verilmesi gerekirken verilmemektedir; bu bir kullanılabilirlik sorunudur, bir güvenlik açığı değildir. Bu, SpiceDB'nin tasarımının hata durumunda güvenli tarafa düştüğünü göstermektedir. İstisna 2026'nın 55866 numaralı kaydıdır: koşullu izin beklenirken koşulsuz izin verilmektedir. Bu gerçek bir atlatmadır.
 
-Ayrıca **caveat (koşul) mekanizması SpiceDB'nin en hatalı alanı**: 5 ayrı CVE. Argus koşullu tuple'ları destekleyecekse, bu alan yoğun test gerektirir.
+Ayrıca koşul mekanizması SpiceDB'nin en hatalı alanıdır: beş ayrı kayıt vardır. Argus koşullu demetleri destekleyecekse bu alan yoğun test gerektirmektedir.
 
 #### Diğerleri
 
-| Ürün | CVE | Tarih | Şiddet | Özet |
+| Ürün | Tanımlayıcı | Tarih | Şiddet | Özet |
 |---|---|---|---|---|
-| **Ory Keto** | CVE-2026-33505 | 2026-03-20 | **HIGH** | **Sahte pagination token'ları ile SQL injection** |
-| **biscuit-auth** | CVE-2022-31053 | 2022-06-17 | **CRITICAL** | **İmza sahteciliği** (< 2.0.0) |
-| **biscuit-auth** | CVE-2024-41949/42350 | 2024-07-31 | LOW | Third-party block'ta public key confusion (4.x) |
-| **OPA** | CVE-2025-46569 | 2025-05-01 | **HIGH** | Data API HTTP path üzerinden **Rego enjeksiyonu** |
-| **OPA** | CVE-2022-36085 | 2022-09-16 | HIGH | `with` keyword ile `WithUnsafeBuiltins` bypass'ı |
-| **OPA** | CVE-2024-8260 | 2024-08-30 | MODERATE | Windows'ta SMB force-authentication |
-| **cedar-policy** | **(kayıt yok)** | — | — | **OSV'de crates.io ekosisteminde CVE bulunamadı** |
-| **casbin** (crates.io) | (kayıt yok) | — | — | — |
-| **regorus** (crates.io) | (kayıt yok) | — | — | — |
-| **Cerbos** | (kayıt yok) | — | — | — |
+| Ory Keto | CVE-2026-33505 | 20 Mart 2026 | Yüksek | Sahte sayfalama belirteçleriyle SQL enjeksiyonudur |
+| biscuit-auth | CVE-2022-31053 | 17 Haziran 2022 | Kritik | İmza sahteciliğidir, 2.0.0 öncesi |
+| biscuit-auth | CVE-2024-41949 ile 42350 | 31 Temmuz 2024 | Düşük | Üçüncü taraf blokta açık anahtar karışıklığıdır, dördüncü ana sürüm |
+| OPA | CVE-2025-46569 | 1 Mayıs 2025 | Yüksek | Veri API'sinin HTTP yolu üzerinden Rego enjeksiyonudur |
+| OPA | CVE-2022-36085 | 16 Eylül 2022 | Yüksek | `with` anahtar kelimesiyle güvensiz yerleşik kısıtlamasının atlatılmasıdır |
+| OPA | CVE-2024-8260 | 30 Ağustos 2024 | Orta | Windows'ta SMB zorunlu kimlik doğrulamasıdır |
+| cedar-policy | Kayıt yoktur | — | — | OSV'de crates.io ekosisteminde bir kayıt bulunamamıştır |
+| casbin, crates.io | Kayıt yoktur | — | — | — |
+| regorus, crates.io | Kayıt yoktur | — | — | — |
+| Cerbos | Kayıt yoktur | — | — | — |
 
-**Cedar'ın sicilinin temiz olması dikkate değer** — ve muhtemelen tesadüf değil. Formal doğrulama + DRT + fuzzing kombinasyonu ölçülebilir bir fark yaratıyor gibi görünüyor. (Cedar'ın OpenFGA'dan daha genç ve daha dar kapsamlı olduğu kaydıyla.)
+Cedar'ın sicilinin temiz olması dikkate değerdir ile muhtemelen bir tesadüf değildir. Formel doğrulama, diferansiyel rastgele test ile bulanık test birleşimi ölçülebilir bir fark yaratıyor görünmektedir. Cedar'ın OpenFGA'dan daha genç ile daha dar kapsamlı olduğu kaydı düşülmelidir.
 
-### 6.2 Açık sınıfları ve test yaklaşımları
+### 6.2 Açık sınıfları ile test yaklaşımları
 
-#### Sınıf 1: Cache anahtarı hataları
+#### Birinci sınıf: önbellek anahtarı hataları
 
-CVE-2026-48096 (delimiter injection), CVE-2026-33729 (cached keys bypass), CVE-2026-34972 (list-value collision), CVE-2026-46668 (nested list cache reuse).
+İlgili kayıtlar ayırıcı enjeksiyonu, önbeleklenmiş anahtarlarla atlatma, liste değeri çakışması ile iç içe liste önbellek yeniden kullanımıdır.
 
-**Kök neden:** Cache anahtarı, yapılandırılmış veriden (tuple, koşul bağlamı) **string birleştirme** ile üretiliyor. `user:a|b` ile `user:a` + `b` aynı anahtarı üretebiliyor.
+Kök neden şudur: önbellek anahtarı, yapılandırılmış veriden, yani demetten ile koşul bağlamından, dizgi birleştirmeyle üretilmektedir. Ayırıcı içeren bir alan, iki farklı girdinin aynı anahtarı üretmesine yol açabilmektedir.
 
-**Argus için savunma:**
+Argus için savunma şudur.
+
 ```rust
 // YANLIŞ
 let key = format!("{}:{}#{}@{}", ns, obj, rel, user);
@@ -1118,70 +1122,68 @@ for field in [ns, obj, rel, user] {
     h.update(field.as_bytes());
 }
 ```
-Uzunluk öneki, delimiter injection'ı **yapısal olarak** imkânsız kılar. Bu, tek satırlık bir savunma ve dört CVE'yi önlerdi.
 
-#### Sınıf 2: Model hataları (kullanıcının kendi ayağına sıkması)
+Uzunluk öneki ayırıcı enjeksiyonunu yapısal olarak imkânsız kılmaktadır. Bu, tek satırlık bir savunmadır ile dört güvenlik açığını önlerdi.
 
-- Fazla geniş relation tanımı
-- Yanlış `tuple_to_userset` (yanlış parent üzerinden miras)
-- **Wildcard tuple'ları** (`user:*`) — CVE-2022-39341 ve CVE-2022-21646 tam olarak bu
-- Exclusion'ın (`but not`) yanlış kullanımı — çift olumsuzlama hataları
+#### İkinci sınıf: model hataları, yani kullanıcının kendi ayağına sıkması
 
-**Bu, motorun hatası değil ama motorun sorumluluğudur.** Argus, model yayımlanırken statik analiz yapmalı: "bu model `user:*` wildcard'ı ile bir yazma yetkisi veriyor — emin misiniz?"
+Fazla geniş ilişki tanımı, yanlış üst nesne üzerinden miras kuran hatalı demet kümesi eşlemesi, joker karakterli demetler, ki 2022'nin 39341 ile 21646 numaralı kayıtları tam olarak budur, ile dışlamanın yanlış kullanımı, yani çift olumsuzlama hataları bu sınıftadır.
 
-#### Sınıf 3: ID confusion ve tenant sızıntısı
+Bu, motorun hatası değil ancak motorun sorumluluğudur. Argus, model yayımlanırken statik analiz yapmalı ile bu modelin bir joker karakterle yazma yetkisi verdiği konusunda uyarmalıdır.
 
-- Kullanıcı silinip aynı ID'nin yeniden kullanılması → eski tuple'lar yeni kullanıcıya yetki verir
-- Subject ID namespace çakışması: `user:123` ile `service:123`
-- Multi-tenant: store/tenant sınırının check yolunda **her adımda** kontrol edilmemesi
+#### Üçüncü sınıf: kimlik karışıklığı ile kiracı sızıntısı
 
-**Savunma:** ID'ler global olarak benzersiz ve **yeniden kullanılmaz** (ULID). Tenant ID cache anahtarının parçası (CVE-2026-48096'nın "intra-store poisoning" ifadesi bunun ihlalidir).
+Kullanıcı silinip aynı kimliğin yeniden kullanılması eski demetlerin yeni kullanıcıya yetki vermesine yol açmaktadır. Özne kimliği ad alanı çakışması, örneğin aynı sayısal kimliğin hem kullanıcı hem servis olarak kullanılması, bir başka yoldur. Çok kiracılı yapıda depo ile kiracı sınırının denetim yolunda her adımda kontrol edilmemesi üçüncüsüdür.
 
-#### Sınıf 4: PEP boşluğu ve TOCTOU
+Savunma şudur: kimlikler küresel olarak benzersiz ile yeniden kullanılamaz olmalıdır, yani ULID kullanılmalıdır. Kiracı kimliği önbellek anahtarının parçası olmalıdır; 2026'nın 48096 numaralı kaydındaki depo içi zehirlenme ifadesi bunun ihlalidir.
 
-"Check yaptım ama enforce etmedim" — AuthZEN spec'inin kendi güven modeli bunu kabul ediyor: *"the PDP must trust the PEP, as the PEP is ultimately responsible for enforcing the decision."*
+#### Dördüncü sınıf: uygulama noktası boşluğu ile kontrol ile kullanım arası yarış
 
-**IDOR/BOLA (OWASP API Top 10 #1) burada doğar.** Bir yetkilendirme motoru kullanmak IDOR'u **çözmez** — sadece doğru soruyu sormayı mümkün kılar. Kod `/documents/:id` handler'ında check çağırmıyorsa, dünyanın en iyi motoru işe yaramaz.
+Denetim yapılmış ancak uygulanmamıştır durumu buradadır. AuthZEN şartnamesinin kendi güven modeli bunu kabul etmektedir: *"the PDP must trust the PEP, as the PEP is ultimately responsible for enforcing the decision."*
 
-**Argus'un yapabileceği:** Middleware/extractor seviyesinde **fail-closed by default** bir tasarım. Rust'ın tip sistemi burada gerçek bir avantaj:
+Güvensiz doğrudan nesne referansı ile nesne düzeyi yetkilendirme kırılması, yani OWASP API ilk onusunun birincisi, burada doğmaktadır. Bir yetkilendirme motoru kullanmak bunu çözmemekte, yalnızca doğru soruyu sormayı mümkün kılmaktadır. Kod belge işleyicisinde denetim çağırmıyorsa dünyanın en iyi motoru işe yaramamaktadır.
+
+Argus'un yapabileceği şudur: ara katman ile çıkarıcı seviyesinde varsayılan olarak kapalı başarısız olan bir tasarım. Rust'ın tip sistemi burada gerçek bir avantajdır.
+
 ```rust
 // Resource'a erişim, ancak bir AuthorizedResource token'ı ile mümkün
 // Bu token yalnızca check() tarafından üretilebilir
 fn get_document(auth: Authorized<Document, Read>) -> Document { ... }
 ```
-Bu, "check yapmayı unutma"yı **derleme zamanı hatası** hâline getirir. Bu, Argus'un Rust'ta olmasının en büyük tek güvenlik avantajıdır ve Go tabanlı rakiplerin yapamayacağı bir şeydir.
 
-#### Sınıf 5: Confused deputy
+Bu, denetim yapmayı unutmayı bir derleme zamanı hatasına dönüştürmektedir. Argus'un Rust'ta olmasının en büyük tek güvenlik avantajıdır ile Go tabanlı rakiplerin yapamayacağı bir şeydir.
 
-Argus'un kendi admin API'si, yetki yükseltme yoludur. "Kim tuple yazabilir?" sorusu, Argus'un kendi yetkilendirme modeliyle cevaplanmalıdır (dogfooding) — ama bu, bootstrap problemi yaratır. Ayrı, basit, denetlenmiş bir yol gerekir.
+#### Beşinci sınıf: şaşkın vekil
+
+Argus'un kendi yönetim API'si bir yetki yükseltme yoludur. Kim demet yazabilir sorusu Argus'un kendi yetkilendirme modeliyle cevaplanmalıdır, yani kendi ürününü kullanmalıdır; ancak bu bir önyükleme problemi yaratmaktadır. Ayrı, basit ile denetlenmiş bir yol gerekmektedir.
 
 ### 6.3 Erişim kontrolü mantığını test etmek
 
-#### Cedar'ın yaklaşımı — sektörün en iyisi
+#### Cedar'ın yaklaşımı, sektörün en iyisi
 
-Üç katmanlı **verification-guided development**:
+Üç katmanlı doğrulama güdümlü geliştirmedir.
 
-1. **Formal kanıt (Lean 4):** 7 özellik, 5.714 satır kanıt, 1.673 satır model. Tüm kanıtlar 3 dakikada doğrulanıyor. **4 hata** buldu.
-2. **Differential Random Testing (DRT):** Milyonlarca rastgele girdi (politika + veri + istek) hem Lean modeline hem Rust üretim koduna gönderiliyor; farklı cevap = hata. `cargo-fuzz` + libfuzzer, hedef başına 6 saat.
-3. **Property-Based Testing (PBT):** Modellenmemiş üretim bileşenleri için.
+1. Lean 4 ile formel kanıt: yedi özellik, 5.714 satır kanıt ile 1.673 satır model. Tüm kanıtlar üç dakikada doğrulanmaktadır. Dört hata bulmuştur.
+2. Diferansiyel rastgele test: milyonlarca rastgele girdi, yani politika, veri ile istek, hem Lean modeline hem Rust üretim koduna gönderilmekte ile farklı cevap bir hata sayılmaktadır. `cargo-fuzz` ile libfuzzer kullanılmakta ile hedef başına altı saat koşulmaktadır.
+3. Özellik tabanlı test: modellenmemiş üretim bileşenleri içindir.
 
-DRT + PBT birlikte **21 hata** buldu. Toplam 25.
+Diferansiyel ile özellik tabanlı test birlikte 21 hata bulmuştur. Toplam 25'tir.
 
-**Makalenin çok değerli bir itirafı:** *"Complete line coverage alone does not guarantee effective testing"* — bir generator tam satır kapsamı sağlasa bile üretilen girdilerin çoğu ilginç değildi. Ve DRT bazı hataları **kaçırdı** (non-termination hatası dahil), çünkü tetikleyici girdiyi üretme olasılığı çok düşüktü.
+Makalenin çok değerli bir itirafı şudur: *"Complete line coverage alone does not guarantee effective testing"*. Bir üretici tam satır kapsamı sağlasa bile üretilen girdilerin çoğu ilginç değildi. Diferansiyel test bazı hataları kaçırmıştır, sonlanmama hatası dahil, çünkü tetikleyici girdiyi üretme olasılığı çok düşüktü.
 
-**Girdi üretimi stratejisi:** *"type directed"* — politika, entity ve istek üretimi **korelasyonlu**. Rastgele üretim yetersiz çünkü çoğu rastgele istek hiçbir politikayla eşleşmez ve hedef kodu çalıştırmaz.
+Girdi üretimi stratejisi tip güdümlüdür: politika, varlık ile istek üretimi korelasyonludur. Rastgele üretim yetersizdir, çünkü çoğu rastgele istek hiçbir politikayla eşleşmemekte ile hedef kodu çalıştırmamaktadır.
 
 #### Argus için somut test planı
 
-| Katman | Araç | Ne test edilir |
+| Katman | Araç | Ne test edilmektedir |
 |---|---|---|
-| **Property-based** | `proptest` 1.11.0 | Invariant'lar (aşağıda) |
-| **Differential** | İki bağımsız implementasyon | Naif referans çözümleyici vs optimize edilmiş motor — **aynı cevabı vermeli** |
-| **Fuzzing** | `cargo-fuzz` | Model parser, tuple parser, cache key üretimi, cursor decode |
-| **Model testleri** | YAML tabanlı (OpenFGA'nın `fga model test`i gibi) | Kullanıcının kendi modeli için assertion'lar |
-| **Metamorfik** | Elle | Aşağıdaki dönüşümler |
+| Özellik tabanlı | `proptest` 1.11.0 | Aşağıdaki değişmezlerdir |
+| Diferansiyel | İki bağımsız gerçekleme | Naif referans çözümleyiciyle optimize edilmiş motor aynı cevabı vermelidir |
+| Bulanık test | `cargo-fuzz` | Model ayrıştırıcısı, demet ayrıştırıcısı, önbellek anahtarı üretimi ile imleç çözme |
+| Model testleri | YAML tabanlı, OpenFGA'nın model testi gibi | Kullanıcının kendi modeli için doğrulamalardır |
+| Metamorfik | Elle | Aşağıdaki dönüşümlerdir |
 
-**Test edilecek invariant'lar (proptest ile ifade edilebilir):**
+Test edilecek değişmezler, `proptest` ile ifade edilebilir biçimde şunlardır.
 
 ```
 1. Determinizm:        check(s,a,r,T) == check(s,a,r,T)
@@ -1201,88 +1203,89 @@ DRT + PBT birlikte **21 hata** buldu. Toplam 25.
 10. Zookie monotonluğu: t2 > t1 ise, t1'de görünen her tuple t2'de de görünür
 ```
 
-**Invariant 4, 6 ve 7'yi test etmek, incelediğim CVE'lerin en az 8'ini önlerdi.** Bu, spekülasyon değil — CVE özetleri doğrudan bu invariant'ların ihlalidir.
+Dördüncü, altıncı ile yedinci değişmezi test etmek, incelenen güvenlik açıklarının en az sekizini önlerdi. Bu bir spekülasyon değildir; açık özetleri doğrudan bu değişmezlerin ihlalidir.
 
-**Formal doğrulama Argus için gerçekçi mi?** Cedar'ın 5.714 satır Lean kanıtı ve 3,4:1 kanıt/model oranı, ciddi bir yatırımdır. Ama **kısmi** yol var: sadece çekirdek karar fonksiyonunun (Cedar'ın Property 1–4 muadili) modellenmesi, tam bir ReBAC çözümleyicisinin doğrulanmasından çok daha ucuzdur. Önerim: **v1 için diferansiyel + property-based test yeterli; formal doğrulama v2 hedefi.**
+Formel doğrulamanın Argus için gerçekçi olup olmadığı sorusunun cevabı şudur: Cedar'ın 5.714 satır Lean kanıtı ile 3,4'e bir kanıt model oranı ciddi bir yatırımdır. Ancak kısmi bir yol vardır: yalnızca çekirdek karar fonksiyonunun, yani Cedar'ın ilk dört özelliğinin muadilinin modellenmesi, tam bir ilişki tabanlı çözümleyicinin doğrulanmasından çok daha ucuzdur. Öneri şudur: birinci sürüm için diferansiyel ile özellik tabanlı test yeterlidir ile formel doğrulama ikinci sürüm hedefidir.
 
-### 6.4 Fail-open vs fail-closed
+### 6.4 Açık başarısızlık ile kapalı başarısızlık
 
-**AuthZEN'in duruşu:** Ret, `200 OK` + `{"decision": false}`. Hata (4xx/5xx) ise **karar değildir**. Spec bu ayrımı net yapıyor ama "PDP'ye ulaşılamazsa ne yapılmalı" konusunda PEP'e bırakıyor — güven modeli gereği.
+AuthZEN'in duruşu şudur: ret, 200 OK ile olumsuz karar yüküdür. Hata, yani dört yüzlü ya da beş yüzlü kod, bir karar değildir. Şartname bu ayrımı net yapmakta ancak karar noktasına ulaşılamazsa ne yapılması gerektiği konusunda uygulama noktasına bırakmaktadır; güven modeli gereğidir.
 
-**Sektör pratiği ve doğru cevap: fail-closed.** Ancak bu, bir kullanılabilirlik riski yaratır: PDP çökerse tüm sistem durur.
+Sektör pratiği ile doğru cevap kapalı başarısızlıktır. Ancak bu bir kullanılabilirlik riski yaratmaktadır: karar noktası çökerse tüm sistem durmaktadır.
 
-**Zanzibar'ın cevabı: erişilebilirliği o kadar yükselt ki soru sorulmasın.** >%99,999, 3 yıl, 30+ bölge, 10.000+ sunucu. Bu, çoğu ekibin ulaşamayacağı bir yatırımdır.
+Zanzibar'ın cevabı erişilebilirliği o kadar yükseltmektir ki soru sorulmasın: %99,999'un üzerinde, üç yıl, 30'dan fazla bölge ile 10.000'den fazla sunucu. Bu, çoğu ekibin ulaşamayacağı bir yatırımdır.
 
-**Argus'un cevabı farklı olmalı: PDP'yi ayrı bir hata alanı yapmamak.** Yetkilendirme motoru IdP sürecinin **içindeyse**, "PDP erişilemez" durumu "IdP erişilemez" durumundan ayrı değildir. Ağ hop'unu kaldırmak, bir performans optimizasyonu olduğu kadar bir **erişilebilirlik** optimizasyonudur.
+Argus'un cevabı farklı olmalıdır: karar noktası ayrı bir hata alanı yapılmamalıdır. Yetkilendirme motoru kimlik sağlayıcı sürecinin içindeyse, karar noktası erişilemez durumu kimlik sağlayıcı erişilemez durumundan ayrı değildir. Ağ sıçramasını kaldırmak, bir performans optimizasyonu olduğu kadar bir erişilebilirlik optimizasyonudur.
 
-**Circuit breaker + "son bilinen iyi karar" cache'i tehlikelidir:** Yetki geri alınmış bir kullanıcı, PDP kesintisi sırasında cache'teki eski ALLOW ile içeri girer. Bu, saldırganın PDP'ye DoS yaparak yetki elde edebileceği anlamına gelir. **Öneri: kesinti sırasında sadece pozitif kararların TTL'i uzatılmamalı; negatif kararlar serbestçe uzatılabilir.**
+Devre kesici ile son bilinen iyi karar önbelleği tehlikelidir: yetkisi geri alınmış bir kullanıcı, karar noktası kesintisi sırasında önbellekteki eski izinle içeri girmektedir. Bu, saldırganın karar noktasına hizmet reddi yaparak yetki elde edebileceği anlamına gelmektedir. Öneri şudur: kesinti sırasında yalnızca olumlu kararların yaşam süresi uzatılmamalı, olumsuz kararlar serbestçe uzatılabilmelidir.
 
 ### 6.5 Denetlenebilirlik
 
 | Ürün | Mekanizma |
 |---|---|
-| **OpenFGA** | `Expand` API — nesnenin userset ağacını döndürür |
-| **SpiceDB** | Debug/trace (CheckDebugTrace) |
-| **Cedar** | `Diagnostics` — kararı belirleyen politikalar + hatalar |
-| **OPA** | Decision logs |
-| **AuthZEN** | `context.reason_admin` / `context.reason_user` |
+| OpenFGA | `Expand` API'sidir; nesnenin kullanıcı kümesi ağacını döndürmektedir |
+| SpiceDB | Hata ayıklama ile izleme, yani denetim hata ayıklama izidir |
+| Cedar | `Diagnostics`'tir; kararı belirleyen politikalar ile hataları vermektedir |
+| OPA | Karar günlükleridir |
+| AuthZEN | Bağlam içindeki yönetici ile kullanıcı gerekçesidir |
 
-**AuthZEN'in `reason_admin`/`reason_user` ayrımı doğru tasarımdır ve Argus benimsemelidir:** Yönetici "policy C076E82F başarısız" görür; kullanıcı "yetersiz ayrıcalık" görür. Kullanıcıya tam nedeni söylemek, kaynak varlığını ve model yapısını sızdırır.
+AuthZEN'in yönetici ile kullanıcı gerekçesi ayrımı doğru bir tasarımdır ile Argus benimsemelidir: yönetici hangi politikanın başarısız olduğunu görmekte, kullanıcı yetersiz ayrıcalık mesajı almaktadır. Kullanıcıya tam nedeni söylemek kaynak varlığını ile model yapısını sızdırmaktadır.
 
-**Argus'un sunması gerekenler:**
-1. **Karar izi (decision trace)** — hangi tuple'lar, hangi relation'lar, hangi yol. Debug modunda; üretimde örneklenmiş.
-2. **Karar logu** — her karar için `(timestamp, subject, action, resource, decision, model_id, consistency_token, latency)`. PII riski: subject ve resource ID'leri hassas olabilir — hash'lenmiş varyant seçeneği.
-3. **Erişim gözden geçirme sorguları** (SOC 2 / ISO 27001 için): "X rolündeki tüm kullanıcılar", "Y kaynağına erişebilen herkes" — bunlar `search_subject` endpoint'idir. Yani AuthZEN'in Search API'si sadece bir özellik değil, bir **uyum gereksinimidir**.
+Argus'un sunması gerekenler şunlardır.
 
-### 6.6 IdP'nin authz motoru olmasının ek riskleri
+1. Karar izi: hangi demetler, hangi ilişkiler ile hangi yol. Hata ayıklama modundadır ile üretimde örneklenmiştir.
+2. Karar günlüğü: her karar için zaman damgası, özne, eylem, kaynak, karar, model kimliği, tutarlılık belirteci ile gecikme. Kişisel veri riski vardır, çünkü özne ile kaynak kimlikleri hassas olabilmektedir; özetlenmiş bir varyant seçeneği sunulmalıdır.
+3. Erişim gözden geçirme sorguları, yani SOC 2 ile ISO 27001 için: şu roldeki tüm kullanıcılar ile şu kaynağa erişebilen herkes. Bunlar özne arama uç noktasıdır. Yani AuthZEN'in arama API'si yalnızca bir özellik değil bir uyum gereksinimidir.
+
+### 6.6 Kimlik sağlayıcının yetkilendirme motoru olmasının ek riskleri
 
 | Risk | Açıklama | Azaltma |
 |---|---|---|
-| **Blast radius** | Kimlik + yetki aynı süreçte; bir RCE her ikisini de verir | Süreç içi ayrıcalık ayrımı; authz yazma yolunun ayrı yetkilendirilmesi |
-| **Admin API = yetki yükseltme** | Tuple yazabilen, kendine admin verebilir | Admin API'nin **kendisi** ince taneli korunmalı; break-glass ayrı |
-| **Multi-tenant izolasyon** | Store sınırı her katmanda kontrol edilmeli | Tenant ID'nin cache anahtarı ve tip sistemi seviyesinde taşınması |
-| **Bootstrap** | "Kim ilk admin'i yaratır?" | Ayrı, basit, tam denetlenen bir yol |
+| Patlama yarıçapı | Kimlikle yetki aynı süreçtedir ile bir uzaktan kod çalıştırma her ikisini de vermektedir | Süreç içi ayrıcalık ayrımı ile yetkilendirme yazma yolunun ayrı yetkilendirilmesidir |
+| Yönetim API'si bir yetki yükseltme yoludur | Demet yazabilen kendine yönetici verebilmektedir | Yönetim API'sinin kendisi ince taneli korunmalı ile acil durum erişimi ayrı olmalıdır |
+| Çok kiracılı izolasyon | Depo sınırı her katmanda kontrol edilmelidir | Kiracı kimliğinin önbellek anahtarı ile tip sistemi seviyesinde taşınmasıdır |
+| Önyükleme | İlk yöneticiyi kim yaratmaktadır | Ayrı, basit ile tam denetlenen bir yoldur |
 
 ---
 
-## BÖLÜM 7 — ARGUS İÇİN KARAR VE MİMARİ
+## Bölüm 7 — Argus için karar ile mimari
 
 ### 7.1 Karşılaştırma özeti
 
 | Kriter | OpenFGA | SpiceDB | Cedar | Ory Keto | Kendi motorumuz |
 |---|---|---|---|---|---|
-| Dil | Go | Go | **Rust** | Go | **Rust** |
-| Model | ReBAC | ReBAC | ABAC+hiyerarşi | ReBAC | ReBAC+ABAC |
-| Rust'a gömülebilir | ✗ | ✗ | **✓** | ✗ | **✓** |
-| Zookie/consistency token | **✗** | **✓** | Yok (stateless) | ✗ | **✓ (tasarlanacak)** |
-| Entity/tuple deposu | ✓ | ✓ | **✗** | ✓ | ✓ |
-| ListObjects | ✓ (riskli) | ✓ (riskli) | **✗** | ✓ | ✓ (kısıtlı) |
-| Formal doğrulama | ✗ | ✗ | **✓ (7 özellik, Lean 4)** | ✗ | Kısmi (hedef) |
-| Bypass CVE sayısı | **~16** | ~3 | **0** | 1 (SQLi) | — |
-| Olgunluk | CNCF Incubating | Üretim | Üretim (AWS) | **Bakım modu** | Yok |
-| Lisans | Apache-2.0 | *DOĞRULANMADI* | Apache-2.0 | Apache-2.0 | Bizim |
-| Ölçülmüş gecikme | 89–746 µs (memdb) | — | **4–11 µs** | — | Hedef: <100 µs |
-| Son sürüm | v1.19.0 (25 Ağu 2026) | v1.56.1 (26 Ağu 2026) | 4.12.0 (28 Tem 2026) | v26.2.0 (20 Mar 2026) | — |
+| Dil | Go | Go | Rust | Go | Rust |
+| Model | İlişki tabanlı | İlişki tabanlı | Öznitelik tabanlı artı hiyerarşi | İlişki tabanlı | İlişki artı öznitelik tabanlı |
+| Rust'a gömülebilir | Hayır | Hayır | Evet | Hayır | Evet |
+| Tutarlılık belirteci | Hayır | Evet | Yoktur, durumsuzdur | Hayır | Evet, tasarlanacaktır |
+| Varlık ile demet deposu | Evet | Evet | Hayır | Evet | Evet |
+| Nesne listeleme | Evet, risklidir | Evet, risklidir | Hayır | Evet | Evet, kısıtlıdır |
+| Formel doğrulama | Hayır | Hayır | Evet; yedi özellik, Lean 4 | Hayır | Kısmidir, hedeftir |
+| Atlatma açığı sayısı | Yaklaşık 16 | Yaklaşık üç | Sıfır | Bir, SQL enjeksiyonu | — |
+| Olgunluk | CNCF kuluçka | Üretim | Üretim, AWS | Bakım modu | Yoktur |
+| Lisans | Apache 2.0 | Doğrulanmamıştır | Apache 2.0 | Apache 2.0 | Bizimdir |
+| Ölçülmüş gecikme | 89 ile 746 mikrosaniye, bellek veritabanı | — | Dört ile 11 mikrosaniye | — | Hedef 100 mikrosaniyenin altıdır |
+| Son sürüm | 1.19.0, 25 Ağustos 2026 | 1.56.1, 26 Ağustos 2026 | 4.12.0, 28 Temmuz 2026 | 26.2.0, 20 Mart 2026 | — |
 
-### 7.2 Karar: **gömülü, kendi motorumuz, Cedar'dan ilham alan**
+### 7.2 Karar: gömülü, kendi motorumuz ile Cedar'dan ilham alan
 
 #### Gerekçe
 
-**1. Harici motor Rust'ta mümkün değil.** OpenFGA ve SpiceDB Go'dur. Rust'tan kullanmak = gRPC hop'u = her istekte 1–15 ms + ayrı hata alanı. Bir IdP'nin token endpoint'i için kabul edilemez. Rust ReBAC crate'leri (`openfga-rs` 25 indirme/90gün, `authzed` 9) **ölüdür**.
+Birincisi, harici bir motor Rust'ta mümkün değildir. OpenFGA ile SpiceDB Go'dur. Rust'tan kullanmak bir gRPC sıçraması, yani her istekte bir ile 15 milisaniye artı ayrı bir hata alanı demektir. Bir kimlik sağlayıcının token uç noktası için kabul edilemez. Rust ilişki tabanlı erişim kontrolü crate'leri, yani 90 günde 25 indirmeli `openfga-rs` ile dokuz indirmeli `authzed`, ölüdür.
 
-**2. Cedar tek başına yetmez.** Entity store'u yok, ListObjects'i yok. ReBAC'ın zor kısmını (ilişki depolama + transitif çözümleme) çözmüyor. Ama **politika değerlendirme katmanı olarak mükemmel**: 4–11 µs, formal doğrulanmış, sıfır CVE, Rust-native.
+İkincisi, Cedar tek başına yetmemektedir. Varlık deposu yoktur ile nesne listelemesi yoktur. İlişki tabanlı erişim kontrolünün zor kısmını, yani ilişki depolamayı ile geçişli çözümlemeyi çözmemektedir. Ancak bir politika değerlendirme katmanı olarak mükemmeldir: dört ile 11 mikrosaniye, formel doğrulanmış, sıfır güvenlik açığı ile Rust yerlisidir.
 
-**3. CVE verileri, "olgun ürünü al" argümanını zayıflatıyor.** OpenFGA'nın 16 bypass CVE'si, bu problem sınıfının **doğası gereği** zor olduğunu gösteriyor — hazır çözüm almak riski ortadan kaldırmıyor, sadece başkasının hatalarını devralıyorsunuz. Ve OpenFGA'yı gömemediğimiz için hata düzeltmelerini de kontrol edemiyoruz.
+Üçüncüsü, güvenlik açığı verileri olgun ürünü al argümanını zayıflatmaktadır. OpenFGA'nın 16 atlatma açığı, bu problem sınıfının doğası gereği zor olduğunu göstermektedir; hazır bir çözüm almak riski ortadan kaldırmamakta, yalnızca başkasının hataları devralınmaktadır. OpenFGA gömülemediği için hata düzeltmeleri de kontrol edilememektedir.
 
-**4. Rust'ın tip sistemi, rakiplerin veremeyeceği bir güvenlik avantajı sunuyor** (Bölüm 6.2, Sınıf 4).
+Dördüncüsü, Rust'ın tip sistemi rakiplerin veremeyeceği bir güvenlik avantajı sunmaktadır; 6.2'nin dördüncü sınıfına bakınız.
 
 #### Riskin dürüst kabulü
 
-Kendi motorunu yazmak, incelediğim 42 CVE'nin kendi versiyonlarını yazmak demektir. Bu kararın tek savunması, **Bölüm 6.3'teki test disiplinini gün 1'den uygulamaktır.** Cedar bunu yaptı ve sicili temiz. OpenFGA yapmadı ve 16 bypass CVE'si var. Fark tesadüf değil.
+Kendi motorunu yazmak, incelenen 42 güvenlik açığının kendi sürümlerini yazmak demektir. Bu kararın tek savunması, 6.3'teki test disiplinini birinci günden uygulamaktır. Cedar bunu yapmıştır ile sicili temizdir. OpenFGA yapmamıştır ile 16 atlatma açığı vardır. Fark bir tesadüf değildir.
 
 ### 7.3 Arayüz tasarımı
 
-#### Çekirdek trait — bu, tüm sistemin taahhüdüdür
+#### Çekirdek özellik, tüm sistemin taahhüdüdür
 
 ```rust
 /// Yetkilendirme kararının tek giriş noktası.
@@ -1354,7 +1357,7 @@ pub struct Decision {
 }
 ```
 
-#### Derleme-zamanı enforcement (Rust'ın süper gücü)
+#### Derleme zamanı zorlama, Rust'ın süper gücü
 
 ```rust
 /// Yalnızca check() başarılı olursa üretilebilen bir kanıt token'ı.
@@ -1368,26 +1371,26 @@ async fn delete_document(doc: Authorized<Document, actions::Delete>) -> Result<(
 }
 ```
 
-Bu kalıp, "check yapmayı unutma" hatasını (IDOR'un birincil kaynağı) **yapısal olarak** ortadan kaldırır. Go tabanlı hiçbir motor bunu veremez.
+Bu kalıp, denetim yapmayı unutma hatasını, yani güvensiz doğrudan nesne referansının birincil kaynağını, yapısal olarak ortadan kaldırmaktadır. Go tabanlı hiçbir motor bunu veremez.
 
 ### 7.4 Veri modeli
 
-#### Tuple — Zanzibar'ın grameri, iyileştirmelerle
+#### Demet: Zanzibar'ın grameri, iyileştirmelerle
 
 ```
 object_type : object_id # relation @ subject_type : subject_id [# subject_relation]
                                                     [with condition_name(params)]
 ```
 
-**Zanzibar'dan sapmalar ve gerekçeleri:**
+Zanzibar'dan sapmalar ile gerekçeleri şunlardır.
 
 | Karar | Gerekçe |
 |---|---|
-| `subject_id` string (integer değil) | Zanzibar integer kullanıyor (Google'ın iç ID'si). Argus'un dış kimlikleri var. **ULID zorunlu** — yeniden kullanım yok |
-| Koşullu tuple desteği | ABAC ihtiyacı gerçek. **Ama SpiceDB'nin 5 caveat CVE'si göz önüne alınarak yoğun test** |
-| `store_id` her satırda + her cache anahtarında | Tenant izolasyonu (CVE-2026-48096 dersi) |
+| Özne kimliği bir dizgidir, tam sayı değildir | Zanzibar tam sayı kullanmaktadır, ki Google'ın iç kimliğidir. Argus'un dış kimlikleri vardır. ULID zorunludur ile yeniden kullanım yoktur |
+| Koşullu demet desteği vardır | Öznitelik tabanlı erişim ihtiyacı gerçektir. Ancak SpiceDB'nin beş koşul açığı göz önüne alınarak yoğun test gerekmektedir |
+| Depo kimliği her satırda ile her önbellek anahtarındadır | Kiracı izolasyonudur, yani 2026'nın 48096 numaralı kaydının dersidir |
 
-#### Postgres şeması
+#### PostgreSQL şeması
 
 ```sql
 CREATE TABLE tuples (
@@ -1423,11 +1426,11 @@ CREATE INDEX tuples_rev ON tuples
 CREATE INDEX tuples_changelog ON tuples (store_id, created_xid);
 ```
 
-**Neden iki indeks:** Check ileri yönde, ListObjects ters yönde yürür. Tek indeks ikisini de veremez — bu, ListObjects'in neden pahalı olduğunun depolama-seviyesi açıklamasıdır.
+Neden iki indeks gerektiği şudur: denetim ileri yönde, nesne listeleme ters yönde yürümektedir. Tek bir indeks ikisini de veremez; bu, nesne listelemenin neden pahalı olduğunun depolama seviyesindeki açıklamasıdır.
 
-**Neden MVCC (created_xid/deleted_xid):** Zookie'nin temelidir. `deleted_xid > ?` ile herhangi bir geçmiş revision'da sorgu yapılabilir. SpiceDB'nin Postgres backend'i tam olarak bunu yapıyor ve **standart dışı eklenti gerektirmiyor**.
+Neden çok sürümlü eşzamanlılık denetimi kullanıldığı şudur: tutarlılık belirtecinin temelidir. Silinme işlem kimliği koşuluyla herhangi bir geçmiş revizyonda sorgu yapılabilmektedir. SpiceDB'nin PostgreSQL arka ucu tam olarak bunu yapmakta ile standart dışı eklenti gerektirmemektedir.
 
-#### Consistency token (zookie eşdeğeri)
+#### Tutarlılık belirteci, yani Zanzibar belirtecinin eşdeğeri
 
 ```rust
 /// Opak, imzalı. İstemci içeriğine bağımlı olmamalı.
@@ -1435,13 +1438,14 @@ pub struct ConsistencyToken(Box<str>);
 // içerik: base64(HMAC(store_id || xid || issued_at))
 ```
 
-**Sözleşme (istemciye açıkça anlatılmalı):**
-1. `write()` bir token döndürür.
-2. İstemci, korunan kaynağın **yanında** bu token'ı saklar (Zanzibar'ın modeli).
-3. O kaynak için check yaparken `AtLeastAsFresh(token)` gönderir.
-4. Argus, o revision'dan eski cache girdisi kullanmayacağını garanti eder.
+Sözleşme istemciye açıkça anlatılmalıdır.
 
-**GC penceresi:** Token, `--gc-window`'dan (öneri: 24 saat) eski olursa `SnapshotExpired` döner ve istemci `FullyConsistent`'a düşer. Bu davranış dokümante edilmelidir.
+1. Yazma işlemi bir belirteç döndürmektedir.
+2. İstemci, korunan kaynağın yanında bu belirteci saklamaktadır, ki Zanzibar'ın modelidir.
+3. O kaynak için denetim yaparken en az bu kadar taze koşuluyla göndermektedir.
+4. Argus, o revizyondan eski bir önbellek girdisi kullanmayacağını garanti etmektedir.
+
+Çöp toplama penceresi şöyledir: belirteç, önerilen 24 saatlik pencereden eski olursa anlık görüntü süresi doldu hatası dönmekte ile istemci tam tutarlı moda düşmektedir. Bu davranış dokümante edilmelidir.
 
 ### 7.5 Sıcak yol tasarımı
 
@@ -1459,8 +1463,8 @@ pub struct ConsistencyToken(Box<str>);
     │
     ├─ KATMAN 1: Karar cache (decision cache)        ~200 ns
     │    Anahtar: blake3(store_id ‖ subject ‖ action ‖ resource ‖ model_id ‖ rev)
-    │    ⚠ UZUNLUK-ÖNEKLİ hash — string concat DEĞİL (CVE-2026-48096)
-    │    Beklenen hit oranı: %10-20 (Google'ın gerçek verisi!)
+    │    UZUNLUK-ÖNEKLİ hash — string concat DEĞİL (CVE-2026-48096)
+    │    Beklenen hit oranı: %10-20 (Google'ın gerçek verisi)
     │            │
     │            └─ hit → dön
     │
@@ -1483,121 +1487,85 @@ pub struct ConsistencyToken(Box<str>);
          Batch/pooling: aynı check'in tüm okumaları gruplanır (Zanzibar'ın yöntemi)
 ```
 
-#### ABAC koşulları: Cedar'ı gömün
+#### Öznitelik koşulları: Cedar gömülmelidir
 
-Katman 3'te bir koşullu tuple'a rastlanırsa, koşulu Argus'un kendi mini-diliyle değerlendirmek yerine **cedar-policy crate'ini çağırın**:
+Üçüncü katmanda bir koşullu demete rastlanırsa, koşulu Argus'un kendi mini diliyle değerlendirmek yerine `cedar-policy` crate'i çağrılmalıdır. Gerekçeleri şunlardır: ölçülmüş dört ile 11 mikrosaniye bütçe içindedir; yedi formel kanıtlanmış özelliği vardır; sıfır güvenlik açığı kaydı vardır; Rust yerlisidir ile yabancı fonksiyon arayüzü gerektirmemektedir; ile bakımını AWS yapmaktadır.
 
-- Ölçülmüş 4–11 µs — bütçe içinde
-- 7 formal kanıtlanmış özellik
-- Sıfır CVE
-- Rust-native, FFI yok
-- Bakımını AWS yapıyor
+Bu, kendi motorunu yaz kararının en akıllı istisnasıdır: ilişki tabanlı grafı kendimiz yazmaktayız, çünkü kimse Rust'ta vermemektedir; ancak politika ile koşul değerlendirmesini yazmamaktayız, çünkü Cedar zaten en iyisini yapmıştır.
 
-**Bu, "kendi motorunu yaz" kararının en akıllı istisnasıdır:** ReBAC graph'ını kendimiz yazıyoruz (kimse Rust'ta vermiyor), ama politika/koşul değerlendirmesini yazmıyoruz (Cedar zaten en iyisini yapmış).
+#### Önbellek geçersizleştirme
 
-#### Cache invalidation
+Üç mekanizma birlikte kullanılmalıdır.
 
-**Üç mekanizma birlikte:**
+1. Revizyon önbellek anahtarındadır ile yapısal geçersizleştirme sağlamaktadır. Yeni revizyon yeni anahtar demektir ile eski girdi erişilemez hâle gelmektedir, ki SpiceDB modelidir. Bu ana mekanizmadır.
+2. İzleme akışı: yazma olduğunda etkilenen alt ağaçlar öngörülü biçimde düşürülmektedir.
+3. Yaşam süresi: son savunma hattıdır. Olumlu için 10 saniye, olumsuz için bir saniye ya da altıdır.
 
-1. **Revision cache anahtarında** → yapısal invalidation. Yeni revision = yeni anahtar. Eski girdi erişilemez hâle gelir (SpiceDB modeli). **Bu ana mekanizmadır.**
-2. **Watch stream'i** → yazma olduğunda etkilenen alt-ağaçlar proaktif düşürülür.
-3. **TTL** → son savunma hattı. Pozitif 10 sn, **negatif ≤1 sn**.
-
-#### Zorunlu kotalar (hasar kontrolü)
+#### Zorunlu kotalar, hasar kontrolü
 
 | Limit | Değer | Gerekçe |
 |---|---|---|
-| Çözümleme derinliği | 25 | OpenFGA ile aynı; döngü koruması (CVE-2023-43645) |
-| Çözümleme genişliği | 10 | Fan-out patlaması koruması |
-| Check zaman aşımı | 100 ms | Sıcak yol bütçesi |
-| **Search deadline** | **1 s (sert)** | ListObjects tehlikesi |
-| **Search max sonuç** | **1000** | Sayfalama zorunlu |
-| Yazma başına tuple | 1000 | OpenFGA'nın 100'ünden yüksek; batch outbox için |
-| Store başına tip | 200 | Model karmaşıklığı sınırı |
+| Çözümleme derinliği | 25 | OpenFGA ile aynıdır; döngü korumasıdır, 2023'ün 43645 numaralı kaydı |
+| Çözümleme genişliği | 10 | Yayılım patlaması korumasıdır |
+| Denetim zaman aşımı | 100 milisaniye | Sıcak yol bütçesidir |
+| Arama son tarihi | Bir saniye, serttir | Nesne listeleme tehlikesidir |
+| Arama azami sonucu | 1000 | Sayfalama zorunludur |
+| Yazma başına demet | 1000 | OpenFGA'nın 100'ünden yüksektir; yığın giden kutusu içindir |
+| Depo başına tip | 200 | Model karmaşıklığı sınırıdır |
 
-### 7.6 AuthZEN PDP olmak — kontrol listesi
+### 7.6 AuthZEN politika karar noktası olmak, kontrol listesi
 
-Argus'un AuthZEN uyumlu olması için gerekenler:
+Argus'un AuthZEN uyumlu olması için gerekenler şunlardır.
 
-| # | Gereksinim | Zorunluluk | Argus'ta |
+| Sıra | Gereksinim | Zorunluluk | Argus'ta karşılığı |
 |---|---|---|---|
-| 1 | `POST /access/v1/evaluation` | **REQUIRED** | `check()` |
-| 2 | `POST /access/v1/evaluations` + 3 semantik | Opsiyonel (yapılmalı) | `batch_check()` |
-| 3 | `POST /access/v1/search/resource` | Opsiyonel (yapılmalı) | `search_resources()` |
-| 4 | `POST /access/v1/search/subject` | Opsiyonel (**uyum için gerekli**) | `search_subjects()` |
-| 5 | `POST /access/v1/search/action` | Opsiyonel | `search_actions()` |
-| 6 | `GET /.well-known/authzen-configuration` | **REQUIRED** | Metadata endpoint |
-| 7 | Ret = `200` + `{"decision": false}` | **MUST** | Hata semantiğini karıştırma |
-| 8 | `X-Request-ID` yankısı | **MUST** (varsa) | Trace korelasyonu |
-| 9 | Bilinmeyen alanları yok say | **MUST** | serde `#[serde(flatten)]` dikkatli |
-| 10 | TLS + PEP kimlik doğrulaması | MUST / SHOULD | mTLS veya OAuth |
-| 11 | I-JSON (RFC 7493) | SHOULD | UTF-8, IEEE754 sınırları |
-| 12 | DoS korumaları | SHOULD | Payload boyutu, nesting derinliği |
-| 13 | `reason_admin` / `reason_user` | Opsiyonel (yapılmalı) | Bilgi sızıntısı kontrolü |
+| 1 | `POST /access/v1/evaluation` | Zorunludur | Denetim çağrısıdır |
+| 2 | `POST /access/v1/evaluations` artı üç semantik | İsteğe bağlıdır, yapılmalıdır | Yığın denetimidir |
+| 3 | `POST /access/v1/search/resource` | İsteğe bağlıdır, yapılmalıdır | Kaynak aramasıdır |
+| 4 | `POST /access/v1/search/subject` | İsteğe bağlıdır, uyum için gereklidir | Özne aramasıdır |
+| 5 | `POST /access/v1/search/action` | İsteğe bağlıdır | Eylem aramasıdır |
+| 6 | `GET /.well-known/authzen-configuration` | Zorunludur | Metadata uç noktasıdır |
+| 7 | Ret, 200 ile olumsuz karar yüküdür | Zorunludur | Hata semantiği karıştırılmamalıdır |
+| 8 | `X-Request-ID` yankısı | Varsa zorunludur | İz korelasyonudur |
+| 9 | Bilinmeyen alanları yok say | Zorunludur | serde düzleştirme dikkatli kullanılmalıdır |
+| 10 | TLS ile uygulama noktası kimlik doğrulaması | Sırasıyla zorunlu ile önerilendir | mTLS ya da OAuth'tur |
+| 11 | I-JSON, RFC 7493 | Önerilendir | UTF-8 ile IEEE 754 sınırlarıdır |
+| 12 | Hizmet reddi korumaları | Önerilendir | Yük boyutu ile iç içe geçme derinliğidir |
+| 13 | Yönetici ile kullanıcı gerekçesi | İsteğe bağlıdır, yapılmalıdır | Bilgi sızıntısı kontrolüdür |
 
-**Ek: consistency token'ı `context.consistency_token` altında taşıyın**, `capabilities` dizisinde ilan edin ve bunu AuthZEN WG'ye boşluk olarak bildirin.
+Ek olarak tutarlılık belirteci `context.consistency_token` altında taşınmalı, yetenekler dizisinde ilan edilmeli ile bu boşluk AuthZEN çalışma grubuna bildirilmelidir.
 
-**Ve stratejik olarak:** "OAuth 2.0 Token Issuance Profile" ve "Authorization Claims Profile" taslaklarını takip edin. Bir IdP'nin bunları implemente etmesi, Argus'u AuthZEN ekosisteminde **benzersiz** kılar — çünkü diğer PDP satıcıları token vermez.
+Stratejik olarak OAuth 2.0 token verme profili ile yetkilendirme iddiaları profili taslakları takip edilmelidir. Bir kimlik sağlayıcının bunları gerçeklemesi Argus'u AuthZEN ekosisteminde benzersiz kılmaktadır, çünkü diğer karar noktası satıcıları token vermemektedir.
 
 ### 7.7 Yol haritası
 
 | Faz | Kapsam | Doğrulama |
 |---|---|---|
-| **F0** | `AuthzEngine` trait'i + naif referans implementasyon (cache yok, indeks yok, doğruluk odaklı) | Bu, diferansiyel testin **referans oracle**'ı olacak |
-| **F1** | Postgres MVCC tuple deposu + consistency token + graph çözümleme + derinlik/genişlik limitleri | proptest ile 10 invariant; F0'a karşı diferansiyel |
-| **F2** | Cedar entegrasyonu (koşullu tuple'lar) + alt-problem cache + singleflight | Invariant 6 (cache şeffaflığı) — **CVE sınıfını kapatır** |
-| **F3** | AuthZEN PDP endpoint'leri + `.well-known` + batch semantikleri | Invariant 7 (batch tutarlılığı) |
-| **F4** | Search API'leri (sert deadline + sayfalama) | **Invariant 4** (check/list uyumu) — 5 CVE'nin sınıfı |
-| **F5** | Materialized index (roaring bitmap) sıcak relation'lar için | Invariant 4 ve 6 yeniden; indeksli/indekssiz diferansiyel |
-| **F6** | Ağırlıklı graf planlayıcı | Planlayıcılı/planlayıcısız diferansiyel (OpenFGA'nın v1.18.2'de düzelttiği hataların dersi) |
-| **F7** | Çekirdek karar fonksiyonunun Lean modeli (Cedar Property 1–4 muadili) | Formal kanıt |
+| F0 | Motor özelliği ile naif referans gerçeklemesi; önbellek yok, indeks yok ile doğruluk odaklıdır | Bu, diferansiyel testin referans kâhini olacaktır |
+| F1 | PostgreSQL çok sürümlü demet deposu, tutarlılık belirteci, graf çözümleme ile derinlik ve genişlik limitleri | `proptest` ile 10 değişmez; F0'a karşı diferansiyel test |
+| F2 | Cedar tümleştirmesi, yani koşullu demetler, artı alt problem önbelleği ile tek uçuş tekilleştirmesi | Altıncı değişmez, yani önbellek şeffaflığı; bir güvenlik açığı sınıfını kapatmaktadır |
+| F3 | AuthZEN karar noktası uç noktaları, iyi bilinen yapılandırma ile yığın semantikleri | Yedinci değişmez, yani yığın tutarlılığı |
+| F4 | Arama API'leri, sert son tarih ile sayfalamayla | Dördüncü değişmez, yani denetim ile liste uyumu; beş güvenlik açığının sınıfıdır |
+| F5 | Sıcak ilişkiler için gerçeklenmiş indeks, yani roaring bitmap | Dördüncü ile altıncı değişmez tekrar; indeksli ile indekssiz diferansiyel test |
+| F6 | Ağırlıklı graf planlayıcı | Planlayıcılı ile planlayıcısız diferansiyel test; OpenFGA'nın 1.18.2'de düzelttiği hataların dersidir |
+| F7 | Çekirdek karar fonksiyonunun Lean modeli, yani Cedar'ın ilk dört özelliğinin muadili | Formel kanıt |
 
-**Her fazda F0 referansına karşı diferansiyel test zorunludur.** Bu, Cedar'ın DRT'sinin Argus'a uyarlanmasıdır ve incelediğim CVE'lerin çoğunu önleyecek tek disiplindir.
-
----
-
-### KAYNAKLAR
-
-**Birincil — akademik**
-- [Zanzibar: Google's Consistent, Global Authorization System](https://www.usenix.org/system/files/atc19-pang.pdf) — USENIX ATC 2019 (PDF indirilip metni çıkarıldı; Tablo 2, §2.1, §2.2, §3.2.4, §4)
-- [Cedar: A New Language for Expressive, Fast, Safe, and Analyzable Authorization (Extended)](https://arxiv.org/abs/2403.04651) — arXiv, Mart 2024; §5.2 benchmark (PDF metni çıkarıldı)
-- [How We Built Cedar: A Verification-Guided Approach](https://arxiv.org/abs/2407.01688) — FSE Companion '24; §3.2 yedi özellik, Tablo 1 (PDF metni çıkarıldı)
-- [Delegation Without Trust](https://arxiv.org/abs/2609.00267) — Dantuluri & Sundi, 31 Ağu 2026; §7.2–7.3 (PDF metni çıkarıldı)
-- [Cedar OOPSLA 2024](https://dl.acm.org/doi/10.1145/3649835) — ACM DL (erişilemedi, arXiv sürümü kullanıldı)
-
-**Birincil — spesifikasyon**
-- [Authorization API 1.0 Final](https://openid.net/specs/authorization-api-1_0-final.html) — 11 Ocak 2026
-- [Final Specification Approved](https://openid.net/authorization-api-1-0-final-specification-approved/) — 12 Ocak 2026, oylama 81/1/25
-- [AuthZEN Working Group](https://openid.net/wg/authzen/) · [AuthZEN blog etiketi](https://openid.net/tag/authzen/)
-- [Yeni WG taslakları (AARP, COAZ)](https://openid.net/openid-foundation-advances-authorization-for-the-agent-era-with-new-authzen-working-group-drafts/) — 15 Haziran 2026
-- [openid/authzen deposu](https://github.com/openid/authzen)
-
-**Birincil — ürün dokümantasyonu**
-- [OpenFGA Configuration Options](https://openfga.dev/docs/getting-started/setup-openfga/configuration) — tüm flag varsayılanları
-- [OpenFGA Query Consistency](https://openfga.dev/docs/interacting/consistency) — zookie yokluğu
-- [OpenFGA Relationship Queries](https://openfga.dev/docs/interacting/relationship-queries) — BatchCheck limitleri, ListObjects uyarıları
-- [OpenFGA Model Migration](https://openfga.dev/docs/modeling/migrating/migrating-models)
-- [OpenFGA ReadChanges](https://openfga.dev/docs/interacting/read-tuple-changes)
-- [OpenFGA Running in Production](https://openfga.dev/docs/getting-started/running-in-production)
-- [OpenFGA Blog](https://openfga.dev/blog) — weighted graph resolution, 21 Tem 2026
-- [OpenFGA GitHub Releases](https://github.com/openfga/openfga/releases) — v1.19.0, 25 Ağu 2026
-- [OpenFGA CNCF sayfası](https://www.cncf.io/projects/openfga/) — Incubating, 28 Eki 2025
-- [SpiceDB Consistency](https://authzed.com/docs/spicedb/concepts/consistency) — ZedToken, 4 seviye, CockroachDB uyarısı
-- [SpiceDB Datastores](https://authzed.com/docs/spicedb/concepts/datastores)
-- [SpiceDB Releases](https://github.com/authzed/spicedb/releases) — v1.56.1, 26 Ağu 2026
-- [Ory Keto](https://github.com/ory/keto) · [Releases](https://github.com/ory/keto/releases) — v26.2.0, 20 Mar 2026
-- [cedar-policy docs.rs](https://docs.rs/cedar-policy/latest/cedar_policy/) — 4.12.0
-- [cedar-spec](https://github.com/cedar-policy/cedar-spec) · [RFC 0032 Dafny→Lean](https://github.com/cedar-policy/rfcs/blob/main/text/0032-port-formalization-to-lean.md)
-- [microsoft/regorus](https://github.com/microsoft/regorus) — OPA v1.2.0 uyumu, 4,6 ms vs 45,2 ms
-- [biscuit-auth/biscuit](https://github.com/biscuit-auth/biscuit) — denetim aranıyor
-- [Oso docs](https://www.osohq.com/docs)
-
-**Birincil — güvenlik ve paket verisi**
-- [OSV.dev API](https://api.osv.dev/v1/query) — tüm CVE tabloları (OpenFGA 26, SpiceDB 16, Keto, OPA, biscuit-auth kayıtları)
-- crates.io API — tüm sürüm/indirme/lisans verileri, 8 Eylül 2026
-
-**Erişilemeyenler (bu oturumda doğrulanamadı):** SpiceDB dispatch/caching dokümanları (404), authzen-interop.net katılımcı listesi (ağ hatası), OpenFGA Postgres migration SQL'i (GitHub API rate limit), SpiceDB lisans dosyası, ACM DL Cedar makalesi (403).
+Her fazda F0 referansına karşı diferansiyel test zorunludur. Bu, Cedar'ın diferansiyel rastgele testinin Argus'a uyarlanmasıdır ile incelenen güvenlik açıklarının çoğunu önleyecek tek disiplindir.
 
 ---
 
-**Üç uyarıyı tekrarlıyorum:** (1) 2,6 µs rakamı bir HMAC doğrulamasıdır, ReBAC check'i değil — hedef olarak alınmamalıdır. (2) Zanzibar'ın "10 ms" p95'i yalnızca 10 saniye bayat veri kabul edildiğinde geçerlidir; tazelik istendiğinde 60 ms'dir. (3) OpenFGA'nın 16 authorization-bypass CVE'si, hazır çözüm almanın riski ortadan kaldırmadığını gösteriyor — Cedar'ın sıfır CVE'si ise test disiplininin işe yaradığını.
+## Kaynaklar
+
+Birincil akademik kaynaklar şunlardır. Zanzibar: Google'ın tutarlı, küresel yetkilendirme sistemi, USENIX ATC 2019; PDF indirilip metni çıkarılmıştır ile Tablo 2, 2.1, 2.2, 3.2.4 ile dördüncü bölümler kullanılmıştır; www.usenix.org/system/files/atc19-pang.pdf. Cedar: açıklayıcı, hızlı, güvenli ile analiz edilebilir yetkilendirme için yeni bir dil, genişletilmiş sürüm, arXiv 2403.04651, Mart 2024; 5.2 bölümündeki kıyaslama kullanılmıştır. Cedar'ı nasıl inşa ettik: doğrulama güdümlü bir yaklaşım, arXiv 2407.01688, FSE Companion 2024; 3.2 bölümündeki yedi özellik ile Tablo 1 kullanılmıştır. Güvensiz devretme, Dantuluri ile Sundi, arXiv 2609.00267, 31 Ağustos 2026; 7.2 ile 7.3 bölümleri kullanılmıştır. Cedar'ın OOPSLA 2024 yayını ACM sayısal kütüphanesindedir, doi 10.1145/3649835; erişilememiş ile arXiv sürümü kullanılmıştır.
+
+Birincil şartname kaynakları şunlardır. Yetkilendirme API'si 1.0 nihai sürümü, 11 Ocak 2026, openid.net/specs/authorization-api-1_0-final.html. Nihai şartnamenin onay duyurusu, 12 Ocak 2026, oylama 81 kabul, bir ret ile 25 çekimser. AuthZEN çalışma grubu sayfası ile AuthZEN blog etiketi. Yeni çalışma grubu taslakları duyurusu, 15 Haziran 2026. openid/authzen GitHub deposu.
+
+Birincil ürün dokümantasyonu şunlardır. OpenFGA yapılandırma seçenekleri, ki tüm bayrak varsayılanları oradandır; sorgu tutarlılığı sayfası, ki tutarlılık belirtecinin yokluğu oradandır; ilişki sorguları sayfası, ki yığın denetimi limitleri ile nesne listeleme uyarıları oradandır; model göçü sayfası; değişiklik okuma sayfası; üretimde çalıştırma sayfası; blog, ki 21 Temmuz 2026 tarihli ağırlıklı graf çözümlemesi yazısı oradandır; GitHub sürümleri, ki 25 Ağustos 2026 tarihli 1.19.0 oradandır; ile CNCF proje sayfası, ki 28 Ekim 2025 tarihli kuluçka statüsü oradandır. SpiceDB tutarlılık sayfası, ki belirteç, dört seviye ile CockroachDB uyarısı oradandır; veri deposu sayfası; ile GitHub sürümleri, ki 26 Ağustos 2026 tarihli 1.56.1 oradandır. Ory Keto deposu ile sürümleri, ki 20 Mart 2026 tarihli 26.2.0 oradandır. cedar-policy docs.rs sayfası, 4.12.0. cedar-spec deposu ile Dafny'den Lean'e taşımayı anlatan 0032 numaralı öneri. microsoft/regorus deposu, ki OPA 1.2.0 uyumu ile 4,6 milisaniyeye karşı 45,2 milisaniye oradandır. biscuit-auth deposu, ki denetim arandığı ifadesi oradandır. Oso dokümantasyonu.
+
+Birincil güvenlik ile paket verisi kaynakları şunlardır. OSV.dev sorgu API'si, ki tüm güvenlik açığı tabloları, yani OpenFGA'nın 26, SpiceDB'nin 16 kaydı ile Keto, OPA ile biscuit-auth kayıtları oradandır. crates.io API'si, ki tüm sürüm, indirme ile lisans verileri 8 Eylül 2026'da çekilmiştir.
+
+Bu oturumda erişilemeyenler ile doğrulanamayanlar şunlardır: SpiceDB gönderim ile önbellekleme dokümanları, 404 dönmüştür; authzen-interop.net katılımcı listesi, ağ hatası alınmıştır; OpenFGA PostgreSQL göç SQL'i, GitHub API hız sınırına takılmıştır; SpiceDB lisans dosyası; ile ACM sayısal kütüphanesindeki Cedar makalesi, 403 dönmüştür.
+
+---
+
+Üç uyarı tekrarlanmalıdır. Birincisi, 2,6 mikrosaniye rakamı bir HMAC doğrulamasıdır, bir ilişki tabanlı denetim değildir; bir hedef olarak alınmamalıdır. İkincisi, Zanzibar'ın 10 milisaniyelik 95. yüzdeliği yalnızca 10 saniye bayat veri kabul edildiğinde geçerlidir; tazelik istendiğinde 60 milisaniyedir. Üçüncüsü, OpenFGA'nın 16 yetkilendirme atlatma açığı hazır çözüm almanın riski ortadan kaldırmadığını göstermektedir; Cedar'ın sıfır açığı ise test disiplininin işe yaradığını göstermektedir.
